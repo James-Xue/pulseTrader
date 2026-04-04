@@ -1,0 +1,25 @@
+{
+  "name": "pulsetrader",
+  "version": "0.1.0",
+  "description": "AI-driven scalping framework with adaptive strategy tuning via real-time social signals",
+  "dependencies": [
+    "nlohmann-json",
+    "spdlog",
+    "fmt",
+    "curl",
+    "openssl",
+    "asio",
+    "websocketpp",
+    "gtest"
+  ],
+  "features": {
+    "sqlite": {
+      "description": "SQLite persistence for TradeRecorder (enable with -DPULSE_ENABLE_SQLITE=ON)",
+      "dependencies": ["sqlitecpp"]
+    },
+    "toml": {
+      "description": "TOML configuration file support (enable with -DPULSE_ENABLE_TOML=ON)",
+      "dependencies": ["toml11"]
+    }
+  }
+}
