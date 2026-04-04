@@ -10,21 +10,30 @@
 
 ## Table of Contents
 
-1. [Project Overview](#1-project-overview)
-2. [High-Level Architecture](#2-high-level-architecture)
-3. [Module Reference](#3-module-reference)
-   - [Layer 1 — Exchange](#layer-1--exchange)
-   - [Layer 2 — Market Data](#layer-2--market-data)
-   - [Layer 3 — Strategy Engine](#layer-3--strategy-engine)
-   - [Layer 4 — Heartbeat Scheduler](#layer-4--heartbeat-scheduler)
-   - [Layer 5 — AI Analysis](#layer-5--ai-analysis)
-   - [Layer 6 — Risk Management](#layer-6--risk-management)
-   - [Layer 7 — Order Execution](#layer-7--order-execution)
-   - [Layer 8 — Logging & Monitoring](#layer-8--logging--monitoring)
-4. [Data Flow](#4-data-flow)
-5. [Threading Model](#5-threading-model)
-6. [Key Design Decisions](#6-key-design-decisions)
-7. [Third-Party Dependencies](#7-third-party-dependencies)
+- [pulseTrader — Architecture](#pulsetrader--architecture)
+  - [Table of Contents](#table-of-contents)
+  - [1. Project Overview](#1-project-overview)
+  - [2. High-Level Architecture](#2-high-level-architecture)
+  - [3. Module Reference](#3-module-reference)
+    - [Layer 1 — Exchange](#layer-1--exchange)
+    - [Layer 2 — Market Data](#layer-2--market-data)
+    - [Layer 3 — Strategy Engine](#layer-3--strategy-engine)
+    - [Layer 4 — Heartbeat Scheduler](#layer-4--heartbeat-scheduler)
+    - [Layer 5 — AI Analysis](#layer-5--ai-analysis)
+    - [Layer 6 — Risk Management](#layer-6--risk-management)
+    - [Layer 7 — Order Execution](#layer-7--order-execution)
+    - [Layer 8 — Logging \& Monitoring](#layer-8--logging--monitoring)
+  - [4. Data Flow](#4-data-flow)
+    - [Market data hot path (latency-critical)](#market-data-hot-path-latency-critical)
+    - [AI analysis cycle (background, every 5 minutes)](#ai-analysis-cycle-background-every-5-minutes)
+  - [5. Threading Model](#5-threading-model)
+  - [6. Key Design Decisions](#6-key-design-decisions)
+    - [1. C++20 over C++17](#1-c20-over-c17)
+    - [2. Heartbeat fully decoupled from the market data thread](#2-heartbeat-fully-decoupled-from-the-market-data-thread)
+    - [3. Lock-free strategy parameter hot-update](#3-lock-free-strategy-parameter-hot-update)
+    - [4. Fixed JSON schema for AI output](#4-fixed-json-schema-for-ai-output)
+    - [5. Single exchange focus](#5-single-exchange-focus)
+  - [7. Third-Party Dependencies](#7-third-party-dependencies)
 
 ---
 
@@ -39,45 +48,45 @@ The system is structured as eight vertical layers. Each layer has a single well-
 ## 2. High-Level Architecture
 
 ```
-+-------------------------------------------------------------------------+
-|                          pulseTrader Process                            |
-|                                                                         |
-|  +------------------------------------------------------------------+   |
-|  |  Layer 4: HeartbeatScheduler  (every 5 min)                      |   |
-|  |    +-► TaskQueue --► AIAnalyzer --► ParamAdvisor              |   |
-|  +------------------------------+-----------------------------------+   |
-|                                 | param updates (atomic writes)         |
-|  +------------------------------▼-----------------------------------+  |
-|  |  Layer 3: Strategy Engine                                        |   |
-|  |    MomentumScalper  |  OrderBookScalper  |  MeanReversionScalper |   |
-|  |    SignalAggregator (weighted voting)                            |   |
-|  +------------------------------+-----------------------------------+   |
-|                                 | signals                               |
-|  +------------------------------▼-----------------------------------+  |
-|  |  Layer 6: Risk Management                                        |   |
-|  |    RiskManager | PositionManager | StopLoss/TakeProfit Engines   |   |
-|  +------------------------------+-----------------------------------+   |
-|                                 | approved orders                       |
-|  +------------------------------▼-----------------------------------+  |
-|  |  Layer 7: Order Execution                                        |   |
-|  |    OrderExecutor | OrderTracker | ExecutionReport                |   |
-|  +------------------------------+-----------------------------------+   |
-|                                 |                                       |
-|  +------------------------------▼-----------------------------------+  |
-|  |  Layer 8: Logging & Monitoring                                   |   |
-|  |    Logger | TradeRecorder | MetricsCollector | AlertManager      |   |
-|  +------------------------------------------------------------------+   |
-|                                                                         |
-|  +------------------------------------------------------------------+   |
-|  |  Layer 2: Market Data  (hot path -- dedicated thread)             |  |
-|  |    MarketFeed | OrderBookManager | KlineBuffer | TickerCache     |   |
-|  +------------------------------+-----------------------------------+   |
-|                                 |                                       |
-|  +------------------------------▼-----------------------------------+  |
-|  |  Layer 1: Exchange  (Gate.io REST + WebSocket)                   |   |
-|  |    GateRestClient | GateWsClient | GateWsChannels | GateAuth     |   |
-|  +------------------------------------------------------------------+   |
-+-------------------------------------------------------------------------+
+┌──────────────────────────────────────┐
+│                            pulseTrader Process                             │
+│                                                                            │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 4: HeartbeatScheduler  (every 5 min)                      │    │
+│  │    └─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor        │    │
+│  └─────────────────────────────────┘    │
+│                                     │ param updates (atomic writes)       │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 3: Strategy Engine                                        │    │
+│  │    MomentumScalper | OrderBookScalper | MeanReversionScalper     │    │
+│  │    SignalAggregator (weighted voting)                            │    │
+│  └─────────────────────────────────┘    │
+│                                     │ signals                             │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 6: Risk Management                                        │    │
+│  │    RiskManager | PositionManager | StopLoss/TakeProfit Engines   │    │
+│  └─────────────────────────────────┘    │
+│                                     │ approved orders                     │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 7: Order Execution                                        │    │
+│  │    OrderExecutor | OrderTracker | ExecutionReport                │    │
+│  └─────────────────────────────────┘    │
+│                                     │                                     │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 8: Logging & Monitoring                                   │    │
+│  │    Logger | TradeRecorder | MetricsCollector | AlertManager      │    │
+│  └─────────────────────────────────┘    │
+│                                                                            │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 2: Market Data  (hot path -- dedicated thread)            │    │
+│  │    MarketFeed | OrderBookManager | KlineBuffer | TickerCache     │    │
+│  └─────────────────────────────────┘    │
+│                                     │                                     │
+│  ┌─────────────────────────────────┐    │
+│  │  Layer 1: Exchange  (Gate.io REST + WebSocket)                   │    │
+│  │    GateRestClient | GateWsClient | GateWsChannels | GateAuth     │    │
+│  └─────────────────────────────────┘    │
+└──────────────────────────────────────┘
 ```
 
 ---
@@ -86,10 +95,10 @@ The system is structured as eight vertical layers. Each layer has a single well-
 
 ### Layer 1 — Exchange
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/exchange/` |
-| Sources | `src/exchange/` |
+| Property | Value                     |
+| -------- | ------------------------- |
+| Headers  | `include/pulse/exchange/` |
+| Sources  | `src/exchange/`           |
 
 **Responsibility**
 
@@ -102,21 +111,21 @@ The Exchange layer is the sole point of contact with Gate.io. It abstracts all p
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `gate_rest_client.hpp / .cpp` | Signed REST client (libcurl + OpenSSL) |
-| `gate_ws_client.hpp / .cpp` | WebSocket client with auto-reconnect (websocketpp + asio) |
-| `gate_ws_channels.hpp / .cpp` | Typed channel subscription registry |
-| `gate_auth.hpp / .cpp` | HMAC-SHA512 request signing utilities |
+| File                          | Description                                               |
+| ----------------------------- | --------------------------------------------------------- |
+| `gate_rest_client.hpp / .cpp` | Signed REST client (libcurl + OpenSSL)                    |
+| `gate_ws_client.hpp / .cpp`   | WebSocket client with auto-reconnect (websocketpp + asio) |
+| `gate_ws_channels.hpp / .cpp` | Typed channel subscription registry                       |
+| `gate_auth.hpp / .cpp`        | HMAC-SHA512 request signing utilities                     |
 
 ---
 
 ### Layer 2 — Market Data
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/market/` |
-| Sources | `src/market/` |
+| Property | Value                   |
+| -------- | ----------------------- |
+| Headers  | `include/pulse/market/` |
+| Sources  | `src/market/`           |
 
 **Responsibility**
 
@@ -130,22 +139,22 @@ The Market Data layer receives raw frames from the Exchange layer and maintains 
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `market_feed.hpp / .cpp` | Event dispatcher and thread management |
-| `orderbook_manager.hpp / .cpp` | Incremental order book reconstruction |
-| `kline_buffer.hpp / .cpp` | Thread-safe ring buffer for candles |
-| `ticker_cache.hpp / .cpp` | Lock-free latest ticker store |
-| `symbol_registry.hpp / .cpp` | Instrument metadata and validation |
+| File                           | Description                            |
+| ------------------------------ | -------------------------------------- |
+| `market_feed.hpp / .cpp`       | Event dispatcher and thread management |
+| `orderbook_manager.hpp / .cpp` | Incremental order book reconstruction  |
+| `kline_buffer.hpp / .cpp`      | Thread-safe ring buffer for candles    |
+| `ticker_cache.hpp / .cpp`      | Lock-free latest ticker store          |
+| `symbol_registry.hpp / .cpp`   | Instrument metadata and validation     |
 
 ---
 
 ### Layer 3 — Strategy Engine
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/strategy/` |
-| Sources | `src/strategy/` |
+| Property | Value                     |
+| -------- | ------------------------- |
+| Headers  | `include/pulse/strategy/` |
+| Sources  | `src/strategy/`           |
 
 **Responsibility**
 
@@ -163,11 +172,11 @@ The Strategy Engine hosts one or more concurrent strategy instances, each runnin
 
 **Built-in scalping strategies**
 
-| Class | Algorithm |
-|---|---|
-| `MomentumScalper` | Detects short-term momentum via EMA crossover on K-lines; enters in the direction of the cross, exits on reversal or stop-loss. |
-| `OrderBookScalper` | Analyses order book imbalance (bid/ask volume ratios at top N levels) to predict short-term price direction; places limit orders at optimal queue position. |
-| `MeanReversionScalper` | Tracks Bollinger Band deviations on tick data; fades extremes with a tight profit target and stop-loss. |
+| Class                  | Algorithm                                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MomentumScalper`      | Detects short-term momentum via EMA crossover on K-lines; enters in the direction of the cross, exits on reversal or stop-loss.                             |
+| `OrderBookScalper`     | Analyses order book imbalance (bid/ask volume ratios at top N levels) to predict short-term price direction; places limit orders at optimal queue position. |
+| `MeanReversionScalper` | Tracks Bollinger Band deviations on tick data; fades extremes with a tight profit target and stop-loss.                                                     |
 
 **Signal aggregator**
 
@@ -175,25 +184,25 @@ When multiple strategies are active, the `SignalAggregator` collects individual 
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `strategy_base.hpp` | Abstract base class and lifecycle hook declarations |
-| `strategy_manager.hpp / .cpp` | Multi-strategy orchestration |
-| `strategy_context.hpp` | Dependency bundle injected into each strategy |
-| `strategy_params.hpp` | Hot-reloadable atomic parameter struct |
-| `momentum_scalper.hpp / .cpp` | EMA crossover momentum strategy |
-| `orderbook_scalper.hpp / .cpp` | Order book imbalance strategy |
-| `mean_reversion_scalper.hpp / .cpp` | Bollinger Band mean-reversion strategy |
-| `signal_aggregator.hpp / .cpp` | Weighted voting signal combiner |
+| File                                | Description                                         |
+| ----------------------------------- | --------------------------------------------------- |
+| `strategy_base.hpp`                 | Abstract base class and lifecycle hook declarations |
+| `strategy_manager.hpp / .cpp`       | Multi-strategy orchestration                        |
+| `strategy_context.hpp`              | Dependency bundle injected into each strategy       |
+| `strategy_params.hpp`               | Hot-reloadable atomic parameter struct              |
+| `momentum_scalper.hpp / .cpp`       | EMA crossover momentum strategy                     |
+| `orderbook_scalper.hpp / .cpp`      | Order book imbalance strategy                       |
+| `mean_reversion_scalper.hpp / .cpp` | Bollinger Band mean-reversion strategy              |
+| `signal_aggregator.hpp / .cpp`      | Weighted voting signal combiner                     |
 
 ---
 
 ### Layer 4 — Heartbeat Scheduler
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/heartbeat/` |
-| Sources | `src/heartbeat/` |
+| Property | Value                      |
+| -------- | -------------------------- |
+| Headers  | `include/pulse/heartbeat/` |
+| Sources  | `src/heartbeat/`           |
 
 **Responsibility**
 
@@ -226,20 +235,20 @@ HeartbeatScheduler (asio::steady_timer, 5 min)
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `heartbeat_scheduler.hpp / .cpp` | `asio::steady_timer`-based 5-minute clock |
-| `task_queue.hpp / .cpp` | Thread-safe priority task queue |
-| `heartbeat_events.hpp` | `OnBeat`, `OnAnalysisDone`, `OnParamUpdate` event types |
+| File                             | Description                                             |
+| -------------------------------- | ------------------------------------------------------- |
+| `heartbeat_scheduler.hpp / .cpp` | `asio::steady_timer`-based 5-minute clock               |
+| `task_queue.hpp / .cpp`          | Thread-safe priority task queue                         |
+| `heartbeat_events.hpp`           | `OnBeat`, `OnAnalysisDone`, `OnParamUpdate` event types |
 
 ---
 
 ### Layer 5 — AI Analysis
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/ai/` |
-| Sources | `src/ai/` |
+| Property | Value               |
+| -------- | ------------------- |
+| Headers  | `include/pulse/ai/` |
+| Sources  | `src/ai/`           |
 
 **Responsibility**
 
@@ -270,23 +279,23 @@ The AI Analysis layer collects real-time social and news signals, assembles a st
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `twitter_feed.hpp / .cpp` | X API v2 filtered stream client |
-| `news_feed.hpp / .cpp` | NewsAPI / CryptoPanic polling client |
+| File                        | Description                                   |
+| --------------------------- | --------------------------------------------- |
+| `twitter_feed.hpp / .cpp`   | X API v2 filtered stream client               |
+| `news_feed.hpp / .cpp`      | NewsAPI / CryptoPanic polling client          |
 | `prompt_builder.hpp / .cpp` | Context assembly and system prompt management |
-| `ai_client.hpp / .cpp` | HTTP LLM backend client (OpenAI / Claude) |
-| `analysis_result.hpp` | Fixed JSON schema C++ mapping |
-| `param_advisor.hpp / .cpp` | Delta validation and atomic param application |
+| `ai_client.hpp / .cpp`      | HTTP LLM backend client (OpenAI / Claude)     |
+| `analysis_result.hpp`       | Fixed JSON schema C++ mapping                 |
+| `param_advisor.hpp / .cpp`  | Delta validation and atomic param application |
 
 ---
 
 ### Layer 6 — Risk Management
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/risk/` |
-| Sources | `src/risk/` |
+| Property | Value                 |
+| -------- | --------------------- |
+| Headers  | `include/pulse/risk/` |
+| Sources  | `src/risk/`           |
 
 **Responsibility**
 
@@ -301,23 +310,23 @@ Every order signal from the Strategy Engine must pass through the Risk Managemen
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `risk_manager.hpp / .cpp` | Order gate and rule evaluation |
-| `position_manager.hpp / .cpp` | Cross-strategy position tracking |
-| `stop_loss_engine.hpp / .cpp` | Fixed / trailing / time-based stops |
-| `take_profit_engine.hpp / .cpp` | Partial take-profit ladder |
-| `drawdown_guard.hpp / .cpp` | Rolling drawdown circuit breaker |
-| `order_rate_limiter.hpp / .cpp` | Token-bucket rate limiter |
+| File                            | Description                         |
+| ------------------------------- | ----------------------------------- |
+| `risk_manager.hpp / .cpp`       | Order gate and rule evaluation      |
+| `position_manager.hpp / .cpp`   | Cross-strategy position tracking    |
+| `stop_loss_engine.hpp / .cpp`   | Fixed / trailing / time-based stops |
+| `take_profit_engine.hpp / .cpp` | Partial take-profit ladder          |
+| `drawdown_guard.hpp / .cpp`     | Rolling drawdown circuit breaker    |
+| `order_rate_limiter.hpp / .cpp` | Token-bucket rate limiter           |
 
 ---
 
 ### Layer 7 — Order Execution
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/execution/` |
-| Sources | `src/execution/` |
+| Property | Value                      |
+| -------- | -------------------------- |
+| Headers  | `include/pulse/execution/` |
+| Sources  | `src/execution/`           |
 
 **Responsibility**
 
@@ -329,20 +338,20 @@ The Order Execution layer is responsible for the reliable placement and lifecycl
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `order_executor.hpp / .cpp` | Order submission with retry logic |
-| `order_tracker.hpp / .cpp` | WS push + REST polling order state tracker |
-| `execution_report.hpp` | Immutable fill record with slippage and fee fields |
+| File                        | Description                                        |
+| --------------------------- | -------------------------------------------------- |
+| `order_executor.hpp / .cpp` | Order submission with retry logic                  |
+| `order_tracker.hpp / .cpp`  | WS push + REST polling order state tracker         |
+| `execution_report.hpp`      | Immutable fill record with slippage and fee fields |
 
 ---
 
 ### Layer 8 — Logging & Monitoring
 
-| Property | Value |
-|---|---|
-| Headers | `include/pulse/logging/` |
-| Sources | `src/logging/` |
+| Property | Value                    |
+| -------- | ------------------------ |
+| Headers  | `include/pulse/logging/` |
+| Sources  | `src/logging/`           |
 
 **Responsibility**
 
@@ -355,12 +364,12 @@ The Logging & Monitoring layer provides observability for all system activity wi
 
 **Key files**
 
-| File | Description |
-|---|---|
-| `logger.hpp / .cpp` | Per-module spdlog wrapper |
-| `trade_recorder.hpp / .cpp` | CSV / SQLite execution record writer |
+| File                           | Description                           |
+| ------------------------------ | ------------------------------------- |
+| `logger.hpp / .cpp`            | Per-module spdlog wrapper             |
+| `trade_recorder.hpp / .cpp`    | CSV / SQLite execution record writer  |
 | `metrics_collector.hpp / .cpp` | Rolling PnL, Sharpe, drawdown metrics |
-| `alert_manager.hpp / .cpp` | Webhook and Telegram alert dispatcher |
+| `alert_manager.hpp / .cpp`     | Webhook and Telegram alert dispatcher |
 
 ---
 
@@ -419,14 +428,14 @@ AIAnalyzer  (Layer 5)
 
 ## 5. Threading Model
 
-| Thread | Responsibility | Lifecycle |
-|---|---|---|
-| Main thread | Startup, config loading, component wiring | Blocks on shutdown signal |
-| WebSocket I/O thread | `asio::io_context` for WS connection and heartbeat pings | Runs for process lifetime |
-| Market data dispatch thread | Routes WS frames to Layer 2 sub-components | Runs for process lifetime |
-| Strategy threads (N) | One `std::jthread` per active strategy; reads market data, emits signals | Started/stopped by StrategyManager |
-| Heartbeat worker thread | Consumes `TaskQueue`; runs AI analysis cycle | Runs for process lifetime |
-| Logger async thread | spdlog async queue consumer | Runs for process lifetime |
+| Thread                      | Responsibility                                                           | Lifecycle                          |
+| --------------------------- | ------------------------------------------------------------------------ | ---------------------------------- |
+| Main thread                 | Startup, config loading, component wiring                                | Blocks on shutdown signal          |
+| WebSocket I/O thread        | `asio::io_context` for WS connection and heartbeat pings                 | Runs for process lifetime          |
+| Market data dispatch thread | Routes WS frames to Layer 2 sub-components                               | Runs for process lifetime          |
+| Strategy threads (N)        | One `std::jthread` per active strategy; reads market data, emits signals | Started/stopped by StrategyManager |
+| Heartbeat worker thread     | Consumes `TaskQueue`; runs AI analysis cycle                             | Runs for process lifetime          |
+| Logger async thread         | spdlog async queue consumer                                              | Runs for process lifetime          |
 
 Strategies use `std::stop_token` (C++20) for cooperative cancellation. The heartbeat worker thread is the only thread that performs blocking network I/O to external APIs (AI, Twitter, News); it is explicitly isolated from all market data paths.
 
@@ -458,17 +467,17 @@ Supporting multiple exchanges requires abstracting away the differences in WebSo
 
 ## 7. Third-Party Dependencies
 
-| Library | Version | Purpose |
-|---|---|---|
-| **libcurl** | ≥ 7.88 | HTTP client for REST API and AI backend calls |
-| **OpenSSL** | ≥ 3.0 | HMAC-SHA512 signing, TLS for all outbound connections |
-| **nlohmann/json** | ≥ 3.11 | JSON serialization / deserialization throughout |
-| **spdlog** | ≥ 1.12 | Structured, asynchronous, per-module logging |
-| **asio** (standalone) | ≥ 1.28 | Async I/O, `steady_timer` for heartbeat scheduler |
-| **websocketpp** | ≥ 0.8.2 | WebSocket client (used by `GateWsClient`) |
-| **GTest** | ≥ 1.14 | Unit and integration test framework |
-| **fmt** | ≥ 10.0 | String formatting (used internally by spdlog and prompt builder) |
-| **toml11** | ≥ 3.8 *(optional)* | TOML configuration file parsing |
-| **SQLiteCpp** | ≥ 3.3 *(optional)* | SQLite persistence for `TradeRecorder` |
+| Library               | Version            | Purpose                                                          |
+| --------------------- | ------------------ | ---------------------------------------------------------------- |
+| **libcurl**           | ≥ 7.88             | HTTP client for REST API and AI backend calls                    |
+| **OpenSSL**           | ≥ 3.0              | HMAC-SHA512 signing, TLS for all outbound connections            |
+| **nlohmann/json**     | ≥ 3.11             | JSON serialization / deserialization throughout                  |
+| **spdlog**            | ≥ 1.12             | Structured, asynchronous, per-module logging                     |
+| **asio** (standalone) | ≥ 1.28             | Async I/O, `steady_timer` for heartbeat scheduler                |
+| **websocketpp**       | ≥ 0.8.2            | WebSocket client (used by `GateWsClient`)                        |
+| **GTest**             | ≥ 1.14             | Unit and integration test framework                              |
+| **fmt**               | ≥ 10.0             | String formatting (used internally by spdlog and prompt builder) |
+| **toml11**            | ≥ 3.8 *(optional)* | TOML configuration file parsing                                  |
+| **SQLiteCpp**         | ≥ 3.3 *(optional)* | SQLite persistence for `TradeRecorder`                           |
 
 All dependencies are managed via **vcpkg** and declared in `vcpkg.json`. The optional dependencies (`toml11`, `SQLiteCpp`) are gated behind CMake feature flags (`-DPULSE_ENABLE_TOML=ON`, `-DPULSE_ENABLE_SQLITE=ON`).
