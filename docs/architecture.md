@@ -52,12 +52,12 @@ The system is structured as eight vertical layers. Each layer has a single well-
 │  │    MomentumScalper  │  OrderBookScalper  │  MeanReversionScalper │   │
 │  │    SignalAggregator (weighted voting)                            │   │
 │  └──────────────────────────────┬───────────────────────────────────┘   │
-│            signals              │                                       │
+│                                 │ signals                               │
 │  ┌──────────────────────────────▼───────────────────────────────────┐   │
 │  │  Layer 6: Risk Management                                        │   │
 │  │    RiskManager │ PositionManager │ StopLoss/TakeProfit Engines   │   │
 │  └──────────────────────────────┬───────────────────────────────────┘   │
-│            approved orders      │                                       │
+│                                 │ approved orders                       │
 │  ┌──────────────────────────────▼───────────────────────────────────┐   │
 │  │  Layer 7: Order Execution                                        │   │
 │  │    OrderExecutor │ OrderTracker │ ExecutionReport                │   │
