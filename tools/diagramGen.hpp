@@ -1,5 +1,5 @@
 #pragma once
-// diagram_gen.hpp — Header-only DiagramGenerator for pulseTrader
+// diagramGen.hpp — Header-only DiagramGenerator for pulseTrader
 // Generates fixed-visual-width ASCII/Unicode box diagrams.
 //
 // All box-drawing characters (─ │ ┌ ┐ └ ┘ ┬ ├ ▼ ►) are treated as
@@ -31,7 +31,7 @@ namespace pulse
         /// Decode the first UTF-8 code point in [p, end).
         /// Returns the code point and advances *p past the bytes consumed.
         /// Returns U+FFFD and advances by 1 on invalid input.
-        inline char32_t utf8_next(const char *&p, const char *end) noexcept
+        inline char32_t utf8Next(const char *&p, const char *end) noexcept
         {
             if (p >= end)
                 return 0;
@@ -82,7 +82,7 @@ namespace pulse
 
         /// Return true for every box-drawing code point used in pulseTrader diagrams.
         /// These code points are rendered as double-width (2 columns) in CJK fonts.
-        inline bool is_double_width(char32_t cp) noexcept
+        inline bool isDoubleWidth(char32_t cp) noexcept
         {
             // Explicit list matching the character table in highLevelArchitecture.md:
             //   ─ U+2500   │ U+2502   ┌ U+250C   ┐ U+2510
@@ -114,33 +114,33 @@ namespace pulse
 
     /// Compute the visual (terminal column) width of a UTF-8 string.
     /// Double-width box-drawing characters count as 2; everything else counts as 1.
-    inline int visual_width(std::string_view s) noexcept
+    inline int visualWidth(std::string_view s) noexcept
     {
         int w = 0;
         const char *p = s.data();
         const char *end = p + s.size();
         while (p < end)
         {
-            char32_t cp = detail::utf8_next(p, end);
-            w += detail::is_double_width(cp) ? 2 : 1;
+            char32_t cp = detail::utf8Next(p, end);
+            w += detail::isDoubleWidth(cp) ? 2 : 1;
         }
         return w;
     }
 
-    /// Return a copy of s padded with trailing spaces so its visual width == target_vw.
-    /// If visual_width(s) >= target_vw the string is returned unchanged.
-    inline std::string pad_to_visual(std::string_view s, int target_vw)
+    /// Return a copy of s padded with trailing spaces so its visual width == targetVw.
+    /// If visualWidth(s) >= targetVw the string is returned unchanged.
+    inline std::string padToVisual(std::string_view s, int targetVw)
     {
-        int cur = visual_width(s);
+        int cur = visualWidth(s);
         std::string result(s);
-        if (cur < target_vw)
-            result.append(static_cast<std::size_t>(target_vw - cur), ' ');
+        if (cur < targetVw)
+            result.append(static_cast<std::size_t>(targetVw - cur), ' ');
         return result;
     }
 
     /// Generate a horizontal line string composed of N '─' (U+2500) characters.
     /// Each character has visual width 2, so the result has visual width 2*n.
-    inline std::string make_hline(int n)
+    inline std::string makeHline(int n)
     {
         // U+2500 ─ encodes as 3 UTF-8 bytes: E2 94 80
         std::string result;
@@ -157,14 +157,14 @@ namespace pulse
     /// Builds a box diagram with the exact visual-width constraints described in
     /// highLevelArchitecture.md.  Default total visual width: 80 columns.
     ///
-    /// Layout constants (for total_vw == 80):
+    /// Layout constants (for totalVw == 80):
     ///   outer frame  : ┌ + 38×─ + ┐                                    (80 vw)
     ///   outer content: │ + <76 vw> + │                                  (80 vw)
     ///   inner frame  : [2 sp] + ┌ + 33×─ + ┐ + [4 sp]  →  76 vw content
     ///   inner content: [2 sp] + │ + <68 vw> + │ + [2 sp] →  76 vw content
     ///   connector    : [37 sp] + │/▼ + [1 sp] + label + trailing       (80 vw)
     ///
-    /// For other total_vw values the constants are computed proportionally.
+    /// For other totalVw values the constants are computed proportionally.
     class DiagramGenerator
     {
     public:
@@ -172,37 +172,37 @@ namespace pulse
         // Construction
         // -----------------------------------------------------------------------
 
-        /// @param total_vw  Target visual width for every output line (default 80).
-        explicit DiagramGenerator(int total_vw = 80) : total_vw_(total_vw)
+        /// @param totalVw  Target visual width for every output line (default 80).
+        explicit DiagramGenerator(int totalVw = 80) : totalVw_(totalVw)
         {
-            if (total_vw < 20)
-                throw std::invalid_argument("total_vw must be at least 20");
+            if (totalVw < 20)
+                throw std::invalid_argument("totalVw must be at least 20");
 
-            // Outer │ chars each = 2 vw → inner content = total_vw - 4
-            inner_vw_ = total_vw_ - 4;
+            // Outer │ chars each = 2 vw → inner content = totalVw - 4
+            innerVw_ = totalVw_ - 4;
 
-            // Outer hline count: ┌(2) + N×─(2) + ┐(2) = total_vw
-            //   → N = (total_vw - 4) / 2
-            outer_hline_count_ = (total_vw_ - 4) / 2;
+            // Outer hline count: ┌(2) + N×─(2) + ┐(2) = totalVw
+            //   → N = (totalVw - 4) / 2
+            outerHlineCount_ = (totalVw_ - 4) / 2;
 
-            // Inner frame: "  ┌" + M×─ + "┐" + trailing_spaces = inner_vw_
-            //   2(spaces) + 2(┌) + 2M(─) + 2(┐) + trailing = inner_vw_
-            //   trailing = inner_vw_ - 6 - 2M
-            // Choose M so trailing >= 2:  M = (inner_vw_ - 8) / 2
-            inner_hline_count_ = (inner_vw_ - 8) / 2;
-            inner_frame_trailing_ = inner_vw_ - 2 - 2 - inner_hline_count_ * 2 - 2;
+            // Inner frame: "  ┌" + M×─ + "┐" + trailing_spaces = innerVw_
+            //   2(spaces) + 2(┌) + 2M(─) + 2(┐) + trailing = innerVw_
+            //   trailing = innerVw_ - 6 - 2M
+            // Choose M so trailing >= 2:  M = (innerVw_ - 8) / 2
+            innerHlineCount_ = (innerVw_ - 8) / 2;
+            innerFrameTrailing_ = innerVw_ - 2 - 2 - innerHlineCount_ * 2 - 2;
 
             // Inner content text width:
-            //   "  │" + text(T vw) + "│  " = inner_vw_
-            //   2 + 2 + T + 2 + 2 = inner_vw_  → T = inner_vw_ - 8
-            inner_text_vw_ = inner_vw_ - 8;
+            //   "  │" + text(T vw) + "│  " = innerVw_
+            //   2 + 2 + T + 2 + 2 = innerVw_  → T = innerVw_ - 8
+            innerTextVw_ = innerVw_ - 8;
 
             // Connector: spaces before │/▼ symbol
             //   We align the connector at the visual center of the inner frame's
             //   horizontal line.  Inner ┌ starts at vw offset 4 (2 spaces + 2 for ┌),
-            //   spans inner_hline_count_ × 2 columns.  Center = 4 + inner_hline_count_.
-            connector_prefix_spaces_ = 2 + 2 + inner_hline_count_;
-            // connector_prefix_spaces_ + 2(sym) + 1(space) + label + trailing = inner_vw_
+            //   spans innerHlineCount_ × 2 columns.  Center = 4 + innerHlineCount_.
+            connectorPrefixSpaces_ = 2 + 2 + innerHlineCount_;
+            // connectorPrefixSpaces_ + 2(sym) + 1(space) + label + trailing = innerVw_
         }
 
         // -----------------------------------------------------------------------
@@ -210,37 +210,37 @@ namespace pulse
         // -----------------------------------------------------------------------
 
         /// Begin the outer enclosing box; optionally print a centred title row.
-        void outer_box_begin(std::string_view title = "")
+        void outerBoxBegin(std::string_view title = "")
         {
             // Top border
             std::string top = "\xe2\x94\x8c"; // ┌
-            top += make_hline(outer_hline_count_);
+            top += makeHline(outerHlineCount_);
             top += "\xe2\x94\x90"; // ┐
             lines_.push_back(std::move(top));
 
             // Optional title
             if (!title.empty())
             {
-                int tv = visual_width(title);
-                int lpad = (inner_vw_ - tv) / 2;
-                int rpad = inner_vw_ - tv - lpad;
+                int tv = visualWidth(title);
+                int lpad = (innerVw_ - tv) / 2;
+                int rpad = innerVw_ - tv - lpad;
                 std::string content(static_cast<std::size_t>(lpad), ' ');
                 content += title;
                 content.append(static_cast<std::size_t>(rpad), ' ');
-                lines_.push_back(make_outer_row(content));
+                lines_.push_back(makeOuterRow(content));
             }
 
             // Blank separator
-            lines_.push_back(make_blank_outer_row());
+            lines_.push_back(makeBlankOuterRow());
         }
 
         /// End the outer enclosing box.
-        void outer_box_end()
+        void outerBoxEnd()
         {
-            lines_.push_back(make_blank_outer_row());
+            lines_.push_back(makeBlankOuterRow());
 
             std::string bot = "\xe2\x94\x94"; // └
-            bot += make_hline(outer_hline_count_);
+            bot += makeHline(outerHlineCount_);
             bot += "\xe2\x94\x98"; // ┘
             lines_.push_back(std::move(bot));
         }
@@ -249,35 +249,35 @@ namespace pulse
         /// @param line1  First content line (layer header).
         /// @param line2  Second content line (optional).
         /// @param line3  Third content line (optional).
-        void inner_box(std::string_view line1,
+        void innerBox(std::string_view line1,
                        std::string_view line2 = "",
                        std::string_view line3 = "")
         {
-            lines_.push_back(make_inner_top());
-            lines_.push_back(make_inner_row("  " + std::string(line1)));
+            lines_.push_back(makeInnerTop());
+            lines_.push_back(makeInnerRow("  " + std::string(line1)));
             if (!line2.empty())
-                lines_.push_back(make_inner_row("    " + std::string(line2)));
+                lines_.push_back(makeInnerRow("    " + std::string(line2)));
             if (!line3.empty())
-                lines_.push_back(make_inner_row("    " + std::string(line3)));
-            lines_.push_back(make_inner_bottom());
+                lines_.push_back(makeInnerRow("    " + std::string(line3)));
+            lines_.push_back(makeInnerBottom());
         }
 
         /// Add a vertical connector line (│) with an optional label to the right.
-        void connector_down(std::string_view label = "")
+        void connectorDown(std::string_view label = "")
         {
-            lines_.push_back(make_connector("\xe2\x94\x82", label)); // │
+            lines_.push_back(makeConnector("\xe2\x94\x82", label)); // │
         }
 
         /// Add a downward arrow connector (▼) with an optional label to the right.
-        void connector_arrow(std::string_view label = "")
+        void connectorArrow(std::string_view label = "")
         {
-            lines_.push_back(make_connector("\xe2\x96\xbc", label)); // ▼
+            lines_.push_back(makeConnector("\xe2\x96\xbc", label)); // ▼
         }
 
         /// Add a blank outer row (empty line inside the outer box).
-        void blank_line()
+        void blankLine()
         {
-            lines_.push_back(make_blank_outer_row());
+            lines_.push_back(makeBlankOuterRow());
         }
 
         // -----------------------------------------------------------------------
@@ -303,18 +303,18 @@ namespace pulse
         // -----------------------------------------------------------------------
         // Accessors (useful for unit tests)
         // -----------------------------------------------------------------------
-        int total_vw() const noexcept { return total_vw_; }
-        int inner_vw() const noexcept { return inner_vw_; }
-        int inner_text_vw() const noexcept { return inner_text_vw_; }
-        int connector_prefix() const noexcept { return connector_prefix_spaces_; }
+        int totalVw() const noexcept { return totalVw_; }
+        int innerVw() const noexcept { return innerVw_; }
+        int innerTextVw() const noexcept { return innerTextVw_; }
+        int connectorPrefix() const noexcept { return connectorPrefixSpaces_; }
 
     private:
         // -----------------------------------------------------------------------
         // Internal helpers
         // -----------------------------------------------------------------------
 
-        /// Wrap content (must have visual width == inner_vw_) with outer │ chars.
-        std::string make_outer_row(std::string_view content) const
+        /// Wrap content (must have visual width == innerVw_) with outer │ chars.
+        std::string makeOuterRow(std::string_view content) const
         {
             std::string row;
             row.reserve(content.size() + 6);
@@ -324,76 +324,76 @@ namespace pulse
             return row;
         }
 
-        /// Build outer row from content string, padding to inner_vw_ first.
-        std::string make_outer_row_padded(std::string_view content) const
+        /// Build outer row from content string, padding to innerVw_ first.
+        std::string makeOuterRowPadded(std::string_view content) const
         {
-            return make_outer_row(pad_to_visual(content, inner_vw_));
+            return makeOuterRow(padToVisual(content, innerVw_));
         }
 
-        std::string make_blank_outer_row() const
+        std::string makeBlankOuterRow() const
         {
-            return make_outer_row(std::string(static_cast<std::size_t>(inner_vw_), ' '));
+            return makeOuterRow(std::string(static_cast<std::size_t>(innerVw_), ' '));
         }
 
-        std::string make_inner_top() const
+        std::string makeInnerTop() const
         {
             // "  ┌" + M×─ + "┐" + trailing_spaces
             std::string content = "  ";
             content += "\xe2\x94\x8c"; // ┌
-            content += make_hline(inner_hline_count_);
+            content += makeHline(innerHlineCount_);
             content += "\xe2\x94\x90"; // ┐
-            content.append(static_cast<std::size_t>(inner_frame_trailing_), ' ');
-            return make_outer_row(content);
+            content.append(static_cast<std::size_t>(innerFrameTrailing_), ' ');
+            return makeOuterRow(content);
         }
 
-        std::string make_inner_bottom() const
+        std::string makeInnerBottom() const
         {
             // "  └" + M×─ + "┘" + trailing_spaces
             std::string content = "  ";
             content += "\xe2\x94\x94"; // └
-            content += make_hline(inner_hline_count_);
+            content += makeHline(innerHlineCount_);
             content += "\xe2\x94\x98"; // ┘
-            content.append(static_cast<std::size_t>(inner_frame_trailing_), ' ');
-            return make_outer_row(content);
+            content.append(static_cast<std::size_t>(innerFrameTrailing_), ' ');
+            return makeOuterRow(content);
         }
 
-        std::string make_inner_row(std::string_view text) const
+        std::string makeInnerRow(std::string_view text) const
         {
-            // "  │" + text(inner_text_vw_) + "│  "
-            std::string inner_text = pad_to_visual(text, inner_text_vw_);
+            // "  │" + text(innerTextVw_) + "│  "
+            std::string innerText = padToVisual(text, innerTextVw_);
             std::string content = "  ";
             content += "\xe2\x94\x82"; // │
-            content += inner_text;
+            content += innerText;
             content += "\xe2\x94\x82"; // │
             content += "  ";
-            return make_outer_row(content);
+            return makeOuterRow(content);
         }
 
-        std::string make_connector(std::string_view sym_utf8,
+        std::string makeConnector(std::string_view symUtf8,
                                    std::string_view label) const
         {
-            // connector_prefix_spaces_ × ' ' + sym(2) + ' ' + label + trailing
-            std::string content(static_cast<std::size_t>(connector_prefix_spaces_), ' ');
-            content += sym_utf8; // │ or ▼  (2 vw)
+            // connectorPrefixSpaces_ × ' ' + sym(2) + ' ' + label + trailing
+            std::string content(static_cast<std::size_t>(connectorPrefixSpaces_), ' ');
+            content += symUtf8; // │ or ▼  (2 vw)
             content += ' ';
             content += label;
-            int cur = visual_width(content);
-            int trailing = inner_vw_ - cur;
+            int cur = visualWidth(content);
+            int trailing = innerVw_ - cur;
             if (trailing > 0)
                 content.append(static_cast<std::size_t>(trailing), ' ');
-            return make_outer_row(content);
+            return makeOuterRow(content);
         }
 
         // -----------------------------------------------------------------------
         // State
         // -----------------------------------------------------------------------
-        int total_vw_;
-        int inner_vw_;
-        int outer_hline_count_;
-        int inner_hline_count_;
-        int inner_frame_trailing_;
-        int inner_text_vw_;
-        int connector_prefix_spaces_;
+        int totalVw_;
+        int innerVw_;
+        int outerHlineCount_;
+        int innerHlineCount_;
+        int innerFrameTrailing_;
+        int innerTextVw_;
+        int connectorPrefixSpaces_;
 
         std::vector<std::string> lines_;
     };
@@ -410,55 +410,55 @@ int main()
 {
     pulse::DiagramGenerator gen(80);
 
-    gen.outer_box_begin("pulseTrader Process");
+    gen.outerBoxBegin("pulseTrader Process");
 
-    gen.inner_box("Layer 4: HeartbeatScheduler  (every 5 min)",
+    gen.innerBox("Layer 4: HeartbeatScheduler  (every 5 min)",
                   "└─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor");
-    gen.connector_arrow("param updates (atomic writes)");
+    gen.connectorArrow("param updates (atomic writes)");
 
-    gen.inner_box("Layer 3: Strategy Engine",
+    gen.innerBox("Layer 3: Strategy Engine",
                   "MomentumScalper | OrderBookScalper | MeanReversionScalper",
                   "SignalAggregator (weighted voting)");
-    gen.connector_arrow("signals");
+    gen.connectorArrow("signals");
 
-    gen.inner_box("Layer 6: Risk Management",
+    gen.innerBox("Layer 6: Risk Management",
                   "RiskManager | PositionManager | StopLoss/TakeProfit Engines");
-    gen.connector_arrow("approved orders");
+    gen.connectorArrow("approved orders");
 
-    gen.inner_box("Layer 7: Order Execution",
+    gen.innerBox("Layer 7: Order Execution",
                   "OrderExecutor | OrderTracker | ExecutionReport");
-    gen.connector_down();
+    gen.connectorDown();
 
-    gen.inner_box("Layer 8: Logging & Monitoring",
+    gen.innerBox("Layer 8: Logging & Monitoring",
                   "Logger | TradeRecorder | MetricsCollector | AlertManager");
-    gen.blank_line();
+    gen.blankLine();
 
-    gen.inner_box("Layer 2: Market Data  (hot path -- dedicated thread)",
+    gen.innerBox("Layer 2: Market Data  (hot path -- dedicated thread)",
                   "MarketFeed | OrderBookManager | KlineBuffer | TickerCache");
-    gen.connector_down();
+    gen.connectorDown();
 
-    gen.inner_box("Layer 1: Exchange  (Gate.io REST + WebSocket)",
+    gen.innerBox("Layer 1: Exchange  (Gate.io REST + WebSocket)",
                   "GateRestClient | GateWsClient | GateWsChannels | GateAuth");
 
-    gen.outer_box_end();
+    gen.outerBoxEnd();
 
     std::cout << gen.render() << '\n';
 
     // Verify all lines
-    bool all_ok = true;
+    bool allOk = true;
     for (const auto &line : gen.lines())
     {
-        int vw = pulse::visual_width(line);
+        int vw = pulse::visualWidth(line);
         if (vw != 80)
         {
             std::cerr << "FAIL vw=" << vw << " : " << line << '\n';
-            all_ok = false;
+            allOk = false;
         }
     }
-    if (all_ok)
+    if (allOk)
         std::cerr << "OK — all " << gen.lines().size()
                   << " lines have visual width 80\n";
 
-    return all_ok ? 0 : 1;
+    return allOk ? 0 : 1;
 }
 #endif // DIAGRAM_GEN_MAIN
