@@ -414,16 +414,16 @@ int main()
 
     gen.inner_box("Layer 4: HeartbeatScheduler  (every 5 min)",
                   "└─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor");
-    gen.connector_down("param updates (atomic writes)");
+    gen.connector_arrow("param updates (atomic writes)");
 
     gen.inner_box("Layer 3: Strategy Engine",
                   "MomentumScalper | OrderBookScalper | MeanReversionScalper",
                   "SignalAggregator (weighted voting)");
-    gen.connector_down("signals");
+    gen.connector_arrow("signals");
 
     gen.inner_box("Layer 6: Risk Management",
                   "RiskManager | PositionManager | StopLoss/TakeProfit Engines");
-    gen.connector_down("approved orders");
+    gen.connector_arrow("approved orders");
 
     gen.inner_box("Layer 7: Order Execution",
                   "OrderExecutor | OrderTracker | ExecutionReport");
