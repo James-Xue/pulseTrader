@@ -412,33 +412,36 @@ int main()
 
     gen.outerBoxBegin("pulseTrader Process");
 
-    gen.innerBox("Layer 4: HeartbeatScheduler  (every 5 min)",
-                  "└─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor");
+    // --- Decision path (top-down control flow) ---
+    gen.innerBox("Layer 5: HeartbeatScheduler  (every 5 min)",
+                  "└─► TaskQueue ──► AIAnalyzer (L4) ──► ParamAdvisor");
     gen.connectorArrow("param updates (atomic writes)");
 
-    gen.innerBox("Layer 3: Strategy Engine",
+    gen.innerBox("Layer 6: Strategy Engine",
                   "MomentumScalper | OrderBookScalper | MeanReversionScalper",
                   "SignalAggregator (weighted voting)");
     gen.connectorArrow("signals");
 
-    gen.innerBox("Layer 6: Risk Management",
+    gen.innerBox("Layer 7: Risk Management",
                   "RiskManager | PositionManager | StopLoss/TakeProfit Engines");
     gen.connectorArrow("approved orders");
 
-    gen.innerBox("Layer 7: Order Execution",
+    gen.innerBox("Layer 8: Order Execution",
                   "OrderExecutor | OrderTracker | ExecutionReport");
-    gen.connectorDown();
-
-    gen.innerBox("Layer 8: Logging & Monitoring",
-                  "Logger | TradeRecorder | MetricsCollector | AlertManager");
     gen.blankLine();
 
-    gen.innerBox("Layer 2: Market Data  (hot path -- dedicated thread)",
+    // --- Data source (bottom-up feed) ---
+    gen.innerBox("Layer 3: Market Data  (hot path -- dedicated thread)",
                   "MarketFeed | OrderBookManager | KlineBuffer | TickerCache");
-    gen.connectorDown();
+    gen.connectorArrow("raw frames");
 
     gen.innerBox("Layer 1: Exchange  (Gate.io REST + WebSocket)",
                   "GateRestClient | GateWsClient | GateWsChannels | GateAuth");
+    gen.blankLine();
+
+    // --- Cross-cutting infrastructure ---
+    gen.innerBox("Layer 2: Logging & Monitoring  (cross-cutting)",
+                  "Logger | TradeRecorder | MetricsCollector | AlertManager");
 
     gen.outerBoxEnd();
 
