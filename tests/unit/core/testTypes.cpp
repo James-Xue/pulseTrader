@@ -57,19 +57,19 @@ TEST(Result, MutableValue) {
 
 TEST(PulseConfig, ExchangeDefaults) {
     ExchangeConfig cfg;
-    EXPECT_EQ(cfg.rest_base_url, "https://api.gateio.ws/api/v4");
-    EXPECT_EQ(cfg.rest_timeout_ms, 5'000u);
-    EXPECT_EQ(cfg.max_retries, 3u);
+    EXPECT_EQ(cfg.restBaseUrl, "https://api.gateio.ws/api/v4");
+    EXPECT_EQ(cfg.restTimeoutMs, 5'000u);
+    EXPECT_EQ(cfg.maxRetries, 3u);
 }
 
 TEST(PulseConfig, AiDefaults) {
     AiConfig cfg;
     EXPECT_EQ(cfg.backend, "claude");
-    EXPECT_EQ(cfg.heartbeat_interval_sec, 300u);
+    EXPECT_EQ(cfg.heartbeatIntervalSec, 300u);
 }
 
 TEST(PulseConfig, RiskDefaults) {
     RiskConfig cfg;
-    EXPECT_DOUBLE_EQ(cfg.max_daily_drawdown, 0.02);
-    EXPECT_EQ(cfg.max_orders_per_sec, 5u);
+    EXPECT_DOUBLE_EQ(cfg.maxDailyDrawdown, 0.02);
+    EXPECT_EQ(cfg.maxOrdersPerSec, 5u);
 }
