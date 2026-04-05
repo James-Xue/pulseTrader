@@ -23,9 +23,11 @@
     - [Layer 6 — Strategy Engine](#layer-6--strategy-engine)
     - [Layer 7 — Risk Management](#layer-7--risk-management)
     - [Layer 8 — Order Execution](#layer-8--order-execution)
+    - [Layer 9 — WebUI (cross-cutting, read-only)](#layer-9--webui-cross-cutting-read-only)
   - [4. Data Flow](#4-data-flow)
     - [Market data hot path (latency-critical)](#market-data-hot-path-latency-critical)
     - [AI analysis cycle (background, every 5 minutes)](#ai-analysis-cycle-background-every-5-minutes)
+    - [WebUI snapshot path (background, 200 ms – 5 min)](#webui-snapshot-path-background-200-ms--5-min)
   - [5. Threading Model](#5-threading-model)
   - [6. Key Design Decisions](#6-key-design-decisions)
     - [1. C++20 over C++17](#1-c20-over-c17)
@@ -33,6 +35,7 @@
     - [3. Lock-free strategy parameter hot-update](#3-lock-free-strategy-parameter-hot-update)
     - [4. Fixed JSON schema for AI output](#4-fixed-json-schema-for-ai-output)
     - [5. Single exchange focus](#5-single-exchange-focus)
+    - [6. WebUI as a read-only observability layer](#6-webui-as-a-read-only-observability-layer)
   - [7. Third-Party Dependencies](#7-third-party-dependencies)
 
 ---
@@ -85,6 +88,12 @@ The system is structured as eight vertical layers. Each layer has a single well-
 │  ┌──────────────────────────────────┐  │
 │  │  Layer 2: Logging & Monitoring  (cross-cutting)                    │  │
 │  │    Logger | TradeRecorder | MetricsCollector | AlertManager        │  │
+│  └──────────────────────────────────┘  │
+│                                                                            │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 9: WebUI  (cross-cutting, read-only)                        │  │
+│  │    WebServer | WsServer | DashboardState                          │  │
+│  │    ◄── snapshot reads from L2-L8 (lock-free / copy-on-query)      │  │
 │  └──────────────────────────────────┘  │
 │                                                                            │
 └──────────────────────────────────────┘
@@ -374,6 +383,70 @@ The Order Execution layer is responsible for the reliable placement and lifecycl
 
 ---
 
+### Layer 9 — WebUI (cross-cutting, read-only)
+
+| Property | Value                  |
+| -------- | ---------------------- |
+| Headers  | `include/pulse/webui/` |
+| Sources  | `src/webui/`           |
+| Feature  | `-DPULSE_ENABLE_WEBUI=ON` (default OFF) |
+
+**Responsibility**
+
+The WebUI layer provides a browser-based real-time dashboard for monitoring system activity. It is a cross-cutting observability layer — architecturally analogous to Layer 2 (Logging & Monitoring) — that reads from all other layers without participating in or influencing the trading hot path. All data access is strictly read-only.
+
+- **DashboardState** — A dedicated low-priority thread that periodically polls snapshot data from each layer and assembles a unified dashboard state object. Poll frequencies are tiered by data volatility:
+
+| Data source              | Access pattern                | Poll frequency |
+| ------------------------ | ----------------------------- | -------------- |
+| TickerCache (L3)         | `std::atomic` load            | 200 ms         |
+| OrderBookManager (L3)    | seqlock snapshot copy         | 200 ms         |
+| KlineBuffer (L3)         | seqlock snapshot copy         | per candle     |
+| StrategyManager (L6)     | read-only query interface     | 1 s            |
+| PositionManager (L7)     | read-only query interface     | 500 ms         |
+| OrderTracker (L8)        | read-only query interface     | 500 ms         |
+| MetricsCollector (L2)    | periodic snapshot copy        | 1 s            |
+| AnalysisResult (L4)      | `atomic<shared_ptr>` load     | 5 min          |
+| DrawdownGuard (L7)       | read-only query interface     | 1 s            |
+
+- **WebServer** — Embedded HTTP server (uWebSockets) that serves the static frontend SPA and exposes REST endpoints for historical queries. Binds to `127.0.0.1` by default. All endpoints require a bearer token configured via `WebUiConfig::authToken`.
+- **WsServer** — WebSocket server that pushes JSON-encoded dashboard state updates to connected browsers. Enforces a configurable maximum client limit to bound resource usage.
+
+**Security**
+
+- Default bind address is `127.0.0.1` (localhost only). Binding to `0.0.0.0` requires explicit configuration.
+- All HTTP and WebSocket endpoints require bearer token authentication.
+- The `Host` header is validated on every request to prevent DNS rebinding attacks.
+- Optional TLS support is available via the existing OpenSSL dependency.
+
+**Shutdown ordering**
+
+The WebUI server must be stopped before any layer it reads from. On shutdown, the WebUI thread is cancelled first (via `std::stop_token`), then remaining layers proceed with their shutdown sequence. The DashboardState thread tolerates stale reads during the shutdown window.
+
+**Dashboard panels**
+
+| Panel                          | Data source                    | Refresh    |
+| ------------------------------ | ------------------------------ | ---------- |
+| Real-time order book depth map | OrderBookManager (L3)          | 200 ms     |
+| K-line chart with signal marks | KlineBuffer (L3) + signals (L6)| per candle |
+| Open positions & exposure      | PositionManager (L7)           | 500 ms     |
+| Active order list              | OrderTracker (L8)              | 500 ms     |
+| PnL curve & key metrics        | MetricsCollector (L2)          | 1 s        |
+| AI analysis result card        | AnalysisResult (L4)            | 5 min      |
+| Strategy status cards          | StrategyManager (L6)           | 1 s        |
+| Risk status & circuit breaker  | DrawdownGuard (L7)             | 1 s        |
+
+**Key files**
+
+| File                           | Description                                         |
+| ------------------------------ | --------------------------------------------------- |
+| `dashboard_state.hpp / .cpp`   | Tiered snapshot aggregator thread                   |
+| `web_server.hpp / .cpp`        | uWebSockets HTTP server with auth and static files  |
+| `ws_server.hpp / .cpp`         | WebSocket push server with client limit             |
+| `snapshot_types.hpp`           | Per-layer snapshot data structures                  |
+
+---
+
 ## 4. Data Flow
 
 ### Market data hot path (latency-critical)
@@ -425,6 +498,30 @@ AIAnalyzer  (Layer 4)
       StrategyManager  (Layer 6)  -- on_ai_update / param hot-reload
 ```
 
+### WebUI snapshot path (background, 200 ms – 5 min)
+
+```
+DashboardState thread  (Layer 9, low priority, independent of hot path)
+      |
+      |  tiered polling (frequency matches data volatility)
+      |
+      +--► TickerCache       (L3)  atomic load              every 200 ms
+      +--► OrderBookManager  (L3)  seqlock snapshot copy    every 200 ms
+      +--► KlineBuffer       (L3)  seqlock snapshot copy    per candle
+      +--► StrategyManager   (L6)  read-only query          every 1 s
+      +--► PositionManager   (L7)  read-only query          every 500 ms
+      +--► OrderTracker      (L8)  read-only query          every 500 ms
+      +--► MetricsCollector  (L2)  snapshot copy            every 1 s
+      +--► AnalysisResult    (L4)  atomic<shared_ptr> load  every 5 min
+      +--► DrawdownGuard     (L7)  read-only query          every 1 s
+              |
+              v  assembled JSON snapshot
+      WsServer  (Layer 9)
+              |  WebSocket push
+              v
+      Browser dashboard  (SPA)
+```
+
 ---
 
 ## 5. Threading Model
@@ -437,6 +534,7 @@ AIAnalyzer  (Layer 4)
 | Strategy threads (N)        | One `std::jthread` per active strategy; reads market data, emits signals | Started/stopped by StrategyManager |
 | Heartbeat worker thread     | Consumes `TaskQueue`; runs AI analysis cycle                             | Runs for process lifetime          |
 | Logger async thread         | spdlog async queue consumer                                              | Runs for process lifetime          |
+| WebUI thread *(optional)*   | DashboardState snapshot polling + uWebSockets HTTP/WS server (low priority) | Runs when `-DPULSE_ENABLE_WEBUI=ON`; stopped first on shutdown |
 
 Strategies use `std::stop_token` (C++20) for cooperative cancellation. The heartbeat worker thread is the only thread that performs blocking network I/O to external APIs (AI, Twitter, News); it is explicitly isolated from all market data paths.
 
@@ -464,6 +562,10 @@ Open-ended LLM text responses are brittle to parse reliably. pulseTrader's syste
 
 Supporting multiple exchanges requires abstracting away the differences in WebSocket protocols, order types, rate limit semantics, and fee structures. This abstraction has a real cost: deeper per-exchange optimisations become harder to implement, and the code grows substantially more complex. pulseTrader intentionally targets Gate.io only, allowing it to exploit Gate.io-specific features (e.g., native order book channel with configurable depth levels, futures funding rate feed) without compromise.
 
+### 6. WebUI as a read-only observability layer
+
+The WebUI is strictly read-only by design. It reads data from all layers using the same lock-free mechanisms (atomic loads, seqlock snapshot copies) that strategy threads already use, so the hot path sees zero additional contention. A dedicated low-priority thread performs tiered polling — high-volatility data (ticker, order book) at 200 ms, low-volatility data (AI results) at the AI cycle frequency — avoiding wasteful uniform polling. The WebUI is gated behind a CMake feature flag (`-DPULSE_ENABLE_WEBUI=ON`, default OFF) so that headless production builds carry no HTTP server dependency. uWebSockets was chosen over Crow and Boost.Beast because it is a standalone library that does not depend on Boost.Asio, avoiding a dependency conflict with the standalone asio already used by websocketpp. Security is enforced at three levels: localhost-only binding by default, bearer token authentication on all endpoints, and `Host` header validation to prevent DNS rebinding attacks.
+
 ---
 
 ## 7. Third-Party Dependencies
@@ -480,5 +582,6 @@ Supporting multiple exchanges requires abstracting away the differences in WebSo
 | **fmt**               | ≥ 10.0             | String formatting (used internally by spdlog and prompt builder) |
 | **toml11**            | ≥ 3.8 *(optional)* | TOML configuration file parsing                                  |
 | **SQLiteCpp**         | ≥ 3.3 *(optional)* | SQLite persistence for `TradeRecorder`                           |
+| **uWebSockets**       | ≥ 20.0 *(optional)* | Embedded HTTP + WebSocket server for WebUI dashboard             |
 
-All dependencies are managed via **vcpkg** and declared in `vcpkg.json`. The optional dependencies (`toml11`, `SQLiteCpp`) are gated behind CMake feature flags (`-DPULSE_ENABLE_TOML=ON`, `-DPULSE_ENABLE_SQLITE=ON`).
+All dependencies are managed via **vcpkg** and declared in `vcpkg.json`. The optional dependencies (`toml11`, `SQLiteCpp`, `uWebSockets`) are gated behind CMake feature flags (`-DPULSE_ENABLE_TOML=ON`, `-DPULSE_ENABLE_SQLITE=ON`, `-DPULSE_ENABLE_WEBUI=ON`).
