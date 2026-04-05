@@ -70,7 +70,7 @@ trailing_spaces = target_vw - visual_width(content_so_far)
 │  │  Layer 7: Order Execution                                          │  │
 │  │    OrderExecutor | OrderTracker | ExecutionReport                  │  │
 │  └──────────────────────────────────┘  │
-│                                      │                                    │
+│                                      ▼                                    │
 │  ┌──────────────────────────────────┐  │
 │  │  Layer 8: Logging & Monitoring                                     │  │
 │  │    Logger | TradeRecorder | MetricsCollector | AlertManager        │  │
@@ -80,7 +80,7 @@ trailing_spaces = target_vw - visual_width(content_so_far)
 │  │  Layer 2: Market Data  (hot path -- dedicated thread)              │  │
 │  │    MarketFeed | OrderBookManager | KlineBuffer | TickerCache       │  │
 │  └──────────────────────────────────┘  │
-│                                      │                                    │
+│                                      ▼                                    │
 │  ┌──────────────────────────────────┐  │
 │  │  Layer 1: Exchange  (Gate.io REST + WebSocket)                     │  │
 │  │    GateRestClient | GateWsClient | GateWsChannels | GateAuth       │  │
