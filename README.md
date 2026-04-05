@@ -20,16 +20,16 @@ The framework ships three production-ready scalping strategies out of the box an
 
 pulseTrader is organised into eight vertical layers, each with a single well-defined responsibility:
 
-| Layer | Name | Summary |
-|---|---|---|
-| 1 | Exchange | Gate.io REST (HMAC-SHA512) + WebSocket client with auto-reconnect |
-| 2 | Market Data | Order book reconstruction, K-line ring buffer, lock-free ticker cache |
-| 3 | Strategy Engine | Multi-strategy manager, abstract base, signal aggregator |
-| 4 | Heartbeat Scheduler | 5-minute AI analysis clock, async task queue |
-| 5 | AI Analysis | Twitter/news ingestion, prompt assembly, LLM call, param deltas |
-| 6 | Risk Management | Order gate, position limits, stops, drawdown circuit breaker |
-| 7 | Order Execution | Order submission, WS + REST order tracking, execution reports |
-| 8 | Logging & Monitoring | Per-module logging, trade recorder, metrics, alert dispatcher |
+| Layer | Name | Depends On | Summary |
+|---|---|---|---|
+| 1 | Exchange | — | Gate.io REST (HMAC-SHA512) + WebSocket client with auto-reconnect |
+| 2 | Logging & Monitoring | — | Per-module logging, trade recorder, metrics, alert dispatcher (cross-cutting) |
+| 3 | Market Data | L1 | Order book reconstruction, K-line ring buffer, lock-free ticker cache |
+| 4 | AI Analysis | L1 | Twitter/news ingestion, prompt assembly, LLM call, param deltas |
+| 5 | Heartbeat Scheduler | L4 | 5-minute AI analysis clock, async task queue |
+| 6 | Strategy Engine | L3, L5 | Multi-strategy manager, abstract base, signal aggregator |
+| 7 | Risk Management | L6 | Order gate, position limits, stops, drawdown circuit breaker |
+| 8 | Order Execution | L7, L1 | Order submission, WS + REST order tracking, execution reports |
 
 For the full architecture document including module responsibilities, key files, threading model, and design rationale, see [docs/architecture.md](docs/architecture.md).
 
@@ -79,13 +79,13 @@ pulseTrader/
 ├── include/
 │   └── pulse/
 │       ├── exchange/   # Layer 1 headers
-│       ├── market/     # Layer 2 headers
-│       ├── strategy/   # Layer 3 headers
-│       ├── heartbeat/  # Layer 4 headers
-│       ├── ai/         # Layer 5 headers
-│       ├── risk/       # Layer 6 headers
-│       ├── execution/  # Layer 7 headers
-│       └── logging/    # Layer 8 headers
+│       ├── logging/    # Layer 2 headers (cross-cutting)
+│       ├── market/     # Layer 3 headers
+│       ├── ai/         # Layer 4 headers
+│       ├── heartbeat/  # Layer 5 headers
+│       ├── strategy/   # Layer 6 headers
+│       ├── risk/       # Layer 7 headers
+│       └── execution/  # Layer 8 headers
 ├── src/                # Implementation files (mirrors include/pulse/)
 ├── tests/              # Unit and integration tests (GTest)
 ├── scripts/            # Build, deploy, and utility scripts

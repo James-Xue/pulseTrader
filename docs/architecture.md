@@ -16,13 +16,13 @@
   - [2. High-Level Architecture](#2-high-level-architecture)
   - [3. Module Reference](#3-module-reference)
     - [Layer 1 — Exchange](#layer-1--exchange)
-    - [Layer 2 — Market Data](#layer-2--market-data)
-    - [Layer 3 — Strategy Engine](#layer-3--strategy-engine)
-    - [Layer 4 — Heartbeat Scheduler](#layer-4--heartbeat-scheduler)
-    - [Layer 5 — AI Analysis](#layer-5--ai-analysis)
-    - [Layer 6 — Risk Management](#layer-6--risk-management)
-    - [Layer 7 — Order Execution](#layer-7--order-execution)
-    - [Layer 8 — Logging \& Monitoring](#layer-8--logging--monitoring)
+    - [Layer 2 — Logging \& Monitoring](#layer-2--logging--monitoring)
+    - [Layer 3 — Market Data](#layer-3--market-data)
+    - [Layer 4 — AI Analysis](#layer-4--ai-analysis)
+    - [Layer 5 — Heartbeat Scheduler](#layer-5--heartbeat-scheduler)
+    - [Layer 6 — Strategy Engine](#layer-6--strategy-engine)
+    - [Layer 7 — Risk Management](#layer-7--risk-management)
+    - [Layer 8 — Order Execution](#layer-8--order-execution)
   - [4. Data Flow](#4-data-flow)
     - [Market data hot path (latency-critical)](#market-data-hot-path-latency-critical)
     - [AI analysis cycle (background, every 5 minutes)](#ai-analysis-cycle-background-every-5-minutes)
@@ -52,39 +52,39 @@ The system is structured as eight vertical layers. Each layer has a single well-
 │                            pulseTrader Process                             │
 │                                                                            │
 │  ┌──────────────────────────────────┐  │
-│  │  Layer 4: HeartbeatScheduler  (every 5 min)                        │  │
-│  │    └─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor          │  │
+│  │  Layer 5: HeartbeatScheduler  (every 5 min)                        │  │
+│  │    └─► TaskQueue ──► AIAnalyzer (L4) ──► ParamAdvisor     │  │
 │  └──────────────────────────────────┘  │
 │                                      ▼ param updates (atomic writes)      │
 │  ┌──────────────────────────────────┐  │
-│  │  Layer 3: Strategy Engine                                          │  │
+│  │  Layer 6: Strategy Engine                                          │  │
 │  │    MomentumScalper | OrderBookScalper | MeanReversionScalper       │  │
 │  │    SignalAggregator (weighted voting)                              │  │
 │  └──────────────────────────────────┘  │
 │                                      ▼ signals                            │
 │  ┌──────────────────────────────────┐  │
-│  │  Layer 6: Risk Management                                          │  │
+│  │  Layer 7: Risk Management                                          │  │
 │  │    RiskManager | PositionManager | StopLoss/TakeProfit Engines     │  │
 │  └──────────────────────────────────┘  │
 │                                      ▼ approved orders                    │
 │  ┌──────────────────────────────────┐  │
-│  │  Layer 7: Order Execution                                          │  │
+│  │  Layer 8: Order Execution                                          │  │
 │  │    OrderExecutor | OrderTracker | ExecutionReport                  │  │
-│  └──────────────────────────────────┘  │
-│                                      ▼                                    │
-│  ┌──────────────────────────────────┐  │
-│  │  Layer 8: Logging & Monitoring                                     │  │
-│  │    Logger | TradeRecorder | MetricsCollector | AlertManager        │  │
 │  └──────────────────────────────────┘  │
 │                                                                            │
 │  ┌──────────────────────────────────┐  │
-│  │  Layer 2: Market Data  (hot path -- dedicated thread)              │  │
+│  │  Layer 3: Market Data  (hot path -- dedicated thread)              │  │
 │  │    MarketFeed | OrderBookManager | KlineBuffer | TickerCache       │  │
 │  └──────────────────────────────────┘  │
-│                                      ▼                                    │
+│                                      ▼ raw frames                         │
 │  ┌──────────────────────────────────┐  │
 │  │  Layer 1: Exchange  (Gate.io REST + WebSocket)                     │  │
 │  │    GateRestClient | GateWsClient | GateWsChannels | GateAuth       │  │
+│  └──────────────────────────────────┘  │
+│                                                                            │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 2: Logging & Monitoring  (cross-cutting)                    │  │
+│  │    Logger | TradeRecorder | MetricsCollector | AlertManager        │  │
 │  └──────────────────────────────────┘  │
 │                                                                            │
 └──────────────────────────────────────┘
@@ -121,7 +121,34 @@ The Exchange layer is the sole point of contact with Gate.io. It abstracts all p
 
 ---
 
-### Layer 2 — Market Data
+### Layer 2 — Logging & Monitoring
+
+| Property | Value                    |
+| -------- | ------------------------ |
+| Headers  | `include/pulse/logging/` |
+| Sources  | `src/logging/`           |
+
+**Responsibility**
+
+The Logging & Monitoring layer provides observability for all system activity without imposing latency on the hot path. All I/O in this layer is asynchronous. This is a cross-cutting infrastructure layer used by all other layers.
+
+- **Logger** — Wraps `spdlog` with per-module named loggers (exchange, market, strategy, heartbeat, ai, risk, execution). Log level is configurable per module at runtime. Asynchronous sink with a bounded queue to prevent back-pressure on callers.
+- **TradeRecorder** — Persists `ExecutionReport` records to CSV (default) or SQLite (optional, via SQLiteCpp). Used for post-session PnL analysis and audit trail.
+- **MetricsCollector** — Accumulates and computes trading performance metrics on a rolling basis: net PnL, gross PnL, win rate, average win/loss ratio, Sharpe ratio, maximum drawdown, and trade count. Metrics are queryable at any time by the alert system or an external monitoring interface.
+- **AlertManager** — Fires outbound alerts when configurable thresholds are breached (e.g., daily loss limit approached, strategy halted, WebSocket disconnect). Supports webhook (generic HTTP POST with JSON payload) and Telegram Bot API transports.
+
+**Key files**
+
+| File                           | Description                           |
+| ------------------------------ | ------------------------------------- |
+| `logger.hpp / .cpp`            | Per-module spdlog wrapper             |
+| `trade_recorder.hpp / .cpp`    | CSV / SQLite execution record writer  |
+| `metrics_collector.hpp / .cpp` | Rolling PnL, Sharpe, drawdown metrics |
+| `alert_manager.hpp / .cpp`     | Webhook and Telegram alert dispatcher |
+
+---
+
+### Layer 3 — Market Data
 
 | Property | Value                   |
 | -------- | ----------------------- |
@@ -130,7 +157,7 @@ The Exchange layer is the sole point of contact with Gate.io. It abstracts all p
 
 **Responsibility**
 
-The Market Data layer receives raw frames from the Exchange layer and maintains authoritative, always-consistent in-memory views of the market that strategy threads can query with minimal latency.
+The Market Data layer receives raw frames from the Exchange layer (Layer 1) and maintains authoritative, always-consistent in-memory views of the market that strategy threads can query with minimal latency.
 
 - **Market feed dispatcher** — Routes incoming WebSocket events to the appropriate sub-component (order book, K-line, ticker). Runs on a single dedicated thread to avoid lock contention on the hot path.
 - **Order book manager** — Applies incremental updates (snapshot + delta sequence) to maintain a full sorted order book. Validates sequence numbers and requests re-subscription on gaps.
@@ -150,101 +177,7 @@ The Market Data layer receives raw frames from the Exchange layer and maintains 
 
 ---
 
-### Layer 3 — Strategy Engine
-
-| Property | Value                     |
-| -------- | ------------------------- |
-| Headers  | `include/pulse/strategy/` |
-| Sources  | `src/strategy/`           |
-
-**Responsibility**
-
-The Strategy Engine hosts one or more concurrent strategy instances, each running on its own `std::jthread`. It provides the lifecycle framework, context injection, and signal aggregation that turn market observations into trading signals.
-
-- **Abstract strategy base** — Defines the strategy contract via pure-virtual lifecycle hooks:
-  - `on_tick(const Ticker&)` — called on every best-bid/ask update
-  - `on_orderbook(const OrderBook&)` — called when the top N levels change
-  - `on_kline(const Kline&)` — called on candle close
-  - `on_heartbeat(const HeartbeatEvent&)` — called every 5 minutes
-  - `on_ai_update(const AnalysisResult&)` — called after each AI analysis cycle
-- **Strategy manager** — Instantiates, starts, and stops strategies. Broadcasts market events to all running strategies. Applies `ParamAdvisor` deltas by writing to each strategy's `StrategyParams`.
-- **Strategy context** — Dependency-injection bundle passed to each strategy at construction: market data views, risk manager handle, order executor handle, and logger.
-- **Strategy params (hot-reload)** — `StrategyParams` stores key tunable values as `std::atomic<double>` fields. `ParamAdvisor` writes updated values after each AI cycle; strategy threads read atomically without acquiring any lock.
-
-**Built-in scalping strategies**
-
-| Class                  | Algorithm                                                                                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MomentumScalper`      | Detects short-term momentum via EMA crossover on K-lines; enters in the direction of the cross, exits on reversal or stop-loss.                             |
-| `OrderBookScalper`     | Analyses order book imbalance (bid/ask volume ratios at top N levels) to predict short-term price direction; places limit orders at optimal queue position. |
-| `MeanReversionScalper` | Tracks Bollinger Band deviations on tick data; fades extremes with a tight profit target and stop-loss.                                                     |
-
-**Signal aggregator**
-
-When multiple strategies are active, the `SignalAggregator` collects individual buy/sell/flat signals, weights them by per-strategy confidence scores (updated dynamically by the AI layer), and emits a single consolidated signal to the Risk Management layer.
-
-**Key files**
-
-| File                                | Description                                         |
-| ----------------------------------- | --------------------------------------------------- |
-| `strategy_base.hpp`                 | Abstract base class and lifecycle hook declarations |
-| `strategy_manager.hpp / .cpp`       | Multi-strategy orchestration                        |
-| `strategy_context.hpp`              | Dependency bundle injected into each strategy       |
-| `strategy_params.hpp`               | Hot-reloadable atomic parameter struct              |
-| `momentum_scalper.hpp / .cpp`       | EMA crossover momentum strategy                     |
-| `orderbook_scalper.hpp / .cpp`      | Order book imbalance strategy                       |
-| `mean_reversion_scalper.hpp / .cpp` | Bollinger Band mean-reversion strategy              |
-| `signal_aggregator.hpp / .cpp`      | Weighted voting signal combiner                     |
-
----
-
-### Layer 4 — Heartbeat Scheduler
-
-| Property | Value                      |
-| -------- | -------------------------- |
-| Headers  | `include/pulse/heartbeat/` |
-| Sources  | `src/heartbeat/`           |
-
-**Responsibility**
-
-The Heartbeat Scheduler is the system's master clock for the AI analysis cycle. It fires every 5 minutes and drives the full chain from data collection through strategy parameter update, entirely asynchronously with respect to the market data thread.
-
-- **HeartbeatScheduler** — Uses `asio::steady_timer` for high-precision 5-minute ticks. On each tick it enqueues an `OnBeat` task into the `TaskQueue`.
-- **TaskQueue** — Thread-safe priority queue consumed by a dedicated worker thread. Supports cancellable tasks and prioritised execution. Prevents the WebSocket hot path from ever blocking on AI I/O.
-- **Events**
-  - `OnBeat` — Triggers the AI analysis pipeline.
-  - `OnAnalysisDone` — Fired when `AIAnalyzer` completes; carries the `AnalysisResult` payload.
-  - `OnParamUpdate` — Fired when `ParamAdvisor` has computed new parameter deltas and committed them to `StrategyParams`.
-
-**Heartbeat flow**
-
-```
-HeartbeatScheduler (asio::steady_timer, 5 min)
-        |
-        v  enqueue OnBeat task
-    TaskQueue  (priority queue, dedicated worker thread)
-        |
-        v
-    AIAnalyzer  (TwitterFeed + NewsFeed + PromptBuilder + AIClient)
-        |  AnalysisResult
-        v
-    ParamAdvisor  (computes parameter deltas)
-        |  atomic writes to StrategyParams
-        v
-    StrategyManager  (strategies read new params on next tick, lock-free)
-```
-
-**Key files**
-
-| File                             | Description                                             |
-| -------------------------------- | ------------------------------------------------------- |
-| `heartbeat_scheduler.hpp / .cpp` | `asio::steady_timer`-based 5-minute clock               |
-| `task_queue.hpp / .cpp`          | Thread-safe priority task queue                         |
-| `heartbeat_events.hpp`           | `OnBeat`, `OnAnalysisDone`, `OnParamUpdate` event types |
-
----
-
-### Layer 5 — AI Analysis
+### Layer 4 — AI Analysis
 
 | Property | Value               |
 | -------- | ------------------- |
@@ -253,7 +186,7 @@ HeartbeatScheduler (asio::steady_timer, 5 min)
 
 **Responsibility**
 
-The AI Analysis layer collects real-time social and news signals, assembles a structured prompt, calls a Large Language Model, and translates the response into actionable parameter deltas that the Strategy Engine can consume.
+The AI Analysis layer collects real-time social and news signals, assembles a structured prompt, calls a Large Language Model, and translates the response into actionable parameter deltas that the Strategy Engine can consume. It depends on the Exchange layer (Layer 1) for HTTP connectivity (libcurl + OpenSSL).
 
 - **TwitterFeed** — Connects to the X (Twitter) API v2 filtered stream to gather tweets for tracked keywords (coin names, tickers, macro events). Maintains a rolling window of recent tweets for inclusion in prompts.
 - **NewsFeed** — Polls NewsAPI and CryptoPanic for recent crypto headlines. Deduplicates and ranks articles by relevance score.
@@ -291,7 +224,101 @@ The AI Analysis layer collects real-time social and news signals, assembles a st
 
 ---
 
-### Layer 6 — Risk Management
+### Layer 5 — Heartbeat Scheduler
+
+| Property | Value                      |
+| -------- | -------------------------- |
+| Headers  | `include/pulse/heartbeat/` |
+| Sources  | `src/heartbeat/`           |
+
+**Responsibility**
+
+The Heartbeat Scheduler is the system's master clock for the AI analysis cycle. It fires every 5 minutes and drives the full chain from data collection through strategy parameter update, entirely asynchronously with respect to the market data thread. It depends on the AI Analysis layer (Layer 4).
+
+- **HeartbeatScheduler** — Uses `asio::steady_timer` for high-precision 5-minute ticks. On each tick it enqueues an `OnBeat` task into the `TaskQueue`.
+- **TaskQueue** — Thread-safe priority queue consumed by a dedicated worker thread. Supports cancellable tasks and prioritised execution. Prevents the WebSocket hot path from ever blocking on AI I/O.
+- **Events**
+  - `OnBeat` — Triggers the AI analysis pipeline.
+  - `OnAnalysisDone` — Fired when `AIAnalyzer` completes; carries the `AnalysisResult` payload.
+  - `OnParamUpdate` — Fired when `ParamAdvisor` has computed new parameter deltas and committed them to `StrategyParams`.
+
+**Heartbeat flow**
+
+```
+HeartbeatScheduler (asio::steady_timer, 5 min)
+        |
+        v  enqueue OnBeat task
+    TaskQueue  (priority queue, dedicated worker thread)
+        |
+        v
+    AIAnalyzer  (Layer 4: TwitterFeed + NewsFeed + PromptBuilder + AIClient)
+        |  AnalysisResult
+        v
+    ParamAdvisor  (Layer 4: computes parameter deltas)
+        |  atomic writes to StrategyParams
+        v
+    StrategyManager  (Layer 6: strategies read new params on next tick, lock-free)
+```
+
+**Key files**
+
+| File                             | Description                                             |
+| -------------------------------- | ------------------------------------------------------- |
+| `heartbeat_scheduler.hpp / .cpp` | `asio::steady_timer`-based 5-minute clock               |
+| `task_queue.hpp / .cpp`          | Thread-safe priority task queue                         |
+| `heartbeat_events.hpp`           | `OnBeat`, `OnAnalysisDone`, `OnParamUpdate` event types |
+
+---
+
+### Layer 6 — Strategy Engine
+
+| Property | Value                     |
+| -------- | ------------------------- |
+| Headers  | `include/pulse/strategy/` |
+| Sources  | `src/strategy/`           |
+
+**Responsibility**
+
+The Strategy Engine hosts one or more concurrent strategy instances, each running on its own `std::jthread`. It provides the lifecycle framework, context injection, and signal aggregation that turn market observations into trading signals. It depends on Market Data (Layer 3) for real-time data and receives parameter updates from the Heartbeat/AI layers (Layer 5 → Layer 4).
+
+- **Abstract strategy base** — Defines the strategy contract via pure-virtual lifecycle hooks:
+  - `on_tick(const Ticker&)` — called on every best-bid/ask update
+  - `on_orderbook(const OrderBook&)` — called when the top N levels change
+  - `on_kline(const Kline&)` — called on candle close
+  - `on_heartbeat(const HeartbeatEvent&)` — called every 5 minutes
+  - `on_ai_update(const AnalysisResult&)` — called after each AI analysis cycle
+- **Strategy manager** — Instantiates, starts, and stops strategies. Broadcasts market events to all running strategies. Applies `ParamAdvisor` deltas by writing to each strategy's `StrategyParams`.
+- **Strategy context** — Dependency-injection bundle passed to each strategy at construction: market data views, risk manager handle, order executor handle, and logger.
+- **Strategy params (hot-reload)** — `StrategyParams` stores key tunable values as `std::atomic<double>` fields. `ParamAdvisor` writes updated values after each AI cycle; strategy threads read atomically without acquiring any lock.
+
+**Built-in scalping strategies**
+
+| Class                  | Algorithm                                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MomentumScalper`      | Detects short-term momentum via EMA crossover on K-lines; enters in the direction of the cross, exits on reversal or stop-loss.                             |
+| `OrderBookScalper`     | Analyses order book imbalance (bid/ask volume ratios at top N levels) to predict short-term price direction; places limit orders at optimal queue position. |
+| `MeanReversionScalper` | Tracks Bollinger Band deviations on tick data; fades extremes with a tight profit target and stop-loss.                                                     |
+
+**Signal aggregator**
+
+When multiple strategies are active, the `SignalAggregator` collects individual buy/sell/flat signals, weights them by per-strategy confidence scores (updated dynamically by the AI layer), and emits a single consolidated signal to the Risk Management layer (Layer 7).
+
+**Key files**
+
+| File                                | Description                                         |
+| ----------------------------------- | --------------------------------------------------- |
+| `strategy_base.hpp`                 | Abstract base class and lifecycle hook declarations |
+| `strategy_manager.hpp / .cpp`       | Multi-strategy orchestration                        |
+| `strategy_context.hpp`              | Dependency bundle injected into each strategy       |
+| `strategy_params.hpp`               | Hot-reloadable atomic parameter struct              |
+| `momentum_scalper.hpp / .cpp`       | EMA crossover momentum strategy                     |
+| `orderbook_scalper.hpp / .cpp`      | Order book imbalance strategy                       |
+| `mean_reversion_scalper.hpp / .cpp` | Bollinger Band mean-reversion strategy              |
+| `signal_aggregator.hpp / .cpp`      | Weighted voting signal combiner                     |
+
+---
+
+### Layer 7 — Risk Management
 
 | Property | Value                 |
 | -------- | --------------------- |
@@ -300,7 +327,7 @@ The AI Analysis layer collects real-time social and news signals, assembles a st
 
 **Responsibility**
 
-Every order signal from the Strategy Engine must pass through the Risk Management layer before reaching the Order Execution layer. This layer acts as a gate that enforces position limits, loss limits, and order rate limits.
+Every order signal from the Strategy Engine (Layer 6) must pass through the Risk Management layer before reaching the Order Execution layer (Layer 8). This layer acts as a gate that enforces position limits, loss limits, and order rate limits.
 
 - **RiskManager** — Central order gate. Evaluates each proposed order against all active risk rules. Returns an approval, a modification (reduced size), or a rejection with reason code.
 - **PositionManager** — Tracks open positions across all strategies in real time. Aggregates net exposure per symbol and enforces portfolio-level limits (max notional, max number of open positions).
@@ -322,7 +349,7 @@ Every order signal from the Strategy Engine must pass through the Risk Managemen
 
 ---
 
-### Layer 7 — Order Execution
+### Layer 8 — Order Execution
 
 | Property | Value                      |
 | -------- | -------------------------- |
@@ -331,7 +358,7 @@ Every order signal from the Strategy Engine must pass through the Risk Managemen
 
 **Responsibility**
 
-The Order Execution layer is responsible for the reliable placement and lifecycle tracking of orders on Gate.io. It isolates the rest of the system from the complexity of network failures, partial fills, and exchange state inconsistencies.
+The Order Execution layer is responsible for the reliable placement and lifecycle tracking of orders on Gate.io. It isolates the rest of the system from the complexity of network failures, partial fills, and exchange state inconsistencies. It depends on Risk Management (Layer 7) for approved orders and the Exchange layer (Layer 1) for order submission.
 
 - **OrderExecutor** — Submits orders via `GateRestClient`. Implements configurable retry logic (max attempts, back-off strategy) for transient failures. Supports market, limit, and post-only order types.
 - **OrderTracker** — Monitors order state after submission. Primary path: listens to private order-update events on the WebSocket. Fallback path: polls REST order status endpoint when WS events are missed or the connection is interrupted.
@@ -347,33 +374,6 @@ The Order Execution layer is responsible for the reliable placement and lifecycl
 
 ---
 
-### Layer 8 — Logging & Monitoring
-
-| Property | Value                    |
-| -------- | ------------------------ |
-| Headers  | `include/pulse/logging/` |
-| Sources  | `src/logging/`           |
-
-**Responsibility**
-
-The Logging & Monitoring layer provides observability for all system activity without imposing latency on the hot path. All I/O in this layer is asynchronous.
-
-- **Logger** — Wraps `spdlog` with per-module named loggers (exchange, market, strategy, heartbeat, ai, risk, execution). Log level is configurable per module at runtime. Asynchronous sink with a bounded queue to prevent back-pressure on callers.
-- **TradeRecorder** — Persists `ExecutionReport` records to CSV (default) or SQLite (optional, via SQLiteCpp). Used for post-session PnL analysis and audit trail.
-- **MetricsCollector** — Accumulates and computes trading performance metrics on a rolling basis: net PnL, gross PnL, win rate, average win/loss ratio, Sharpe ratio, maximum drawdown, and trade count. Metrics are queryable at any time by the alert system or an external monitoring interface.
-- **AlertManager** — Fires outbound alerts when configurable thresholds are breached (e.g., daily loss limit approached, strategy halted, WebSocket disconnect). Supports webhook (generic HTTP POST with JSON payload) and Telegram Bot API transports.
-
-**Key files**
-
-| File                           | Description                           |
-| ------------------------------ | ------------------------------------- |
-| `logger.hpp / .cpp`            | Per-module spdlog wrapper             |
-| `trade_recorder.hpp / .cpp`    | CSV / SQLite execution record writer  |
-| `metrics_collector.hpp / .cpp` | Rolling PnL, Sharpe, drawdown metrics |
-| `alert_manager.hpp / .cpp`     | Webhook and Telegram alert dispatcher |
-
----
-
 ## 4. Data Flow
 
 ### Market data hot path (latency-critical)
@@ -385,44 +385,44 @@ Gate.io WS Gateway
 GateWsClient  (Layer 1)
       |  typed channel callbacks
       v
-MarketFeed dispatcher  (Layer 2)
+MarketFeed dispatcher  (Layer 3)
       +--► OrderBookManager  (incremental update, seqlock)
       +--► KlineBuffer       (ring buffer, seqlock)
       +--► TickerCache       (atomic store)
               |
               v  lock-free reads
-      StrategyEngine  (Layer 3)  -- on_tick / on_orderbook / on_kline
+      StrategyEngine  (Layer 6)  -- on_tick / on_orderbook / on_kline
               |
               v  trading signal
-      RiskManager  (Layer 6)
+      RiskManager  (Layer 7)
               |  approved order
               v
-      OrderExecutor  (Layer 7)
+      OrderExecutor  (Layer 8)
               |  ExecutionReport
               v
-      TradeRecorder / MetricsCollector  (Layer 8)
+      TradeRecorder / MetricsCollector  (Layer 2)
 ```
 
 ### AI analysis cycle (background, every 5 minutes)
 
 ```
-HeartbeatScheduler  (Layer 4)
+HeartbeatScheduler  (Layer 5)
       |  OnBeat task
       v
-TaskQueue  (Layer 4)  -- background worker thread
+TaskQueue  (Layer 5)  -- background worker thread
       |
       v
-AIAnalyzer  (Layer 5)
+AIAnalyzer  (Layer 4)
       +--► TwitterFeed   (X API v2 filtered stream)
       +--► NewsFeed      (NewsAPI / CryptoPanic)
       +--► PromptBuilder (market snapshot + signals)
       +--► AIClient      (OpenAI / Claude HTTP API)
               |  AnalysisResult (JSON)
               v
-      ParamAdvisor  (Layer 5)
+      ParamAdvisor  (Layer 4)
               |  atomic writes to StrategyParams
               v
-      StrategyManager  (Layer 3)  -- on_ai_update / param hot-reload
+      StrategyManager  (Layer 6)  -- on_ai_update / param hot-reload
 ```
 
 ---
@@ -433,7 +433,7 @@ AIAnalyzer  (Layer 5)
 | --------------------------- | ------------------------------------------------------------------------ | ---------------------------------- |
 | Main thread                 | Startup, config loading, component wiring                                | Blocks on shutdown signal          |
 | WebSocket I/O thread        | `asio::io_context` for WS connection and heartbeat pings                 | Runs for process lifetime          |
-| Market data dispatch thread | Routes WS frames to Layer 2 sub-components                               | Runs for process lifetime          |
+| Market data dispatch thread | Routes WS frames to Layer 3 sub-components                               | Runs for process lifetime          |
 | Strategy threads (N)        | One `std::jthread` per active strategy; reads market data, emits signals | Started/stopped by StrategyManager |
 | Heartbeat worker thread     | Consumes `TaskQueue`; runs AI analysis cycle                             | Runs for process lifetime          |
 | Logger async thread         | spdlog async queue consumer                                              | Runs for process lifetime          |
