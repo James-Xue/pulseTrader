@@ -1,0 +1,48 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# 基础排版
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+ContinuationIndentWidth: 4
+
+# 大括号与空行
+BreakBeforeBraces: Allman
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# 指针/引用风格
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# include 排序
+SortIncludes: false
+IncludeBlocks: Preserve
+
+# 对齐与换行
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+AlignAfterOpenBracket: DontAlign
+BinPackArguments: false
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# C++11/17 友好项
+Standard: c++17
+Cpp11BracedListStyle: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpaceInEmptyParentheses: false
+
+# 预处理与宏
+IndentPPDirectives: None
+
+...
