@@ -55,6 +55,18 @@ struct LogConfig {
 };
 
 // ---------------------------------------------------------------------------
+// WebUI configuration (requires -DPULSE_ENABLE_WEBUI=ON)
+// ---------------------------------------------------------------------------
+
+struct WebUiConfig {
+    bool        enabled      = false;
+    std::string bindAddress  = "127.0.0.1";  ///< Localhost only by default.
+    std::uint16_t port       = 8080;
+    std::string authToken;                    ///< Bearer token for all endpoints.
+    std::uint32_t maxClients = 4;             ///< Max concurrent WebSocket clients.
+};
+
+// ---------------------------------------------------------------------------
 // Top-level configuration
 // ---------------------------------------------------------------------------
 
@@ -63,6 +75,7 @@ struct PulseConfig {
     AiConfig             ai;
     RiskConfig           risk;
     LogConfig            log;
+    WebUiConfig          webui;
     std::vector<std::string> symbols;  ///< Symbols to trade, e.g. {"BTC_USDT"}.
 };
 
