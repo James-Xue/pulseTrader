@@ -1,9 +1,9 @@
 # pulseTrader — Architecture
 
-> **Version:** 0.1.0-dev  
-> **Language:** C++20  
-> **Exchange:** Gate.io (REST + WebSocket)  
-> **Namespace:** `pulse::`  
+> **Version:** 0.1.0-dev\
+> **Language:** C++20\
+> **Exchange:** Gate.io (REST + WebSocket)\
+> **Namespace:** `pulse::`\
 > **Build system:** CMake + vcpkg
 
 ---
