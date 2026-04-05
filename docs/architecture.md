@@ -51,41 +51,42 @@ The system is structured as eight vertical layers. Each layer has a single well-
 ┌──────────────────────────────────────┐
 │                            pulseTrader Process                             │
 │                                                                            │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 4: HeartbeatScheduler  (every 5 min)                      │    │
-│  │    └─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor        │    │
-│  └─────────────────────────────────┘    │
-│                                     │ param updates (atomic writes)       │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 3: Strategy Engine                                        │    │
-│  │    MomentumScalper | OrderBookScalper | MeanReversionScalper     │    │
-│  │    SignalAggregator (weighted voting)                            │    │
-│  └─────────────────────────────────┘    │
-│                                     │ signals                             │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 6: Risk Management                                        │    │
-│  │    RiskManager | PositionManager | StopLoss/TakeProfit Engines   │    │
-│  └─────────────────────────────────┘    │
-│                                     │ approved orders                     │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 7: Order Execution                                        │    │
-│  │    OrderExecutor | OrderTracker | ExecutionReport                │    │
-│  └─────────────────────────────────┘    │
-│                                     │                                     │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 8: Logging & Monitoring                                   │    │
-│  │    Logger | TradeRecorder | MetricsCollector | AlertManager      │    │
-│  └─────────────────────────────────┘    │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 4: HeartbeatScheduler  (every 5 min)                        │  │
+│  │    └─► TaskQueue ──► AIAnalyzer ──► ParamAdvisor          │  │
+│  └──────────────────────────────────┘  │
+│                                      ▼ param updates (atomic writes)      │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 3: Strategy Engine                                          │  │
+│  │    MomentumScalper | OrderBookScalper | MeanReversionScalper       │  │
+│  │    SignalAggregator (weighted voting)                              │  │
+│  └──────────────────────────────────┘  │
+│                                      ▼ signals                            │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 6: Risk Management                                          │  │
+│  │    RiskManager | PositionManager | StopLoss/TakeProfit Engines     │  │
+│  └──────────────────────────────────┘  │
+│                                      ▼ approved orders                    │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 7: Order Execution                                          │  │
+│  │    OrderExecutor | OrderTracker | ExecutionReport                  │  │
+│  └──────────────────────────────────┘  │
+│                                      ▼                                    │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 8: Logging & Monitoring                                     │  │
+│  │    Logger | TradeRecorder | MetricsCollector | AlertManager        │  │
+│  └──────────────────────────────────┘  │
 │                                                                            │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 2: Market Data  (hot path -- dedicated thread)            │    │
-│  │    MarketFeed | OrderBookManager | KlineBuffer | TickerCache     │    │
-│  └─────────────────────────────────┘    │
-│                                     │                                     │
-│  ┌─────────────────────────────────┐    │
-│  │  Layer 1: Exchange  (Gate.io REST + WebSocket)                   │    │
-│  │    GateRestClient | GateWsClient | GateWsChannels | GateAuth     │    │
-│  └─────────────────────────────────┘    │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 2: Market Data  (hot path -- dedicated thread)              │  │
+│  │    MarketFeed | OrderBookManager | KlineBuffer | TickerCache       │  │
+│  └──────────────────────────────────┘  │
+│                                      ▼                                    │
+│  ┌──────────────────────────────────┐  │
+│  │  Layer 1: Exchange  (Gate.io REST + WebSocket)                     │  │
+│  │    GateRestClient | GateWsClient | GateWsChannels | GateAuth       │  │
+│  └──────────────────────────────────┘  │
+│                                                                            │
 └──────────────────────────────────────┘
 ```
 
