@@ -6,19 +6,23 @@
 #include <fstream>
 #include <string>
 
-namespace pulse::logging {
-namespace {
+namespace pulse::logging
+{
+namespace
+{
 
-class LoggerTest : public ::testing::Test {
-protected:
-    void SetUp() override {
+class LoggerTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
         // Use a unique temp directory for each test.
-        test_log_dir_ = std::filesystem::temp_directory_path()
-                      / ("pulse_log_test_" + std::to_string(getpid()));
+        test_log_dir_ = std::filesystem::temp_directory_path() / ("pulse_log_test_" + std::to_string(getpid()));
         std::filesystem::create_directories(test_log_dir_);
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         Logger::shutdown();
         std::filesystem::remove_all(test_log_dir_);
     }
@@ -26,7 +30,8 @@ protected:
     std::filesystem::path test_log_dir_;
 };
 
-TEST_F(LoggerTest, InitCreatesLogDirectory) {
+TEST_F(LoggerTest, InitCreatesLogDirectory)
+{
     auto dir = test_log_dir_ / "subdir";
     LogConfig config;
     config.logDir = dir.string();
@@ -37,7 +42,8 @@ TEST_F(LoggerTest, InitCreatesLogDirectory) {
     EXPECT_TRUE(std::filesystem::exists(dir));
 }
 
-TEST_F(LoggerTest, GetReturnsSameLoggerForSameModule) {
+TEST_F(LoggerTest, GetReturnsSameLoggerForSameModule)
+{
     LogConfig config;
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
@@ -49,7 +55,8 @@ TEST_F(LoggerTest, GetReturnsSameLoggerForSameModule) {
     EXPECT_EQ(log1.get(), log2.get());
 }
 
-TEST_F(LoggerTest, GetReturnsDifferentLoggersForDifferentModules) {
+TEST_F(LoggerTest, GetReturnsDifferentLoggersForDifferentModules)
+{
     LogConfig config;
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
@@ -57,11 +64,12 @@ TEST_F(LoggerTest, GetReturnsDifferentLoggersForDifferentModules) {
     Logger::init(config);
 
     auto log_market = Logger::get("market");
-    auto log_risk   = Logger::get("risk");
+    auto log_risk = Logger::get("risk");
     EXPECT_NE(log_market.get(), log_risk.get());
 }
 
-TEST_F(LoggerTest, LoggerWritesToFile) {
+TEST_F(LoggerTest, LoggerWritesToFile)
+{
     LogConfig config;
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
@@ -76,14 +84,14 @@ TEST_F(LoggerTest, LoggerWritesToFile) {
     EXPECT_TRUE(std::filesystem::exists(log_file));
 
     std::ifstream ifs(log_file);
-    std::string content((std::istreambuf_iterator<char>(ifs)),
-                         std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     EXPECT_NE(content.find("hello from test"), std::string::npos);
 }
 
-TEST_F(LoggerTest, LogLevelFiltersMessages) {
+TEST_F(LoggerTest, LogLevelFiltersMessages)
+{
     LogConfig config;
-    config.level = "warn";  // only warn+ should be written
+    config.level = "warn"; // only warn+ should be written
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
     config.toFile = true;
@@ -96,13 +104,13 @@ TEST_F(LoggerTest, LogLevelFiltersMessages) {
 
     auto log_file = test_log_dir_ / "level_test.log";
     std::ifstream ifs(log_file);
-    std::string content((std::istreambuf_iterator<char>(ifs)),
-                         std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     EXPECT_EQ(content.find("should not appear"), std::string::npos);
     EXPECT_NE(content.find("should appear"), std::string::npos);
 }
 
-TEST_F(LoggerTest, SetLevelChangesFilterAtRuntime) {
+TEST_F(LoggerTest, SetLevelChangesFilterAtRuntime)
+{
     LogConfig config;
     config.level = "info";
     config.logDir = test_log_dir_.string();
@@ -123,13 +131,13 @@ TEST_F(LoggerTest, SetLevelChangesFilterAtRuntime) {
 
     auto log_file = test_log_dir_ / "dynamic_level.log";
     std::ifstream ifs(log_file);
-    std::string content((std::istreambuf_iterator<char>(ifs)),
-                         std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     EXPECT_EQ(content.find("filtered_debug"), std::string::npos);
     EXPECT_NE(content.find("visible_debug"), std::string::npos);
 }
 
-TEST_F(LoggerTest, MacrosCompileAndLog) {
+TEST_F(LoggerTest, MacrosCompileAndLog)
+{
     LogConfig config;
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
@@ -142,13 +150,13 @@ TEST_F(LoggerTest, MacrosCompileAndLog) {
 
     auto log_file = test_log_dir_ / "macro_test.log";
     std::ifstream ifs(log_file);
-    std::string content((std::istreambuf_iterator<char>(ifs)),
-                         std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     EXPECT_NE(content.find("value=42"), std::string::npos);
     EXPECT_NE(content.find("warning!"), std::string::npos);
 }
 
-TEST_F(LoggerTest, ShutdownIsIdempotent) {
+TEST_F(LoggerTest, ShutdownIsIdempotent)
+{
     LogConfig config;
     config.logDir = test_log_dir_.string();
     config.toConsole = false;
