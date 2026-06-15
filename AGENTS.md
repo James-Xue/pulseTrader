@@ -59,6 +59,7 @@ Dependencies are managed by **vcpkg** — never add system packages; always add 
 | **Logging** | Use `PULSE_LOG_INFO/WARN/ERROR(module, fmt, ...)` macros — never `std::cout`. |
 | **Thread safety** | Hot path data structures: prefer lock-free (atomics, seqlock). Only use `std::mutex` when lock-free is impractical. Document thread-safety in header comments. |
 | **Naming** | Classes: `PascalCase`. Functions/variables: `snake_case`. Constants: `kPascalCase`. Private members: `snake_case_` (trailing underscore). |
+| **Braces** | **Always use braces** for `if`, `else`, `for`, `while`, `do-while` — even for single-line bodies. No `if (x) return;` on one line. |
 | **Comments** | **Required and detailed.** Use numbered lists for multi-step logic. See Comment Style below. |
 
 ### Comment Style
