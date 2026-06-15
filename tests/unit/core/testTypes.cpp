@@ -1,23 +1,33 @@
+// testTypes.cpp — Unit tests for pulse/core/types.hpp, error.hpp, and config.hpp
+//
+// Test coverage:
+//   1. Side::opposite() symmetry (Buy↔Sell)
+//   2. Timestamp monotonicity and nanosecond resolution
+//   3. Result<T> ok/value/error accessors
+//   4. Default values for ExchangeConfig, AiConfig, RiskConfig
+
 #include <gtest/gtest.h>
 
-#include "pulse/core/types.hpp"
-#include "pulse/core/error.hpp"
 #include "pulse/core/config.hpp"
+#include "pulse/core/error.hpp"
+#include "pulse/core/types.hpp"
 
 using namespace pulse;
 
 // ---------------------------------------------------------------------------
-// types.hpp
+// types.hpp — Side and Timestamp
 // ---------------------------------------------------------------------------
 
 TEST(Side, OppositeIsSymmetric)
 {
+    // opposite() must be an involution: opposite(opposite(x)) == x
     EXPECT_EQ(opposite(Side::Buy), Side::Sell);
     EXPECT_EQ(opposite(Side::Sell), Side::Buy);
 }
 
 TEST(Timestamp, NowIsMonotonic)
 {
+    // Two successive calls must return non-decreasing timestamps
     const auto t1 = now();
     const auto t2 = now();
     EXPECT_LE(t1, t2);
@@ -25,17 +35,19 @@ TEST(Timestamp, NowIsMonotonic)
 
 TEST(Timestamp, NowHasNanosecondResolution)
 {
-    // Verify the type carries nanoseconds (compile-time check via static_assert).
+    // Compile-time check: Timestamp must be backed by std::chrono::nanoseconds
     static_assert(
-        std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>, "Timestamp must have nanosecond resolution");
+        std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>,
+        "Timestamp must have nanosecond resolution");
 }
 
 // ---------------------------------------------------------------------------
-// error.hpp
+// error.hpp — Result<T>
 // ---------------------------------------------------------------------------
 
 TEST(Result, OkVariant)
 {
+    // A Result<int> constructed from a value must report ok() == true
     Result<int> r = 42;
     EXPECT_TRUE(ok(r));
     EXPECT_EQ(value(r), 42);
@@ -43,6 +55,7 @@ TEST(Result, OkVariant)
 
 TEST(Result, ErrorVariant)
 {
+    // A Result<int> constructed from a PulseError must report ok() == false
     Result<int> r = PulseError{ErrorCode::NetworkTimeout, "timed out"};
     EXPECT_FALSE(ok(r));
     EXPECT_EQ(error(r).code, ErrorCode::NetworkTimeout);
@@ -51,6 +64,7 @@ TEST(Result, ErrorVariant)
 
 TEST(Result, MutableValue)
 {
+    // value() on a mutable Result must return a writable reference
     Result<int> r = 10;
     value(r) = 20;
     EXPECT_EQ(value(r), 20);
@@ -62,6 +76,7 @@ TEST(Result, MutableValue)
 
 TEST(PulseConfig, ExchangeDefaults)
 {
+    // ExchangeConfig must ship with Gate.io production defaults
     ExchangeConfig cfg;
     EXPECT_EQ(cfg.restBaseUrl, "https://api.gateio.ws/api/v4");
     EXPECT_EQ(cfg.restTimeoutMs, 5'000u);
@@ -70,6 +85,7 @@ TEST(PulseConfig, ExchangeDefaults)
 
 TEST(PulseConfig, AiDefaults)
 {
+    // AiConfig must default to Claude backend with 5-minute heartbeat
     AiConfig cfg;
     EXPECT_EQ(cfg.backend, "claude");
     EXPECT_EQ(cfg.heartbeatIntervalSec, 300u);
@@ -77,6 +93,7 @@ TEST(PulseConfig, AiDefaults)
 
 TEST(PulseConfig, RiskDefaults)
 {
+    // RiskConfig must default to conservative limits (2% daily, 5 orders/sec)
     RiskConfig cfg;
     EXPECT_DOUBLE_EQ(cfg.maxDailyDrawdown, 0.02);
     EXPECT_EQ(cfg.maxOrdersPerSec, 5u);
