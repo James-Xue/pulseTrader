@@ -4,23 +4,22 @@
 #include <cstdint>
 #include <string>
 
-namespace pulse {
+namespace pulse
+{
 
 // ---------------------------------------------------------------------------
 // Time
 // ---------------------------------------------------------------------------
 
 /// Nanosecond-precision wall-clock timestamp.
-using Timestamp = std::chrono::time_point<
-    std::chrono::system_clock,
-    std::chrono::nanoseconds>;
+using Timestamp = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 
 using Duration = std::chrono::nanoseconds;
 
 /// Returns the current wall-clock time with nanosecond precision.
-[[nodiscard]] inline Timestamp now() noexcept {
-    return std::chrono::time_point_cast<std::chrono::nanoseconds>(
-        std::chrono::system_clock::now());
+[[nodiscard]] inline Timestamp now() noexcept
+{
+    return std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
 }
 
 // ---------------------------------------------------------------------------
@@ -41,20 +40,23 @@ using Quantity = double;
 // ---------------------------------------------------------------------------
 
 /// Trade direction.
-enum class Side : std::uint8_t {
+enum class Side : std::uint8_t
+{
     Buy,
     Sell,
 };
 
 /// Order types supported by Gate.io.
-enum class OrderType : std::uint8_t {
+enum class OrderType : std::uint8_t
+{
     Market,
     Limit,
-    PostOnly,   ///< Rejected if it would match immediately (maker-only).
+    PostOnly, ///< Rejected if it would match immediately (maker-only).
 };
 
 /// Lifecycle state of an order.
-enum class OrderStatus : std::uint8_t {
+enum class OrderStatus : std::uint8_t
+{
     Pending,
     Open,
     PartiallyFilled,
@@ -68,7 +70,8 @@ enum class OrderStatus : std::uint8_t {
 // ---------------------------------------------------------------------------
 
 /// Returns the opposite side.
-[[nodiscard]] constexpr Side opposite(Side s) noexcept {
+[[nodiscard]] constexpr Side opposite(Side s) noexcept
+{
     return s == Side::Buy ? Side::Sell : Side::Buy;
 }
 

@@ -8,7 +8,8 @@
 #include <string>
 #include <string_view>
 
-namespace pulse::logging {
+namespace pulse::logging
+{
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -27,12 +28,13 @@ namespace pulse::logging {
 //   PULSE_LOG_INFO("market", "orderbook depth: {}", depth);
 // ---------------------------------------------------------------------------
 
-class Logger {
-public:
+class Logger
+{
+  public:
     /// Initialise the global spdlog registry from PulseConfig::log.
     /// Creates the log directory if it does not exist.
     /// Must be called exactly once before any get() call.
-    static void init(const LogConfig& config);
+    static void init(const LogConfig &config);
 
     /// Flush all sinks and shut down the async thread pool.
     /// Must be called before process exit to avoid losing buffered messages.
@@ -51,7 +53,7 @@ public:
     /// Flush all loggers immediately (useful before a crash or shutdown).
     static void flush_all();
 
-private:
+  private:
     Logger() = default;
 };
 
@@ -70,20 +72,14 @@ private:
 // set during init()).
 // ---------------------------------------------------------------------------
 
-#define PULSE_LOG_TRACE(module, ...) \
-    ::pulse::logging::Logger::get(module)->trace(__VA_ARGS__)
+#define PULSE_LOG_TRACE(module, ...) ::pulse::logging::Logger::get(module)->trace(__VA_ARGS__)
 
-#define PULSE_LOG_DEBUG(module, ...) \
-    ::pulse::logging::Logger::get(module)->debug(__VA_ARGS__)
+#define PULSE_LOG_DEBUG(module, ...) ::pulse::logging::Logger::get(module)->debug(__VA_ARGS__)
 
-#define PULSE_LOG_INFO(module, ...) \
-    ::pulse::logging::Logger::get(module)->info(__VA_ARGS__)
+#define PULSE_LOG_INFO(module, ...) ::pulse::logging::Logger::get(module)->info(__VA_ARGS__)
 
-#define PULSE_LOG_WARN(module, ...) \
-    ::pulse::logging::Logger::get(module)->warn(__VA_ARGS__)
+#define PULSE_LOG_WARN(module, ...) ::pulse::logging::Logger::get(module)->warn(__VA_ARGS__)
 
-#define PULSE_LOG_ERROR(module, ...) \
-    ::pulse::logging::Logger::get(module)->error(__VA_ARGS__)
+#define PULSE_LOG_ERROR(module, ...) ::pulse::logging::Logger::get(module)->error(__VA_ARGS__)
 
-#define PULSE_LOG_CRITICAL(module, ...) \
-    ::pulse::logging::Logger::get(module)->critical(__VA_ARGS__)
+#define PULSE_LOG_CRITICAL(module, ...) ::pulse::logging::Logger::get(module)->critical(__VA_ARGS__)

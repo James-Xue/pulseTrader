@@ -2,14 +2,14 @@
 Language: Cpp
 BasedOnStyle: LLVM
 
-# 基础排版
+# Layout
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
 ColumnLimit: 120
 ContinuationIndentWidth: 4
 
-# 大括号与空行
+# Braces and blank lines
 BreakBeforeBraces: Allman
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
@@ -17,15 +17,15 @@ AllowShortFunctionsOnASingleLine: None
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 
-# 指针/引用风格
+# Pointer / reference alignment
 PointerAlignment: Right
 ReferenceAlignment: Right
 
-# include 排序
+# Include ordering
 SortIncludes: false
 IncludeBlocks: Preserve
 
-# 对齐与换行
+# Alignment and wrapping
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 AlignTrailingComments: true
@@ -34,15 +34,15 @@ BinPackArguments: false
 BinPackParameters: false
 AllowAllParametersOfDeclarationOnNextLine: false
 
-# C++11/17 友好项
-Standard: c++17
+# C++20
+Standard: c++20
 Cpp11BracedListStyle: true
 SpaceBeforeParens: ControlStatements
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
 SpaceInEmptyParentheses: false
 
-# 预处理与宏
+# Preprocessor
 IndentPPDirectives: None
 
 ...
