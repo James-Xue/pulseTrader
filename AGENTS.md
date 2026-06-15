@@ -59,6 +59,32 @@ Dependencies are managed by **vcpkg** — never add system packages; always add 
 | **Logging** | Use `PULSE_LOG_INFO/WARN/ERROR(module, fmt, ...)` macros — never `std::cout`. |
 | **Thread safety** | Hot path data structures: prefer lock-free (atomics, seqlock). Only use `std::mutex` when lock-free is impractical. Document thread-safety in header comments. |
 | **Naming** | Classes: `PascalCase`. Functions/variables: `snake_case`. Constants: `kPascalCase`. Private members: `snake_case_` (trailing underscore). |
+| **Comments** | **Required and detailed.** Use numbered lists for multi-step logic. See Comment Style below. |
+
+### Comment Style
+
+Every non-trivial function, class, and block must have detailed comments explaining intent, not just mechanics. For multi-step logic, use a **numbered list with line breaks**:
+
+```cpp
+// Process incoming tick and update internal state:
+// 1. Validate timestamp is within acceptable skew window
+// 2. Update best bid/ask in the lock-free order book snapshot
+// 3. Recalculate mid-price and spread
+// 4. If spread exceeds threshold, flag as illiquid and skip strategy evaluation
+// 5. Publish updated snapshot to downstream consumers via atomic store
+void MarketDataProcessor::on_tick(const TickEvent& tick) {
+    // ...
+}
+```
+
+**Where to comment**:
+- Every public function/method: document purpose, parameters, return value, and thread-safety guarantees
+- Every class: document ownership, lifetime, and which layer it belongs to
+- Every `if`/`switch` with more than 2 branches: explain the decision tree
+- Every lock-free or atomic operation: explain the memory ordering choice
+- Every error path: explain what failed and why we recover (or don't)
+
+**Never** write comments that just restate the code (`// increment counter`). Explain **why**, not **what**.
 
 ---
 
