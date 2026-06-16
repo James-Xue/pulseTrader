@@ -44,3 +44,4 @@ build
 *.dwo
 .claude/
 build/
+.cache/
