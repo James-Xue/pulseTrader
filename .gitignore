@@ -1,3 +1,6 @@
+#Compile Dir
+build
+
 # Prerequisites
 *.d
 
