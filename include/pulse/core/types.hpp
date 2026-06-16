@@ -75,12 +75,12 @@ enum class OrderType : std::uint8_t
 ///         → Rejected
 enum class OrderStatus : std::uint8_t
 {
-    Pending,        ///< Submitted but not yet acknowledged by the exchange.
-    Open,           ///< Acknowledged and resting in the order book.
-    PartiallyFilled,///< Part of the order has been filled.
-    Filled,         ///< Fully filled — terminal state.
-    Cancelled,      ///< Cancelled by user or system — terminal state.
-    Rejected,       ///< Rejected by exchange or risk engine — terminal state.
+    Pending,         ///< Submitted but not yet acknowledged by the exchange.
+    Open,            ///< Acknowledged and resting in the order book.
+    PartiallyFilled, ///< Part of the order has been filled.
+    Filled,          ///< Fully filled — terminal state.
+    Cancelled,       ///< Cancelled by user or system — terminal state.
+    Rejected,        ///< Rejected by exchange or risk engine — terminal state.
 };
 
 // ---------------------------------------------------------------------------

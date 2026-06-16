@@ -52,25 +52,32 @@ bool g_initialised = false;
 // ---------------------------------------------------------------------------
 spdlog::level::level_enum parse_level(const std::string &name)
 {
-    if ("trace" == name) {
+    if ("trace" == name)
+    {
         return spdlog::level::trace;
     }
-    if ("debug" == name) {
+    if ("debug" == name)
+    {
         return spdlog::level::debug;
     }
-    if ("info" == name) {
+    if ("info" == name)
+    {
         return spdlog::level::info;
     }
-    if ("warn" == name) {
+    if ("warn" == name)
+    {
         return spdlog::level::warn;
     }
-    if ("error" == name) {
+    if ("error" == name)
+    {
         return spdlog::level::err;
     }
-    if ("critical" == name) {
+    if ("critical" == name)
+    {
         return spdlog::level::critical;
     }
-    if ("off" == name) {
+    if ("off" == name)
+    {
         return spdlog::level::off;
     }
     return spdlog::level::info; // fallback for unrecognised input
@@ -90,7 +97,8 @@ std::shared_ptr<spdlog::logger> make_logger(std::string_view module, const LogCo
     std::vector<spdlog::sink_ptr> sinks;
 
     // Step 1: coloured console sink (thread-safe, multi-thread variant)
-    if (config.toConsole) {
+    if (config.toConsole)
+    {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(g_default_level);
         console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
@@ -98,10 +106,10 @@ std::shared_ptr<spdlog::logger> make_logger(std::string_view module, const LogCo
     }
 
     // Step 2: file sink (append mode, one file per module)
-    if (config.toFile) {
+    if (config.toFile)
+    {
         auto file_path = std::filesystem::path(config.logDir) / (std::string(module) + ".log");
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-            file_path.string(), /*truncate=*/false);
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(file_path.string(), /*truncate=*/false);
         file_sink->set_level(g_default_level);
         file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] %v");
         sinks.push_back(file_sink);
@@ -132,7 +140,8 @@ std::shared_ptr<spdlog::logger> make_logger(std::string_view module, const LogCo
 void Logger::init(const LogConfig &config)
 {
     std::lock_guard lock(g_mutex);
-    if (g_initialised) {
+    if (g_initialised)
+    {
         return;
     }
 
@@ -140,7 +149,8 @@ void Logger::init(const LogConfig &config)
     g_default_level = parse_level(config.level);
 
     // Ensure the log directory tree exists before any file sink opens
-    if (config.toFile) {
+    if (config.toFile)
+    {
         std::filesystem::create_directories(config.logDir);
     }
 
@@ -167,11 +177,13 @@ void Logger::init(const LogConfig &config)
 void Logger::shutdown() noexcept
 {
     std::lock_guard lock(g_mutex);
-    if (!g_initialised) {
+    if (!g_initialised)
+    {
         return;
     }
 
-    for (auto &[name, logger] : g_loggers) {
+    for (auto &[name, logger] : g_loggers)
+    {
         logger->flush();
     }
     spdlog::shutdown();
@@ -200,7 +212,8 @@ std::shared_ptr<spdlog::logger> Logger::get(std::string_view module)
     {
         std::lock_guard lock(g_mutex);
         auto it = g_loggers.find(key);
-        if (it != g_loggers.end()) {
+        if (it != g_loggers.end())
+        {
             return it->second;
         }
     }
@@ -230,10 +243,12 @@ void Logger::set_level(std::string_view module, spdlog::level::level_enum level)
 {
     std::lock_guard lock(g_mutex);
     auto it = g_loggers.find(std::string(module));
-    if (it != g_loggers.end()) {
+    if (it != g_loggers.end())
+    {
         it->second->set_level(level);
         // Each sink has its own independent filter — update them all
-        for (auto &sink : it->second->sinks()) {
+        for (auto &sink : it->second->sinks())
+        {
             sink->set_level(level);
         }
     }
@@ -250,9 +265,11 @@ void Logger::set_level(std::string_view module, spdlog::level::level_enum level)
 void Logger::set_global_level(spdlog::level::level_enum level)
 {
     std::lock_guard lock(g_mutex);
-    for (auto &[name, logger] : g_loggers) {
+    for (auto &[name, logger] : g_loggers)
+    {
         logger->set_level(level);
-        for (auto &sink : logger->sinks()) {
+        for (auto &sink : logger->sinks())
+        {
             sink->set_level(level);
         }
     }
@@ -270,7 +287,8 @@ void Logger::set_global_level(spdlog::level::level_enum level)
 void Logger::flush_all()
 {
     std::lock_guard lock(g_mutex);
-    for (auto &[name, logger] : g_loggers) {
+    for (auto &[name, logger] : g_loggers)
+    {
         logger->flush();
     }
 }

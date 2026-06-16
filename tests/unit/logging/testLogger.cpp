@@ -32,8 +32,7 @@ class LoggerTest : public ::testing::Test
     void SetUp() override
     {
         // Each test gets its own temp directory to avoid cross-test interference
-        test_log_dir_ = std::filesystem::temp_directory_path()
-                        / ("pulse_log_test_" + std::to_string(getpid()));
+        test_log_dir_ = std::filesystem::temp_directory_path() / ("pulse_log_test_" + std::to_string(getpid()));
         std::filesystem::create_directories(test_log_dir_);
     }
 

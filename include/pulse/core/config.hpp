@@ -80,7 +80,7 @@ struct RiskConfig
 // ---------------------------------------------------------------------------
 struct LogConfig
 {
-    std::string level = "info"; ///< trace/debug/info/warn/error/critical/off
+    std::string level = "info";  ///< trace/debug/info/warn/error/critical/off
     std::string logDir = "logs"; ///< Directory for per-module log files.
     bool toConsole = true;       ///< Write logs to stdout.
     bool toFile = true;          ///< Write per-module .log files.

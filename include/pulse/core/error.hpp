@@ -74,33 +74,28 @@ struct PulseError
 //   if (ok(r)) { use(value(r)); }
 //   else       { log(error(r).message); }
 // ---------------------------------------------------------------------------
-template <typename T>
-using Result = std::variant<T, PulseError>;
+template <typename T> using Result = std::variant<T, PulseError>;
 
 /// Returns true if the Result holds a success value (T).
-template <typename T>
-[[nodiscard]] bool ok(const Result<T> &r) noexcept
+template <typename T> [[nodiscard]] bool ok(const Result<T> &r) noexcept
 {
     return std::holds_alternative<T>(r);
 }
 
 /// Returns a const reference to the success value. UB if !ok(r).
-template <typename T>
-[[nodiscard]] const T &value(const Result<T> &r)
+template <typename T> [[nodiscard]] const T &value(const Result<T> &r)
 {
     return std::get<T>(r);
 }
 
 /// Returns a mutable reference to the success value. UB if !ok(r).
-template <typename T>
-[[nodiscard]] T &value(Result<T> &r)
+template <typename T> [[nodiscard]] T &value(Result<T> &r)
 {
     return std::get<T>(r);
 }
 
 /// Returns a const reference to the error. UB if ok(r).
-template <typename T>
-[[nodiscard]] const PulseError &error(const Result<T> &r)
+template <typename T> [[nodiscard]] const PulseError &error(const Result<T> &r)
 {
     return std::get<PulseError>(r);
 }

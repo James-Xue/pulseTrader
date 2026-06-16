@@ -36,7 +36,7 @@ AllowAllParametersOfDeclarationOnNextLine: false
 
 # C++20
 Standard: c++20
-Cpp11BracedListStyle: true
+Cpp11BracedListStyle: false
 SpaceBeforeParens: ControlStatements
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
