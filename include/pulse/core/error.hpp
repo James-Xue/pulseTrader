@@ -49,6 +49,10 @@ enum class ErrorCode : std::uint32_t
     OrderRejected = 3000,
     DrawdownLimitHit = 3001,
     PositionLimitHit = 3002,
+    RateLimitHit = 3003,       ///< Order rate limiter rejected (token bucket empty).
+    StopLossTriggered = 3004,  ///< Position closed by stop-loss engine.
+    TakeProfitTriggered = 3005, ///< Position partially/fully closed by take-profit engine.
+    SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
 
     // AI (4xxx)
     AiResponseInvalid = 4000,

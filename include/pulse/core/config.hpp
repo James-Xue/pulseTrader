@@ -12,6 +12,52 @@ namespace pulse
 {
 
 // ---------------------------------------------------------------------------
+// StopMode — stop-loss strategy per position
+//
+//   1. Fixed     — absolute price level derived from entry price +/- fixed_pct
+//   2. Trailing  — tracks best observed price with a percentage offset
+//   3. TimeBased — forces close after max_hold_seconds elapsed
+// ---------------------------------------------------------------------------
+enum class StopMode : std::uint8_t
+{
+    Fixed,     ///< Absolute price level derived from entry price +/- fixed_pct.
+    Trailing,  ///< Tracks best observed price with a percentage offset.
+    TimeBased, ///< Forces close after max_hold_seconds elapsed.
+};
+
+// ---------------------------------------------------------------------------
+// StopLossConfig — stop-loss parameters per position
+//
+// Fields:
+//   1. mode              — Stop mode: Fixed, Trailing, or TimeBased
+//   2. fixed_pct         — Fixed stop distance as fraction of entry price (e.g. 0.01 = 1%)
+//   3. trailing_pct      — Trailing stop offset as fraction of best price (e.g. 0.005 = 0.5%)
+//   4. max_hold_seconds  — Maximum hold duration before forced close (time-based stop)
+// ---------------------------------------------------------------------------
+struct StopLossConfig
+{
+    StopMode mode = StopMode::Trailing;   ///< Default to trailing stop.
+    double fixed_pct = 0.01;              ///< 1% fixed stop distance.
+    double trailing_pct = 0.005;          ///< 0.5% trailing offset.
+    std::uint32_t max_hold_seconds = 300; ///< 5-minute max hold.
+};
+
+// ---------------------------------------------------------------------------
+// TakeProfitConfig — partial take-profit ladder parameters
+//
+// Fields:
+//   1. enabled       — Whether take-profit ladder is active
+//   2. targets_pct   — Price targets as fractions above entry (Buy) or below (Sell)
+//   3. fractions     — Fraction of position to close at each target (must sum to <= 1.0)
+// ---------------------------------------------------------------------------
+struct TakeProfitConfig
+{
+    bool enabled = true;
+    std::vector<double> targets_pct = { 0.005, 0.01, 0.02 }; ///< 0.5%, 1%, 2% targets.
+    std::vector<double> fractions = { 0.33, 0.33, 0.34 };    ///< Close 33%/33%/34% at each.
+};
+
+// ---------------------------------------------------------------------------
 // ExchangeConfig — Gate.io REST + WebSocket connection parameters
 //
 // Fields:
@@ -61,6 +107,9 @@ struct AiConfig
 //   3. maxDailyDrawdown    — Maximum daily loss as a fraction of equity (e.g. 0.02 = 2%)
 //   4. maxDrawdown         — Maximum total drawdown before trading halts
 //   5. maxOrdersPerSec     — Token-bucket capacity for order rate limiting
+//   6. maxSymbolNotional   — Maximum notional exposure per individual symbol (USDT)
+//   7. stop_loss           — Default stop-loss configuration for new positions
+//   8. take_profit         — Default take-profit ladder configuration
 // ---------------------------------------------------------------------------
 struct RiskConfig
 {
@@ -69,6 +118,9 @@ struct RiskConfig
     double maxDailyDrawdown = 0.02;       ///< Max daily loss as fraction of equity.
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
+    double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
+    StopLossConfig stop_loss;             ///< Default stop-loss configuration.
+    TakeProfitConfig take_profit;         ///< Default take-profit configuration.
 };
 
 // ---------------------------------------------------------------------------
