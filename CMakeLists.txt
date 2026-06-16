@@ -73,4 +73,5 @@ if(PULSE_BUILD_DEMOS)
     add_subdirectory(demos)
 endif()
 
+add_subdirectory(tools)
 add_subdirectory(apps)
