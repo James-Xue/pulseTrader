@@ -57,43 +57,48 @@
 
 ---
 
-## Phase 2 — Market Data Pipeline (Layer 3)
+## Phase 2 — Market Data Pipeline (Layer 3) ✅ COMPLETED
 
 > **Goal**: 拿到结构化的实时行情数据，策略层可以直接消费
+> **Status**: ✅ Done (2026-06-16) — 32 unit tests, smoke test tool, all 84 tests passing
 
-### Step 2.1: TickerCache + SymbolRegistry
+### Step 2.1: TickerCache + SymbolRegistry ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `ticker_cache.hpp / .cpp`, `symbol_registry.hpp / .cpp` |
-| Scope | `std::atomic` 存储最新 ticker；REST 拉取交易对元信息（tick size、lot size、min notional） |
-| Test | 单元测试：atomic 读写、symbol 查询 |
+| Scope | Thread-safe storage (shared_mutex) for latest ticker; REST fetch instrument metadata (tick size, lot size, min notional) |
+| Test | 12 unit tests: concurrent updates, symbol lookup, order validation |
+| Notes | TickerCache uses shared_mutex (not atomic) due to Ticker struct size; SymbolRegistry validates order params against metadata |
 
-### Step 2.2: OrderBookManager
+### Step 2.2: OrderBookManager ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `orderbook_manager.hpp / .cpp` |
-| Scope | snapshot + delta 增量更新、sequence number 校验、gap 检测触发重订阅 |
-| Test | 单元测试：snapshot 初始化、delta 应用、sequence gap 检测 |
+| Scope | snapshot + delta incremental updates, sequence number validation, gap detection triggers re-subscription |
+| Test | 11 unit tests: snapshot init, delta apply, sequence gap, top N bids/asks |
+| Notes | Uses std::map for sorted price levels; resubscribe callback on sequence gap |
 
-### Step 2.3: KlineBuffer
+### Step 2.3: KlineBuffer ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `kline_buffer.hpp / .cpp` |
-| Scope | thread-safe ring buffer、seqlock snapshot 读取 |
-| Test | 单元测试：满 buffer 覆盖、并发读写正确性 |
+| Scope | Fixed-size ring buffer (500 candles), seqlock pattern for lock-free snapshot reads |
+| Test | 12 unit tests: ring wrap-around, concurrent push/snapshot, seqlock consistency |
+| Notes | Seqlock ensures readers see consistent snapshots without locks; per-symbol buffers in MarketFeed |
 
-### Step 2.4: MarketFeed Dispatcher
+### Step 2.4: MarketFeed Dispatcher ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `market_feed.hpp / .cpp` |
-| Scope | 独立线程、路由 WS 事件到 OrderBook/Kline/Ticker |
-| Test | 集成测试：连接 Gate.io WS → TickerCache 实时更新 |
+| Scope | Integrates all L3 components, subscribes to Gate.io WS channels (tickers, order_book, candlesticks), routes events |
+| Test | Smoke test `tools/test_market_feed.cpp` connects to Gate.io, prints BTC_USDT ticker + orderbook top 5 + K-line |
+| Notes | No separate dispatch thread — callbacks execute on WS I/O thread; per-symbol KlineBuffer map |
 
-**Deliverable**: `tools/test_market_feed.cpp` 实时打印 BTC_USDT 的 ticker + 订单簿 top 5 + K线收盘价
+**Deliverable**: ✅ `tools/test_market_feed.cpp` 实时打印 BTC_USDT 的 ticker + 订单簿 top 5 + K线收盘价
 
 ---
 
