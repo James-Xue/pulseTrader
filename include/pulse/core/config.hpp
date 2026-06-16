@@ -27,8 +27,10 @@ struct ExchangeConfig
     std::string apiSecret;
     std::string restBaseUrl = "https://api.gateio.ws/api/v4";
     std::string wsUrl = "wss://api.gateio.ws/ws/v4/";
-    std::uint32_t restTimeoutMs = 5'000; ///< Per-request timeout in milliseconds.
-    std::uint32_t maxRetries = 3;        ///< Retries before giving up on a request.
+    std::uint32_t restTimeoutMs = 5'000;     ///< Per-request timeout in milliseconds.
+    std::uint32_t maxRetries = 3;            ///< Retries before giving up on a request.
+    std::uint32_t wsReconnectBaseMs = 1'000; ///< Base backoff for WS reconnection (ms).
+    std::uint32_t wsReconnectMaxMs = 30'000; ///< Max backoff cap for WS reconnection (ms).
 };
 
 // ---------------------------------------------------------------------------

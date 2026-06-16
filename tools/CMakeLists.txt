@@ -10,3 +10,13 @@ target_link_libraries(test_gate_rest
         pulse::exchange
         pulse::logging
 )
+
+add_executable(test_gate_ws
+    test_gate_ws.cpp
+)
+
+target_link_libraries(test_gate_ws
+    PRIVATE
+        pulse::exchange
+        pulse::logging
+)
