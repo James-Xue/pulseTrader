@@ -43,3 +43,16 @@ target_link_libraries(test_execution
         pulse::exchange
         pulse::logging
 )
+
+add_executable(test_strategy
+    test_strategy.cpp
+)
+
+target_link_libraries(test_strategy
+    PRIVATE
+        pulse::strategy
+        pulse::market
+        pulse::risk
+        pulse::execution
+        pulse::logging
+)

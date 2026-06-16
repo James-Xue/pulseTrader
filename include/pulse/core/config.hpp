@@ -158,6 +158,42 @@ struct WebUiConfig
 };
 
 // ---------------------------------------------------------------------------
+// StrategyInstanceConfig — one strategy's runtime parameters
+//
+// Fields:
+//   1. name              — strategy class name (e.g. "momentum_scalper")
+//   2. symbol            — trading pair this strategy operates on
+//   3. order_quantity    — base order size in base currency
+//   4. min_confidence    — minimum signal confidence to emit (0.0–1.0)
+//   5. enabled           — whether this strategy is active
+//   6. poll_interval_ms  — how often the strategy thread polls market data
+// ---------------------------------------------------------------------------
+struct StrategyInstanceConfig
+{
+    std::string name;                         ///< Strategy class name (e.g. "momentum_scalper").
+    std::string symbol;                       ///< Trading pair (e.g. "BTC_USDT").
+    double order_quantity = 0.001;            ///< Base order size in base currency.
+    double min_confidence = 0.6;              ///< Minimum confidence to emit a signal.
+    bool enabled = true;                      ///< Whether this strategy is active.
+    std::uint32_t poll_interval_ms = 500;     ///< Poll interval in milliseconds.
+};
+
+// ---------------------------------------------------------------------------
+// StrategyConfig — strategy engine configuration (Layer 6)
+//
+// Fields:
+//   1. strategies               — list of active strategy instances
+//   2. signal_aggregator_threshold — minimum aggregated confidence to act
+//   3. signal_cooldown_sec      — seconds between signals for the same symbol
+// ---------------------------------------------------------------------------
+struct StrategyConfig
+{
+    std::vector<StrategyInstanceConfig> strategies; ///< Active strategy instances.
+    double signal_aggregator_threshold = 0.7;       ///< Minimum aggregated confidence to act.
+    std::uint32_t signal_cooldown_sec = 30;         ///< Cooldown between signals per symbol.
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
@@ -165,6 +201,7 @@ struct PulseConfig
     ExchangeConfig exchange;
     AiConfig ai;
     RiskConfig risk;
+    StrategyConfig strategy;
     LogConfig log;
     WebUiConfig webui;
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
