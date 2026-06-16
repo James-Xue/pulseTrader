@@ -33,6 +33,12 @@ enum class ErrorCode : std::uint32_t
     NetworkDisconnected = 1001,
     HttpError = 1002,
 
+    // WebSocket (1xxx)
+    WsConnectionFailed = 1010, ///< Initial connection or reconnect failed.
+    WsParseError = 1011,       ///< Incoming frame is not valid JSON.
+    WsAuthFailed = 1012,       ///< Private channel authentication rejected.
+    WsReconnectLimit = 1013,   ///< Reconnect attempts exceeded maximum.
+
     // Exchange (2xxx)
     RateLimitExceeded = 2000,
     InsufficientBalance = 2001,
