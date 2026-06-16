@@ -31,3 +31,15 @@ target_link_libraries(test_market_feed
         pulse::exchange
         pulse::logging
 )
+
+add_executable(test_execution
+    test_execution.cpp
+)
+
+target_link_libraries(test_execution
+    PRIVATE
+        pulse::execution
+        pulse::market
+        pulse::exchange
+        pulse::logging
+)
