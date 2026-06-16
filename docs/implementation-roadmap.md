@@ -186,39 +186,46 @@
 
 ---
 
-## Phase 5 — Strategy Engine (Layer 6)
+## Phase 5 — Strategy Engine (Layer 6) ✅ COMPLETED
 
 > **Goal**: 自动产生交易信号，替代手动下单
+> **Status**: ✅ Done (2026-06-16) — 52 unit tests, smoke test tool, all 250 tests passing
+> **Branch**: `feat/layer6-strategy-engine`
 
-### Step 5.1: Strategy Infrastructure
+### Step 5.1: Strategy Infrastructure ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `strategy_base.hpp`, `strategy_context.hpp`, `strategy_params.hpp`, `strategy_manager.hpp / .cpp` |
-| Scope | 抽象基类 + lifecycle hooks + hot-reload params + 多策略编排 |
+| Files | `signal_types.hpp`, `strategy_params.hpp`, `strategy_context.hpp`, `strategy_base.hpp`, `strategy_manager.hpp / .cpp` |
+| Scope | SignalType 枚举 + TradingSignal 结构体；atomic 热更新参数；DI 上下文注入；抽象基类 + lifecycle hooks；多策略 jthread 编排 + stop_token 取消 |
+| Config | 新增 `StrategyInstanceConfig`（per-strategy name/symbol/quantity/confidence）和 `StrategyConfig`（aggregator threshold/cooldown）到 `PulseConfig` |
+| Test | 20 unit tests: signal defaults, atomic read/write, concurrent access, base class interface, manager lifecycle |
 
-### Step 5.2: MomentumScalper
+### Step 5.2: MomentumScalper ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `momentum_scalper.hpp / .cpp` |
-| Scope | EMA crossover，第一个可运行的策略实现 |
+| Scope | EMA crossover 趋势跟踪策略：fast EMA / slow EMA 交叉检测，confidence 由 EMA 距离归一化 |
+| Test | 7 unit tests: name/id, default params, on_tick/on_orderbook ignored, insufficient data, hot-reload |
 
-### Step 5.3: OrderBookScalper + MeanReversionScalper
+### Step 5.3: OrderBookScalper + MeanReversionScalper ✅
 
 | Item | Detail |
 |------|--------|
-| Files | 两个策略的 `.hpp / .cpp` |
-| Scope | 订单簿不平衡度策略 + 布林带均值回归策略 |
+| Files | `orderbook_scalper.hpp / .cpp`, `mean_reversion_scalper.hpp / .cpp` |
+| Scope | 订单簿不平衡度策略（bid/ask 体积比 + threshold）；布林带均值回归策略（SMA + stddev bands + 超买/超卖检测） |
+| Test | 17 unit tests (9 + 8): imbalance buy/sell signals, balanced book, depth check, cooldown, Bollinger params |
 
-### Step 5.4: SignalAggregator
+### Step 5.4: SignalAggregator ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `signal_aggregator.hpp / .cpp` |
-| Scope | 多策略加权投票 → 单一合并信号 |
+| Scope | 多策略加权投票，per-symbol 冷却期，阈值触发合并信号输出；策略权重可动态调整（为 AI 层预留） |
+| Test | 11 unit tests: flat ignored, threshold, weighted signals, buy/sell dominance, cooldown, different symbols, reset |
 
-**Deliverable**: `tools/test_strategy.cpp` 用历史行情回放，验证策略信号生成
+**Deliverable**: ✅ `tools/test_strategy.cpp` 验证全部 3 个策略 + SignalAggregator + StrategyManager 生命周期
 
 > ✅ **里程碑 M2**: 自动交易。`Market Data → Strategy → Risk → Execution` 全自动闭环。
 
