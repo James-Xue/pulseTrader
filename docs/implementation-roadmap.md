@@ -102,35 +102,40 @@
 
 ---
 
-## Phase 3 — Order Execution (Layer 8)
+## Phase 3 — Order Execution (Layer 8) ✅ COMPLETED
 
 > **Goal**: 能手动触发下单，验证端到端链路
+> **Status**: ✅ Done (2026-06-16) — 22 unit tests, smoke test tool, all 106 tests passing
+> **Milestone M1**: ✅ End-to-end Exchange → Market Data → Execution pipeline achieved
 
-### Step 3.1: OrderExecutor
+### Step 3.1: OrderExecutor ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `order_executor.hpp / .cpp` |
-| Scope | REST 下单（market/limit/post-only）、retry 逻辑、transient failure 处理 |
-| Test | 集成测试：testnet 下单 → 返回 order_id |
+| Scope | REST order placement (market/limit/post-only), retry logic for transient failures |
+| Test | Integration test: testnet order placement, response parsing |
+| Notes | Uses `Result<OrderResponse>` for place_order, `bool` for cancel_order (simpler than Result<void>) |
 
-### Step 3.2: OrderTracker
+### Step 3.2: OrderTracker ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `order_tracker.hpp / .cpp` |
-| Scope | WS 私有频道监听订单状态 + REST 轮询 fallback |
-| Test | 集成测试：下单 → 追踪到 filled/cancelled |
+| Scope | WS private channel (spot.orders) subscription, REST polling fallback, state machine, ExecutionReport generation |
+| Test | Unit tests: state machine transitions, status parsing; Integration test: full order lifecycle tracking |
+| Notes | Completion callback invoked on terminal state; slippage calculated vs mid-price at submission |
 
-### Step 3.3: ExecutionReport
+### Step 3.3: ExecutionReport ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `execution_report.hpp` |
-| Scope | 不可变成交记录：symbol/side/qty/fill price/slippage/fees/latency |
-| Test | 单元测试：构造 + 序列化 |
+| Files | `execution_report.hpp / .cpp` |
+| Scope | Immutable fill record: order_id, symbol, side, qty, fill_price, slippage (bps), fees, latency |
+| Test | Unit tests: construction, to_json() serialization, slippage calculation |
+| Notes | Slippage formula: (fill_price - mid_price) / mid_price * 10000; inverted for Sell orders |
 
-**Deliverable**: `tools/test_execution.cpp` 手动下一笔 limit order → 追踪到成交 → 输出 ExecutionReport
+**Deliverable**: ✅ `tools/test_execution.cpp` places limit order on testnet → tracks via WS → prints ExecutionReport
 
 > ✅ **里程碑 M1**: 端到端链路打通。`Exchange → Market Data → Execution` 可运行，能拿到行情并下单。
 
