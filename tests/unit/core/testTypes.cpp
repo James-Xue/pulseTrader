@@ -37,8 +37,7 @@ TEST(Timestamp, NowHasNanosecondResolution)
 {
     // Compile-time check: Timestamp must be backed by std::chrono::nanoseconds
     static_assert(
-        std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>,
-        "Timestamp must have nanosecond resolution");
+        std::is_same_v<Timestamp::duration, std::chrono::nanoseconds>, "Timestamp must have nanosecond resolution");
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +55,7 @@ TEST(Result, OkVariant)
 TEST(Result, ErrorVariant)
 {
     // A Result<int> constructed from a PulseError must report ok() == false
-    Result<int> r = PulseError{ErrorCode::NetworkTimeout, "timed out"};
+    Result<int> r = PulseError{ ErrorCode::NetworkTimeout, "timed out" };
     EXPECT_FALSE(ok(r));
     EXPECT_EQ(error(r).code, ErrorCode::NetworkTimeout);
     EXPECT_EQ(error(r).message, "timed out");

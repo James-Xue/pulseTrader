@@ -38,13 +38,15 @@ namespace detail
 ///   5. Return U+FFFD on any invalid sequence
 inline char32_t utf8Next(const char *&p, const char *end) noexcept
 {
-    if (p >= end) {
+    if (p >= end)
+    {
         return 0;
     }
     unsigned char c = static_cast<unsigned char>(*p);
 
     // ASCII fast path — single byte, no continuation
-    if (c < 0x80) {
+    if (c < 0x80)
+    {
         ++p;
         return c;
     }
@@ -53,16 +55,23 @@ inline char32_t utf8Next(const char *&p, const char *end) noexcept
     char32_t cp = 0;
 
     // Determine sequence length from the lead byte's high bits
-    if (0xC0 == (c & 0xE0)) {
+    if (0xC0 == (c & 0xE0))
+    {
         extra = 1;
         cp = c & 0x1F;
-    } else if (0xE0 == (c & 0xF0)) {
+    }
+    else if (0xE0 == (c & 0xF0))
+    {
         extra = 2;
         cp = c & 0x0F;
-    } else if (0xF0 == (c & 0xF8)) {
+    }
+    else if (0xF0 == (c & 0xF8))
+    {
         extra = 3;
         cp = c & 0x07;
-    } else {
+    }
+    else
+    {
         ++p;
         return 0xFFFD; // invalid lead byte
     }
@@ -70,8 +79,10 @@ inline char32_t utf8Next(const char *&p, const char *end) noexcept
     ++p;
 
     // Consume continuation bytes (each must have top bits == 10xxxxxx)
-    for (int i = 0; i < extra; ++i) {
-        if (p >= end || 0x80 != (static_cast<unsigned char>(*p) & 0xC0)) {
+    for (int i = 0; i < extra; ++i)
+    {
+        if (p >= end || 0x80 != (static_cast<unsigned char>(*p) & 0xC0))
+        {
             return 0xFFFD; // truncated or invalid continuation
         }
         cp = (cp << 6) | (static_cast<unsigned char>(*p) & 0x3F);
@@ -89,7 +100,8 @@ inline char32_t utf8Next(const char *&p, const char *end) noexcept
 ///   ▼ U+25BC   ► U+25BA
 inline bool isDoubleWidth(char32_t cp) noexcept
 {
-    switch (cp) {
+    switch (cp)
+    {
     case 0x2500: // ─
     case 0x2502: // │
     case 0x250C: // ┌
@@ -123,7 +135,8 @@ inline int visualWidth(std::string_view s) noexcept
     int w = 0;
     const char *p = s.data();
     const char *end = p + s.size();
-    while (p < end) {
+    while (p < end)
+    {
         char32_t cp = detail::utf8Next(p, end);
         w += detail::isDoubleWidth(cp) ? 2 : 1;
     }
@@ -136,7 +149,8 @@ inline std::string padToVisual(std::string_view s, int targetVw)
 {
     int cur = visualWidth(s);
     std::string result(s);
-    if (cur < targetVw) {
+    if (cur < targetVw)
+    {
         result.append(static_cast<std::size_t>(targetVw - cur), ' ');
     }
     return result;
@@ -152,7 +166,8 @@ inline std::string makeHline(int n)
 {
     std::string result;
     result.reserve(static_cast<std::size_t>(n) * 3);
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n; ++i)
+    {
         result += "\xe2\x94\x80"; // ─ (U+2500, 3 UTF-8 bytes)
     }
     return result;
@@ -190,7 +205,8 @@ class DiagramGenerator
     ///   5. Compute inner text width and connector prefix alignment
     explicit DiagramGenerator(int totalVw = 80) : totalVw_(totalVw)
     {
-        if (totalVw < 20) {
+        if (totalVw < 20)
+        {
             throw std::invalid_argument("totalVw must be at least 20");
         }
 
@@ -238,7 +254,8 @@ class DiagramGenerator
         lines_.push_back(std::move(top));
 
         // Step 2: optional centred title
-        if (!title.empty()) {
+        if (!title.empty())
+        {
             int tv = visualWidth(title);
             int lpad = (innerVw_ - tv) / 2;
             int rpad = innerVw_ - tv - lpad;
@@ -268,16 +285,16 @@ class DiagramGenerator
     /// @param line1  First content line (layer header, required).
     /// @param line2  Second content line (optional, indented 4 spaces).
     /// @param line3  Third content line (optional, indented 4 spaces).
-    void innerBox(std::string_view line1,
-                  std::string_view line2 = "",
-                  std::string_view line3 = "")
+    void innerBox(std::string_view line1, std::string_view line2 = "", std::string_view line3 = "")
     {
         lines_.push_back(makeInnerTop());
         lines_.push_back(makeInnerRow("  " + std::string(line1)));
-        if (!line2.empty()) {
+        if (!line2.empty())
+        {
             lines_.push_back(makeInnerRow("    " + std::string(line2)));
         }
-        if (!line3.empty()) {
+        if (!line3.empty())
+        {
             lines_.push_back(makeInnerRow("    " + std::string(line3)));
         }
         lines_.push_back(makeInnerBottom());
@@ -309,8 +326,10 @@ class DiagramGenerator
     std::string render() const
     {
         std::ostringstream oss;
-        for (std::size_t i = 0; i < lines_.size(); ++i) {
-            if (0 < i) {
+        for (std::size_t i = 0; i < lines_.size(); ++i)
+        {
+            if (0 < i)
+            {
                 oss << '\n';
             }
             oss << lines_[i];
@@ -319,15 +338,30 @@ class DiagramGenerator
     }
 
     /// Return each line as a separate string.
-    const std::vector<std::string> &lines() const noexcept { return lines_; }
+    const std::vector<std::string> &lines() const noexcept
+    {
+        return lines_;
+    }
 
     // -----------------------------------------------------------------------
     // Accessors (useful for unit tests)
     // -----------------------------------------------------------------------
-    int totalVw() const noexcept { return totalVw_; }
-    int innerVw() const noexcept { return innerVw_; }
-    int innerTextVw() const noexcept { return innerTextVw_; }
-    int connectorPrefix() const noexcept { return connectorPrefixSpaces_; }
+    int totalVw() const noexcept
+    {
+        return totalVw_;
+    }
+    int innerVw() const noexcept
+    {
+        return innerVw_;
+    }
+    int innerTextVw() const noexcept
+    {
+        return innerTextVw_;
+    }
+    int connectorPrefix() const noexcept
+    {
+        return connectorPrefixSpaces_;
+    }
 
   private:
     // -----------------------------------------------------------------------
@@ -395,8 +429,7 @@ class DiagramGenerator
     ///
     /// @param symUtf8  The connector symbol in UTF-8 (│ or ▼, each 2 vw).
     /// @param label    Optional text label to the right of the symbol.
-    std::string makeConnector(std::string_view symUtf8,
-                              std::string_view label) const
+    std::string makeConnector(std::string_view symUtf8, std::string_view label) const
     {
         std::string content(static_cast<std::size_t>(connectorPrefixSpaces_), ' ');
         content += symUtf8; // │ or ▼ (2 vw)
@@ -404,7 +437,8 @@ class DiagramGenerator
         content += label;
         int cur = visualWidth(content);
         int trailing = innerVw_ - cur;
-        if (0 < trailing) {
+        if (0 < trailing)
+        {
             content.append(static_cast<std::size_t>(trailing), ' ');
         }
         return makeOuterRow(content);
@@ -413,12 +447,12 @@ class DiagramGenerator
     // -----------------------------------------------------------------------
     // State
     // -----------------------------------------------------------------------
-    int totalVw_;              ///< Target visual width for every output line.
-    int innerVw_;              ///< Inner content width (totalVw - 4).
-    int outerHlineCount_;      ///< Number of ─ chars in the outer top/bottom border.
-    int innerHlineCount_;      ///< Number of ─ chars in the inner top/bottom border.
-    int innerFrameTrailing_;   ///< Trailing spaces after inner ┐/┘ to fill innerVw_.
-    int innerTextVw_;          ///< Visual width available for text inside inner boxes.
+    int totalVw_;               ///< Target visual width for every output line.
+    int innerVw_;               ///< Inner content width (totalVw - 4).
+    int outerHlineCount_;       ///< Number of ─ chars in the outer top/bottom border.
+    int innerHlineCount_;       ///< Number of ─ chars in the inner top/bottom border.
+    int innerFrameTrailing_;    ///< Trailing spaces after inner ┐/┘ to fill innerVw_.
+    int innerTextVw_;           ///< Visual width available for text inside inner boxes.
     int connectorPrefixSpaces_; ///< Leading spaces before the connector symbol.
 
     std::vector<std::string> lines_; ///< Accumulated output lines.
@@ -439,35 +473,32 @@ int main()
     gen.outerBoxBegin("pulseTrader Process");
 
     // --- Decision path (top-down control flow) ---
-    gen.innerBox("Layer 5: HeartbeatScheduler  (every 5 min)",
-                 "└─► TaskQueue ──► AIAnalyzer (L4) ──► ParamAdvisor");
+    gen.innerBox("Layer 5: HeartbeatScheduler  (every 5 min)", "└─► TaskQueue ──► AIAnalyzer (L4) ──► ParamAdvisor");
     gen.connectorArrow("param updates (atomic writes)");
 
     gen.innerBox("Layer 6: Strategy Engine",
-                 "MomentumScalper | OrderBookScalper | MeanReversionScalper",
-                 "SignalAggregator (weighted voting)");
+        "MomentumScalper | OrderBookScalper | MeanReversionScalper",
+        "SignalAggregator (weighted voting)");
     gen.connectorArrow("signals");
 
-    gen.innerBox("Layer 7: Risk Management",
-                 "RiskManager | PositionManager | StopLoss/TakeProfit Engines");
+    gen.innerBox("Layer 7: Risk Management", "RiskManager | PositionManager | StopLoss/TakeProfit Engines");
     gen.connectorArrow("approved orders");
 
-    gen.innerBox("Layer 8: Order Execution",
-                 "OrderExecutor | OrderTracker | ExecutionReport");
+    gen.innerBox("Layer 8: Order Execution", "OrderExecutor | OrderTracker | ExecutionReport");
     gen.blankLine();
 
     // --- Data source (bottom-up feed) ---
     gen.innerBox("Layer 3: Market Data  (hot path -- dedicated thread)",
-                 "MarketFeed | OrderBookManager | KlineBuffer | TickerCache");
+        "MarketFeed | OrderBookManager | KlineBuffer | TickerCache");
     gen.connectorArrow("raw frames");
 
-    gen.innerBox("Layer 1: Exchange  (Gate.io REST + WebSocket)",
-                 "GateRestClient | GateWsClient | GateWsChannels | GateAuth");
+    gen.innerBox(
+        "Layer 1: Exchange  (Gate.io REST + WebSocket)", "GateRestClient | GateWsClient | GateWsChannels | GateAuth");
     gen.blankLine();
 
     // --- Cross-cutting infrastructure ---
-    gen.innerBox("Layer 2: Logging & Monitoring  (cross-cutting)",
-                 "Logger | TradeRecorder | MetricsCollector | AlertManager");
+    gen.innerBox(
+        "Layer 2: Logging & Monitoring  (cross-cutting)", "Logger | TradeRecorder | MetricsCollector | AlertManager");
 
     gen.outerBoxEnd();
 
@@ -475,16 +506,18 @@ int main()
 
     // Verify all lines have visual width == 80
     bool allOk = true;
-    for (const auto &line : gen.lines()) {
+    for (const auto &line : gen.lines())
+    {
         int vw = pulse::visualWidth(line);
-        if (80 != vw) {
+        if (80 != vw)
+        {
             std::cerr << "FAIL vw=" << vw << " : " << line << '\n';
             allOk = false;
         }
     }
-    if (allOk) {
-        std::cerr << "OK — all " << gen.lines().size()
-                  << " lines have visual width 80\n";
+    if (allOk)
+    {
+        std::cerr << "OK — all " << gen.lines().size() << " lines have visual width 80\n";
     }
 
     return allOk ? 0 : 1;
