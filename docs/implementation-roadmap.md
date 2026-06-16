@@ -141,32 +141,48 @@
 
 ---
 
-## Phase 4 — Risk Management (Layer 7)
+## Phase 4 — Risk Management (Layer 7) ✅ COMPLETED
 
 > **Goal**: 在下单前加一道安全闸门
+> **Status**: ✅ Done (2026-06-16) — 92 unit tests, all 198 tests passing
+> **Branch**: `feat/layer7-risk-management` (merged)
 
-### Step 4.1: PositionManager
+### Step 4.1: Foundation — risk_types + PositionManager ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `position_manager.hpp / .cpp` |
-| Scope | 实时持仓跟踪、net exposure 聚合、portfolio-level limits |
+| Files | `risk_types.hpp`, `position_manager.hpp / .cpp` |
+| Scope | 共享类型（RiskDecision, RiskEvalResult, Position, PortfolioSummary）+ 线程安全持仓跟踪（shared_mutex），portfolio/symbol notional 限制 |
+| Config | 新增 `StopMode` 枚举、`StopLossConfig`、`TakeProfitConfig`；`RiskConfig` 新增 `maxSymbolNotional` |
+| Error codes | `RateLimitHit(3003)`, `StopLossTriggered(3004)`, `TakeProfitTriggered(3005)`, `SymbolLimitHit(3006)` |
+| Test | 23 unit tests: open/close/limits/queries/aggregation/thread safety |
 
-### Step 4.2: RiskManager
+### Step 4.2: DrawdownGuard + OrderRateLimiter ✅
+
+| Item | Detail |
+|------|--------|
+| Files | `drawdown_guard.hpp / .cpp`, `order_rate_limiter.hpp / .cpp` |
+| Scope | 滚动 PnL 监控 + 日内/峰值回撤熔断器（atomic halt flag）；lock-free token-bucket 限流（atomic + CAS loop） |
+| Test | 26 unit tests (14 + 12): equity tracking, drawdown triggers, token acquire/refill, thread safety |
+
+### Step 4.3: RiskManager Orchestrator ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `risk_manager.hpp / .cpp` |
-| Scope | 订单审批闸门：approve / modify(reduce size) / reject + reason code |
+| Scope | 中央订单审批网关：`evaluate_order(OrderRequest)` → Approved / Modified(reduced qty) / Rejected(reason code) |
+| Flow | DrawdownGuard halt check → OrderRateLimiter token check → PositionManager limit check |
+| Test | 15 unit tests: approve/reject/modify across all rules, halt-clear recovery |
 
-### Step 4.3: StopLoss / TakeProfit / DrawdownGuard / RateLimiter
+### Step 4.4: StopLossEngine + TakeProfitEngine ✅
 
 | Item | Detail |
 |------|--------|
-| Files | 6 个引擎的 `.hpp / .cpp` |
-| Scope | fixed/trailing/time-based 止损、阶梯止盈、回撤熔断、token-bucket 限流 |
+| Files | `stop_loss_engine.hpp / .cpp`, `take_profit_engine.hpp / .cpp` |
+| Scope | 三模式止损（Fixed/Trailing/TimeBased）+ 阶梯止盈（N targets + fractions），纯评估器不执行订单 |
+| Test | 28 unit tests (16 + 12): fixed/trailing/time stops, ladder progression, multi-position tracking |
 
-**Deliverable**: 单元测试全覆盖，`tools/test_risk.cpp` 模拟各种触发场景
+**Deliverable**: ✅ 92 unit tests 全覆盖，`pulse::risk` static library 编译通过
 
 ---
 
