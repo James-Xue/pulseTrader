@@ -30,8 +30,10 @@ namespace pulse::strategy
 //   5. bb_period                — Bollinger Band window size
 //   6. bb_std_dev               — Bollinger Band standard deviation multiplier
 //   7. ob_imbalance_threshold   — order book imbalance threshold (0.0–1.0)
-//   8. cooldown_seconds         — minimum seconds between signals per symbol
-//   9. ob_depth                 — number of order book levels to analyze
+//   8. ob_depth                 — number of order book levels to analyze
+//   9. cooldown_seconds         — minimum seconds between signals per symbol
+//   10. stop_loss_pct           — stop-loss distance as fraction of entry price
+//   11. take_profit_pct         — first take-profit target as fraction of entry
 // ---------------------------------------------------------------------------
 struct StrategyParams
 {
@@ -53,6 +55,10 @@ struct StrategyParams
 
     // --- Timing ---
     std::atomic<double> cooldown_seconds{ 30.0 };      ///< Seconds between signals per symbol.
+
+    // --- Risk (AI-tunable, mirrors StopLossConfig / TakeProfitConfig) ---
+    std::atomic<double> stop_loss_pct{ 0.01 };         ///< Stop-loss distance fraction.
+    std::atomic<double> take_profit_pct{ 0.005 };       ///< First take-profit target fraction.
 };
 
 } // namespace pulse::strategy

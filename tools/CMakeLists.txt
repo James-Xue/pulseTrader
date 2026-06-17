@@ -56,3 +56,16 @@ target_link_libraries(test_strategy
         pulse::execution
         pulse::logging
 )
+
+add_executable(test_ai_pipeline
+    test_ai_pipeline.cpp
+)
+
+target_link_libraries(test_ai_pipeline
+    PRIVATE
+        pulse::ai
+        pulse::heartbeat
+        pulse::strategy
+        pulse::market
+        pulse::logging
+)

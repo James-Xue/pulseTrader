@@ -1,6 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-16
+> Last updated: 2026-06-17
+> 文件大小：9687 字符 / 10000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -18,8 +19,8 @@
 | 1 | Exchange | Gate.io REST + WebSocket API | ✅ Done |
 | 2 | Logging & Monitoring | spdlog + fmt | ✅ Done |
 | 3 | Market Data | Hot path, latency-critical | ✅ Done |
-| 4 | AI Analysis | Background, every 5 min, social signals → fixed JSON schema | Not started |
-| 5 | Heartbeat Scheduler | Fully decoupled from market data thread | Not started |
+| 4 | AI Analysis | Social/news ingestion → LLM → fixed JSON schema → param deltas | ✅ Done |
+| 5 | Heartbeat Scheduler | 5-min AI clock, TaskQueue worker thread | ✅ Done |
 | 6 | Strategy Engine | EMA crossover, order book imbalance, Bollinger Band mean-reversion, weighted signal aggregation | ✅ Done |
 | 7 | Risk Management | PositionManager, RiskManager, DrawdownGuard, OrderRateLimiter, StopLossEngine, TakeProfitEngine | ✅ Done |
 | 8 | Order Execution | Order lifecycle management | ✅ Done |
@@ -88,18 +89,32 @@
   - `signal_aggregator`: weighted voting across strategies, per-symbol cooldown, threshold-based emission
   - Config: `StrategyInstanceConfig` (per-strategy name/symbol/quantity/confidence), `StrategyConfig` (aggregator threshold/cooldown)
   - 52 unit tests, smoke test tool (`tools/test_strategy.cpp`)
+- **L4 AI Analysis** (2026-06-17): LLM-driven parameter adaptation
+  - `analysis_result`: Sentiment/Volatility enums, ParamDeltas (10 deltas 1:1 to StrategyParams), JSON ADL
+  - `twitter_feed`: X API v2 polling, rolling deque with ID dedup, `enabled=false` by default
+  - `news_feed`: NewsAPI/CryptoPanic dual-provider, URL dedup, `enabled=false` by default
+  - `prompt_builder`: Fixed system prompt enforcing JSON schema, dynamic user prompt
+  - `ai_client`: OpenAI/Claude dual-backend, injectable HttpTransport for testing, retry
+  - `param_advisor`: Safety-bounded deltas (max_delta + hard bounds clamp), atomic writes
+  - `ai_pipeline`: Full-cycle orchestrator, each step tolerates failure independently
+  - Config: `TwitterConfig`, `NewsConfig`, `AiConfig.baseUrl/maxRetries`; Error codes: 4002-4004
+  - StrategyParams: added `stop_loss_pct`, `take_profit_pct`; 43 tests, smoke tool (`--mock`)
+- **L5 Heartbeat Scheduler** (2026-06-17): 5-min AI analysis clock
+  - `task_queue`: Priority queue + worker jthread, exception-safe
+  - `heartbeat_scheduler`: asio::steady_timer, drift-free re-arm, manual trigger
+  - 7 unit tests
 - **Coding standards** (2026-06-15/16): AGENTS.md with Allman brace style, Yoda conditions, mandatory braces, English-only, detailed comments
 
 ### Test Summary
-- 250 tests total: core 9 + logger 8 + exchange 35 + market 32 + execution 22 + risk 92 + strategy 52 — all passing
+- 300 tests total: core 9 + logger 8 + exchange 35 + market 32 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 — all passing
 
-### Milestone M1 Achieved ✅
-- End-to-end pipeline: Exchange → Market Data → Execution
-- Can connect to Gate.io, receive real-time market data, place orders, track fills, generate ExecutionReports
+### Milestones Achieved
+- **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
+- **M2** ✅: Automatic trading: Market Data → Strategy → Risk → Execution
+- **M3** ✅: AI adaptive — strategy parameters auto-tune every 5 min via LLM analysis
 
 ### Next Steps (per roadmap)
-- **Phase 6**: Layer 5 + Layer 4 AI Pipeline → **Milestone M3** (AI adaptive)
-- **Phase 7**: Layer 9 WebUI → **Milestone M4** (complete product)
+- **Phase 7**: Layer 9 WebUI Dashboard → **Milestone M4** (complete product)
 
 ## Code Conventions
 
@@ -125,7 +140,7 @@
 5. ✅ Phase 3: L8 Order Execution → **Milestone M1 achieved**
 6. ✅ Phase 4: L7 Risk Management — 6 modules, 92 tests
 7. ✅ Phase 5: L6 Strategy Engine → 3 strategies, signal aggregator, 52 tests
-8. 🔲 Phase 6: L5 + L4 AI Pipeline → **Milestone M3** (AI adaptive)
+8. ✅ Phase 6: L5 + L4 AI Pipeline → **Milestone M3 achieved** (AI adaptive, 50 new tests)
 9. 🔲 Phase 7: L9 WebUI → **Milestone M4** (complete product)
 
 ## Notes
