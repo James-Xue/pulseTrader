@@ -78,7 +78,7 @@ TEST(PulseConfig, ExchangeDefaults)
     // ExchangeConfig must ship with Gate.io production defaults
     ExchangeConfig cfg;
     EXPECT_EQ(cfg.restBaseUrl, "https://api.gateio.ws/api/v4");
-    EXPECT_EQ(cfg.restTimeoutMs, 5'000u);
+    EXPECT_EQ(cfg.restTimeoutMs, 10'000u);
     EXPECT_EQ(cfg.maxRetries, 3u);
 }
 

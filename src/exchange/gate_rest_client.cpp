@@ -23,6 +23,7 @@
 #include <curl/curl.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <mutex>
 #include <thread>
 
@@ -149,6 +150,23 @@ HttpResponse GateRestClient::do_request(
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(config_.restTimeoutMs));
+
+    // Proxy support — read from environment (HTTPS_PROXY / HTTP_PROXY)
+    if (!config_.proxyUrl.empty())
+    {
+        curl_easy_setopt(curl, CURLOPT_PROXY, config_.proxyUrl.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+    }
+    else if (const char *proxy = std::getenv("HTTPS_PROXY"); proxy)
+    {
+        curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
+        curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+    }
+    else if (const char *proxy = std::getenv("HTTP_PROXY"); proxy)
+    {
+        curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
+        curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
+    }
 
     // 4. Method-specific configuration
     if ("POST" == method)
