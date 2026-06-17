@@ -23,11 +23,38 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
 namespace pulse::strategy
 {
+
+// ---------------------------------------------------------------------------
+// StrategySnapshot — lightweight read-only snapshot of one strategy's state
+//
+// Used by the WebUI dashboard (Layer 9) to display strategy status without
+// accessing the internal strategy vector.
+// ---------------------------------------------------------------------------
+struct StrategySnapshot
+{
+    std::string name;             ///< Strategy class name (e.g. "MomentumScalper").
+    std::string id;               ///< Unique instance ID (e.g. "momentum_scalper_BTC_USDT").
+    std::string symbol;           ///< Trading pair.
+    bool enabled;                 ///< Whether the strategy is configured as enabled.
+    bool running;                 ///< Whether the strategy thread is currently active.
+    std::uint32_t poll_interval_ms; ///< Poll interval.
+
+    StrategySnapshot()
+        : name{}
+        , id{}
+        , symbol{}
+        , enabled{ false }
+        , running{ false }
+        , poll_interval_ms{ 0 }
+    {
+    }
+};
 
 // ---------------------------------------------------------------------------
 // StrategyManager — spawns and manages strategy threads
@@ -81,6 +108,13 @@ class StrategyManager
 
     /// Number of currently running strategy threads.
     [[nodiscard]] std::size_t running_count() const;
+
+    /// Returns a snapshot of all registered strategies (read-only, thread-safe).
+    ///
+    /// Iterates the internal strategy vector and captures each strategy's
+    /// name, id, symbol, enabled flag, and running state.
+    /// Safe to call from the WebUI thread while strategy threads are running.
+    [[nodiscard]] std::vector<StrategySnapshot> snapshot() const;
 
   private:
     std::vector<std::unique_ptr<StrategyBase>> strategies_;

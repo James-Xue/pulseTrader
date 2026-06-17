@@ -137,6 +137,24 @@ std::size_t StrategyManager::running_count() const
     return count;
 }
 
+std::vector<StrategySnapshot> StrategyManager::snapshot() const
+{
+    std::vector<StrategySnapshot> result;
+    result.reserve(strategies_.size());
+    for (const auto &s : strategies_)
+    {
+        StrategySnapshot snap;
+        snap.name = s->name();
+        snap.id = s->id();
+        snap.symbol = s->context().config.symbol;
+        snap.enabled = s->context().config.enabled;
+        snap.running = s->active().load(std::memory_order_acquire);
+        snap.poll_interval_ms = s->context().config.poll_interval_ms;
+        result.push_back(std::move(snap));
+    }
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // strategy_loop — the main loop for a single strategy thread
 // ---------------------------------------------------------------------------

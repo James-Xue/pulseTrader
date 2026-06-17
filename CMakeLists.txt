@@ -27,6 +27,7 @@ option(PULSE_BUILD_TESTS   "Build unit and integration tests" ON)
 option(PULSE_BUILD_DEMOS   "Build demo programs"              OFF)
 option(PULSE_ENABLE_SQLITE "Enable SQLite trade recorder"     OFF)
 option(PULSE_ENABLE_TOML   "Enable TOML config file support"  OFF)
+option(PULSE_ENABLE_WEBUI  "Enable WebUI dashboard server"    OFF)
 
 # ---------------------------------------------------------------------------
 # Compiler flags

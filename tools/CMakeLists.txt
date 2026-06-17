@@ -69,3 +69,29 @@ target_link_libraries(test_ai_pipeline
         pulse::market
         pulse::logging
 )
+
+if(PULSE_ENABLE_WEBUI)
+    add_executable(test_webui_server
+        test_webui.cpp
+    )
+
+    target_include_directories(test_webui_server
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
+            ${PROJECT_SOURCE_DIR}/third_party/uSockets
+    )
+
+    target_link_libraries(test_webui_server
+        PRIVATE
+            pulse::webui
+            pulse::market
+            pulse::strategy
+            pulse::risk
+            pulse::execution
+            pulse::ai
+            pulse::exchange
+            pulse::logging
+            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
+            z
+    )
+endif()

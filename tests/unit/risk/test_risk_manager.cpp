@@ -242,3 +242,53 @@ TEST_F(RiskManagerTest, ClearHaltAllowsTradingAgain)
     drawdown_guard_.clear_halt();
     EXPECT_EQ(RiskDecision::Approved, risk_manager_.evaluate_order(make_order()).decision);
 }
+
+// ---------------------------------------------------------------------------
+// risk_snapshot() — interface gap bridge for dashboard
+// ---------------------------------------------------------------------------
+
+TEST_F(RiskManagerTest, RiskSnapshotDefaultAllZerosAndFalse)
+{
+    // A fresh risk manager must return a snapshot with all default values.
+    const auto snap = risk_manager_.risk_snapshot();
+
+    EXPECT_FALSE(snap.trading_halted);
+    EXPECT_EQ(ErrorCode::Ok, snap.halt_reason);
+    EXPECT_DOUBLE_EQ(0.0, snap.daily_drawdown);
+    EXPECT_DOUBLE_EQ(0.0, snap.max_drawdown);
+    EXPECT_FALSE(snap.rate_limiter_exhausted);
+    EXPECT_EQ(0, snap.portfolio.open_position_count);
+    EXPECT_DOUBLE_EQ(0.0, snap.portfolio.total_notional);
+    EXPECT_DOUBLE_EQ(0.0, snap.portfolio.total_unrealized_pnl);
+    EXPECT_DOUBLE_EQ(0.0, snap.portfolio.net_exposure);
+    EXPECT_EQ(0, snap.open_position_count);
+}
+
+TEST_F(RiskManagerTest, RiskSnapshotReflectsOpenPositions)
+{
+    // Open positions and verify the snapshot reflects them.
+    (void)position_manager_.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
+    (void)position_manager_.open_position("ETH_USDT", Side::Buy, 0.1, 3000.0, "s1");
+
+    const auto snap = risk_manager_.risk_snapshot();
+
+    EXPECT_EQ(2, snap.open_position_count);
+    EXPECT_EQ(2, snap.portfolio.open_position_count);
+    // total_notional = 0.001 * 50000 + 0.1 * 3000 = 50 + 300 = 350
+    EXPECT_DOUBLE_EQ(350.0, snap.portfolio.total_notional);
+    // net_exposure for two longs = 350
+    EXPECT_DOUBLE_EQ(350.0, snap.portfolio.net_exposure);
+}
+
+TEST_F(RiskManagerTest, RiskSnapshotReflectsHaltedState)
+{
+    // Trigger a drawdown halt and verify the snapshot reflects it.
+    drawdown_guard_.update_equity(10000.0);
+    drawdown_guard_.update_equity(9400.0); // 6% drawdown > 5% threshold.
+
+    const auto snap = risk_manager_.risk_snapshot();
+
+    EXPECT_TRUE(snap.trading_halted);
+    EXPECT_NE(ErrorCode::Ok, snap.halt_reason);
+    EXPECT_GT(snap.max_drawdown, 0.0);
+}

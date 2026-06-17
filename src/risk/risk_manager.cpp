@@ -160,4 +160,18 @@ bool RiskManager::is_trading_halted() const
     return drawdown_guard_.is_halted();
 }
 
+RiskSnapshot RiskManager::risk_snapshot() const
+{
+    RiskSnapshot snap;
+    snap.trading_halted = drawdown_guard_.is_halted();
+    snap.halt_reason = drawdown_guard_.halt_reason();
+    snap.daily_drawdown = drawdown_guard_.daily_drawdown();
+    snap.max_drawdown = drawdown_guard_.max_drawdown();
+    snap.rate_limiter_tokens = rate_limiter_.available_tokens();
+    snap.rate_limiter_exhausted = rate_limiter_.is_exhausted();
+    snap.portfolio = position_manager_.portfolio_summary();
+    snap.open_position_count = position_manager_.open_position_count();
+    return snap;
+}
+
 } // namespace pulse::risk

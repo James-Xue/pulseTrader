@@ -20,6 +20,10 @@
     "toml": {
       "description": "TOML configuration file support (enable with -DPULSE_ENABLE_TOML=ON)",
       "dependencies": ["toml11"]
+    },
+    "webui": {
+      "description": "WebUI dashboard server (enable with -DPULSE_ENABLE_WEBUI=ON)",
+      "dependencies": ["uwebsockets"]
     }
   }
 }

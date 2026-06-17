@@ -16,6 +16,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pulse::market
 {
@@ -78,6 +79,10 @@ class TickerCache
 
     /// Returns the number of symbols currently cached.
     [[nodiscard]] std::size_t size() const;
+
+    /// Returns a vector of all symbols currently cached.
+    /// Thread-safe: takes shared read lock.
+    [[nodiscard]] std::vector<Symbol> symbols() const;
 
   private:
     mutable std::shared_mutex mutex_; ///< Protects the cache map.

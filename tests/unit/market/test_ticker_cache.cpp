@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <algorithm>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -189,4 +190,68 @@ TEST(TickerCache, SizeReflectsUniqueSymbols)
     eth.symbol = "ETH_USDT";
     cache.update("ETH_USDT", eth);
     EXPECT_EQ(cache.size(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// symbols() — interface gap bridge for dashboard
+// ---------------------------------------------------------------------------
+
+TEST(TickerCache, SymbolsReturnsEmptyVectorWhenCacheIsEmpty)
+{
+    // A fresh cache must return an empty vector from symbols().
+    TickerCache cache;
+    const auto result = cache.symbols();
+    EXPECT_TRUE(result.empty());
+}
+
+TEST(TickerCache, SymbolsReturnsAllCachedSymbols)
+{
+    // After populating the cache, symbols() must return all stored symbols.
+    TickerCache cache;
+
+    Ticker btc;
+    btc.symbol = "BTC_USDT";
+    btc.last = 50000.0;
+    cache.update("BTC_USDT", btc);
+
+    Ticker eth;
+    eth.symbol = "ETH_USDT";
+    eth.last = 3000.0;
+    cache.update("ETH_USDT", eth);
+
+    Ticker sol;
+    sol.symbol = "SOL_USDT";
+    sol.last = 150.0;
+    cache.update("SOL_USDT", sol);
+
+    const auto result = cache.symbols();
+    ASSERT_EQ(result.size(), 3u);
+
+    // Order is unspecified (unordered_map), so sort before comparing.
+    std::vector<std::string> sorted_result(result.begin(), result.end());
+    std::sort(sorted_result.begin(), sorted_result.end());
+
+    EXPECT_EQ(sorted_result[0], "BTC_USDT");
+    EXPECT_EQ(sorted_result[1], "ETH_USDT");
+    EXPECT_EQ(sorted_result[2], "SOL_USDT");
+}
+
+TEST(TickerCache, SymbolsDoesNotDuplicateAfterOverwrite)
+{
+    // Updating an existing symbol must not create a duplicate in symbols().
+    TickerCache cache;
+
+    Ticker btc1;
+    btc1.symbol = "BTC_USDT";
+    btc1.last = 50000.0;
+    cache.update("BTC_USDT", btc1);
+
+    Ticker btc2;
+    btc2.symbol = "BTC_USDT";
+    btc2.last = 51000.0;
+    cache.update("BTC_USDT", btc2);
+
+    const auto result = cache.symbols();
+    EXPECT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0], "BTC_USDT");
 }

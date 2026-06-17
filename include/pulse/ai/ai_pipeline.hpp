@@ -29,6 +29,9 @@
 #include "pulse/core/error.hpp"
 #include "pulse/strategy/strategy_params.hpp"
 
+#include <memory>
+#include <shared_mutex>
+
 namespace pulse::ai
 {
 
@@ -78,12 +81,22 @@ class AiPipeline
     /// Access the parameter advisor (for bounds inspection / tuning).
     [[nodiscard]] ParamAdvisor &param_advisor();
 
+    /// Returns the most recent AnalysisResult, or nullptr if no cycle has completed.
+    ///
+    /// Thread-safe: uses shared_mutex for read access.
+    /// The returned shared_ptr is immutable and safe to read from any thread.
+    [[nodiscard]] std::shared_ptr<const AnalysisResult> last_result() const noexcept;
+
   private:
     TwitterFeed twitter_feed_;    ///< Social signal ingestion (X API v2).
     NewsFeed news_feed_;          ///< News article ingestion (NewsAPI/CryptoPanic).
     PromptBuilder prompt_builder_; ///< Prompt assembly.
     AIClient ai_client_;          ///< LLM HTTP client.
     ParamAdvisor param_advisor_;  ///< Delta validation + atomic apply.
+
+    /// Cached last analysis result for WebUI/dashboard retrieval.
+    mutable std::shared_mutex result_mutex_;
+    std::shared_ptr<const AnalysisResult> last_result_{ nullptr };
 };
 
 } // namespace pulse::ai

@@ -4,6 +4,8 @@
 
 #include "pulse/logging/logger.hpp"
 
+#include <algorithm>
+
 namespace pulse::execution
 {
 
@@ -274,6 +276,55 @@ OrderStatus OrderTracker::parse_status(const std::string &status_str)
         return OrderStatus::Cancelled;
     }
     return OrderStatus::Pending;
+}
+
+std::vector<OrderSnapshot> OrderTracker::active_orders() const
+{
+    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::vector<OrderSnapshot> result;
+    result.reserve(tracked_orders_.size());
+    for (const auto &[id, order] : tracked_orders_)
+    {
+        if (!is_terminal_status(order.status))
+        {
+            OrderSnapshot snap;
+            snap.order_id = order.order_id;
+            snap.symbol = order.symbol;
+            snap.side = order.side;
+            snap.type = order.type;
+            snap.requested_qty = order.requested_qty;
+            snap.filled_qty = order.filled_qty;
+            snap.status = order.status;
+            snap.submit_time = order.submit_time;
+            snap.last_update_time = order.last_update_time;
+            result.push_back(std::move(snap));
+        }
+    }
+    return result;
+}
+
+std::vector<ExecutionReport> OrderTracker::recent_reports(std::size_t n) const
+{
+    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::vector<ExecutionReport> result;
+    result.reserve(completed_reports_.size());
+    for (const auto &[id, report] : completed_reports_)
+    {
+        result.push_back(report);
+    }
+
+    // Sort by fill_time descending (most recent first).
+    std::sort(result.begin(), result.end(),
+        [](const ExecutionReport &a, const ExecutionReport &b)
+        {
+            return a.fill_time > b.fill_time;
+        });
+
+    if (result.size() > n)
+    {
+        result.resize(n);
+    }
+    return result;
 }
 
 } // namespace pulse::execution
