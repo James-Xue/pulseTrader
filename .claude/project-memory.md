@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-17
-> 文件大小：11129 字符 / 12000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：12895 字符 / 14000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -32,6 +32,8 @@
 - WebUI recommended stack: uWebSockets (crow/beast conflict with standalone asio)
 - WebUI security: localhost bind + bearer token + Host header validation
 - WebUI gated by CMake flag: `-DPULSE_ENABLE_WEBUI=ON`
+- HTTP proxy support: REST via libcurl `CURLOPT_PROXY` + `CURLOPT_HTTPPROXYTUNNEL`; WebSocket via `ProxyTunnel` class (local TCP forwarder + HTTP CONNECT tunnel)
+- API credentials: `.env` file with `GATE_API_KEY` / `GATE_API_SECRET` env vars (gitignored)
 
 ## Dependencies (vcpkg.json)
 
@@ -43,17 +45,24 @@
 
 ### Completed
 - **L2 Logging** (2026-06-15): spdlog async logger, per-module isolation, `PULSE_LOG_*` macros, 8 tests
-- **L1 Exchange REST** (2026-06-16): Gate.io v4 REST client adapted from QuantX `gate_client`
+- **L1 Exchange REST** (2026-06-16/17): Gate.io v4 REST client adapted from QuantX `gate_client`
   - `gate_auth`: SHA-512, HMAC-SHA512, `sign_request()` — pure stateless functions (OpenSSL)
-  - `gate_rest_client`: libcurl + signing + retry (exponential backoff) + timeout
+  - `gate_rest_client`: libcurl + signing + retry (exponential backoff) + timeout + HTTP proxy auto-detect
+  - Proxy: reads `ExchangeConfig.proxyUrl` or `HTTPS_PROXY`/`HTTP_PROXY` env vars, `CURLOPT_HTTPPROXYTUNNEL`
+  - Default timeout: 10s (increased from 5s for proxy latency)
   - Public endpoints: `get_currencies()`, `get_currency_pairs()`, `get_ticker()`
   - Authenticated endpoint: `get_spot_accounts()`
   - Generic `request()` method for future expansion
   - 11 unit tests (NIST/RFC test vectors), smoke test tool
-- **L1 Exchange WebSocket** (2026-06-16): Gate.io v4 WebSocket client with websocketpp + asio
+- **L1 Exchange WebSocket** (2026-06-16/17): Gate.io v4 WebSocket client with websocketpp + asio
   - `gate_ws_channels`: channel subscription/unsubscription, message dispatch by channel type
   - `gate_ws_client`: auto-reconnect with exponential backoff + jitter, ping/pong keepalive
   - Private channel HMAC authentication, connection state management
+  - Proxy tunnel: `ProxyTunnel` class — local TCP forwarder + HTTP CONNECT tunnel + bidirectional relay
+    - websocketpp connects to `wss://127.0.0.1:LOCAL_PORT/` (random port)
+    - ProxyTunnel establishes CONNECT tunnel through HTTP proxy to real WSS server
+    - TLS: `verify_none` for proxy mode (cert hostname mismatch: 127.0.0.1 vs real host)
+  - Helper functions: `detect_proxy_url()`, `parse_ws_url()`
   - 24 unit tests (12 channels + 12 client), smoke test tool
 - **L3 Market Data** (2026-06-16): Hot path market data pipeline
   - `ticker_cache`: thread-safe storage for latest ticker per symbol (shared_mutex)
@@ -127,6 +136,18 @@
 
 ### Next Steps (per roadmap)
 - All phases complete — Milestone M4 achieved. Future enhancements: MetricsCollector (L2), config file loading (TOML), SQLite trade recorder, TLS support, strategy parameter tuning via WebUI.
+
+### Operational Setup (2026-06-17)
+- **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
+- **run.sh**: Convenience script in project root — `./run.sh {rest|ws|market|strategy|ai|webui|test}`
+  - Auto-sources `.env` for API credentials and proxy settings
+  - Commands: rest (REST API test), ws (WebSocket test), market, strategy, ai (mock), webui, test (357 unit tests)
+- **.env**: Gitignored file for runtime configuration
+  - `GATE_API_KEY` / `GATE_API_SECRET` — Gate.io HMAC credentials
+  - `HTTP_PROXY` / `HTTPS_PROXY` — Clash Verge proxy (`http://127.0.0.1:7897`)
+- **.gitignore**: Ignores `logs/`, `Testing/`, `.env`, `build/`, `.claude/`
+- **Git global proxy**: `http.proxy` and `https.proxy` set to `http://127.0.0.1:7897`
+- **Warning**: Current config uses **mainnet** (not testnet). Real money at risk when placing orders.
 
 ## Code Conventions
 
