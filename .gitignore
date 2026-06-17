@@ -48,3 +48,9 @@ build
 .claude/
 build/
 .cache/
+
+# Runtime logs
+logs/
+
+# CTest temporary files
+Testing/
