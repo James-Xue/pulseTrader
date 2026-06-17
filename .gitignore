@@ -52,5 +52,8 @@ build/
 # Runtime logs
 logs/
 
+# Environment variables (API keys)
+.env
+
 # CTest temporary files
 Testing/
