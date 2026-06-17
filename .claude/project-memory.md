@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-17
-> 文件大小：10978 字符 / 12000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：11129 字符 / 12000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -36,7 +36,8 @@
 ## Dependencies (vcpkg.json)
 
 - Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest
-- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`)
+- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
+- Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
 
 ## Current State (2026-06-17)
 
