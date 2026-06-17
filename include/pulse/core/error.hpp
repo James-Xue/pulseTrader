@@ -23,6 +23,7 @@ namespace pulse
 //   3xxx   : risk management rejections
 //   4xxx   : AI backend failures
 //   9xxx   : internal / programming errors
+//   91xx   : WebUI server errors
 // ---------------------------------------------------------------------------
 enum class ErrorCode : std::uint32_t
 {
@@ -49,10 +50,25 @@ enum class ErrorCode : std::uint32_t
     OrderRejected = 3000,
     DrawdownLimitHit = 3001,
     PositionLimitHit = 3002,
+    RateLimitHit = 3003,       ///< Order rate limiter rejected (token bucket empty).
+    StopLossTriggered = 3004,  ///< Position closed by stop-loss engine.
+    TakeProfitTriggered = 3005, ///< Position partially/fully closed by take-profit engine.
+    SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
 
     // AI (4xxx)
-    AiResponseInvalid = 4000,
-    AiBackendError = 4001,
+    AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.
+    AiBackendError = 4001,     ///< LLM provider returned a non-retryable error.
+    AiTimeout = 4002,          ///< LLM request exceeded configured timeout.
+    AiSchemaMismatch = 4003,   ///< LLM response does not match the required JSON schema.
+    AiParamOutOfBounds = 4004, ///< AI-proposed delta exceeded safety bounds (clamped, not fatal).
+
+    // WebUI (91xx)
+    WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.
+    WebUiAuthFailed = 9101,     ///< Bearer token authentication rejected.
+    WebUiHostInvalid = 9102,    ///< Host header validation failed (DNS rebinding attempt).
+    WebUiClientLimit = 9103,    ///< WebSocket client limit reached.
+    WebUiSnapshotError = 9104,  ///< Failed to assemble dashboard snapshot.
+    WebUiStaticNotFound = 9105, ///< Requested static file not found.
 
     // Internal (9xxx)
     InternalError = 9000,

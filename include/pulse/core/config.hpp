@@ -12,6 +12,52 @@ namespace pulse
 {
 
 // ---------------------------------------------------------------------------
+// StopMode — stop-loss strategy per position
+//
+//   1. Fixed     — absolute price level derived from entry price +/- fixed_pct
+//   2. Trailing  — tracks best observed price with a percentage offset
+//   3. TimeBased — forces close after max_hold_seconds elapsed
+// ---------------------------------------------------------------------------
+enum class StopMode : std::uint8_t
+{
+    Fixed,     ///< Absolute price level derived from entry price +/- fixed_pct.
+    Trailing,  ///< Tracks best observed price with a percentage offset.
+    TimeBased, ///< Forces close after max_hold_seconds elapsed.
+};
+
+// ---------------------------------------------------------------------------
+// StopLossConfig — stop-loss parameters per position
+//
+// Fields:
+//   1. mode              — Stop mode: Fixed, Trailing, or TimeBased
+//   2. fixed_pct         — Fixed stop distance as fraction of entry price (e.g. 0.01 = 1%)
+//   3. trailing_pct      — Trailing stop offset as fraction of best price (e.g. 0.005 = 0.5%)
+//   4. max_hold_seconds  — Maximum hold duration before forced close (time-based stop)
+// ---------------------------------------------------------------------------
+struct StopLossConfig
+{
+    StopMode mode = StopMode::Trailing;   ///< Default to trailing stop.
+    double fixed_pct = 0.01;              ///< 1% fixed stop distance.
+    double trailing_pct = 0.005;          ///< 0.5% trailing offset.
+    std::uint32_t max_hold_seconds = 300; ///< 5-minute max hold.
+};
+
+// ---------------------------------------------------------------------------
+// TakeProfitConfig — partial take-profit ladder parameters
+//
+// Fields:
+//   1. enabled       — Whether take-profit ladder is active
+//   2. targets_pct   — Price targets as fractions above entry (Buy) or below (Sell)
+//   3. fractions     — Fraction of position to close at each target (must sum to <= 1.0)
+// ---------------------------------------------------------------------------
+struct TakeProfitConfig
+{
+    bool enabled = true;
+    std::vector<double> targets_pct = { 0.005, 0.01, 0.02 }; ///< 0.5%, 1%, 2% targets.
+    std::vector<double> fractions = { 0.33, 0.33, 0.34 };    ///< Close 33%/33%/34% at each.
+};
+
+// ---------------------------------------------------------------------------
 // ExchangeConfig — Gate.io REST + WebSocket connection parameters
 //
 // Fields:
@@ -48,8 +94,54 @@ struct AiConfig
     std::string backend = "claude"; ///< "claude" or "openai"
     std::string model;              ///< e.g. "claude-sonnet-4-6"
     std::string apiKey;
+    std::string baseUrl;            ///< Auto-resolved per backend if empty.
     std::uint32_t heartbeatIntervalSec = 300; ///< AI cycle period (default 5 min).
     std::uint32_t requestTimeoutMs = 30'000;  ///< Max wait for a single LLM request.
+    std::uint32_t maxRetries = 2;   ///< Retry count for transient LLM failures.
+};
+
+// ---------------------------------------------------------------------------
+// TwitterConfig — X (Twitter) API v2 social signal ingestion
+//
+// Fields:
+//   1. enabled      — Whether Twitter feed polling is active
+//   2. bearerToken  — X API v2 bearer token for recent-search endpoint
+//   3. baseUrl      — X API v2 base URL (default: https://api.twitter.com/2)
+//   4. keywords     — Search keywords for filtered stream (comma-separated)
+//   5. maxTweets    — Maximum tweets to keep in the rolling window
+//   6. pollIntervalSec — Seconds between poll requests
+// ---------------------------------------------------------------------------
+struct TwitterConfig
+{
+    bool enabled = false;                              ///< Disabled by default.
+    std::string bearerToken;                           ///< X API v2 bearer token.
+    std::string baseUrl = "https://api.twitter.com/2"; ///< X API v2 base URL.
+    std::vector<std::string> keywords;                 ///< Search keywords.
+    std::uint32_t maxTweets = 20;                      ///< Rolling window size.
+    std::uint32_t pollIntervalSec = 300;               ///< Poll every 5 min.
+};
+
+// ---------------------------------------------------------------------------
+// NewsConfig — News article ingestion from NewsAPI or CryptoPanic
+//
+// Fields:
+//   1. enabled      — Whether news feed polling is active
+//   2. apiKey       — API key for the news provider
+//   3. provider     — Provider name ("newsapi" or "cryptopanic")
+//   4. baseUrl      — News provider base URL (auto-resolved if empty)
+//   5. keywords     — Search keywords for news articles
+//   6. maxArticles  — Maximum articles to keep in the rolling window
+//   7. pollIntervalSec — Seconds between poll requests
+// ---------------------------------------------------------------------------
+struct NewsConfig
+{
+    bool enabled = false;           ///< Disabled by default.
+    std::string apiKey;             ///< News provider API key.
+    std::string provider = "newsapi"; ///< "newsapi" or "cryptopanic".
+    std::string baseUrl;            ///< Auto-resolved per provider if empty.
+    std::vector<std::string> keywords; ///< Search keywords.
+    std::uint32_t maxArticles = 20; ///< Rolling window size.
+    std::uint32_t pollIntervalSec = 300; ///< Poll every 5 min.
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +153,9 @@ struct AiConfig
 //   3. maxDailyDrawdown    — Maximum daily loss as a fraction of equity (e.g. 0.02 = 2%)
 //   4. maxDrawdown         — Maximum total drawdown before trading halts
 //   5. maxOrdersPerSec     — Token-bucket capacity for order rate limiting
+//   6. maxSymbolNotional   — Maximum notional exposure per individual symbol (USDT)
+//   7. stop_loss           — Default stop-loss configuration for new positions
+//   8. take_profit         — Default take-profit ladder configuration
 // ---------------------------------------------------------------------------
 struct RiskConfig
 {
@@ -69,6 +164,9 @@ struct RiskConfig
     double maxDailyDrawdown = 0.02;       ///< Max daily loss as fraction of equity.
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
+    double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
+    StopLossConfig stop_loss;             ///< Default stop-loss configuration.
+    TakeProfitConfig take_profit;         ///< Default take-profit configuration.
 };
 
 // ---------------------------------------------------------------------------
@@ -106,13 +204,52 @@ struct WebUiConfig
 };
 
 // ---------------------------------------------------------------------------
+// StrategyInstanceConfig — one strategy's runtime parameters
+//
+// Fields:
+//   1. name              — strategy class name (e.g. "momentum_scalper")
+//   2. symbol            — trading pair this strategy operates on
+//   3. order_quantity    — base order size in base currency
+//   4. min_confidence    — minimum signal confidence to emit (0.0–1.0)
+//   5. enabled           — whether this strategy is active
+//   6. poll_interval_ms  — how often the strategy thread polls market data
+// ---------------------------------------------------------------------------
+struct StrategyInstanceConfig
+{
+    std::string name;                         ///< Strategy class name (e.g. "momentum_scalper").
+    std::string symbol;                       ///< Trading pair (e.g. "BTC_USDT").
+    double order_quantity = 0.001;            ///< Base order size in base currency.
+    double min_confidence = 0.6;              ///< Minimum confidence to emit a signal.
+    bool enabled = true;                      ///< Whether this strategy is active.
+    std::uint32_t poll_interval_ms = 500;     ///< Poll interval in milliseconds.
+};
+
+// ---------------------------------------------------------------------------
+// StrategyConfig — strategy engine configuration (Layer 6)
+//
+// Fields:
+//   1. strategies               — list of active strategy instances
+//   2. signal_aggregator_threshold — minimum aggregated confidence to act
+//   3. signal_cooldown_sec      — seconds between signals for the same symbol
+// ---------------------------------------------------------------------------
+struct StrategyConfig
+{
+    std::vector<StrategyInstanceConfig> strategies; ///< Active strategy instances.
+    double signal_aggregator_threshold = 0.7;       ///< Minimum aggregated confidence to act.
+    std::uint32_t signal_cooldown_sec = 30;         ///< Cooldown between signals per symbol.
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
 {
     ExchangeConfig exchange;
     AiConfig ai;
+    TwitterConfig twitter;
+    NewsConfig news;
     RiskConfig risk;
+    StrategyConfig strategy;
     LogConfig log;
     WebUiConfig webui;
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.

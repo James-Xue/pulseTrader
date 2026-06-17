@@ -36,4 +36,16 @@ std::size_t TickerCache::size() const
     return cache_.size();
 }
 
+std::vector<Symbol> TickerCache::symbols() const
+{
+    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::vector<Symbol> result;
+    result.reserve(cache_.size());
+    for (const auto &[sym, _] : cache_)
+    {
+        result.push_back(sym);
+    }
+    return result;
+}
+
 } // namespace pulse::market
