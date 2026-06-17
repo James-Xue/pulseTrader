@@ -130,4 +130,34 @@ struct PortfolioSummary
     }
 };
 
+// ---------------------------------------------------------------------------
+// RiskSnapshot — aggregated risk status for the WebUI dashboard
+//
+// Bundles halt state, drawdown levels, rate limiter state, and portfolio
+// summary into a single read-only snapshot.
+// ---------------------------------------------------------------------------
+struct RiskSnapshot
+{
+    bool trading_halted;           ///< Whether DrawdownGuard has halted trading.
+    ErrorCode halt_reason;         ///< Reason for halt, or ErrorCode::Ok.
+    double daily_drawdown;         ///< Current daily drawdown fraction.
+    double max_drawdown;           ///< Current peak-to-valley drawdown fraction.
+    double rate_limiter_tokens;    ///< Available tokens in OrderRateLimiter.
+    bool rate_limiter_exhausted;   ///< Whether the token bucket is empty.
+    PortfolioSummary portfolio;    ///< Aggregated position summary.
+    int open_position_count;       ///< Number of open positions.
+
+    RiskSnapshot()
+        : trading_halted{ false }
+        , halt_reason{ ErrorCode::Ok }
+        , daily_drawdown{ 0.0 }
+        , max_drawdown{ 0.0 }
+        , rate_limiter_tokens{ 0.0 }
+        , rate_limiter_exhausted{ false }
+        , portfolio{}
+        , open_position_count{ 0 }
+    {
+    }
+};
+
 } // namespace pulse::risk

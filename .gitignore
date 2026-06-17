@@ -35,6 +35,9 @@ build
 *.a
 *.lib
 
+# Exception: third-party vendored libraries
+!third_party/**/*.a
+
 # Executables
 *.exe
 *.out

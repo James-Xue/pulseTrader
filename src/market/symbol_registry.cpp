@@ -129,6 +129,18 @@ std::size_t SymbolRegistry::size() const
     return symbols_.size();
 }
 
+std::vector<Symbol> SymbolRegistry::symbols() const
+{
+    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::vector<Symbol> result;
+    result.reserve(symbols_.size());
+    for (const auto &[sym, _] : symbols_)
+    {
+        result.push_back(sym);
+    }
+    return result;
+}
+
 std::optional<SymbolInfo> SymbolRegistry::parse_currency_pair(const nlohmann::json &obj)
 {
     // Gate.io format: see header comment.

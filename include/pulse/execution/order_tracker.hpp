@@ -18,9 +18,42 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pulse::execution
 {
+
+// ---------------------------------------------------------------------------
+// OrderSnapshot — lightweight read-only snapshot of a tracked order
+//
+// Used by the WebUI dashboard (Layer 9) to display active order state without
+// exposing internal TrackedOrder struct.
+// ---------------------------------------------------------------------------
+struct OrderSnapshot
+{
+    std::string order_id;
+    Symbol symbol;
+    Side side;
+    OrderType type;
+    Quantity requested_qty;
+    Quantity filled_qty;
+    OrderStatus status;
+    Timestamp submit_time;
+    Timestamp last_update_time;
+
+    OrderSnapshot()
+        : order_id{}
+        , symbol{}
+        , side{ Side::Buy }
+        , type{ OrderType::Market }
+        , requested_qty{ 0.0 }
+        , filled_qty{ 0.0 }
+        , status{ OrderStatus::Pending }
+        , submit_time{}
+        , last_update_time{}
+    {
+    }
+};
 
 // ---------------------------------------------------------------------------
 // OrderTracker — tracks orders via WS + REST fallback
@@ -76,6 +109,17 @@ class OrderTracker
 
     /// Parse order status string from Gate.io API.
     [[nodiscard]] static OrderStatus parse_status(const std::string &status_str);
+
+    /// Returns a snapshot of all currently tracked (non-terminal) orders.
+    /// Thread-safe: takes shared read lock.
+    [[nodiscard]] std::vector<OrderSnapshot> active_orders() const;
+
+    /// Returns the N most recent execution reports (completed orders).
+    /// Thread-safe: takes shared read lock.
+    ///
+    /// Parameters:
+    ///   1. n — maximum number of reports to return (default: 20)
+    [[nodiscard]] std::vector<ExecutionReport> recent_reports(std::size_t n = 20) const;
 
   private:
     exchange::GateWsClient &ws_client_;

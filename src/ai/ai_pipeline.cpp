@@ -119,6 +119,13 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
     PULSE_LOG_INFO("ai", "AI pipeline cycle completed: sentiment={}, confidence={:.2f}",
                    to_string(analysis.sentiment), analysis.confidence);
 
+    // Store the latest result for WebUI/dashboard retrieval.
+    {
+        auto ptr = std::make_shared<const AnalysisResult>(analysis);
+        std::unique_lock write_lock(result_mutex_);
+        last_result_ = std::move(ptr);
+    }
+
     return analysis;
 }
 
@@ -138,6 +145,12 @@ NewsFeed &AiPipeline::news_feed()
 ParamAdvisor &AiPipeline::param_advisor()
 {
     return param_advisor_;
+}
+
+std::shared_ptr<const AnalysisResult> AiPipeline::last_result() const noexcept
+{
+    std::shared_lock read_lock(result_mutex_);
+    return last_result_;
 }
 
 } // namespace pulse::ai

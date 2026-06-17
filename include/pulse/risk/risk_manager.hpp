@@ -64,6 +64,13 @@ class RiskManager
     /// Quick check: is trading currently halted?
     [[nodiscard]] bool is_trading_halted() const;
 
+    /// Returns an aggregated snapshot of all risk state.
+    ///
+    /// Bundles: halt status, drawdown levels, rate limiter state,
+    /// and portfolio summary. Thread-safe: delegates to sub-components
+    /// which each handle their own synchronization.
+    [[nodiscard]] RiskSnapshot risk_snapshot() const;
+
   private:
     const RiskConfig &config_;
     PositionManager &position_manager_;

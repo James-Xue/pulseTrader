@@ -16,6 +16,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pulse::market
 {
@@ -91,6 +92,10 @@ class SymbolRegistry
 
     /// Returns the number of symbols in the registry.
     [[nodiscard]] std::size_t size() const;
+
+    /// Returns a vector of all registered symbol names.
+    /// Thread-safe: takes shared read lock.
+    [[nodiscard]] std::vector<Symbol> symbols() const;
 
   private:
     exchange::GateRestClient &rest_client_;

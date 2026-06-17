@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
 using namespace pulse;
@@ -100,3 +101,33 @@ TEST(SymbolRegistry, SizeIsZeroInitially)
 
     EXPECT_EQ(registry.size(), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// symbols() — interface gap bridge for dashboard
+// ---------------------------------------------------------------------------
+
+TEST(SymbolRegistry, SymbolsReturnsEmptyVectorWhenRegistryIsEmpty)
+{
+    // A fresh registry must return an empty vector from symbols().
+    ExchangeConfig config;
+    GateRestClient rest_client(config);
+    SymbolRegistry registry(rest_client);
+
+    const auto result = registry.symbols();
+    EXPECT_TRUE(result.empty());
+}
+
+TEST(SymbolRegistry, SymbolsConsistentWithSize)
+{
+    // symbols().size() must always equal size().
+    // For a fresh registry, both must be zero.
+    ExchangeConfig config;
+    GateRestClient rest_client(config);
+    SymbolRegistry registry(rest_client);
+
+    EXPECT_EQ(registry.symbols().size(), registry.size());
+}
+
+// Note: Testing symbols() with populated data requires a live or mock REST
+// client (load_from_rest is the only public path to inject SymbolInfo).
+// Integration tests in tools/ will cover the populated case.

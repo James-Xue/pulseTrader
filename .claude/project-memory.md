@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-17
-> 文件大小：9687 字符 / 10000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：10978 字符 / 12000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -24,7 +24,7 @@
 | 6 | Strategy Engine | EMA crossover, order book imbalance, Bollinger Band mean-reversion, weighted signal aggregation | ✅ Done |
 | 7 | Risk Management | PositionManager, RiskManager, DrawdownGuard, OrderRateLimiter, StopLossEngine, TakeProfitEngine | ✅ Done |
 | 8 | Order Execution | Order lifecycle management | ✅ Done |
-| 9 | WebUI | Cross-cutting read-only observability | Not started |
+| 9 | WebUI | Cross-cutting read-only observability | ✅ Done |
 
 ### Key Design Decisions
 - Two parallel data pipelines: market hot path (latency-critical) vs AI background pipeline, bridged via `std::atomic`
@@ -38,7 +38,7 @@
 - Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest
 - Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`)
 
-## Current State (2026-06-16)
+## Current State (2026-06-17)
 
 ### Completed
 - **L2 Logging** (2026-06-15): spdlog async logger, per-module isolation, `PULSE_LOG_*` macros, 8 tests
@@ -103,18 +103,29 @@
   - `task_queue`: Priority queue + worker jthread, exception-safe
   - `heartbeat_scheduler`: asio::steady_timer, drift-free re-arm, manual trigger
   - 7 unit tests
+- **L9 WebUI Dashboard** (2026-06-17): Browser-based real-time monitoring
+  - `snapshot_types`: 8 per-panel snapshot structs + nlohmann JSON ADL serialization
+  - `dashboard_state`: Tiered polling aggregator (200ms/500ms/1s/60s), std::jthread with stop_token
+  - `web_server`: uWebSockets HTTP server, static SPA serving, REST API (/api/status, /api/snapshot), bearer token auth, Host header validation, PIMPL pattern
+  - `ws_server`: WebSocket push server, client tracking, JSON broadcast, max client enforcement
+  - Frontend: vanilla HTML/CSS/JS dark-theme dashboard, 8 panels, WS auto-reconnect
+  - Interface gap bridges: TickerCache::symbols(), SymbolRegistry::symbols(), StrategyManager::snapshot(), AiPipeline::last_result(), OrderTracker::active_orders()+recent_reports(), RiskManager::risk_snapshot()
+  - Config: gated by `-DPULSE_ENABLE_WEBUI=ON`, error codes 9100-9105
+  - 57 unit tests, smoke test tool (`tools/test_webui.cpp`)
 - **Coding standards** (2026-06-15/16): AGENTS.md with Allman brace style, Yoda conditions, mandatory braces, English-only, detailed comments
 
 ### Test Summary
-- 300 tests total: core 9 + logger 8 + exchange 35 + market 32 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 — all passing
+- 357 tests total (with WEBUI): core 9 + logger 8 + exchange 35 + market 32 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
+- 319 tests (without WEBUI): same minus webui — all passing
 
 ### Milestones Achieved
 - **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
 - **M2** ✅: Automatic trading: Market Data → Strategy → Risk → Execution
 - **M3** ✅: AI adaptive — strategy parameters auto-tune every 5 min via LLM analysis
+- **M4** ✅: Complete product — all 9 layers operational, WebUI dashboard with real-time monitoring
 
 ### Next Steps (per roadmap)
-- **Phase 7**: Layer 9 WebUI Dashboard → **Milestone M4** (complete product)
+- All phases complete — Milestone M4 achieved. Future enhancements: MetricsCollector (L2), config file loading (TOML), SQLite trade recorder, TLS support, strategy parameter tuning via WebUI.
 
 ## Code Conventions
 
@@ -141,7 +152,7 @@
 6. ✅ Phase 4: L7 Risk Management — 6 modules, 92 tests
 7. ✅ Phase 5: L6 Strategy Engine → 3 strategies, signal aggregator, 52 tests
 8. ✅ Phase 6: L5 + L4 AI Pipeline → **Milestone M3 achieved** (AI adaptive, 50 new tests)
-9. 🔲 Phase 7: L9 WebUI → **Milestone M4** (complete product)
+9. ✅ Phase 7: L9 WebUI → **Milestone M4 achieved** (DashboardState + WebServer + WsServer + Frontend SPA, 57 new tests)
 
 ## Notes
 

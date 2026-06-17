@@ -9,3 +9,7 @@ add_subdirectory(ai)
 add_subdirectory(risk)
 add_subdirectory(execution)
 add_subdirectory(logging)
+
+if(PULSE_ENABLE_WEBUI)
+    add_subdirectory(webui)
+endif()

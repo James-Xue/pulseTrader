@@ -173,3 +173,52 @@ TEST(AiPipeline, ComponentAccessors)
     EXPECT_EQ(pipeline.news_feed().size(), 0u);
     EXPECT_EQ(pipeline.param_advisor().bounds().size(), 10u);
 }
+
+// ---------------------------------------------------------------------------
+// last_result() — interface gap bridge for dashboard
+// ---------------------------------------------------------------------------
+
+TEST(AiPipeline, LastResultNullptrBeforeAnyRun)
+{
+    // Before any run() call, last_result() must return nullptr.
+    auto pipeline = make_test_pipeline(make_success_transport());
+    const auto result = pipeline.last_result();
+    EXPECT_EQ(nullptr, result);
+}
+
+TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
+{
+    // After a successful run(), last_result() must return a non-null pointer
+    // with the correct analysis data.
+    auto pipeline = make_test_pipeline(make_success_transport(0.0005));
+    MarketSnapshot snapshot;
+    snapshot.ticker.symbol = "BTC_USDT";
+    snapshot.ticker.last = 65000.0;
+    StrategyParams params;
+
+    auto run_result = pipeline.run(snapshot, params);
+    ASSERT_TRUE(ok(run_result));
+
+    // last_result() should now be populated.
+    const auto last = pipeline.last_result();
+    ASSERT_NE(nullptr, last);
+    EXPECT_EQ(last->sentiment, Sentiment::Bullish);
+    EXPECT_DOUBLE_EQ(last->confidence, 0.8);
+    EXPECT_DOUBLE_EQ(last->param_deltas.order_quantity_delta, 0.0005);
+}
+
+TEST(AiPipeline, LastResultRemainsNullAfterFailedRun)
+{
+    // After a failed run(), last_result() must remain nullptr.
+    auto pipeline = make_test_pipeline(make_error_transport());
+    MarketSnapshot snapshot;
+    snapshot.ticker.symbol = "BTC_USDT";
+    StrategyParams params;
+
+    auto run_result = pipeline.run(snapshot, params);
+    ASSERT_FALSE(ok(run_result));
+
+    // last_result() should still be nullptr.
+    const auto last = pipeline.last_result();
+    EXPECT_EQ(nullptr, last);
+}
