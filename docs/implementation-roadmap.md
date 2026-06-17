@@ -231,25 +231,29 @@
 
 ---
 
-## Phase 6 — AI Pipeline (Layer 5 + Layer 4)
+## Phase 6 — AI Pipeline (Layer 5 + Layer 4) ✅ COMPLETED
 
 > **Goal**: 接入 LLM，实现参数自适应调整
+> **Status**: ✅ Done (2026-06-17) — 50 unit tests, smoke test tool, all 300 tests passing
+> **Branch**: `feat/layer6-strategy-engine`
 
-### Step 6.1: AI Analysis (Layer 4)
+### Step 6.1: AI Analysis (Layer 4) ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `twitter_feed`, `news_feed`, `prompt_builder`, `ai_client`, `analysis_result`, `param_advisor` |
+| Files | `twitter_feed`, `news_feed`, `prompt_builder`, `ai_client`, `analysis_result`, `param_advisor`, `ai_pipeline` |
 | Scope | 社交媒体/新闻采集 → prompt 组装 → LLM 调用 → JSON schema 验证 → 参数 delta 应用 |
+| Notes | HttpTransport injection for testability; social feeds disabled by default; 10-delta ParamDeltas mapping 1:1 to StrategyParams |
 
-### Step 6.2: Heartbeat Scheduler (Layer 5)
+### Step 6.2: Heartbeat Scheduler (Layer 5) ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `heartbeat_scheduler`, `task_queue`, `heartbeat_events` |
 | Scope | asio::steady_timer 5分钟节拍 → TaskQueue → AI 管线全链路 |
+| Notes | Single worker jthread; exception-safe task execution; drift-free timer re-arm |
 
-**Deliverable**: `tools/test_ai_pipeline.cpp` 模拟一次完整的心跳周期，验证参数更新
+**Deliverable**: ✅ `tools/test_ai_pipeline.cpp` 模拟一次完整的心跳周期，验证参数更新
 
 > ✅ **里程碑 M3**: AI 自适应。策略参数每 5 分钟根据市场情绪自动调整。
 

@@ -55,8 +55,11 @@ enum class ErrorCode : std::uint32_t
     SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
 
     // AI (4xxx)
-    AiResponseInvalid = 4000,
-    AiBackendError = 4001,
+    AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.
+    AiBackendError = 4001,     ///< LLM provider returned a non-retryable error.
+    AiTimeout = 4002,          ///< LLM request exceeded configured timeout.
+    AiSchemaMismatch = 4003,   ///< LLM response does not match the required JSON schema.
+    AiParamOutOfBounds = 4004, ///< AI-proposed delta exceeded safety bounds (clamped, not fatal).
 
     // Internal (9xxx)
     InternalError = 9000,

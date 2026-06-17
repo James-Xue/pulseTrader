@@ -94,8 +94,54 @@ struct AiConfig
     std::string backend = "claude"; ///< "claude" or "openai"
     std::string model;              ///< e.g. "claude-sonnet-4-6"
     std::string apiKey;
+    std::string baseUrl;            ///< Auto-resolved per backend if empty.
     std::uint32_t heartbeatIntervalSec = 300; ///< AI cycle period (default 5 min).
     std::uint32_t requestTimeoutMs = 30'000;  ///< Max wait for a single LLM request.
+    std::uint32_t maxRetries = 2;   ///< Retry count for transient LLM failures.
+};
+
+// ---------------------------------------------------------------------------
+// TwitterConfig — X (Twitter) API v2 social signal ingestion
+//
+// Fields:
+//   1. enabled      — Whether Twitter feed polling is active
+//   2. bearerToken  — X API v2 bearer token for recent-search endpoint
+//   3. baseUrl      — X API v2 base URL (default: https://api.twitter.com/2)
+//   4. keywords     — Search keywords for filtered stream (comma-separated)
+//   5. maxTweets    — Maximum tweets to keep in the rolling window
+//   6. pollIntervalSec — Seconds between poll requests
+// ---------------------------------------------------------------------------
+struct TwitterConfig
+{
+    bool enabled = false;                              ///< Disabled by default.
+    std::string bearerToken;                           ///< X API v2 bearer token.
+    std::string baseUrl = "https://api.twitter.com/2"; ///< X API v2 base URL.
+    std::vector<std::string> keywords;                 ///< Search keywords.
+    std::uint32_t maxTweets = 20;                      ///< Rolling window size.
+    std::uint32_t pollIntervalSec = 300;               ///< Poll every 5 min.
+};
+
+// ---------------------------------------------------------------------------
+// NewsConfig — News article ingestion from NewsAPI or CryptoPanic
+//
+// Fields:
+//   1. enabled      — Whether news feed polling is active
+//   2. apiKey       — API key for the news provider
+//   3. provider     — Provider name ("newsapi" or "cryptopanic")
+//   4. baseUrl      — News provider base URL (auto-resolved if empty)
+//   5. keywords     — Search keywords for news articles
+//   6. maxArticles  — Maximum articles to keep in the rolling window
+//   7. pollIntervalSec — Seconds between poll requests
+// ---------------------------------------------------------------------------
+struct NewsConfig
+{
+    bool enabled = false;           ///< Disabled by default.
+    std::string apiKey;             ///< News provider API key.
+    std::string provider = "newsapi"; ///< "newsapi" or "cryptopanic".
+    std::string baseUrl;            ///< Auto-resolved per provider if empty.
+    std::vector<std::string> keywords; ///< Search keywords.
+    std::uint32_t maxArticles = 20; ///< Rolling window size.
+    std::uint32_t pollIntervalSec = 300; ///< Poll every 5 min.
 };
 
 // ---------------------------------------------------------------------------
@@ -200,6 +246,8 @@ struct PulseConfig
 {
     ExchangeConfig exchange;
     AiConfig ai;
+    TwitterConfig twitter;
+    NewsConfig news;
     RiskConfig risk;
     StrategyConfig strategy;
     LogConfig log;
