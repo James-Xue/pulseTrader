@@ -1,0 +1,500 @@
+/* style.css — pulseTrader WebUI dark trading dashboard theme */
+
+/* === Reset & Base === */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+/* === Halt Banner === */
+.halt-banner {
+    background: #d32f2f;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 12px 24px;
+    text-align: center;
+    font-size: 1.1em;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.halt-banner .halt-detail {
+    font-weight: 400;
+    margin-left: 8px;
+    font-size: 0.9em;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* === Header === */
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+}
+
+header h1 {
+    font-size: 1.4em;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 1px;
+}
+
+/* === Connection Status === */
+#connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85em;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-connected .status-dot {
+    background: #4caf50;
+    box-shadow: 0 0 6px #4caf50;
+}
+
+.status-connected #status-text {
+    color: #4caf50;
+}
+
+.status-disconnected .status-dot {
+    background: #f44336;
+    box-shadow: 0 0 6px #f44336;
+}
+
+.status-disconnected #status-text {
+    color: #f44336;
+}
+
+/* === Dashboard Grid === */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1800px;
+    margin: 0 auto;
+}
+
+@media (max-width: 1200px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    header {
+        padding: 10px 16px;
+    }
+
+    .dashboard-grid {
+        padding: 12px 16px;
+    }
+}
+
+/* === Panel Cards === */
+.panel {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel h2 {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #a0a0c0;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #0f3460;
+}
+
+.panel-content {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 300px;
+}
+
+.panel-content .placeholder {
+    color: #666680;
+    font-style: italic;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* === Table Styles === */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+
+thead th {
+    text-align: left;
+    color: #a0a0c0;
+    font-weight: 600;
+    padding: 6px 8px;
+    border-bottom: 1px solid #0f3460;
+    position: sticky;
+    top: 0;
+    background: #16213e;
+    z-index: 1;
+}
+
+tbody td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.4);
+}
+
+tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+tbody tr:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* === Monospace Numbers === */
+.mono {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* === Color Coding === */
+.positive, .buy-side {
+    color: #4caf50;
+}
+
+.negative, .sell-side {
+    color: #f44336;
+}
+
+.neutral {
+    color: #a0a0c0;
+}
+
+/* === Order Book === */
+.ob-bid {
+    background: rgba(76, 175, 80, 0.06);
+}
+
+.ob-ask {
+    background: rgba(244, 67, 54, 0.06);
+}
+
+.ob-bar {
+    height: 4px;
+    border-radius: 2px;
+    margin-top: 2px;
+}
+
+.ob-bar-bid {
+    background: rgba(76, 175, 80, 0.4);
+}
+
+.ob-bar-ask {
+    background: rgba(244, 67, 54, 0.4);
+}
+
+.ob-spread {
+    text-align: center;
+    padding: 4px 8px;
+    color: #a0a0c0;
+    font-size: 0.85em;
+    border-top: 1px solid #0f3460;
+    border-bottom: 1px solid #0f3460;
+}
+
+/* === Symbol Tabs === */
+.symbol-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.symbol-tab {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+    background: transparent;
+    color: #a0a0c0;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.symbol-tab.active {
+    background: #0f3460;
+    color: #e0e0e0;
+}
+
+/* === Badges === */
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge-green {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+}
+
+.badge-red {
+    background: rgba(244, 67, 54, 0.2);
+    color: #f44336;
+}
+
+.badge-gray {
+    background: rgba(160, 160, 192, 0.2);
+    color: #a0a0c0;
+}
+
+.badge-blue {
+    background: rgba(33, 150, 243, 0.2);
+    color: #2196f3;
+}
+
+.badge-yellow {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
+}
+
+/* === Progress / Gauge Bars === */
+.gauge-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.gauge-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.gauge-fill-green {
+    background: #4caf50;
+}
+
+.gauge-fill-yellow {
+    background: #ffc107;
+}
+
+.gauge-fill-red {
+    background: #f44336;
+}
+
+/* === Strategy Cards === */
+.strategy-card {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+
+.strategy-card:last-child {
+    margin-bottom: 0;
+}
+
+.strategy-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.strategy-name {
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+.strategy-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.8em;
+    color: #a0a0c0;
+}
+
+/* === Pulsing Running Indicator === */
+@keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4); }
+    50% { box-shadow: 0 0 6px 2px rgba(76, 175, 80, 0.6); }
+}
+
+.badge-running {
+    animation: pulse-green 2s infinite;
+}
+
+/* === AI Panel === */
+.ai-sentiment {
+    font-size: 1.2em;
+    margin-bottom: 8px;
+}
+
+.ai-metric {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.4);
+}
+
+.ai-metric-label {
+    color: #a0a0c0;
+}
+
+.ai-metric-value {
+    font-weight: 600;
+}
+
+.direction-bar-container {
+    width: 100%;
+    height: 12px;
+    background: linear-gradient(to right, #f44336 0%, #a0a0c0 50%, #4caf50 100%);
+    border-radius: 6px;
+    position: relative;
+    margin: 8px 0;
+}
+
+.direction-bar-marker {
+    width: 4px;
+    height: 16px;
+    background: #ffffff;
+    border-radius: 2px;
+    position: absolute;
+    top: -2px;
+    transition: left 0.3s ease;
+}
+
+/* === K-line Table === */
+.kline-up {
+    color: #4caf50;
+}
+
+.kline-down {
+    color: #f44336;
+}
+
+/* === Metrics Key-Value === */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.metric-card {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.metric-label {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #a0a0c0;
+    margin-bottom: 4px;
+}
+
+.metric-value {
+    font-size: 1.1em;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* === Risk Panel === */
+.risk-section {
+    margin-bottom: 12px;
+}
+
+.risk-section:last-child {
+    margin-bottom: 0;
+}
+
+.risk-label {
+    font-size: 0.8em;
+    color: #a0a0c0;
+    margin-bottom: 4px;
+}
+
+.risk-value {
+    font-weight: 600;
+}
+
+/* === Scrollbar Styling === */
+.panel-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.panel-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.panel-content::-webkit-scrollbar-thumb {
+    background: #0f3460;
+    border-radius: 3px;
+}
+
+.panel-content::-webkit-scrollbar-thumb:hover {
+    background: #1a4a8a;
+}
+
+/* === Portfolio Summary Row === */
+.portfolio-summary {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #0f3460;
+    font-size: 0.85em;
+}
+
+.portfolio-summary .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+}
+
+.portfolio-summary .summary-label {
+    color: #a0a0c0;
+}

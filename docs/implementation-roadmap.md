@@ -141,98 +141,125 @@
 
 ---
 
-## Phase 4 — Risk Management (Layer 7)
+## Phase 4 — Risk Management (Layer 7) ✅ COMPLETED
 
 > **Goal**: 在下单前加一道安全闸门
+> **Status**: ✅ Done (2026-06-16) — 92 unit tests, all 198 tests passing
+> **Branch**: `feat/layer7-risk-management` (merged)
 
-### Step 4.1: PositionManager
+### Step 4.1: Foundation — risk_types + PositionManager ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `position_manager.hpp / .cpp` |
-| Scope | 实时持仓跟踪、net exposure 聚合、portfolio-level limits |
+| Files | `risk_types.hpp`, `position_manager.hpp / .cpp` |
+| Scope | 共享类型（RiskDecision, RiskEvalResult, Position, PortfolioSummary）+ 线程安全持仓跟踪（shared_mutex），portfolio/symbol notional 限制 |
+| Config | 新增 `StopMode` 枚举、`StopLossConfig`、`TakeProfitConfig`；`RiskConfig` 新增 `maxSymbolNotional` |
+| Error codes | `RateLimitHit(3003)`, `StopLossTriggered(3004)`, `TakeProfitTriggered(3005)`, `SymbolLimitHit(3006)` |
+| Test | 23 unit tests: open/close/limits/queries/aggregation/thread safety |
 
-### Step 4.2: RiskManager
+### Step 4.2: DrawdownGuard + OrderRateLimiter ✅
+
+| Item | Detail |
+|------|--------|
+| Files | `drawdown_guard.hpp / .cpp`, `order_rate_limiter.hpp / .cpp` |
+| Scope | 滚动 PnL 监控 + 日内/峰值回撤熔断器（atomic halt flag）；lock-free token-bucket 限流（atomic + CAS loop） |
+| Test | 26 unit tests (14 + 12): equity tracking, drawdown triggers, token acquire/refill, thread safety |
+
+### Step 4.3: RiskManager Orchestrator ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `risk_manager.hpp / .cpp` |
-| Scope | 订单审批闸门：approve / modify(reduce size) / reject + reason code |
+| Scope | 中央订单审批网关：`evaluate_order(OrderRequest)` → Approved / Modified(reduced qty) / Rejected(reason code) |
+| Flow | DrawdownGuard halt check → OrderRateLimiter token check → PositionManager limit check |
+| Test | 15 unit tests: approve/reject/modify across all rules, halt-clear recovery |
 
-### Step 4.3: StopLoss / TakeProfit / DrawdownGuard / RateLimiter
+### Step 4.4: StopLossEngine + TakeProfitEngine ✅
 
 | Item | Detail |
 |------|--------|
-| Files | 6 个引擎的 `.hpp / .cpp` |
-| Scope | fixed/trailing/time-based 止损、阶梯止盈、回撤熔断、token-bucket 限流 |
+| Files | `stop_loss_engine.hpp / .cpp`, `take_profit_engine.hpp / .cpp` |
+| Scope | 三模式止损（Fixed/Trailing/TimeBased）+ 阶梯止盈（N targets + fractions），纯评估器不执行订单 |
+| Test | 28 unit tests (16 + 12): fixed/trailing/time stops, ladder progression, multi-position tracking |
 
-**Deliverable**: 单元测试全覆盖，`tools/test_risk.cpp` 模拟各种触发场景
+**Deliverable**: ✅ 92 unit tests 全覆盖，`pulse::risk` static library 编译通过
 
 ---
 
-## Phase 5 — Strategy Engine (Layer 6)
+## Phase 5 — Strategy Engine (Layer 6) ✅ COMPLETED
 
 > **Goal**: 自动产生交易信号，替代手动下单
+> **Status**: ✅ Done (2026-06-16) — 52 unit tests, smoke test tool, all 250 tests passing
+> **Branch**: `feat/layer6-strategy-engine`
 
-### Step 5.1: Strategy Infrastructure
+### Step 5.1: Strategy Infrastructure ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `strategy_base.hpp`, `strategy_context.hpp`, `strategy_params.hpp`, `strategy_manager.hpp / .cpp` |
-| Scope | 抽象基类 + lifecycle hooks + hot-reload params + 多策略编排 |
+| Files | `signal_types.hpp`, `strategy_params.hpp`, `strategy_context.hpp`, `strategy_base.hpp`, `strategy_manager.hpp / .cpp` |
+| Scope | SignalType 枚举 + TradingSignal 结构体；atomic 热更新参数；DI 上下文注入；抽象基类 + lifecycle hooks；多策略 jthread 编排 + stop_token 取消 |
+| Config | 新增 `StrategyInstanceConfig`（per-strategy name/symbol/quantity/confidence）和 `StrategyConfig`（aggregator threshold/cooldown）到 `PulseConfig` |
+| Test | 20 unit tests: signal defaults, atomic read/write, concurrent access, base class interface, manager lifecycle |
 
-### Step 5.2: MomentumScalper
+### Step 5.2: MomentumScalper ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `momentum_scalper.hpp / .cpp` |
-| Scope | EMA crossover，第一个可运行的策略实现 |
+| Scope | EMA crossover 趋势跟踪策略：fast EMA / slow EMA 交叉检测，confidence 由 EMA 距离归一化 |
+| Test | 7 unit tests: name/id, default params, on_tick/on_orderbook ignored, insufficient data, hot-reload |
 
-### Step 5.3: OrderBookScalper + MeanReversionScalper
+### Step 5.3: OrderBookScalper + MeanReversionScalper ✅
 
 | Item | Detail |
 |------|--------|
-| Files | 两个策略的 `.hpp / .cpp` |
-| Scope | 订单簿不平衡度策略 + 布林带均值回归策略 |
+| Files | `orderbook_scalper.hpp / .cpp`, `mean_reversion_scalper.hpp / .cpp` |
+| Scope | 订单簿不平衡度策略（bid/ask 体积比 + threshold）；布林带均值回归策略（SMA + stddev bands + 超买/超卖检测） |
+| Test | 17 unit tests (9 + 8): imbalance buy/sell signals, balanced book, depth check, cooldown, Bollinger params |
 
-### Step 5.4: SignalAggregator
+### Step 5.4: SignalAggregator ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `signal_aggregator.hpp / .cpp` |
-| Scope | 多策略加权投票 → 单一合并信号 |
+| Scope | 多策略加权投票，per-symbol 冷却期，阈值触发合并信号输出；策略权重可动态调整（为 AI 层预留） |
+| Test | 11 unit tests: flat ignored, threshold, weighted signals, buy/sell dominance, cooldown, different symbols, reset |
 
-**Deliverable**: `tools/test_strategy.cpp` 用历史行情回放，验证策略信号生成
+**Deliverable**: ✅ `tools/test_strategy.cpp` 验证全部 3 个策略 + SignalAggregator + StrategyManager 生命周期
 
 > ✅ **里程碑 M2**: 自动交易。`Market Data → Strategy → Risk → Execution` 全自动闭环。
 
 ---
 
-## Phase 6 — AI Pipeline (Layer 5 + Layer 4)
+## Phase 6 — AI Pipeline (Layer 5 + Layer 4) ✅ COMPLETED
 
 > **Goal**: 接入 LLM，实现参数自适应调整
+> **Status**: ✅ Done (2026-06-17) — 50 unit tests, smoke test tool, all 300 tests passing
+> **Branch**: `feat/layer6-strategy-engine`
 
-### Step 6.1: AI Analysis (Layer 4)
+### Step 6.1: AI Analysis (Layer 4) ✅
 
 | Item | Detail |
 |------|--------|
-| Files | `twitter_feed`, `news_feed`, `prompt_builder`, `ai_client`, `analysis_result`, `param_advisor` |
+| Files | `twitter_feed`, `news_feed`, `prompt_builder`, `ai_client`, `analysis_result`, `param_advisor`, `ai_pipeline` |
 | Scope | 社交媒体/新闻采集 → prompt 组装 → LLM 调用 → JSON schema 验证 → 参数 delta 应用 |
+| Notes | HttpTransport injection for testability; social feeds disabled by default; 10-delta ParamDeltas mapping 1:1 to StrategyParams |
 
-### Step 6.2: Heartbeat Scheduler (Layer 5)
+### Step 6.2: Heartbeat Scheduler (Layer 5) ✅
 
 | Item | Detail |
 |------|--------|
 | Files | `heartbeat_scheduler`, `task_queue`, `heartbeat_events` |
 | Scope | asio::steady_timer 5分钟节拍 → TaskQueue → AI 管线全链路 |
+| Notes | Single worker jthread; exception-safe task execution; drift-free timer re-arm |
 
-**Deliverable**: `tools/test_ai_pipeline.cpp` 模拟一次完整的心跳周期，验证参数更新
+**Deliverable**: ✅ `tools/test_ai_pipeline.cpp` 模拟一次完整的心跳周期，验证参数更新
 
 > ✅ **里程碑 M3**: AI 自适应。策略参数每 5 分钟根据市场情绪自动调整。
 
 ---
 
-## Phase 7 — WebUI Dashboard (Layer 9)
+## Phase 7 — WebUI Dashboard (Layer 9) ✅ COMPLETED
 
 > **Goal**: 浏览器实时监控，锦上添花
 

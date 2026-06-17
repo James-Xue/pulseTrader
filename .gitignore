@@ -35,6 +35,9 @@ build
 *.a
 *.lib
 
+# Exception: third-party vendored libraries
+!third_party/**/*.a
+
 # Executables
 *.exe
 *.out
@@ -45,3 +48,9 @@ build
 .claude/
 build/
 .cache/
+
+# Runtime logs
+logs/
+
+# CTest temporary files
+Testing/
