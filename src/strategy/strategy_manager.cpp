@@ -1,8 +1,8 @@
 // strategy_manager.cpp — Multi-strategy orchestration (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/strategy_manager.hpp"
+#include "strategy/strategy_manager.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <chrono>

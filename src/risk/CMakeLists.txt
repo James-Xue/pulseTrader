@@ -13,7 +13,7 @@ add_library(pulse::risk ALIAS pulse_risk)
 
 target_include_directories(pulse_risk
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(pulse_risk

@@ -21,19 +21,19 @@
 //   9. StatusEndpointReturnsOk     — GET /api/status returns JSON with status=ok
 //  10. SnapshotEndpointReturnsJson — GET /api/snapshot returns JSON (possibly error)
 
-#include "pulse/webui/web_server.hpp"
+#include "webui/web_server.hpp"
 
-#include "pulse/ai/ai_pipeline.hpp"
-#include "pulse/core/config.hpp"
-#include "pulse/exchange/gate_rest_client.hpp"
-#include "pulse/exchange/gate_ws_client.hpp"
-#include "pulse/execution/order_tracker.hpp"
-#include "pulse/market/market_feed.hpp"
-#include "pulse/risk/drawdown_guard.hpp"
-#include "pulse/risk/order_rate_limiter.hpp"
-#include "pulse/risk/position_manager.hpp"
-#include "pulse/risk/risk_manager.hpp"
-#include "pulse/strategy/strategy_manager.hpp"
+#include "ai/ai_pipeline.hpp"
+#include "core/config.hpp"
+#include "exchange/gate_rest_client.hpp"
+#include "exchange/gate_ws_client.hpp"
+#include "execution/order_tracker.hpp"
+#include "market/market_feed.hpp"
+#include "risk/drawdown_guard.hpp"
+#include "risk/order_rate_limiter.hpp"
+#include "risk/position_manager.hpp"
+#include "risk/risk_manager.hpp"
+#include "strategy/strategy_manager.hpp"
 
 #include <gtest/gtest.h>
 

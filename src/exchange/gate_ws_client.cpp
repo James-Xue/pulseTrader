@@ -9,10 +9,10 @@
 #define ASIO_STANDALONE
 #endif
 
-#include "pulse/exchange/gate_ws_client.hpp"
+#include "exchange/gate_ws_client.hpp"
 
-#include "pulse/exchange/gate_auth.hpp"
-#include "pulse/logging/logger.hpp"
+#include "exchange/gate_auth.hpp"
+#include "logging/logger.hpp"
 
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>

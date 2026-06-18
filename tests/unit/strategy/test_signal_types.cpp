@@ -1,6 +1,6 @@
 // test_signal_types.cpp — Unit tests for signal type definitions (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/signal_types.hpp"
+#include "strategy/signal_types.hpp"
 
 #include <gtest/gtest.h>
 

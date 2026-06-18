@@ -1,6 +1,6 @@
 // test_orderbook_scalper.cpp — Unit tests for order book imbalance strategy (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/scalping/orderbook_scalper.hpp"
+#include "strategy/scalping/orderbook_scalper.hpp"
 
 #include <gtest/gtest.h>
 

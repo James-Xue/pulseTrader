@@ -8,7 +8,7 @@
 //   3. A bounded 8192-item queue prevents unbounded memory growth under load
 //   4. Per-module named loggers allow independent level control at runtime
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>

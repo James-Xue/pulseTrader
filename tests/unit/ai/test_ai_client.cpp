@@ -13,7 +13,7 @@
 //   7. Custom baseUrl is respected
 //   8. Missing content field returns error
 
-#include "pulse/ai/ai_client.hpp"
+#include "ai/ai_client.hpp"
 
 #include <gtest/gtest.h>
 

@@ -13,7 +13,7 @@
 //   7. AiSnapshotUnavailable           — available=false, verify JSON
 //   8. DashboardSnapshotToJson         — full snapshot with all panels
 
-#include "pulse/webui/snapshot_types.hpp"
+#include "webui/snapshot_types.hpp"
 
 #include <gtest/gtest.h>
 

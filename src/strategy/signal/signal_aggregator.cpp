@@ -1,8 +1,8 @@
 // signal_aggregator.cpp — Multi-strategy weighted voting (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/signal/signal_aggregator.hpp"
+#include "strategy/signal/signal_aggregator.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <chrono>

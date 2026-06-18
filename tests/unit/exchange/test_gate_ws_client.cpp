@@ -4,9 +4,9 @@
 // No real WebSocket connection required — all tests exercise detail:: free functions
 // and the GateWsClient's observable state.
 
-#include "pulse/exchange/gate_ws_client.hpp"
+#include "exchange/gate_ws_client.hpp"
 
-#include "pulse/core/config.hpp"
+#include "core/config.hpp"
 
 #include <gtest/gtest.h>
 

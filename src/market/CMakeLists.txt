@@ -12,7 +12,7 @@ add_library(pulse::market ALIAS pulse_market)
 
 target_include_directories(pulse_market
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(pulse_market

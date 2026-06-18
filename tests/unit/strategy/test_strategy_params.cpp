@@ -1,6 +1,6 @@
 // test_strategy_params.cpp — Unit tests for hot-reload strategy params (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/strategy_params.hpp"
+#include "strategy/strategy_params.hpp"
 
 #include <gtest/gtest.h>
 

@@ -1,8 +1,8 @@
 // mean_reversion_scalper.cpp — Bollinger Band mean-reversion (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/scalping/mean_reversion_scalper.hpp"
+#include "strategy/scalping/mean_reversion_scalper.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <chrono>

@@ -1,8 +1,8 @@
 // symbol_registry.cpp — SymbolRegistry implementation (Layer 3 Market Data)
 
-#include "pulse/market/symbol_registry.hpp"
+#include "market/symbol_registry.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <cmath>
 

@@ -21,13 +21,13 @@
 //   - stop() closes the listen socket, causing the event loop to return, then
 //     joins the background thread and cleans up the Impl
 
-#include "pulse/webui/web_server.hpp"
+#include "webui/web_server.hpp"
 
 #include "App.h"           // uWebSockets main header (uWS::App)
 #include "Loop.h"          // uWS::Loop for defer()
 #include "libusockets.h"   // us_listen_socket_close, us_socket_local_port
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <nlohmann/json.hpp>
 

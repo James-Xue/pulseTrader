@@ -10,7 +10,7 @@
 //   7. from_json — invalid sentiment string defaults to Neutral
 //   8. Round-trip — to_json → from_json preserves values
 
-#include "pulse/ai/analysis_result.hpp"
+#include "ai/analysis_result.hpp"
 
 #include <gtest/gtest.h>
 

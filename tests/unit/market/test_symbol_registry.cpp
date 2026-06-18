@@ -1,8 +1,8 @@
 // test_symbol_registry.cpp — Unit tests for SymbolRegistry (Layer 3 Market Data)
 
-#include "pulse/market/symbol_registry.hpp"
+#include "market/symbol_registry.hpp"
 
-#include "pulse/exchange/gate_rest_client.hpp"
+#include "exchange/gate_rest_client.hpp"
 
 #include <gtest/gtest.h>
 

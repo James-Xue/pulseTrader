@@ -10,9 +10,9 @@
 //
 // NOT part of CTest — this is a manual verification tool.
 
-#include "pulse/core/config.hpp"
-#include "pulse/exchange/gate_ws_client.hpp"
-#include "pulse/logging/logger.hpp"
+#include "core/config.hpp"
+#include "exchange/gate_ws_client.hpp"
+#include "logging/logger.hpp"
 
 #include <nlohmann/json.hpp>
 

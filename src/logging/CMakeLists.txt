@@ -8,7 +8,7 @@ add_library(pulse::logging ALIAS pulse_logging)
 
 target_include_directories(pulse_logging
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(pulse_logging

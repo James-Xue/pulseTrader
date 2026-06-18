@@ -1,8 +1,8 @@
 // momentum_scalper.cpp — EMA crossover strategy (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/scalping/momentum_scalper.hpp"
+#include "strategy/scalping/momentum_scalper.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <cmath>

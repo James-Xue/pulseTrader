@@ -16,9 +16,9 @@
 //   - curl_global_init is called exactly once via std::call_once (process-safe)
 //   - No retry logic — polling will naturally retry on the next interval
 
-#include "pulse/ai/news_feed.hpp"
+#include "ai/news_feed.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <curl/curl.h>
 

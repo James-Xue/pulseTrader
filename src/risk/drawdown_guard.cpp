@@ -1,8 +1,8 @@
 // drawdown_guard.cpp — Rolling PnL monitor + circuit breaker (Layer 7 Risk Management)
 
-#include "pulse/risk/drawdown_guard.hpp"
+#include "risk/drawdown_guard.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 namespace pulse::risk
 {

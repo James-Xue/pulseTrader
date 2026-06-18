@@ -15,10 +15,10 @@
 //   AI_MODEL       — model identifier (e.g. "claude-sonnet-4-6")
 //   AI_API_KEY     — API key for the chosen backend
 
-#include "pulse/ai/ai_pipeline.hpp"
-#include "pulse/core/config.hpp"
-#include "pulse/logging/logger.hpp"
-#include "pulse/strategy/strategy_params.hpp"
+#include "ai/ai_pipeline.hpp"
+#include "core/config.hpp"
+#include "logging/logger.hpp"
+#include "strategy/strategy_params.hpp"
 
 #include <cstdlib>
 #include <iostream>

@@ -1,6 +1,6 @@
 // test_signal_aggregator.cpp — Unit tests for weighted voting (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/signal/signal_aggregator.hpp"
+#include "strategy/signal/signal_aggregator.hpp"
 
 #include <gtest/gtest.h>
 

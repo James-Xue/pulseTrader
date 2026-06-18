@@ -9,7 +9,7 @@
 // The actual WebSocket route registration (open/close handlers) is done by
 // WebServer, which calls on_ws_open() and on_ws_close() from the handlers.
 
-#include "pulse/webui/ws_server.hpp"
+#include "webui/ws_server.hpp"
 
 #include <nlohmann/json.hpp>
 

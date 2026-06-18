@@ -12,14 +12,14 @@
 //
 // NOT part of CTest — this is a manual verification tool.
 
-#include "pulse/core/config.hpp"
-#include "pulse/execution/execution_report.hpp"
-#include "pulse/execution/order_executor.hpp"
-#include "pulse/execution/order_tracker.hpp"
-#include "pulse/exchange/gate_rest_client.hpp"
-#include "pulse/exchange/gate_ws_client.hpp"
-#include "pulse/logging/logger.hpp"
-#include "pulse/market/market_feed.hpp"
+#include "core/config.hpp"
+#include "execution/execution_report.hpp"
+#include "execution/order_executor.hpp"
+#include "execution/order_tracker.hpp"
+#include "exchange/gate_rest_client.hpp"
+#include "exchange/gate_ws_client.hpp"
+#include "logging/logger.hpp"
+#include "market/market_feed.hpp"
 
 #include <atomic>
 #include <chrono>
