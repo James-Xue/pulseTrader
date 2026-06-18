@@ -3,8 +3,9 @@
     "tasks": [
         {
             "label": "CMake Build",
-            "type": "cmake",
-            "command": "build",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "${workspaceFolder}/build", "--parallel"],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -14,15 +15,25 @@
         },
         {
             "label": "CMake Configure",
-            "type": "cmake",
-            "command": "configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "${workspaceFolder}/build",
+                "-S", "${workspaceFolder}",
+                "-DPULSE_BUILD_TESTS=ON",
+                "-DPULSE_BUILD_DEMOS=OFF",
+                "-DPULSE_ENABLE_SQLITE=OFF",
+                "-DPULSE_ENABLE_TOML=OFF",
+                "-DPULSE_ENABLE_WEBUI=ON"
+            ],
             "problemMatcher": [],
             "detail": "Run CMake configure"
         },
         {
             "label": "CMake Clean",
-            "type": "cmake",
-            "command": "clean",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "${workspaceFolder}/build", "--target", "clean"],
             "problemMatcher": [],
             "detail": "Clean build directory"
         },
