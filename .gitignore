@@ -45,7 +45,6 @@ build
 
 # debug information files
 *.dwo
-.claude/
 build/
 .cache/
 
