@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -28,6 +29,9 @@
 
 namespace pulse::exchange
 {
+
+// Forward declaration — defined in gate_ws_client.cpp
+struct WsInternal;
 
 // ---------------------------------------------------------------------------
 // WsConnectionState — WebSocket connection lifecycle states
@@ -152,6 +156,7 @@ class GateWsClient
     GateWsChannels channels_;
     std::atomic<WsConnectionState> state_{ WsConnectionState::Disconnected };
     std::jthread io_thread_;
+    std::shared_ptr<WsInternal> internal_;
 
     /// I/O thread body — runs the WebSocket event loop.
     ///

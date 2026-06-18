@@ -71,7 +71,7 @@ struct ExchangeConfig
 {
     std::string apiKey;
     std::string apiSecret;
-    std::string restBaseUrl = "https://api.gateio.ws/api/v4";
+    std::string restBaseUrl = "https://api.gateio.ws";
     std::string wsUrl = "wss://api.gateio.ws/ws/v4/";
     std::string proxyUrl;                               ///< HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Falls back to HTTPS_PROXY env var.
     std::uint32_t restTimeoutMs = 10'000;    ///< Per-request timeout in milliseconds.

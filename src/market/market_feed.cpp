@@ -152,19 +152,19 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
         return;
     }
 
-    // Determine the symbol from the full frame (Gate.io includes it in the frame).
-    const std::string symbol = full_frame.value("currency_pair", "");
+    // Gate.io order_book puts the symbol in result["s"], not in the outer frame.
+    const std::string symbol = result.value("s", "");
     if (symbol.empty())
     {
         return;
     }
 
-    // Check if this is a snapshot or delta by looking at the event type.
+    // Gate.io: event "all" = full snapshot, event "update" = incremental delta.
     const std::string event = full_frame.value("event", "");
 
-    if (event == "update" || !orderbook_manager_.contains(symbol))
+    if ("all" == event || !orderbook_manager_.contains(symbol))
     {
-        // First update or explicit snapshot — treat as snapshot.
+        // Snapshot — replace the entire book.
         nlohmann::json snapshot = result;
         snapshot["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
         orderbook_manager_.apply_snapshot(symbol, snapshot);
