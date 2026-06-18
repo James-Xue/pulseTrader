@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-17
-> 文件大小：12895 字符 / 14000 字符。更新本文件后必须重新计算并同步这一行。
+> Last updated: 2026-06-18
+> 文件大小：15423 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -41,7 +41,17 @@
 - Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
 - Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
 
-## Current State (2026-06-17)
+## Current State (2026-06-18)
+
+### Bug Fixes (2026-06-18)
+- **REST URL double path** (`config.hpp:74`): `restBaseUrl` default changed from `"https://api.gateio.ws/api/v4"` to `"https://api.gateio.ws"` (host only). Every call site's `path` already includes `/api/v4`, so the old default caused `/api/v4/api/v4/...` → HTTP 404. Test assertion in `testTypes.cpp:80` updated to match.
+- **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` previously only registered the callback without sending a WS message. Subscribe messages were only sent in `on_open`. When `MarketFeed::start()` called `subscribe()` after a blocking REST call, `on_open` had already fired with an empty channel list — no subscriptions ever reached the server.
+  - Fix: `subscribe()` now immediately registers the callback in the channel registry AND queues a `PendingAction`. If already connected, `send_queued()` sends immediately via the stored `WsClient*` and `active_hdl`. On reconnect, `drain_queue()` flushes pending actions.
+  - Refactored `WsInternal` from local `shared_ptr` in `run_io_loop()` to member `std::shared_ptr<WsInternal> internal_` (forward-declared in header). Added `active_hdl`, `hdl_mutex`, `client_ptr` fields. Added `send_queued()` method.
+  - `on_close` and `on_fail` handlers now clear `internal_->active_hdl` on disconnect.
+- **WS pong missing** (`gate_ws_client.cpp`): `on_message` received `spot.ping` but never replied with `spot.pong`. Gate.io closes the connection after ~15s without pong. Fix: `on_message` now sends `{"time": <ts>, "channel": "spot.pong"}` immediately.
+- **Orderbook symbol field** (`market_feed.cpp:156`): Changed `full_frame.value("currency_pair", "")` to `result.value("s", "")`. Gate.io's `spot.order_book` puts the symbol in `result["s"]`, not in the outer frame (unlike `spot.tickers` which uses `full_frame["currency_pair"]`).
+- **Orderbook event type** (`market_feed.cpp:165`): Changed `event == "update"` to `"all" == event` for snapshot detection. Gate.io sends `event: "all"` for full snapshots and `event: "update"` for deltas — the old code had these reversed, causing snapshots to be treated as deltas (and ignored) and deltas to replace the entire book.
 
 ### Completed
 - **L2 Logging** (2026-06-15): spdlog async logger, per-module isolation, `PULSE_LOG_*` macros, 8 tests
@@ -59,11 +69,13 @@
   - `gate_ws_client`: auto-reconnect with exponential backoff + jitter, ping/pong keepalive
   - Private channel HMAC authentication, connection state management
   - Proxy tunnel: `ProxyTunnel` class — local TCP forwarder + HTTP CONNECT tunnel + bidirectional relay
-    - websocketpp connects to `wss://127.0.0.1:LOCAL_PORT/` (random port)
+    - websocketpp connects to `wss://127.0.0.1:LOCAL_PORT/PATH` (random port, preserves original path)
     - ProxyTunnel establishes CONNECT tunnel through HTTP proxy to real WSS server
     - TLS: `verify_none` for proxy mode (cert hostname mismatch: 127.0.0.1 vs real host)
-  - Helper functions: `detect_proxy_url()`, `parse_ws_url()`
-  - 24 unit tests (12 channels + 12 client), smoke test tool
+    - **Critical fix (2026-06-17)**: Set `Host` header to real host (not 127.0.0.1), preserve URL path
+    - **Critical fix (2026-06-17)**: All handlers (open/close/fail/message) must be set BEFORE `get_connection()`, otherwise websocketpp won't trigger them
+  - Helper functions: `detect_proxy_url()`, `parse_ws_url()` (returns host, port, path)
+  - 24 unit tests (12 channels + 12 client), smoke test tool — **verified working with proxy**
 - **L3 Market Data** (2026-06-16): Hot path market data pipeline
   - `ticker_cache`: thread-safe storage for latest ticker per symbol (shared_mutex)
   - `symbol_registry`: REST-fetched instrument metadata (tick size, lot size, min notional)

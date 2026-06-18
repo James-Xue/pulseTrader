@@ -430,9 +430,21 @@ struct WsInternal
     std::mutex queue_mutex;
     std::queue<PendingAction> pending_actions;
 
+    // Active connection handle (set in on_open, cleared on close/fail)
+    std::mutex hdl_mutex;
+    WsConnectionPtr active_hdl;
+
+    // Pointer to the active WsClient (valid while client.run() is executing).
+    // Used by send_queued() to send messages from external threads.
+    WsClient *client_ptr{ nullptr };
+
     /// Process all queued actions on the I/O thread.
     /// Called after connection is established.
     void drain_queue(WsClient &client, WsConnectionPtr hdl, GateWsChannels &channels, const ExchangeConfig &config);
+
+    /// Send all queued actions using the active connection handle.
+    /// Called from external threads (subscribe/unsubscribe) when already connected.
+    void send_queued(GateWsChannels &channels, const ExchangeConfig &config);
 };
 
 void WsInternal::drain_queue(WsClient &client,
@@ -453,10 +465,7 @@ void WsInternal::drain_queue(WsClient &client,
         {
         case PendingAction::Type::Subscribe:
         {
-            // 1. Register callback in channel registry
-            channels.subscribe(action.channel, action.payload, std::move(action.callback));
-
-            // 2. Build and send subscribe message
+            // Callback already registered by subscribe(); just send the WS message.
             const auto msg = channels.build_subscribe_msg(action.channel, action.payload);
             const std::string json_str = msg.dump();
             client.send(hdl, json_str, websocketpp::frame::opcode::text);
@@ -465,10 +474,7 @@ void WsInternal::drain_queue(WsClient &client,
         }
         case PendingAction::Type::SubscribePrivate:
         {
-            // 1. Register callback
-            channels.subscribe(action.channel, action.payload, std::move(action.callback));
-
-            // 2. Build subscribe message with auth block
+            // Callback already registered by subscribe_private(); just send with auth.
             auto msg = channels.build_subscribe_msg(action.channel, action.payload);
             msg["auth"] = detail::build_ws_auth(config.apiKey, config.apiSecret, action.channel, "subscribe");
             const std::string json_str = msg.dump();
@@ -478,14 +484,80 @@ void WsInternal::drain_queue(WsClient &client,
         }
         case PendingAction::Type::Unsubscribe:
         {
-            // 1. Build and send unsubscribe message
+            // Callback already removed by unsubscribe(); just send the WS message.
             const auto payload = channels.get_payload(action.channel);
             const auto msg = channels.build_unsubscribe_msg(action.channel, payload);
-            const std::string json_str = msg.dump();
-            client.send(hdl, json_str, websocketpp::frame::opcode::text);
+            client.send(hdl, msg.dump(), websocketpp::frame::opcode::text);
+            PULSE_LOG_INFO("exchange", "WS unsubscribed from {}", action.channel);
+            break;
+        }
+        }
+        actions.pop();
+    }
+}
 
-            // 2. Remove from registry
-            channels.unsubscribe(action.channel);
+void WsInternal::send_queued(GateWsChannels &channels, const ExchangeConfig &config)
+{
+    std::queue<PendingAction> actions;
+    {
+        std::lock_guard lock(queue_mutex);
+        std::swap(actions, pending_actions);
+    }
+
+    if (actions.empty())
+    {
+        return;
+    }
+
+    // Capture the handle and client pointer under lock.
+    WsConnectionPtr hdl;
+    WsClient *cli = nullptr;
+    {
+        std::lock_guard hlock(hdl_mutex);
+        hdl = active_hdl;
+        cli = client_ptr;
+    }
+
+    if (hdl.expired() || nullptr == cli)
+    {
+        // Connection lost between state check and handle capture — re-queue everything.
+        std::lock_guard lock(queue_mutex);
+        while (!actions.empty())
+        {
+            pending_actions.push(std::move(actions.front()));
+            actions.pop();
+        }
+        return;
+    }
+
+    while (!actions.empty())
+    {
+        auto &action = actions.front();
+        switch (action.type)
+        {
+        case PendingAction::Type::Subscribe:
+        {
+            // Callback already registered by subscribe(); just send the WS message.
+            const auto msg = channels.build_subscribe_msg(action.channel, action.payload);
+            cli->send(hdl, msg.dump(), websocketpp::frame::opcode::text);
+            PULSE_LOG_INFO("exchange", "WS subscribed to {}", action.channel);
+            break;
+        }
+        case PendingAction::Type::SubscribePrivate:
+        {
+            // Callback already registered by subscribe_private(); just send with auth.
+            auto msg = channels.build_subscribe_msg(action.channel, action.payload);
+            msg["auth"] = detail::build_ws_auth(config.apiKey, config.apiSecret, action.channel, "subscribe");
+            cli->send(hdl, msg.dump(), websocketpp::frame::opcode::text);
+            PULSE_LOG_INFO("exchange", "WS subscribed to {} (private)", action.channel);
+            break;
+        }
+        case PendingAction::Type::Unsubscribe:
+        {
+            // Callback already removed by unsubscribe(); just send the WS message.
+            const auto payload = channels.get_payload(action.channel);
+            const auto msg = channels.build_unsubscribe_msg(action.channel, payload);
+            cli->send(hdl, msg.dump(), websocketpp::frame::opcode::text);
             PULSE_LOG_INFO("exchange", "WS unsubscribed from {}", action.channel);
             break;
         }
@@ -498,7 +570,7 @@ void WsInternal::drain_queue(WsClient &client,
 // GateWsClient implementation
 // ---------------------------------------------------------------------------
 
-GateWsClient::GateWsClient(const ExchangeConfig &config) : config_(config), channels_()
+GateWsClient::GateWsClient(const ExchangeConfig &config) : config_(config), channels_(), internal_(std::make_shared<WsInternal>())
 {
 }
 
@@ -541,21 +613,57 @@ void GateWsClient::subscribe(const std::string &channel,
     const std::vector<std::string> &payload,
     ChannelCallback callback)
 {
-    // Register the callback in the channel registry immediately (thread-safe).
-    channels_.subscribe(channel, payload, callback);
+    // 1. Register the callback in the channel registry immediately (thread-safe).
+    channels_.subscribe(channel, payload, std::move(callback));
+
+    // 2. Queue the subscribe message for sending on the I/O thread.
+    {
+        std::lock_guard lock(internal_->queue_mutex);
+        internal_->pending_actions.push(
+            PendingAction{ PendingAction::Type::Subscribe, channel, payload, nullptr });
+    }
+
+    // 3. If already connected, send immediately.
+    if (WsConnectionState::Connected == state_.load(std::memory_order_acquire))
+    {
+        internal_->send_queued(channels_, config_);
+    }
 }
 
 void GateWsClient::subscribe_private(const std::string &channel,
     const std::vector<std::string> &payload,
     ChannelCallback callback)
 {
-    // Register the callback — auth is added when sending the subscribe message
-    channels_.subscribe(channel, payload, callback);
+    channels_.subscribe(channel, payload, std::move(callback));
+
+    {
+        std::lock_guard lock(internal_->queue_mutex);
+        internal_->pending_actions.push(
+            PendingAction{ PendingAction::Type::SubscribePrivate, channel, payload, nullptr });
+    }
+
+    if (WsConnectionState::Connected == state_.load(std::memory_order_acquire))
+    {
+        internal_->send_queued(channels_, config_);
+    }
 }
 
 void GateWsClient::unsubscribe(const std::string &channel)
 {
+    // Remove from channel registry immediately.
     channels_.unsubscribe(channel);
+
+    // Queue the unsubscribe message for sending on the I/O thread.
+    {
+        std::lock_guard lock(internal_->queue_mutex);
+        internal_->pending_actions.push(
+            PendingAction{ PendingAction::Type::Unsubscribe, channel, {}, nullptr });
+    }
+
+    if (WsConnectionState::Connected == state_.load(std::memory_order_acquire))
+    {
+        internal_->send_queued(channels_, config_);
+    }
 }
 
 WsConnectionState GateWsClient::state() const
@@ -573,9 +681,6 @@ GateWsChannels &GateWsClient::channels()
 // ---------------------------------------------------------------------------
 void GateWsClient::run_io_loop(std::stop_token stop_token)
 {
-    // Shared internal state for cross-thread communication
-    auto internal = std::make_shared<WsInternal>();
-
     std::uint32_t attempt = 0;
 
     // --- Proxy tunnel setup ---
@@ -638,26 +743,20 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     return ctx;
                 });
 
-            // Store the connection handle for sending messages
-            std::mutex hdl_mutex;
-            WsConnectionPtr active_hdl;
-
             // --- Set all handlers BEFORE get_connection() ---
             // --- on_open handler ---
             client.set_open_handler(
                 [this,
                     &client,
-                    &hdl_mutex,
-                    &active_hdl,
                     &attempt,
-                    internal,
+                    &internal = this->internal_,
                     &channels = this->channels_,
                     &config = this->config_](WsConnectionPtr hdl)
                 {
                     PULSE_LOG_DEBUG("exchange", "on_open handler called");
                     {
-                        std::lock_guard lock(hdl_mutex);
-                        active_hdl = hdl;
+                        std::lock_guard lock(internal->hdl_mutex);
+                        internal->active_hdl = hdl;
                     }
                     state_.store(WsConnectionState::Connected, std::memory_order_release);
                     attempt = 0; // reset backoff on successful connection
@@ -680,23 +779,32 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
             // --- on_close handler ---
             client.set_close_handler(
-                [this](WsConnectionPtr /*hdl*/)
+                [this, &internal = this->internal_](WsConnectionPtr /*hdl*/)
                 {
+                    {
+                        std::lock_guard lock(internal->hdl_mutex);
+                        internal->active_hdl.reset();
+                    }
                     state_.store(WsConnectionState::Disconnected, std::memory_order_release);
                     PULSE_LOG_WARN("exchange", "WS connection closed");
                 });
 
             // --- on_fail handler ---
             client.set_fail_handler(
-                [this](WsConnectionPtr /*hdl*/)
+                [this, &internal = this->internal_](WsConnectionPtr /*hdl*/)
                 {
+                    {
+                        std::lock_guard lock(internal->hdl_mutex);
+                        internal->active_hdl.reset();
+                    }
                     state_.store(WsConnectionState::Disconnected, std::memory_order_release);
                     PULSE_LOG_ERROR("exchange", "WS connection failed");
                 });
 
             // --- on_message handler ---
             client.set_message_handler(
-                [this, &channels = this->channels_](WsConnectionPtr /*hdl*/, WsMessagePtr msg)
+                [this, &client, &internal = this->internal_, &channels = this->channels_](
+                    WsConnectionPtr hdl, WsMessagePtr msg)
                 {
                     // 1. Parse the incoming frame as JSON
                     const std::string &body = msg->get_payload();
@@ -711,9 +819,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     // 2. Handle server ping — reply with pong immediately
                     if (frame.contains("channel") && "spot.ping" == frame["channel"].get<std::string>())
                     {
-                        // Pong is handled by the caller who has access to the connection handle.
-                        // We log it here; actual pong sending is done in the outer scope.
                         PULSE_LOG_DEBUG("exchange", "WS received server ping");
+                        nlohmann::json pong = { { "time", frame.value("time", 0) },
+                            { "channel", "spot.pong" } };
+                        client.send(hdl, pong.dump(), websocketpp::frame::opcode::text);
+                        PULSE_LOG_DEBUG("exchange", "WS sent pong");
                         return;
                     }
 
@@ -749,11 +859,12 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
             // 6. Connect and run
             client.connect(con);
 
-            // 7. Run the event loop
-            //    Use run() for continuous event processing
+            // 7. Store client pointer for cross-thread send, then run the event loop
+            internal_->client_ptr = &client;
             PULSE_LOG_DEBUG("exchange", "Entering client.run()");
             client.run();
             PULSE_LOG_DEBUG("exchange", "client.run() returned");
+            internal_->client_ptr = nullptr;
 
             // Check if we should stop or reconnect
             if (stop_token.stop_requested())
@@ -768,11 +879,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
             // 8. Clean up — close the connection if still open
             {
-                std::lock_guard lock(hdl_mutex);
-                if (active_hdl.use_count() > 0)
+                std::lock_guard lock(internal_->hdl_mutex);
+                if (internal_->active_hdl.use_count() > 0)
                 {
                     websocketpp::lib::error_code close_ec;
-                    client.close(active_hdl, websocketpp::close::status::going_away, "shutdown", close_ec);
+                    client.close(internal_->active_hdl, websocketpp::close::status::going_away, "shutdown", close_ec);
                 }
             }
 
