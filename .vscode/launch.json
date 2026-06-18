@@ -37,6 +37,16 @@
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",
                     "ignoreFailures": true
+                },
+                {
+                    "description": "Break at WS message handler (line 810)",
+                    "text": "break gate_ws_client.cpp:810",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Break at ping/pong handler (line 820)",
+                    "text": "break gate_ws_client.cpp:820",
+                    "ignoreFailures": true
                 }
             ],
             "preLaunchTask": "CMake Build"
@@ -56,6 +66,16 @@
                 {
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Break at on_ticker_update (line 112)",
+                    "text": "break market_feed.cpp:112",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Break at on_orderbook_update (line 144)",
+                    "text": "break market_feed.cpp:144",
                     "ignoreFailures": true
                 }
             ],
