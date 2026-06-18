@@ -21,6 +21,7 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/read_until.hpp>
 #include <asio/write.hpp>
+#include <asio/ssl.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -98,8 +99,8 @@ nlohmann::json build_ws_auth(const std::string &api_key,
 class ProxyTunnel
 {
 public:
-    ProxyTunnel(const std::string &proxy_url, const std::string &target_host, std::uint16_t target_port)
-        : proxy_url_(proxy_url), target_host_(target_host), target_port_(target_port)
+    ProxyTunnel(const std::string &proxy_url, const std::string &target_host, std::uint16_t target_port, const std::string &target_path = "/")
+        : proxy_url_(proxy_url), target_host_(target_host), target_port_(target_port), target_path_(target_path)
     {
     }
 
@@ -157,7 +158,7 @@ public:
             }
         });
 
-        return "wss://127.0.0.1:" + std::to_string(local_port_) + "/";
+        return "wss://127.0.0.1:" + std::to_string(local_port_) + target_path_;
     }
 
     /// Stop the tunnel — close acceptor and join accept thread
@@ -243,7 +244,7 @@ private:
         }
     }
 
-    /// Relay data from source to sink until EOF or error
+    /// Relay data from source to sink until EOF or error (plain socket)
     static void relay_data(asio::ip::tcp::socket &source, asio::ip::tcp::socket &sink)
     {
         try
@@ -269,9 +270,68 @@ private:
         }
     }
 
+    /// Relay data from plain socket to SSL stream
+    static void relay_data(asio::ip::tcp::socket &source, asio::ssl::stream<asio::ip::tcp::socket&> &sink)
+    {
+        try
+        {
+            char buf[8192];
+            while (true)
+            {
+                asio::error_code ec;
+                const std::size_t bytes = source.read_some(asio::buffer(buf), ec);
+                if (ec)
+                {
+                    PULSE_LOG_DEBUG("exchange", "Relay L→R read error: {}", ec.message());
+                    break;
+                }
+                PULSE_LOG_TRACE("exchange", "Relay L→R: {} bytes", bytes);
+                asio::write(sink, asio::buffer(buf, bytes), ec);
+                if (ec)
+                {
+                    PULSE_LOG_DEBUG("exchange", "Relay L→R write error: {}", ec.message());
+                    break;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    /// Relay data from SSL stream to plain socket
+    static void relay_data(asio::ssl::stream<asio::ip::tcp::socket&> &source, asio::ip::tcp::socket &sink)
+    {
+        try
+        {
+            char buf[8192];
+            while (true)
+            {
+                asio::error_code ec;
+                const std::size_t bytes = source.read_some(asio::buffer(buf), ec);
+                if (ec)
+                {
+                    PULSE_LOG_DEBUG("exchange", "Relay R→L read error: {}", ec.message());
+                    break;
+                }
+                PULSE_LOG_TRACE("exchange", "Relay R→L: {} bytes", bytes);
+                asio::write(sink, asio::buffer(buf, bytes), ec);
+                if (ec)
+                {
+                    PULSE_LOG_DEBUG("exchange", "Relay R→L write error: {}", ec.message());
+                    break;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
     std::string proxy_url_;
     std::string target_host_;
     std::uint16_t target_port_;
+    std::string target_path_;
     asio::io_context io_ctx_;
     std::unique_ptr<asio::ip::tcp::acceptor> acceptor_;
     std::thread accept_thread_;
@@ -300,31 +360,40 @@ std::string detect_proxy_url(const ExchangeConfig &config)
 }
 
 // ---------------------------------------------------------------------------
-// Helper: extract host and port from a WSS URL
-//   "wss://api.gateio.ws/ws/v4/" → {"api.gateio.ws", 443}
+// Helper: extract host, port, and path from a WSS URL
+//   "wss://api.gateio.ws/ws/v4/" → {"api.gateio.ws", 443, "/ws/v4/"}
 // ---------------------------------------------------------------------------
-std::pair<std::string, std::uint16_t> parse_ws_url(const std::string &url)
+struct WsUrlParts
 {
     std::string host;
-    std::uint16_t port = 443;
+    std::uint16_t port;
+    std::string path;
+};
+
+WsUrlParts parse_ws_url(const std::string &url)
+{
+    WsUrlParts result;
+    result.port = 443;
+    result.path = "/";
 
     auto scheme_end = url.find("://");
     std::string rest = (std::string::npos != scheme_end) ? url.substr(scheme_end + 3) : url;
     auto path_start = rest.find('/');
     std::string authority = (std::string::npos != path_start) ? rest.substr(0, path_start) : rest;
+    result.path = (std::string::npos != path_start) ? rest.substr(path_start) : "/";
 
     auto colon_pos = authority.find(':');
     if (std::string::npos != colon_pos)
     {
-        host = authority.substr(0, colon_pos);
-        port = static_cast<std::uint16_t>(std::stoi(authority.substr(colon_pos + 1)));
+        result.host = authority.substr(0, colon_pos);
+        result.port = static_cast<std::uint16_t>(std::stoi(authority.substr(colon_pos + 1)));
     }
     else
     {
-        host = authority;
+        result.host = authority;
     }
 
-    return { host, port };
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -520,9 +589,9 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
     if (!proxy_url.empty())
     {
-        auto [host, port] = parse_ws_url(config_.wsUrl);
-        real_host = host;
-        tunnel = std::make_unique<ProxyTunnel>(proxy_url, host, port);
+        auto parts = parse_ws_url(config_.wsUrl);
+        real_host = parts.host;
+        tunnel = std::make_unique<ProxyTunnel>(proxy_url, parts.host, parts.port, parts.path);
         connect_url = tunnel->start();
         PULSE_LOG_INFO("exchange", "WS proxy tunnel active: {} → {} (via {})",
             connect_url, config_.wsUrl, proxy_url);
@@ -536,9 +605,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
             // 1. Create a fresh websocketpp client for each connection attempt
             WsClient client;
 
-            // 2. Configure logging — suppress websocketpp's own logging
+            // 2. Configure logging — enable minimal logging to debug handshake
             client.clear_access_channels(websocketpp::log::alevel::all);
+            client.set_access_channels(websocketpp::log::alevel::connect | websocketpp::log::alevel::disconnect);
             client.clear_error_channels(websocketpp::log::elevel::all);
+            client.set_error_channels(websocketpp::log::elevel::all);
 
             // 3. Initialise the asio transport
             client.init_asio();
@@ -567,25 +638,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     return ctx;
                 });
 
-            state_.store(WsConnectionState::Connecting, std::memory_order_release);
-            PULSE_LOG_INFO("exchange", "WS connecting to {} (attempt {})", connect_url, attempt + 1);
-
-            // 5. Create a connection and set handlers
-            websocketpp::lib::error_code ec;
-            auto con = client.get_connection(connect_url, ec);
-            if (ec)
-            {
-                PULSE_LOG_ERROR("exchange", "WS get_connection failed: {}", ec.message());
-                state_.store(WsConnectionState::Disconnected, std::memory_order_release);
-                break;
-            }
-
-            // SNI hostname is set in the TLS handler above via SSL_CTX_set_tlsext_host_name
-
             // Store the connection handle for sending messages
             std::mutex hdl_mutex;
             WsConnectionPtr active_hdl;
 
+            // --- Set all handlers BEFORE get_connection() ---
             // --- on_open handler ---
             client.set_open_handler(
                 [this,
@@ -593,10 +650,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     &hdl_mutex,
                     &active_hdl,
                     &attempt,
-                    &internal,
+                    internal,
                     &channels = this->channels_,
                     &config = this->config_](WsConnectionPtr hdl)
                 {
+                    PULSE_LOG_DEBUG("exchange", "on_open handler called");
                     {
                         std::lock_guard lock(hdl_mutex);
                         active_hdl = hdl;
@@ -607,12 +665,13 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
                     // Re-subscribe all active channels
                     const auto active = channels.active_channels();
+                    PULSE_LOG_DEBUG("exchange", "Active channels: {}", active.size());
                     for (const auto &ch : active)
                     {
                         const auto payload = channels.get_payload(ch);
                         const auto msg = channels.build_subscribe_msg(ch, payload);
                         client.send(hdl, msg.dump(), websocketpp::frame::opcode::text);
-                        PULSE_LOG_DEBUG("exchange", "WS re-subscribed to {}", ch);
+                        PULSE_LOG_INFO("exchange", "WS re-subscribed to {}", ch);
                     }
 
                     // Drain any pending actions queued while disconnected
@@ -666,29 +725,46 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     }
                 });
 
+            state_.store(WsConnectionState::Connecting, std::memory_order_release);
+            PULSE_LOG_INFO("exchange", "WS connecting to {} (attempt {})", connect_url, attempt + 1);
+
+            // 5. Create a connection
+            websocketpp::lib::error_code ec;
+            auto con = client.get_connection(connect_url, ec);
+            if (ec)
+            {
+                PULSE_LOG_ERROR("exchange", "WS get_connection failed: {}", ec.message());
+                state_.store(WsConnectionState::Disconnected, std::memory_order_release);
+                break;
+            }
+
+            // When using proxy tunnel, override Host header to the real server
+            // (websocketpp would otherwise send 127.0.0.1:<port> from connect_url)
+            if (use_proxy)
+            {
+                con->replace_header("Host", real_host);
+                PULSE_LOG_DEBUG("exchange", "Set Host header to: {}", real_host);
+            }
+
             // 6. Connect and run
             client.connect(con);
 
-            // 7. Run the event loop — blocks until the connection closes or stop is requested
-            //    We use a poll-based approach to check stop_token periodically
-            auto &asio_io = client.get_io_context();
-            while (!stop_token.stop_requested())
-            {
-                // Run io_service for up to 100ms, then check stop_token
-                asio_io.restart();
-                const auto handlers_run = asio_io.run_for(std::chrono::milliseconds(100));
-                if (0 == handlers_run)
-                {
-                    // No work to do — brief sleep to avoid busy-waiting
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
+            // 7. Run the event loop
+            //    Use run() for continuous event processing
+            PULSE_LOG_DEBUG("exchange", "Entering client.run()");
+            client.run();
+            PULSE_LOG_DEBUG("exchange", "client.run() returned");
 
-                // Check if connection is closed — break out to reconnect
-                if (WsConnectionState::Disconnected == state_.load(std::memory_order_acquire))
-                {
-                    break;
-                }
+            // Check if we should stop or reconnect
+            if (stop_token.stop_requested())
+            {
+                break;
             }
+
+            // Connection closed - loop to reconnect
+            const auto backoff = detail::compute_backoff_ms(attempt++, 1000, 30000);
+            PULSE_LOG_INFO("exchange", "WS reconnecting in {} ms", backoff);
+            std::this_thread::sleep_for(std::chrono::milliseconds(backoff));
 
             // 8. Clean up — close the connection if still open
             {
