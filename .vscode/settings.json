@@ -1,0 +1,22 @@
+{
+    // CMake Tools
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureArgs": [
+        "-DPULSE_BUILD_TESTS=ON",
+        "-DPULSE_BUILD_DEMOS=OFF",
+        "-DPULSE_ENABLE_SQLITE=OFF",
+        "-DPULSE_ENABLE_TOML=OFF",
+        "-DPULSE_ENABLE_WEBUI=ON"
+    ],
+    "cmake.generator": "Unix Makefiles",
+
+    // C/C++ IntelliSense (powered by compile_commands.json)
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+    // Editor
+    "editor.formatOnSave": true,
+    "files.associations": {
+        "*.hpp": "cpp",
+        "*.h": "cpp"
+    }
+}
