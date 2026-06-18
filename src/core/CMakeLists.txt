@@ -7,7 +7,7 @@ add_library(pulse::core ALIAS pulse_core)
 
 target_include_directories(pulse_core
     INTERFACE
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_compile_features(pulse_core INTERFACE cxx_std_20)

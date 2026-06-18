@@ -7,7 +7,7 @@
 //   4. sign_request end-to-end produces a valid signature
 //   5. unix_seconds returns a plausible timestamp
 
-#include "pulse/exchange/gate_auth.hpp"
+#include "exchange/gate_auth.hpp"
 
 #include <gtest/gtest.h>
 

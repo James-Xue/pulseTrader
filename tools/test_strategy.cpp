@@ -13,13 +13,13 @@
 //   4. SignalAggregator combining signals from all three strategies
 //   5. End-to-end signal flow: Strategy → SignalAggregator → output callback
 
-#include "pulse/core/config.hpp"
-#include "pulse/logging/logger.hpp"
-#include "pulse/strategy/scalping/mean_reversion_scalper.hpp"
-#include "pulse/strategy/scalping/momentum_scalper.hpp"
-#include "pulse/strategy/scalping/orderbook_scalper.hpp"
-#include "pulse/strategy/signal/signal_aggregator.hpp"
-#include "pulse/strategy/strategy_manager.hpp"
+#include "core/config.hpp"
+#include "logging/logger.hpp"
+#include "strategy/scalping/mean_reversion_scalper.hpp"
+#include "strategy/scalping/momentum_scalper.hpp"
+#include "strategy/scalping/orderbook_scalper.hpp"
+#include "strategy/signal/signal_aggregator.hpp"
+#include "strategy/strategy_manager.hpp"
 
 #include <chrono>
 #include <cmath>

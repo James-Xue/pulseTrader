@@ -10,9 +10,9 @@
 //   7. Atomic semantics — concurrent read/write is safe
 //   8. Custom bounds — set_bound() overrides defaults
 
-#include "pulse/ai/param_advisor.hpp"
+#include "ai/param_advisor.hpp"
 
-#include "pulse/strategy/strategy_params.hpp"
+#include "strategy/strategy_params.hpp"
 
 #include <gtest/gtest.h>
 

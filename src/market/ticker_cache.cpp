@@ -1,6 +1,6 @@
 // ticker_cache.cpp — TickerCache implementation (Layer 3 Market Data)
 
-#include "pulse/market/ticker_cache.hpp"
+#include "market/ticker_cache.hpp"
 
 #include <mutex>
 

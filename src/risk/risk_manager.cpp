@@ -1,8 +1,8 @@
 // risk_manager.cpp — Central order gate (Layer 7 Risk Management)
 
-#include "pulse/risk/risk_manager.hpp"
+#include "risk/risk_manager.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <cmath>
 

@@ -3,9 +3,9 @@
 // Implementation of channel management, frame dispatch, and message builders.
 // All public methods are thread-safe via std::shared_mutex.
 
-#include "pulse/exchange/gate_ws_channels.hpp"
+#include "exchange/gate_ws_channels.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <chrono>
 

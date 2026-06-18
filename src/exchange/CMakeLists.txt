@@ -11,7 +11,7 @@ add_library(pulse::exchange ALIAS pulse_exchange)
 
 target_include_directories(pulse_exchange
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(pulse_exchange

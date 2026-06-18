@@ -6,9 +6,9 @@
 //   3. stop() cancels timer (on_timer gets error::operation_aborted)
 //   4. io_context thread exits when it has no more work
 
-#include "pulse/heartbeat/heartbeat_scheduler.hpp"
+#include "heartbeat/heartbeat_scheduler.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <asio/post.hpp>
 

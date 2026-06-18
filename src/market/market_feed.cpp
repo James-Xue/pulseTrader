@@ -1,8 +1,8 @@
 // market_feed.cpp — MarketFeed dispatcher implementation (Layer 3 Market Data)
 
-#include "pulse/market/market_feed.hpp"
+#include "market/market_feed.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 namespace pulse::market
 {

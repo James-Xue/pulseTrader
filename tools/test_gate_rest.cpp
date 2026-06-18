@@ -15,10 +15,10 @@
 //   3. GET /api/v4/spot/tickers           — public, with query param
 //   4. GET /api/v4/spot/accounts          — private, requires API key + secret
 
-#include "pulse/core/config.hpp"
-#include "pulse/core/error.hpp"
-#include "pulse/exchange/gate_rest_client.hpp"
-#include "pulse/logging/logger.hpp"
+#include "core/config.hpp"
+#include "core/error.hpp"
+#include "exchange/gate_rest_client.hpp"
+#include "logging/logger.hpp"
 
 #include <cstdlib>
 #include <iostream>

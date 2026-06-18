@@ -1,9 +1,9 @@
 // test_order_tracker.cpp — Unit tests for OrderTracker (Layer 8 Order Execution)
 
-#include "pulse/execution/order_tracker.hpp"
+#include "execution/order_tracker.hpp"
 
-#include "pulse/exchange/gate_rest_client.hpp"
-#include "pulse/exchange/gate_ws_client.hpp"
+#include "exchange/gate_rest_client.hpp"
+#include "exchange/gate_ws_client.hpp"
 
 #include <gtest/gtest.h>
 

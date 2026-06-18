@@ -1,6 +1,6 @@
 // test_strategy_manager.cpp — Unit tests for StrategyManager (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/strategy_manager.hpp"
+#include "strategy/strategy_manager.hpp"
 
 #include <gtest/gtest.h>
 

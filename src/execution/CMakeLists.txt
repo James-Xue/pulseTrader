@@ -8,7 +8,7 @@ add_library(pulse::execution ALIAS pulse_execution)
 
 target_include_directories(pulse_execution
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(pulse_execution

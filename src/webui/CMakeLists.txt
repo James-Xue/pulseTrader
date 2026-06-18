@@ -10,7 +10,7 @@ add_library(pulse::webui ALIAS pulse_webui)
 
 target_include_directories(pulse_webui
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
     PRIVATE
         # uWebSockets (header-only C++ wrapper)
         ${PROJECT_SOURCE_DIR}/third_party/uWebSockets

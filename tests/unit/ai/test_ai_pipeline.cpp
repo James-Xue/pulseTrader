@@ -9,7 +9,7 @@
 //   4. Social feed failure — pipeline continues without social data
 //   5. Zero deltas — cycle succeeds but no params changed
 
-#include "pulse/ai/ai_pipeline.hpp"
+#include "ai/ai_pipeline.hpp"
 
 #include <gtest/gtest.h>
 

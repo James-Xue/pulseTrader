@@ -8,11 +8,11 @@
 //
 // NOT part of CTest — this is a manual verification tool.
 
-#include "pulse/core/config.hpp"
-#include "pulse/exchange/gate_rest_client.hpp"
-#include "pulse/exchange/gate_ws_client.hpp"
-#include "pulse/logging/logger.hpp"
-#include "pulse/market/market_feed.hpp"
+#include "core/config.hpp"
+#include "exchange/gate_rest_client.hpp"
+#include "exchange/gate_ws_client.hpp"
+#include "logging/logger.hpp"
+#include "market/market_feed.hpp"
 
 #include <chrono>
 #include <iostream>

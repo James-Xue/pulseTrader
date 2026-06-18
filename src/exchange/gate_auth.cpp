@@ -3,7 +3,7 @@
 // Dependencies: OpenSSL (libcrypto) for SHA-512 and HMAC-SHA512.
 // All functions are pure — no global state, no I/O, thread-safe by design.
 
-#include "pulse/exchange/gate_auth.hpp"
+#include "exchange/gate_auth.hpp"
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>

@@ -10,7 +10,7 @@
 //   7. PULSE_LOG_* macros compile and produce output
 //   8. shutdown() is idempotent (safe to call twice)
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <gtest/gtest.h>
 

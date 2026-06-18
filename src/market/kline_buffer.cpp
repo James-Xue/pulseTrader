@@ -1,6 +1,6 @@
 // kline_buffer.cpp — KlineBuffer implementation (Layer 3 Market Data)
 
-#include "pulse/market/kline_buffer.hpp"
+#include "market/kline_buffer.hpp"
 
 #include <algorithm>
 

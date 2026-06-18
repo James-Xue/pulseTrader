@@ -1,8 +1,8 @@
 // stop_loss_engine.cpp — Stop-loss evaluator (Layer 7 Risk Management)
 
-#include "pulse/risk/stop_loss_engine.hpp"
+#include "risk/stop_loss_engine.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <chrono>
 

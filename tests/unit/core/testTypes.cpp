@@ -8,9 +8,9 @@
 
 #include <gtest/gtest.h>
 
-#include "pulse/core/config.hpp"
-#include "pulse/core/error.hpp"
-#include "pulse/core/types.hpp"
+#include "core/config.hpp"
+#include "core/error.hpp"
+#include "core/types.hpp"
 
 using namespace pulse;
 

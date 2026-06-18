@@ -15,10 +15,10 @@
 //   - JSON parse fail → ErrorCode::ExchangeError
 //   - HTTP timeout   → ErrorCode::NetworkTimeout
 
-#include "pulse/exchange/gate_rest_client.hpp"
+#include "exchange/gate_rest_client.hpp"
 
-#include "pulse/exchange/gate_auth.hpp"
-#include "pulse/logging/logger.hpp"
+#include "exchange/gate_auth.hpp"
+#include "logging/logger.hpp"
 
 #include <curl/curl.h>
 

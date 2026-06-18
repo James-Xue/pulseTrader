@@ -14,9 +14,9 @@
 // The LLM reads this and returns a JSON object matching the schema enforced
 // by the system prompt. The JSON is then parsed by AIClient into AnalysisResult.
 
-#include "pulse/ai/prompt_builder.hpp"
+#include "ai/prompt_builder.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <cstddef>

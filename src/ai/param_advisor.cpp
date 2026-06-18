@@ -18,9 +18,9 @@
 // These defaults are conservative — they allow gradual tuning over multiple AI
 // cycles while preventing any single cycle from making dangerous changes.
 
-#include "pulse/ai/param_advisor.hpp"
+#include "ai/param_advisor.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <cmath>

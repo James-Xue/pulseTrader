@@ -21,9 +21,9 @@
 //   JSON parse failure    → PulseError{AiResponseInvalid, ...}
 //   Schema mismatch       → PulseError{AiSchemaMismatch, ...}
 
-#include "pulse/ai/ai_client.hpp"
+#include "ai/ai_client.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <curl/curl.h>
 

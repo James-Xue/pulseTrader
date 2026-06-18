@@ -5,9 +5,9 @@
 //   2. Worker blocks on condition_variable until a task arrives or stop is requested
 //   3. Destructor signals stop, wakes the worker, and joins the thread
 
-#include "pulse/heartbeat/task_queue.hpp"
+#include "heartbeat/task_queue.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 namespace pulse::heartbeat
 {

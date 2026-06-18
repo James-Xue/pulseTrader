@@ -11,7 +11,7 @@
 // The loop sleeps 50 ms between checks to keep latency low while avoiding
 // busy-waiting.
 
-#include "pulse/webui/dashboard_state.hpp"
+#include "webui/dashboard_state.hpp"
 
 #include <algorithm>
 #include <chrono>

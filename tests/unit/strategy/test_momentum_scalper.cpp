@@ -1,6 +1,6 @@
 // test_momentum_scalper.cpp — Unit tests for EMA crossover strategy (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/scalping/momentum_scalper.hpp"
+#include "strategy/scalping/momentum_scalper.hpp"
 
 #include <gtest/gtest.h>
 

@@ -1,6 +1,6 @@
 // test_stop_loss_engine.cpp — Unit tests for StopLossEngine (Layer 7 Risk Management)
 
-#include "pulse/risk/stop_loss_engine.hpp"
+#include "risk/stop_loss_engine.hpp"
 
 #include <gtest/gtest.h>
 

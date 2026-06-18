@@ -1,8 +1,8 @@
 // position_manager.cpp — Thread-safe position tracking (Layer 7 Risk Management)
 
-#include "pulse/risk/position_manager.hpp"
+#include "risk/position_manager.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 #include <algorithm>
 #include <cmath>

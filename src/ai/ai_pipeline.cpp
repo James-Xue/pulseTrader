@@ -11,9 +11,9 @@
 // is logged and the pipeline either continues with degraded data
 // (social feed failure) or aborts gracefully (LLM failure).
 
-#include "pulse/ai/ai_pipeline.hpp"
+#include "ai/ai_pipeline.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 namespace pulse::ai
 {

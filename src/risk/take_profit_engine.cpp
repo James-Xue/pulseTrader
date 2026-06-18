@@ -1,8 +1,8 @@
 // take_profit_engine.cpp — Partial take-profit ladder (Layer 7 Risk Management)
 
-#include "pulse/risk/take_profit_engine.hpp"
+#include "risk/take_profit_engine.hpp"
 
-#include "pulse/logging/logger.hpp"
+#include "logging/logger.hpp"
 
 namespace pulse::risk
 {

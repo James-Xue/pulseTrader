@@ -1,6 +1,6 @@
 // test_strategy_base.cpp — Unit tests for StrategyBase (Layer 6 Strategy Engine)
 
-#include "pulse/strategy/strategy_base.hpp"
+#include "strategy/strategy_base.hpp"
 
 #include <gtest/gtest.h>
 
