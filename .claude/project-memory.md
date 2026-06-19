@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-19
-> 文件大小：10563 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：12351 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -37,8 +37,8 @@
 
 ## Dependencies (vcpkg.json)
 
-- Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest
-- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
+- Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest, **toml11**
+- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
 - Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
 
 ## Current State (2026-06-19)
@@ -54,6 +54,23 @@
 - **`apps/pulsetrader/CMakeLists.txt`**: Build rules linking all layer libraries, conditional WEBUI support
 - **`run.sh`**: Added `./run.sh trade` command to launch the trading engine
 - **`docs/OPERATIONAL_GUIDE.md`**: 598-line operational guide covering setup, config, parameter tuning, risk control, profitability analysis, FAQ
+
+### TOML Config Loader (2026-06-19)
+- **`src/core/config_loader.hpp/cpp`**: TOML configuration file loader using toml11 v4
+  - Four-stage pipeline: file check → TOML parse → `from_env:VAR` resolution → section parsers
+  - `from_env:` syntax reads sensitive values from environment variables at runtime
+  - Unset/empty env vars resolve to empty string (validation catches missing credentials at runtime)
+  - `find_double()` helper handles toml11 v4 integer/float type distinction (TOML `500` → C++ `double`)
+  - All fields optional — omitted fields retain `config.hpp` defaults
+  - Unknown keys silently ignored for forward compatibility
+- **`src/core/config_validator.hpp/cpp`**: Semantic validation with 20+ rules
+  - Required fields (symbols, exchange credentials), risk ranges, stop-loss/take-profit consistency
+  - Strategy instance symbols validated against top-level symbols list
+  - AI config only validated when `heartbeatIntervalSec > 0` (enabled)
+- **`trading.toml.example`**: Complete sample config with Chinese comments covering all 12 config structs
+- **CMake**: toml11 moved from optional feature to mandatory core dependency; `pulse_core` converted from INTERFACE to STATIC
+- **CLI**: `--config <path>` flag added to `pulsetrader` binary; `./run.sh trade --config trading.toml` supported
+- **Error codes**: Config 5xxx range added (ConfigFileNotFound, ConfigParseError, ConfigMissingField, ConfigInvalidValue, ConfigEnvVarMissing, ConfigValidationError)
 
 ### WS JSON Parsing Fix (2026-06-19)
 - **Orderbook price/quantity type mismatch** (`orderbook_manager.cpp`): Gate.io v4 WS sends all numeric values as JSON strings (e.g. `"50000.0"`). `parse_levels()` and `apply_delta_levels()` used `.get<Price>()` / `.get<Quantity>()` which threw `json.exception.type_error.302`. Fix: `is_string()` branch — `std::stod(level[0].get<std::string>())` for strings, direct `.get<>()` for numbers.
@@ -83,8 +100,8 @@
 - **Coding standards** (2026-06-15/16): AGENTS.md, Allman braces, Yoda conditions, mandatory braces
 
 ### Test Summary
-- 358 tests total (with WEBUI): core 9 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
-- 320 tests (without WEBUI): same minus webui — all passing
+- 404 tests total (with WEBUI): core 9 + config_loader 22 + config_validator 24 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
+- 366 tests (without WEBUI): same minus webui — all passing
 
 ### Milestones Achieved
 - **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
@@ -92,9 +109,10 @@
 - **M3** ✅: AI adaptive — strategy parameters auto-tune every 5 min via LLM analysis
 - **M4** ✅: Complete product — all 9 layers operational, WebUI dashboard with real-time monitoring
 - **M5** ✅: Trading engine — all 9 layers wired into runnable process, `./run.sh trade` launches full system
+- **M6** ✅: TOML config — `--config trading.toml` file-driven configuration with `from_env:` syntax, validation, 46 new tests
 
 ### Next Steps (per roadmap)
-- M1–M5 achieved. Future enhancements: TOML config file loading, SQLite trade recorder, MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI, backtesting system.
+- M1–M6 achieved. Next: SQLite trade recorder (Phase 2), backtesting system, simulated trading mode, P&L dashboard (WebUI), MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI.
 
 ### Operational Setup (2026-06-17)
 - **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
@@ -135,6 +153,7 @@
 8. ✅ Phase 6: L5 + L4 AI Pipeline → **Milestone M3 achieved** (AI adaptive, 50 new tests)
 9. ✅ Phase 7: L9 WebUI → **Milestone M4 achieved** (DashboardState + WebServer + WsServer + Frontend SPA, 57 new tests)
 10. ✅ Phase 8: Trading Engine → **Milestone M5 achieved** (apps/pulsetrader/main.cpp, 9-layer wiring, WS JSON fix, operational guide)
+11. ✅ Phase 9: TOML Config Loader → **Milestone M6 achieved** (config_loader + config_validator + trading.toml.example, toml11 v4, 46 new tests, 404 total)
 
 ## Notes
 
