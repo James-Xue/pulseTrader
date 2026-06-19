@@ -255,6 +255,19 @@ PulseError validate_config(const PulseConfig &cfg)
                 + cfg.log.level + "\")"};
     }
 
+    // -----------------------------------------------------------------------
+    // 10. SQLite config (only validate when enabled)
+    // -----------------------------------------------------------------------
+    if (cfg.sqlite.enabled)
+    {
+        if (cfg.sqlite.dbPath.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "sqlite.dbPath must not be empty when "
+                              "sqlite.enabled is true"};
+        }
+    }
+
     return {}; // All checks passed.
 }
 

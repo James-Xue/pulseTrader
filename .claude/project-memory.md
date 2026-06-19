@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-19
-> 文件大小：12351 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：15204 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -38,8 +38,9 @@
 ## Dependencies (vcpkg.json)
 
 - Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest, **toml11**
-- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
+- Optional: **sqlitecpp** (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
 - Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
+- System install note: SQLiteCpp can be built from source into `~/.local` with `-DCMAKE_CXX_FLAGS="-include cstdint"` for GCC 15 compatibility
 
 ## Current State (2026-06-19)
 
@@ -79,6 +80,24 @@
 - **Sequence gap logic** (`orderbook_manager.cpp`): Gate.io's `lastUpdateId` is a **global counter** shared across all symbols' order book updates, not a per-symbol sequential ID. Old code expected `last_seq + 1` and re-subscribed on every gap — caused infinite re-subscribe loop. Fix: accept any `delta_seq > last_seq`, only reject stale deltas (`delta_seq <= last_seq`).
 - **Test update**: Replaced `SequenceGapTriggersResubscribe` with `SequenceGapIsAccepted` + `StaleDeltaIsRejected` (2 new tests).
 
+### SQLite Trade Recorder (2026-06-19)
+- **`src/trade_recorder/trade_record.hpp`**: POD structs `TradeRecord` (17 fields, mirrors DB row) and `TradeSummary` (aggregate stats)
+- **`src/trade_recorder/trade_recorder.hpp/cpp`**: RAII `TradeRecorder` class
+  - Factory `static open(db_path) → Result<TradeRecorder>` with WAL mode + `synchronous=NORMAL`
+  - `record_trade(ExecutionReport, pnl, strategy_name)` — thread-safe (mutex), INSERT with UNIQUE order_id constraint
+  - 4 query methods: `get_trades(symbol, from, to)`, `get_trades_by_strategy(name)`, `get_summary(from, to)`, `get_daily_pnl(date_ns)`
+  - `trade_count()`, `checkpoint()`, `close()` utilities
+  - Forward-declares `SQLite::Database` to avoid leaking SQLiteCpp into public header
+  - Namespace: `SQLite::` (not `SQLiteCpp::`) — the library package is SQLiteCpp but the C++ namespace is `SQLite`
+- **`src/trade_recorder/CMakeLists.txt`**: `pulse::trade_recorder` STATIC library, links `pulse::core`, `pulse::execution`, `SQLiteCpp`, `spdlog`
+- **Table schema**: `trades` — 17 columns (id, order_id, client_order_id, timestamp_ns, symbol, side, order_type, requested/filled_qty, avg_fill_price, submit_mid_price, slippage_bps, fees, pnl, latency_ms, final_status, strategy_name) + 3 indexes
+- **Error codes**: 6xxx range (TradeRecorderDbError 6000, InsertFailed 6001, QueryFailed 6002, NotOpen 6003, SchemaError 6004, Duplicate 6005)
+- **Config**: `SqliteConfig` struct (`enabled`, `dbPath`) added to `PulseConfig`; `parse_sqlite()` in config_loader.cpp; validation in config_validator.cpp
+- **OrderTracker integration**: `client_order_id` parameter added to `track_order()` and `TrackedOrder` struct; flows through to `ExecutionReport` via `generate_report()`; `main.cpp` passes `sig.strategy_id` as client_order_id
+- **main.cpp integration**: Conditional `#ifdef PULSE_ENABLE_SQLITE` init after L8, chained into completion callback (record_trade after drawdown_guard.record_pnl), graceful shutdown (checkpoint + close before L2 Logger)
+- **`trading.toml.example`**: Added `[sqlite]` section with `enabled = true`, `dbPath = "data/trades.db"`
+- **27 tests** (all `:memory:` SQLite): 15 core (open/close/insert/duplicate/partial fill/all-fields roundtrip) + 12 queries (filter by symbol/time/strategy, summary, win rate, daily PnL)
+
 ### Bug Fixes (2026-06-18)
 - **REST URL double path** (`config.hpp`): `restBaseUrl` changed to host only (`https://api.gateio.ws`), path includes `/api/v4`.
 - **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` now queues `PendingAction` and sends immediately if connected. Refactored `WsInternal` to member `shared_ptr`.
@@ -100,8 +119,9 @@
 - **Coding standards** (2026-06-15/16): AGENTS.md, Allman braces, Yoda conditions, mandatory braces
 
 ### Test Summary
-- 404 tests total (with WEBUI): core 9 + config_loader 22 + config_validator 24 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
-- 366 tests (without WEBUI): same minus webui — all passing
+- 431 tests total (with WEBUI + SQLITE): core 9 + config_loader 22 + config_validator 24 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 — all passing
+- 404 tests (with WEBUI, without SQLITE): same minus trade_recorder — all passing
+- 366 tests (without WEBUI or SQLITE): same minus webui — all passing
 
 ### Milestones Achieved
 - **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
@@ -110,15 +130,16 @@
 - **M4** ✅: Complete product — all 9 layers operational, WebUI dashboard with real-time monitoring
 - **M5** ✅: Trading engine — all 9 layers wired into runnable process, `./run.sh trade` launches full system
 - **M6** ✅: TOML config — `--config trading.toml` file-driven configuration with `from_env:` syntax, validation, 46 new tests
+- **M7** ✅: SQLite trade recorder — 17-column trades table, 4 query APIs, WAL + mutex, strategy tracking via client_order_id, 27 new tests
 
 ### Next Steps (per roadmap)
-- M1–M6 achieved. Next: SQLite trade recorder (Phase 2), backtesting system, simulated trading mode, P&L dashboard (WebUI), MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI.
+- M1–M7 achieved. Next: backtesting system, simulated trading mode (Gate.io testnet), P&L dashboard (WebUI), MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI.
 
 ### Operational Setup (2026-06-17)
 - **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
 - **run.sh**: Convenience script in project root — `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
   - Auto-sources `.env` for API credentials and proxy settings
-  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (358 unit tests)
+  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (431 unit tests)
 - **.env**: Gitignored file for runtime configuration
   - `GATE_API_KEY` / `GATE_API_SECRET` — Gate.io HMAC credentials
   - `HTTP_PROXY` / `HTTPS_PROXY` — Clash Verge proxy (`http://127.0.0.1:7897`)
@@ -154,6 +175,7 @@
 9. ✅ Phase 7: L9 WebUI → **Milestone M4 achieved** (DashboardState + WebServer + WsServer + Frontend SPA, 57 new tests)
 10. ✅ Phase 8: Trading Engine → **Milestone M5 achieved** (apps/pulsetrader/main.cpp, 9-layer wiring, WS JSON fix, operational guide)
 11. ✅ Phase 9: TOML Config Loader → **Milestone M6 achieved** (config_loader + config_validator + trading.toml.example, toml11 v4, 46 new tests, 404 total)
+12. ✅ Phase 10: SQLite Trade Recorder → **Milestone M7 achieved** (trade_recorder + trade_record + 17-column schema + 4 queries, SQLiteCpp, 27 new tests, 431 total)
 
 ## Notes
 

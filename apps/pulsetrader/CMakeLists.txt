@@ -35,3 +35,8 @@ if(PULSE_ENABLE_WEBUI)
             z
     )
 endif()
+
+if(PULSE_ENABLE_SQLITE)
+    target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_SQLITE=1)
+    target_link_libraries(pulsetrader PRIVATE pulse::trade_recorder)
+endif()

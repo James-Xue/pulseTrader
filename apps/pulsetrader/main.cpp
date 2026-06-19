@@ -44,6 +44,10 @@
 #include "webui/web_server.hpp"
 #endif
 
+#ifdef PULSE_ENABLE_SQLITE
+#include "trade_recorder/trade_recorder.hpp"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -338,6 +342,41 @@ int main(int argc, char* argv[])
     log->info("[L8] Order executor + tracker created");
 
     // ------------------------------------------------------------------
+    // 6b. Trade Recorder (optional, Phase 2)
+    // ------------------------------------------------------------------
+#ifdef PULSE_ENABLE_SQLITE
+    std::unique_ptr<pulse::trade_recorder::TradeRecorder> trade_recorder;
+
+    if (cfg.sqlite.enabled)
+    {
+        auto rec_result = pulse::trade_recorder::TradeRecorder::open(
+            cfg.sqlite.dbPath);
+
+        if (pulse::ok(rec_result))
+        {
+            trade_recorder = std::make_unique<
+                pulse::trade_recorder::TradeRecorder>(
+                    std::move(pulse::value(rec_result)));
+            log->info("[L8+] Trade recorder opened: '{}'",
+                      cfg.sqlite.dbPath);
+        }
+        else
+        {
+            log->warn("[L8+] Trade recorder failed to open: {}",
+                      pulse::error(rec_result).message);
+        }
+    }
+    else
+    {
+        log->info("[L8+] Trade recorder disabled "
+                  "(set sqlite.enabled = true)");
+    }
+#else
+    log->info("[L8+] Trade recorder disabled "
+              "(compile with -DPULSE_ENABLE_SQLITE=ON)");
+#endif
+
+    // ------------------------------------------------------------------
     // 7. L6: Strategy Engine
     // ------------------------------------------------------------------
     pulse::strategy::StrategyManager strategy_mgr;
@@ -521,7 +560,8 @@ int main(int argc, char* argv[])
             // Track order lifecycle via WS + REST polling fallback.
             order_tracker.track_order(resp.order_id, req.symbol,
                                       req.side, req.type,
-                                      req.quantity, sig.price);
+                                      req.quantity, sig.price,
+                                      sig.strategy_id);
         });
 
     // ------------------------------------------------------------------
@@ -582,6 +622,21 @@ int main(int argc, char* argv[])
             // Update drawdown guard with realized PnL.
             double pnl = 0.0;  // Simplified — real PnL needs position tracking.
             drawdown_guard.record_pnl(pnl);
+
+            // Record trade in SQLite (if enabled).
+#ifdef PULSE_ENABLE_SQLITE
+            if (trade_recorder)
+            {
+                auto rec_result = trade_recorder->record_trade(
+                    report, pnl, report.client_order_id);
+
+                if (!pulse::ok(rec_result))
+                {
+                    log_app->warn("Trade recorder INSERT failed: {}",
+                                  pulse::error(rec_result).message);
+                }
+            }
+#endif
         });
 
     // ------------------------------------------------------------------
@@ -688,6 +743,17 @@ int main(int argc, char* argv[])
     auto portfolio = position_mgr.portfolio_summary();
     log->info("Final portfolio: {} open position(s), notional {:.2f} USDT",
               position_mgr.open_position_count(), portfolio.total_notional);
+
+    // L8+: Trade recorder
+#ifdef PULSE_ENABLE_SQLITE
+    if (trade_recorder)
+    {
+        const auto count = trade_recorder->trade_count();
+        trade_recorder->checkpoint();
+        trade_recorder->close();
+        log->info("[L8+] Trade recorder closed ({} trades recorded)", count);
+    }
+#endif
 
     log->info("pulseTrader stopped. Goodbye.");
 

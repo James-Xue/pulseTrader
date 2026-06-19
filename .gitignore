@@ -46,6 +46,7 @@ build
 # debug information files
 *.dwo
 build/
+build_no_sqlite/
 .cache/
 
 # Runtime logs

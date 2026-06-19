@@ -241,6 +241,19 @@ struct StrategyConfig
 };
 
 // ---------------------------------------------------------------------------
+// SqliteConfig — Optional SQLite trade recorder (requires -DPULSE_ENABLE_SQLITE=ON)
+//
+// Fields:
+//   1. enabled — Whether SQLite trade recording is active
+//   2. dbPath  — Path to the SQLite database file (created if missing)
+// ---------------------------------------------------------------------------
+struct SqliteConfig
+{
+    bool enabled = false;                ///< Disabled by default.
+    std::string dbPath = "trades.db";    ///< SQLite database file path.
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
@@ -253,6 +266,7 @@ struct PulseConfig
     StrategyConfig strategy;
     LogConfig log;
     WebUiConfig webui;
+    SqliteConfig sqlite;                ///< SQLite trade recorder config.
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
 };
 
