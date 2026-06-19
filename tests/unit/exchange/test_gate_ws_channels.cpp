@@ -5,6 +5,8 @@
 
 #include "exchange/gate_ws_channels.hpp"
 
+#include "core/types.hpp"
+
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
@@ -193,19 +195,66 @@ TEST(GateWsChannelsTest, BuildUnsubscribeMsgFormat)
 }
 
 // ---------------------------------------------------------------------------
-// Test 8: BuildPongFromPing — verify pong response format
+// Test 8: BuildPongFromSpotPing — verify pong response for spot ping
 // ---------------------------------------------------------------------------
-TEST(GateWsChannelsTest, BuildPongFromPing)
+TEST(GateWsChannelsTest, BuildPongFromSpotPing)
 {
-    // 1. Simulate a server ping frame
+    // 1. Simulate a server spot ping frame
     const auto ping = nlohmann::json{ { "time", 1700000000 }, { "channel", "spot.ping" } };
 
-    // 2. Build the pong reply
+    // 2. Build the pong reply (default MarketType::Spot)
     const auto pong = GateWsChannels::build_pong(ping);
 
-    // 3. Verify pong has the same timestamp and correct channel
+    // 3. Verify pong has the same timestamp and spot.pong channel
     EXPECT_EQ(1700000000, pong["time"].get<std::int64_t>());
     EXPECT_EQ("spot.pong", pong["channel"].get<std::string>());
+}
+
+// ---------------------------------------------------------------------------
+// Test 8b: BuildPongFromFuturesPing — verify pong for futures ping
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, BuildPongFromFuturesPing)
+{
+    // 1. Simulate a server futures ping frame
+    const auto ping = nlohmann::json{ { "time", 1700000500 }, { "channel", "futures.ping" } };
+
+    // 2. Build the pong reply with Futures market type
+    const auto pong = GateWsChannels::build_pong(ping, MarketType::Futures);
+
+    // 3. Verify pong has futures.pong channel (dynamically derived from futures.ping)
+    EXPECT_EQ(1700000500, pong["time"].get<std::int64_t>());
+    EXPECT_EQ("futures.pong", pong["channel"].get<std::string>());
+}
+
+// ---------------------------------------------------------------------------
+// Test 8c: BuildPong_PreservesTime — time field is always copied from ping
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, BuildPong_PreservesTime)
+{
+    // Various time values should be preserved exactly
+    for (const auto ts : { 0, 1, 1577836800, 1700000000, 2147483647 })
+    {
+        const auto ping = nlohmann::json{ { "time", ts }, { "channel", "spot.ping" } };
+        const auto pong = GateWsChannels::build_pong(ping);
+        EXPECT_EQ(ts, pong["time"].get<std::int64_t>()) << "time mismatch for ts=" << ts;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 8d: BuildPong_DynamicChannel — channel is derived from input, not hardcoded
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, BuildPong_DynamicChannel)
+{
+    // Even if we pass Spot as market type, a futures.ping channel should produce futures.pong
+    // because the channel is derived from the input ping frame's channel field.
+    const auto ping = nlohmann::json{ { "time", 42 }, { "channel", "futures.ping" } };
+    const auto pong = GateWsChannels::build_pong(ping, MarketType::Spot);
+    EXPECT_EQ("futures.pong", pong["channel"].get<std::string>());
+
+    // Conversely, spot.ping with Futures market type should still produce spot.pong
+    const auto ping2 = nlohmann::json{ { "time", 43 }, { "channel", "spot.ping" } };
+    const auto pong2 = GateWsChannels::build_pong(ping2, MarketType::Futures);
+    EXPECT_EQ("spot.pong", pong2["channel"].get<std::string>());
 }
 
 // ---------------------------------------------------------------------------

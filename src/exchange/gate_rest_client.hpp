@@ -16,6 +16,7 @@
 
 #include "core/config.hpp"
 #include "core/error.hpp"
+#include "core/types.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -49,8 +50,11 @@ class GateRestClient
     /// The base URL should be the host only (e.g. "https://api.gateio.ws"),
     /// NOT including "/api/v4" — that prefix is part of the path.
     ///
+    /// market_type selects spot or futures endpoint paths for convenience methods.
+    /// The generic request() method accepts any path regardless of market_type.
+    ///
     /// Initialises curl_global_init() on first construction (process-wide).
-    explicit GateRestClient(const ExchangeConfig &config);
+    explicit GateRestClient(const ExchangeConfig &config, MarketType market_type = MarketType::Spot);
 
     ~GateRestClient();
 
@@ -93,6 +97,26 @@ class GateRestClient
     [[nodiscard]] Result<nlohmann::json> get_spot_accounts();
 
     // -----------------------------------------------------------------------
+    // Futures endpoints
+    // -----------------------------------------------------------------------
+
+    /// GET /api/v4/futures/usdt/contracts — list all USDT-settled perpetual contracts.
+    ///
+    /// Returns contract metadata: name, mark price, funding rate, multiplier, etc.
+    [[nodiscard]] Result<nlohmann::json> get_futures_contracts();
+
+    /// GET /api/v4/futures/usdt/tickers?contract={contract} — fetch futures ticker.
+    ///
+    /// Returns the latest mark price, index price, funding rate, volume.
+    [[nodiscard]] Result<nlohmann::json> get_futures_ticker(const std::string &contract);
+
+    /// GET /api/v4/futures/usdt/accounts — fetch futures account balance.
+    ///
+    /// Returns {total, available, unrealised_pnl, currency, etc.}.
+    /// Requires valid API key and secret.
+    [[nodiscard]] Result<nlohmann::json> get_futures_accounts();
+
+    // -----------------------------------------------------------------------
     // Generic request (for future expansion)
     // -----------------------------------------------------------------------
 
@@ -114,6 +138,7 @@ class GateRestClient
 
   private:
     ExchangeConfig config_;
+    MarketType market_type_;
 
     /// Perform a single HTTP request (no retry). Returns raw HttpResponse.
     [[nodiscard]] HttpResponse do_request(

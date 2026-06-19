@@ -219,4 +219,26 @@ TEST(GateWsClientTest, BuildWsAuthSignIsHexLowercase)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Test 13: ConstructWithDefaultMarketType — backward-compatible: default is Spot
+// ---------------------------------------------------------------------------
+TEST(GateWsClientTest, ConstructWithDefaultMarketType)
+{
+    // Existing code that constructs with just ExchangeConfig should still compile
+    // and behave identically to before (market_type defaults to Spot).
+    const ExchangeConfig config;
+    const GateWsClient client(config);
+    EXPECT_EQ(WsConnectionState::Disconnected, client.state());
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: ConstructWithFuturesMarketType — explicit Futures market type
+// ---------------------------------------------------------------------------
+TEST(GateWsClientTest, ConstructWithFuturesMarketType)
+{
+    const ExchangeConfig config;
+    const GateWsClient client(config, MarketType::Futures);
+    EXPECT_EQ(WsConnectionState::Disconnected, client.state());
+}
+
 } // namespace pulse::exchange::test

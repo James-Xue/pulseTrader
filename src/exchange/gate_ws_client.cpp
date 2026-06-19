@@ -11,6 +11,7 @@
 
 #include "exchange/gate_ws_client.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "exchange/gate_auth.hpp"
 #include "logging/logger.hpp"
 
@@ -570,7 +571,8 @@ void WsInternal::send_queued(GateWsChannels &channels, const ExchangeConfig &con
 // GateWsClient implementation
 // ---------------------------------------------------------------------------
 
-GateWsClient::GateWsClient(const ExchangeConfig &config) : config_(config), channels_(), internal_(std::make_shared<WsInternal>())
+GateWsClient::GateWsClient(const ExchangeConfig &config, MarketType market_type)
+    : config_(config), market_type_(market_type), channels_(), internal_(std::make_shared<WsInternal>())
 {
 }
 
@@ -688,18 +690,19 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
     // websocketpp connects to the local tunnel, which forwards through the proxy
     // via HTTP CONNECT to the real WSS server.
     const std::string proxy_url = detect_proxy_url(config_);
-    std::string connect_url = config_.wsUrl;
+    const std::string ws_url = EndpointRouter::select_ws_url(config_, market_type_);
+    std::string connect_url = ws_url;
     std::string real_host;
     std::unique_ptr<ProxyTunnel> tunnel;
 
     if (!proxy_url.empty())
     {
-        auto parts = parse_ws_url(config_.wsUrl);
+        auto parts = parse_ws_url(ws_url);
         real_host = parts.host;
         tunnel = std::make_unique<ProxyTunnel>(proxy_url, parts.host, parts.port, parts.path);
         connect_url = tunnel->start();
         PULSE_LOG_INFO("exchange", "WS proxy tunnel active: {} → {} (via {})",
-            connect_url, config_.wsUrl, proxy_url);
+            connect_url, ws_url, proxy_url);
     }
 
     // Reconnect loop — runs until stop_token is triggered
@@ -817,13 +820,15 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     }
 
                     // 2. Handle server ping — reply with pong immediately
-                    if (frame.contains("channel") && "spot.ping" == frame["channel"].get<std::string>())
+                    //    Supports both spot (JSON spot.ping) and futures (JSON futures.ping or RFC 6455)
+                    const std::string ping_ch = EndpointRouter::ping_channel(market_type_);
+                    if (frame.contains("channel") && ping_ch == frame["channel"].get<std::string>())
                     {
-                        PULSE_LOG_DEBUG("exchange", "WS received server ping");
-                        nlohmann::json pong = { { "time", frame.value("time", 0) },
-                            { "channel", "spot.pong" } };
+                        PULSE_LOG_DEBUG("exchange", "WS received server ping ({})", ping_ch);
+                        const auto pong = GateWsChannels::build_pong(frame, market_type_);
                         client.send(hdl, pong.dump(), websocketpp::frame::opcode::text);
-                        PULSE_LOG_DEBUG("exchange", "WS sent pong");
+                        PULSE_LOG_DEBUG("exchange", "WS sent pong ({})",
+                            EndpointRouter::pong_channel(market_type_));
                         return;
                     }
 

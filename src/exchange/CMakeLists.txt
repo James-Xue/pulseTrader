@@ -1,6 +1,7 @@
 # pulse_exchange — Gate.io v4 REST + WebSocket client with HMAC-SHA512 signing.
 
 add_library(pulse_exchange STATIC
+    endpoint_router.cpp
     gate_auth.cpp
     gate_rest_client.cpp
     gate_ws_channels.cpp

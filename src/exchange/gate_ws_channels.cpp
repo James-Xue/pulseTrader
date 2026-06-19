@@ -5,6 +5,7 @@
 
 #include "exchange/gate_ws_channels.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "logging/logger.hpp"
 
 #include <chrono>
@@ -97,14 +98,38 @@ nlohmann::json GateWsChannels::build_unsubscribe_msg(const std::string &channel,
 }
 
 // ---------------------------------------------------------------------------
-// build_pong
+// build_pong — derive pong channel from incoming ping frame
 // ---------------------------------------------------------------------------
-nlohmann::json GateWsChannels::build_pong(const nlohmann::json &ping_frame)
+nlohmann::json GateWsChannels::build_pong(const nlohmann::json &ping_frame, MarketType mt)
 {
-    // Gate.io sends: {"time": <int>, "channel": "spot.ping"}
-    // Client replies: {"time": <same_int>, "channel": "spot.pong"}
+    // Gate.io sends: {"time": <int>, "channel": "<prefix>.ping"}
+    // Client replies: {"time": <same_int>, "channel": "<prefix>.pong"}
+    //
+    // Strategy: replace ".ping" with ".pong" in the incoming channel name.
+    // Fallback: use EndpointRouter::pong_channel(mt) if channel is missing.
     const auto time_val = ping_frame.value("time", 0);
-    return nlohmann::json{ { "time", time_val }, { "channel", "spot.pong" } };
+
+    std::string pong_ch;
+    if (ping_frame.contains("channel"))
+    {
+        std::string ch = ping_frame["channel"].get<std::string>();
+        const auto pos = ch.rfind(".ping");
+        if (std::string::npos != pos)
+        {
+            ch.replace(pos, 5, ".pong");
+            pong_ch = std::move(ch);
+        }
+        else
+        {
+            pong_ch = EndpointRouter::pong_channel(mt);
+        }
+    }
+    else
+    {
+        pong_ch = EndpointRouter::pong_channel(mt);
+    }
+
+    return nlohmann::json{ { "time", time_val }, { "channel", std::move(pong_ch) } };
 }
 
 // ---------------------------------------------------------------------------

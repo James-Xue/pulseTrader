@@ -1,206 +1,109 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-19
-> 文件大小：17931 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：4896 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
 
 - **Project**: pulseTrader — C++20 high-frequency scalping framework
-- **Version**: 0.1.0-dev
 - **Repository**: https://github.com/James-Xue/pulseTrader (public, GPL 3.0)
 - **Exchange**: Gate.io (REST + WebSocket), single-exchange focus
-- **Namespace**: `pulse::`
-- **Build**: CMake + vcpkg
+- **Namespace**: `pulse::` · **Build**: CMake + vcpkg
 
-## Architecture (9 Layers)
+## Architecture (9 Layers, All ✅)
 
-| Layer | Module | Responsibility | Status |
-|-------|--------|----------------|--------|
-| 1 | Exchange | Gate.io REST + WebSocket API | ✅ Done |
-| 2 | Logging & Monitoring | spdlog + fmt | ✅ Done |
-| 3 | Market Data | Hot path, latency-critical | ✅ Done |
-| 4 | AI Analysis | Social/news ingestion → LLM → fixed JSON schema → param deltas | ✅ Done |
-| 5 | Heartbeat Scheduler | 5-min AI clock, TaskQueue worker thread | ✅ Done |
-| 6 | Strategy Engine | EMA crossover, order book imbalance, Bollinger Band mean-reversion, weighted signal aggregation | ✅ Done |
-| 7 | Risk Management | PositionManager, RiskManager, DrawdownGuard, OrderRateLimiter, StopLossEngine, TakeProfitEngine | ✅ Done |
-| 8 | Order Execution | Order lifecycle management | ✅ Done |
-| 9 | WebUI | Cross-cutting read-only observability | ✅ Done |
+| L1 Exchange | L2 Logging | L3 Market Data | L4 AI Analysis | L5 Heartbeat |
+|---|---|---|---|---|
+| L6 Strategy | L7 Risk Mgmt | L8 Execution | L9 WebUI | — |
 
-### Key Design Decisions
-- Two parallel data pipelines: market hot path (latency-critical) vs AI background pipeline, bridged via `std::atomic`
-- WebUI: layered polling (200ms ~ 5min), lock-free reads (atomic load / seqlock / atomic shared_ptr)
-- WebUI recommended stack: uWebSockets (crow/beast conflict with standalone asio)
-- WebUI security: localhost bind + bearer token + Host header validation
-- WebUI gated by CMake flag: `-DPULSE_ENABLE_WEBUI=ON`
-- HTTP proxy support: REST via libcurl `CURLOPT_PROXY` + `CURLOPT_HTTPPROXYTUNNEL`; WebSocket via `ProxyTunnel` class (local TCP forwarder + HTTP CONNECT tunnel)
-- API credentials: `.env` file with `GATE_API_KEY` / `GATE_API_SECRET` env vars (gitignored)
+- Hot path (L1→L3→L6→L7→L8) vs AI background (L4→L5), bridged via `std::atomic`
+- WebUI: uWebSockets, `-DPULSE_ENABLE_WEBUI=ON`, localhost + bearer token
+- Proxy: REST via `CURLOPT_PROXY`; WS via `ProxyTunnel` class
+- Credentials: `.env` (`GATE_API_KEY`/`GATE_API_SECRET`), gitignored
 
-## Dependencies (vcpkg.json)
+## Dependencies
 
-- Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest, **toml11**
-- Optional: **sqlitecpp** (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
-- Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
-- System install note: SQLiteCpp can be built from source into `~/.local` with `-DCMAKE_CXX_FLAGS="-include cstdint"` for GCC 15 compatibility
+- Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest, toml11
+- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
+- Vendored: uWebSockets + uSockets in `third_party/`
+- SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (2026-06-19)
-
-### Trading Engine (2026-06-19)
-- **`apps/pulsetrader/main.cpp`**: Main trading program wiring all 9 layers (~630 lines)
-  - Construction order: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
-  - Signal flow: StrategyManager → SignalAggregator → [app callback: risk check → OrderExecutor → OrderTracker]
-  - OrderTracker completion callback → PositionManager open/close + DrawdownGuard PnL
-  - Graceful shutdown: SIGINT/SIGTERM → atomic stop flag → reverse-order stop (WebUI → Heartbeat → Strategy → Market → WS → Logger)
-  - Strategy factory: `create_strategy()` maps config name → concrete class (MomentumScalper, OrderBookScalper, MeanReversionScalper)
-  - Default config: 2 strategies on BTC_USDT, AI disabled, WebUI on :8080, credentials from `.env`
-- **`apps/pulsetrader/CMakeLists.txt`**: Build rules linking all layer libraries, conditional WEBUI support
-- **`run.sh`**: Added `./run.sh trade` command to launch the trading engine
-- **`docs/OPERATIONAL_GUIDE.md`**: 598-line operational guide covering setup, config, parameter tuning, risk control, profitability analysis, FAQ
-
-### TOML Config Loader (2026-06-19)
-- **`src/core/config_loader.hpp/cpp`**: TOML configuration file loader using toml11 v4
-  - Four-stage pipeline: file check → TOML parse → `from_env:VAR` resolution → section parsers
-  - `from_env:` syntax reads sensitive values from environment variables at runtime
-  - Unset/empty env vars resolve to empty string (validation catches missing credentials at runtime)
-  - `find_double()` helper handles toml11 v4 integer/float type distinction (TOML `500` → C++ `double`)
-  - All fields optional — omitted fields retain `config.hpp` defaults
-  - Unknown keys silently ignored for forward compatibility
-- **`src/core/config_validator.hpp/cpp`**: Semantic validation with 20+ rules
-  - Required fields (symbols, exchange credentials), risk ranges, stop-loss/take-profit consistency
-  - Strategy instance symbols validated against top-level symbols list
-  - AI config only validated when `heartbeatIntervalSec > 0` (enabled)
-- **`trading.toml.example`**: Complete sample config with Chinese comments covering all 12 config structs
-- **CMake**: toml11 moved from optional feature to mandatory core dependency; `pulse_core` converted from INTERFACE to STATIC
-- **CLI**: `--config <path>` flag added to `pulsetrader` binary; `./run.sh trade --config trading.toml` supported
-- **Error codes**: Config 5xxx range added (ConfigFileNotFound, ConfigParseError, ConfigMissingField, ConfigInvalidValue, ConfigEnvVarMissing, ConfigValidationError)
-
-### WS JSON Parsing Fix (2026-06-19)
-- **Orderbook price/quantity type mismatch** (`orderbook_manager.cpp`): Gate.io v4 WS sends all numeric values as JSON strings (e.g. `"50000.0"`). `parse_levels()` and `apply_delta_levels()` used `.get<Price>()` / `.get<Quantity>()` which threw `json.exception.type_error.302`. Fix: `is_string()` branch — `std::stod(level[0].get<std::string>())` for strings, direct `.get<>()` for numbers.
-- **Kline timestamp type mismatch** (`market_feed.cpp:207`): `result["t"]` is a string, `.get<std::int64_t>()` crashed. Fix: `is_string()` branch with `std::stoll()`.
-- **`lastUpdateId` type hardening** (`orderbook_manager.cpp:28,57`): Added `is_string()` fallback with `std::stoull()` for both snapshot and delta sequence IDs.
-- **Sequence gap logic** (`orderbook_manager.cpp`): Gate.io's `lastUpdateId` is a **global counter** shared across all symbols' order book updates, not a per-symbol sequential ID. Old code expected `last_seq + 1` and re-subscribed on every gap — caused infinite re-subscribe loop. Fix: accept any `delta_seq > last_seq`, only reject stale deltas (`delta_seq <= last_seq`).
-- **Test update**: Replaced `SequenceGapTriggersResubscribe` with `SequenceGapIsAccepted` + `StaleDeltaIsRejected` (2 new tests).
-
-### SQLite Trade Recorder (2026-06-19)
-- **`src/trade_recorder/trade_record.hpp`**: POD structs `TradeRecord` (17 fields, mirrors DB row) and `TradeSummary` (aggregate stats)
-- **`src/trade_recorder/trade_recorder.hpp/cpp`**: RAII `TradeRecorder` class
-  - Factory `static open(db_path) → Result<TradeRecorder>` with WAL mode + `synchronous=NORMAL`
-  - `record_trade(ExecutionReport, pnl, strategy_name)` — thread-safe (mutex), INSERT with UNIQUE order_id constraint
-  - 4 query methods: `get_trades(symbol, from, to)`, `get_trades_by_strategy(name)`, `get_summary(from, to)`, `get_daily_pnl(date_ns)`
-  - `trade_count()`, `checkpoint()`, `close()` utilities
-  - Forward-declares `SQLite::Database` to avoid leaking SQLiteCpp into public header
-  - Namespace: `SQLite::` (not `SQLiteCpp::`) — the library package is SQLiteCpp but the C++ namespace is `SQLite`
-- **`src/trade_recorder/CMakeLists.txt`**: `pulse::trade_recorder` STATIC library, links `pulse::core`, `pulse::execution`, `SQLiteCpp`, `spdlog`
-- **Table schema**: `trades` — 17 columns (id, order_id, client_order_id, timestamp_ns, symbol, side, order_type, requested/filled_qty, avg_fill_price, submit_mid_price, slippage_bps, fees, pnl, latency_ms, final_status, strategy_name) + 3 indexes
-- **Error codes**: 6xxx range (TradeRecorderDbError 6000, InsertFailed 6001, QueryFailed 6002, NotOpen 6003, SchemaError 6004, Duplicate 6005)
-- **Config**: `SqliteConfig` struct (`enabled`, `dbPath`) added to `PulseConfig`; `parse_sqlite()` in config_loader.cpp; validation in config_validator.cpp
-- **OrderTracker integration**: `client_order_id` parameter added to `track_order()` and `TrackedOrder` struct; flows through to `ExecutionReport` via `generate_report()`; `main.cpp` passes `sig.strategy_id` as client_order_id
-- **main.cpp integration**: Conditional `#ifdef PULSE_ENABLE_SQLITE` init after L8, chained into completion callback (record_trade after drawdown_guard.record_pnl), graceful shutdown (checkpoint + close before L2 Logger)
-- **`trading.toml.example`**: Added `[sqlite]` section with `enabled = true`, `dbPath = "data/trades.db"`
-- **27 tests** (all `:memory:` SQLite): 15 core (open/close/insert/duplicate/partial fill/all-fields roundtrip) + 12 queries (filter by symbol/time/strategy, summary, win rate, daily PnL)
-
-### Futures Config M8 (2026-06-19)
-- **`src/core/types.hpp`**: New `MarketType` enum (`Spot`/`Futures`) and `MarginMode` enum (`Cross`/`Isolated`) with `to_string()` helpers
-- **`src/core/config.hpp`**: Futures fields added to existing structs:
-  - `ExchangeConfig.futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"` — Gate.io futures WS endpoint
-  - `StrategyInstanceConfig.market_type` / `leverage` / `margin_mode` — per-strategy futures config
-  - `RiskConfig.max_leverage` (1.0–125.0) / `max_margin_used` (0.0–1.0) — futures risk limits
-  - `PulseConfig.default_market_type` — global default for strategies without explicit setting
-- **`src/core/error.hpp`**: 7xxx range error codes (FuturesLeverageExceeded 7001, FuturesMarginInsufficient 7002, FuturesLiquidation 7003, FuturesFundingError 7004, FuturesContractNotFound 7005)
-- **`src/core/config_loader.cpp`**: TOML parsing for all new fields + `parse_market_type()`/`parse_margin_mode()` string-to-enum helpers
-- **`src/core/config_validator.cpp`**: leverage range (≥1.0, ≤max_leverage), max_leverage range (1.0–125.0), max_margin_used range (0.0–1.0), per-strategy leverage vs global max cross-check
-- **`trading.toml.example`**: futuresWsUrl, max_leverage/max_margin_used, commented futures strategy example with Chinese explanations
-- **All defaults backward-compatible**: MarketType::Spot, leverage=1.0, MarginMode::Cross, multiplier=1.0 — existing 404 tests unaffected
-- **18 new tests**: 4 MarketType/MarginMode to_string + 2 config defaults + 5 config_loader futures parsing + 7 config_validator futures validation
-
-### Bug Fixes (2026-06-18)
-- **REST URL double path** (`config.hpp`): `restBaseUrl` changed to host only (`https://api.gateio.ws`), path includes `/api/v4`.
-- **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` now queues `PendingAction` and sends immediately if connected. Refactored `WsInternal` to member `shared_ptr`.
-- **WS pong missing**: `on_message` now replies `spot.pong` immediately.
-- **Orderbook symbol field** (`market_feed.cpp`): Changed to `result.value("s", "")` (Gate.io puts symbol in `result["s"]`).
-- **Orderbook event type** (`market_feed.cpp`): Changed `"update"` to `"all"` for snapshot detection.
-
-### Completed
-- **L2 Logging** (2026-06-15): spdlog async, per-module isolation, `PULSE_LOG_*` macros, 8 tests
-- **L1 Exchange REST** (2026-06-16/17): Gate.io v4 REST, libcurl + HMAC signing + retry + proxy, 11 tests
-- **L1 Exchange WebSocket** (2026-06-16/17): websocketpp + asio, auto-reconnect, proxy tunnel, private HMAC auth, 24 tests
-- **L3 Market Data** (2026-06-16): ticker_cache, symbol_registry, kline_buffer (seqlock), orderbook_manager, market_feed, 33 tests
-- **L8 Order Execution** (2026-06-16): order_executor (REST), order_tracker (WS + REST fallback), execution_report, 22 tests
-- **L7 Risk Management** (2026-06-16): position_manager, drawdown_guard, order_rate_limiter, risk_manager, stop_loss/take_profit engines, 92 tests
-- **L6 Strategy Engine** (2026-06-16): 3 strategies (momentum/orderbook/mean_reversion), signal_aggregator, strategy_manager (jthread per strategy), 52 tests
-- **L4 AI Analysis** (2026-06-17): ai_pipeline, twitter_feed, news_feed, prompt_builder, ai_client (OpenAI/Claude), param_advisor, 43 tests
-- **L5 Heartbeat** (2026-06-17): task_queue, heartbeat_scheduler (asio steady_timer), 7 tests
-- **L9 WebUI** (2026-06-17): dashboard_state (tiered polling), web_server (uWebSockets), ws_server (push broadcast), dark-theme SPA, 57 tests
-- **Coding standards** (2026-06-15/16): AGENTS.md, Allman braces, Yoda conditions, mandatory braces
+## Current State (M9 Done, 2026-06-19)
 
 ### Test Summary
-- 449 tests total (with WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 — all passing
-- 422 tests (with WEBUI, without SQLITE): same minus trade_recorder — all passing
-- 384 tests (without WEBUI or SQLITE): same minus webui — all passing
+- **467 tests** (WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 53 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 440 without SQLITE · 402 without WEBUI or SQLITE
 
-### Milestones Achieved
-- **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
-- **M2** ✅: Automatic trading: Market Data → Strategy → Risk → Execution
-- **M3** ✅: AI adaptive — strategy parameters auto-tune every 5 min via LLM analysis
-- **M4** ✅: Complete product — all 9 layers operational, WebUI dashboard with real-time monitoring
-- **M5** ✅: Trading engine — all 9 layers wired into runnable process, `./run.sh trade` launches full system
-- **M6** ✅: TOML config — `--config trading.toml` file-driven configuration with `from_env:` syntax, validation, 46 new tests
-- **M7** ✅: SQLite trade recorder — 17-column trades table, 4 query APIs, WAL + mutex, strategy tracking via client_order_id, 27 new tests
-- **M8** ✅: Futures config foundation — MarketType/MarginMode enums, futures config fields, 7xxx error codes, TOML parsing + validation, 18 new tests
+### Milestones
+- **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
+- **M6** ✅: TOML config (`--config trading.toml`, `from_env:` syntax)
+- **M7** ✅: SQLite trade recorder (17-col schema, 4 queries)
+- **M8** ✅: Futures config foundation (MarketType/MarginMode enums, 7xxx errors)
+- **M9** ✅: EndpointRouter + WS ping/pong fix
+  - `src/exchange/endpoint_router.hpp/cpp` — `MarketType` → REST paths / WS prefixes / ping-pong channels
+  - `GateWsClient(config, MarketType=Spot)` — URL via `EndpointRouter::select_ws_url()`, ping/pong generalized
+  - `GateWsChannels::build_pong(frame, MarketType)` — dynamic `.ping`→`.pong` derivation
+  - `GateRestClient(config, MarketType=Spot)` — +3 futures methods (contracts/ticker/accounts)
+  - 18 tests (13 EndpointRouter + 3 build_pong + 2 constructor compat)
 
-### Next Steps (per roadmap)
-- M1–M8 achieved. Next: **M9 — EndpointRouter + WS ping/pong fix**, then M10 (futures market data), M11 (futures risk/PnL), M12 (futures execution + dual-market wiring). After M12: backtesting, simulated trading, P&L dashboard.
-- **Futures support plan**: 5 milestones (M8–M12), USDT-settled only, leverage up to exchange max (125x), simultaneous spot+futures via config. See plan at `.claude/plans/polished-wondering-lamport.md`.
+### Next: M10 — Futures Market Data
+- futures ticker / mark_price / funding_rate parsing
+- `SymbolInfo.contract_multiplier` field
+- dual MarketFeed (spot + futures)
+- ~14 new tests
 
-### Operational Setup (2026-06-17)
-- **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
-- **run.sh**: Convenience script in project root — `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
-  - Auto-sources `.env` for API credentials and proxy settings
-  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (449 unit tests)
-- **.env**: Gitignored file for runtime configuration
-  - `GATE_API_KEY` / `GATE_API_SECRET` — Gate.io HMAC credentials
-  - `HTTP_PROXY` / `HTTPS_PROXY` — Clash Verge proxy (`http://127.0.0.1:7897`)
-- **.gitignore**: Ignores `logs/`, `Testing/`, `.env`, `build/`, `.claude/`
-- **Git global proxy**: `http.proxy` and `https.proxy` set to `http://127.0.0.1:7897`
-- **Warning**: Current config uses **mainnet** (not testnet). Real money at risk when placing orders.
+Then M11 (futures risk/PnL) → M12 (futures execution + dual-market wiring) → testnet → paper trading → 小资金实盘
+
+## Config Structure
+
+Key files: `src/core/config.hpp` (all structs), `config_loader.cpp` (TOML→struct), `config_validator.cpp` (semantic rules)
+
+```
+PulseConfig
+├── ExchangeConfig   (apiKey, apiSecret, restBaseUrl, wsUrl, futuresWsUrl, proxyUrl)
+├── LogConfig        (level, logDir, toConsole, toFile)
+├── StrategyConfig   (aggregator_threshold, cooldown_sec, instances[])
+│   └── StrategyInstanceConfig (name, symbol, market_type, leverage, margin_mode, ...)
+├── RiskConfig       (maxPositionNotional, maxOpenPositions, maxDailyDrawdown, max_leverage, ...)
+│   ├── StopLossConfig  (mode, fixed_pct, trailing_pct, max_hold_seconds)
+│   └── TakeProfitConfig (targets_pct[], fractions[])
+├── AiConfig         (backend, model, apiKey, heartbeatIntervalSec)
+├── WebuiConfig      (enabled, bindAddress, port, authToken)
+├── SqliteConfig     (enabled, dbPath)
+└── symbols[]
+```
+
+## Error Code Ranges
+
+| Range | Subsystem |
+|-------|-----------|
+| 1xxx | Network (timeout, disconnect, WS, auth) |
+| 2xxx | Exchange (rate limit, balance, invalid order) |
+| 3xxx | Risk (rejected, drawdown, position limit, stops) |
+| 4xxx | AI |
+| 5xxx | Config |
+| 6xxx | Trade Recorder |
+| 7xxx | Futures (leverage, margin, liquidation, funding, contract) |
+| 9xxx | Internal / WebUI |
+
+## Operational Setup
+
+- **Branch**: only `main` exists
+- **run.sh**: `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
+- **.env**: `GATE_API_KEY`, `GATE_API_SECRET`, `HTTP_PROXY`, `HTTPS_PROXY` (→ `127.0.0.1:7897`)
+- **Git proxy**: `http.proxy` / `https.proxy` = `http://127.0.0.1:7897`
+- ⚠️ **Mainnet** — real money at risk
 
 ## Code Conventions
 
-- `.clang-format`: Allman braces, Cpp11BracedListStyle=false, 120 col limit, 4-space indent
+- `.clang-format`: Allman braces, 120 col, 4-space indent
 - Naming: PascalCase classes, snake_case functions/vars, kPascalCase constants, trailing_underscore_ privates
-- Yoda conditions: `if (0 == status)` not `if (status == 0)`
-- All braces mandatory (even single-line if/for/while)
-- Error handling: `Result<T>` = `std::variant<T, PulseError>`, ErrorCode enum by subsystem range
-- Config: `ExchangeConfig` stores `restBaseUrl` as host only (e.g. `https://api.gateio.ws`), path includes `/api/v4`
-
-## Strategic Decisions (from 2026-04-05)
-
-- **Open-source for tech reputation** over personal trading profit (alpha decay, small capital, institution competition)
-- Infrastructure layer open-source, strategy layer can stay private
-- Goal: complete market-data → order-execution pipeline before promoting
-
-## Roadmap (from implementation-roadmap.md)
-
-1. ✅ Phase 1 Step 1.1: L2 Logging
-2. ✅ Phase 1 Step 1.2: L1 Exchange REST
-3. ✅ Phase 1 Step 1.3: L1 Exchange WebSocket
-4. ✅ Phase 2: L3 Market Data Pipeline
-5. ✅ Phase 3: L8 Order Execution → **Milestone M1 achieved**
-6. ✅ Phase 4: L7 Risk Management — 6 modules, 92 tests
-7. ✅ Phase 5: L6 Strategy Engine → 3 strategies, signal aggregator, 52 tests
-8. ✅ Phase 6: L5 + L4 AI Pipeline → **Milestone M3 achieved** (AI adaptive, 50 new tests)
-9. ✅ Phase 7: L9 WebUI → **Milestone M4 achieved** (DashboardState + WebServer + WsServer + Frontend SPA, 57 new tests)
-10. ✅ Phase 8: Trading Engine → **Milestone M5 achieved** (apps/pulsetrader/main.cpp, 9-layer wiring, WS JSON fix, operational guide)
-11. ✅ Phase 9: TOML Config Loader → **Milestone M6 achieved** (config_loader + config_validator + trading.toml.example, toml11 v4, 46 new tests, 404 total)
-12. ✅ Phase 10: SQLite Trade Recorder → **Milestone M7 achieved** (trade_recorder + trade_record + 17-column schema + 4 queries, SQLiteCpp, 27 new tests, 431 total)
-13. ✅ Phase 11: Futures Config Foundation → **Milestone M8 achieved** (MarketType/MarginMode enums, futures config fields, 7xxx errors, TOML parsing + validation, 18 new tests, 449 total)
-14. 🔲 Phase 12: Futures EndpointRouter + WS Ping Fix → M9 (endpoint_router.hpp/cpp, WS ping/pong generalization, dual WS URL support, 18 new tests)
-15. 🔲 Phase 13: Futures Market Data → M10 (futures ticker/mark_price/funding_rate, SymbolInfo contract_multiplier, dual MarketFeed, 14 new tests)
-16. 🔲 Phase 14: Futures Risk & PnL → M11 (unified PnL formula with multiplier, leverage/margin checks, liquidation price, 15 new tests)
-17. 🔲 Phase 15: Futures Execution + Dual-Market Wiring → M12 (futures order format, dual WS/MarketFeed in main.cpp, 16 new tests)
+- Yoda conditions, mandatory braces, `Result<T>` = `std::variant<T, PulseError>`
+- `ExchangeConfig.restBaseUrl` = host only (`https://api.gateio.ws`), path includes `/api/v4`
 
 ## Notes
 
-- Project originally at `~/1_Code/pulseTrader`, moved to `~/1_Code/09_pulseTrader`
-- QuantX (`~/1_Code/QuantX`) has reusable Gate.io code (signing, REST client, futures adapter)
-- Sub-account API trading recommended for risk isolation (one sub-account per strategy)
-- Gate.io sub-accounts: inherit main VIP, max 10 (VIP0-4) or 30 (VIP5-9), cannot delete once created
+- QuantX (`~/1_Code/QuantX`) has reusable Gate.io code (signing, REST, futures adapter)
+- Sub-account recommended for risk isolation (max 10 for VIP0-4, inherit main VIP)
+- Futures: USDT-settled only, leverage up to 125x, simultaneous spot+futures via config
