@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-18
-> 文件大小：15423 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
+> Last updated: 2026-06-19
+> 文件大小：10563 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -41,119 +41,66 @@
 - Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), toml11 (`-DPULSE_ENABLE_TOML=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
 - Vendored: uWebSockets + uSockets in `third_party/` (built from source with epoll backend, no libuv needed)
 
-## Current State (2026-06-18)
+## Current State (2026-06-19)
+
+### Trading Engine (2026-06-19)
+- **`apps/pulsetrader/main.cpp`**: Main trading program wiring all 9 layers (~630 lines)
+  - Construction order: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
+  - Signal flow: StrategyManager → SignalAggregator → [app callback: risk check → OrderExecutor → OrderTracker]
+  - OrderTracker completion callback → PositionManager open/close + DrawdownGuard PnL
+  - Graceful shutdown: SIGINT/SIGTERM → atomic stop flag → reverse-order stop (WebUI → Heartbeat → Strategy → Market → WS → Logger)
+  - Strategy factory: `create_strategy()` maps config name → concrete class (MomentumScalper, OrderBookScalper, MeanReversionScalper)
+  - Default config: 2 strategies on BTC_USDT, AI disabled, WebUI on :8080, credentials from `.env`
+- **`apps/pulsetrader/CMakeLists.txt`**: Build rules linking all layer libraries, conditional WEBUI support
+- **`run.sh`**: Added `./run.sh trade` command to launch the trading engine
+- **`docs/OPERATIONAL_GUIDE.md`**: 598-line operational guide covering setup, config, parameter tuning, risk control, profitability analysis, FAQ
+
+### WS JSON Parsing Fix (2026-06-19)
+- **Orderbook price/quantity type mismatch** (`orderbook_manager.cpp`): Gate.io v4 WS sends all numeric values as JSON strings (e.g. `"50000.0"`). `parse_levels()` and `apply_delta_levels()` used `.get<Price>()` / `.get<Quantity>()` which threw `json.exception.type_error.302`. Fix: `is_string()` branch — `std::stod(level[0].get<std::string>())` for strings, direct `.get<>()` for numbers.
+- **Kline timestamp type mismatch** (`market_feed.cpp:207`): `result["t"]` is a string, `.get<std::int64_t>()` crashed. Fix: `is_string()` branch with `std::stoll()`.
+- **`lastUpdateId` type hardening** (`orderbook_manager.cpp:28,57`): Added `is_string()` fallback with `std::stoull()` for both snapshot and delta sequence IDs.
+- **Sequence gap logic** (`orderbook_manager.cpp`): Gate.io's `lastUpdateId` is a **global counter** shared across all symbols' order book updates, not a per-symbol sequential ID. Old code expected `last_seq + 1` and re-subscribed on every gap — caused infinite re-subscribe loop. Fix: accept any `delta_seq > last_seq`, only reject stale deltas (`delta_seq <= last_seq`).
+- **Test update**: Replaced `SequenceGapTriggersResubscribe` with `SequenceGapIsAccepted` + `StaleDeltaIsRejected` (2 new tests).
 
 ### Bug Fixes (2026-06-18)
-- **REST URL double path** (`config.hpp:74`): `restBaseUrl` default changed from `"https://api.gateio.ws/api/v4"` to `"https://api.gateio.ws"` (host only). Every call site's `path` already includes `/api/v4`, so the old default caused `/api/v4/api/v4/...` → HTTP 404. Test assertion in `testTypes.cpp:80` updated to match.
-- **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` previously only registered the callback without sending a WS message. Subscribe messages were only sent in `on_open`. When `MarketFeed::start()` called `subscribe()` after a blocking REST call, `on_open` had already fired with an empty channel list — no subscriptions ever reached the server.
-  - Fix: `subscribe()` now immediately registers the callback in the channel registry AND queues a `PendingAction`. If already connected, `send_queued()` sends immediately via the stored `WsClient*` and `active_hdl`. On reconnect, `drain_queue()` flushes pending actions.
-  - Refactored `WsInternal` from local `shared_ptr` in `run_io_loop()` to member `std::shared_ptr<WsInternal> internal_` (forward-declared in header). Added `active_hdl`, `hdl_mutex`, `client_ptr` fields. Added `send_queued()` method.
-  - `on_close` and `on_fail` handlers now clear `internal_->active_hdl` on disconnect.
-- **WS pong missing** (`gate_ws_client.cpp`): `on_message` received `spot.ping` but never replied with `spot.pong`. Gate.io closes the connection after ~15s without pong. Fix: `on_message` now sends `{"time": <ts>, "channel": "spot.pong"}` immediately.
-- **Orderbook symbol field** (`market_feed.cpp:156`): Changed `full_frame.value("currency_pair", "")` to `result.value("s", "")`. Gate.io's `spot.order_book` puts the symbol in `result["s"]`, not in the outer frame (unlike `spot.tickers` which uses `full_frame["currency_pair"]`).
-- **Orderbook event type** (`market_feed.cpp:165`): Changed `event == "update"` to `"all" == event` for snapshot detection. Gate.io sends `event: "all"` for full snapshots and `event: "update"` for deltas — the old code had these reversed, causing snapshots to be treated as deltas (and ignored) and deltas to replace the entire book.
+- **REST URL double path** (`config.hpp`): `restBaseUrl` changed to host only (`https://api.gateio.ws`), path includes `/api/v4`.
+- **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` now queues `PendingAction` and sends immediately if connected. Refactored `WsInternal` to member `shared_ptr`.
+- **WS pong missing**: `on_message` now replies `spot.pong` immediately.
+- **Orderbook symbol field** (`market_feed.cpp`): Changed to `result.value("s", "")` (Gate.io puts symbol in `result["s"]`).
+- **Orderbook event type** (`market_feed.cpp`): Changed `"update"` to `"all"` for snapshot detection.
 
 ### Completed
-- **L2 Logging** (2026-06-15): spdlog async logger, per-module isolation, `PULSE_LOG_*` macros, 8 tests
-- **L1 Exchange REST** (2026-06-16/17): Gate.io v4 REST client adapted from QuantX `gate_client`
-  - `gate_auth`: SHA-512, HMAC-SHA512, `sign_request()` — pure stateless functions (OpenSSL)
-  - `gate_rest_client`: libcurl + signing + retry (exponential backoff) + timeout + HTTP proxy auto-detect
-  - Proxy: reads `ExchangeConfig.proxyUrl` or `HTTPS_PROXY`/`HTTP_PROXY` env vars, `CURLOPT_HTTPPROXYTUNNEL`
-  - Default timeout: 10s (increased from 5s for proxy latency)
-  - Public endpoints: `get_currencies()`, `get_currency_pairs()`, `get_ticker()`
-  - Authenticated endpoint: `get_spot_accounts()`
-  - Generic `request()` method for future expansion
-  - 11 unit tests (NIST/RFC test vectors), smoke test tool
-- **L1 Exchange WebSocket** (2026-06-16/17): Gate.io v4 WebSocket client with websocketpp + asio
-  - `gate_ws_channels`: channel subscription/unsubscription, message dispatch by channel type
-  - `gate_ws_client`: auto-reconnect with exponential backoff + jitter, ping/pong keepalive
-  - Private channel HMAC authentication, connection state management
-  - Proxy tunnel: `ProxyTunnel` class — local TCP forwarder + HTTP CONNECT tunnel + bidirectional relay
-    - websocketpp connects to `wss://127.0.0.1:LOCAL_PORT/PATH` (random port, preserves original path)
-    - ProxyTunnel establishes CONNECT tunnel through HTTP proxy to real WSS server
-    - TLS: `verify_none` for proxy mode (cert hostname mismatch: 127.0.0.1 vs real host)
-    - **Critical fix (2026-06-17)**: Set `Host` header to real host (not 127.0.0.1), preserve URL path
-    - **Critical fix (2026-06-17)**: All handlers (open/close/fail/message) must be set BEFORE `get_connection()`, otherwise websocketpp won't trigger them
-  - Helper functions: `detect_proxy_url()`, `parse_ws_url()` (returns host, port, path)
-  - 24 unit tests (12 channels + 12 client), smoke test tool — **verified working with proxy**
-- **L3 Market Data** (2026-06-16): Hot path market data pipeline
-  - `ticker_cache`: thread-safe storage for latest ticker per symbol (shared_mutex)
-  - `symbol_registry`: REST-fetched instrument metadata (tick size, lot size, min notional)
-  - `kline_buffer`: fixed-size ring buffer with seqlock pattern for lock-free reads
-  - `orderbook_manager`: snapshot + delta incremental updates, sequence validation, gap detection
-  - `market_feed`: dispatcher that wires WS events to L3 components
-  - 32 unit tests, smoke test tool
-- **L8 Order Execution** (2026-06-16): Order lifecycle management
-  - `execution_report`: immutable fill record with slippage/fees/latency metrics
-  - `order_executor`: REST order placement (market/limit/post-only) with retry logic
-  - `order_tracker`: WS private channel + REST polling fallback, state machine, ExecutionReport generation
-  - 22 unit tests, smoke test tool
-- **L7 Risk Management** (2026-06-16): Safety gate between Strategy (L6) and Execution (L8)
-  - `risk_types`: shared types — `RiskDecision` enum, `RiskEvalResult`, `Position`, `PortfolioSummary`
-  - `position_manager`: thread-safe position tracking (shared_mutex), portfolio/symbol notional limits
-  - `drawdown_guard`: rolling PnL monitor, daily/peak-to-valley circuit breaker (atomic halt flag)
-  - `order_rate_limiter`: lock-free token-bucket rate limiter (atomic + CAS loop)
-  - `risk_manager`: central order gate — evaluate_order() returns Approved/Modified/Rejected
-  - `stop_loss_engine`: fixed/trailing/time-based stop modes, pure evaluator (no execution)
-  - `take_profit_engine`: partial take-profit ladders with N targets, pure evaluator
-  - Config: `StopMode`, `StopLossConfig`, `TakeProfitConfig` added to config.hpp
-  - Error codes: `RateLimitHit=3003`, `StopLossTriggered=3004`, `TakeProfitTriggered=3005`, `SymbolLimitHit=3006`
-  - 92 unit tests
-- **L6 Strategy Engine** (2026-06-16): Automatic signal generation with multi-strategy orchestration
-  - `signal_types`: `SignalType` enum (Buy/Sell/Flat), `TradingSignal` struct with confidence/price/reason
-  - `strategy_params`: hot-reloadable parameters via `std::atomic<double>` (AI-layer ready, lock-free)
-  - `strategy_context`: dependency injection bundle (MarketFeed, RiskManager, OrderExecutor, config)
-  - `strategy_base`: abstract base class with lifecycle hooks (on_tick, on_kline, on_orderbook), signal emission
-  - `strategy_manager`: multi-strategy orchestration, one `std::jthread` per strategy, `std::stop_token` cancellation
-  - `momentum_scalper`: EMA crossover strategy (fast/slow EMA, crossover detection, confidence from EMA distance)
-  - `orderbook_scalper`: order book imbalance strategy (bid/ask volume ratio, threshold-based signals)
-  - `mean_reversion_scalper`: Bollinger Band mean-reversion strategy (SMA + stddev bands, oversold/overbought)
-  - `signal_aggregator`: weighted voting across strategies, per-symbol cooldown, threshold-based emission
-  - Config: `StrategyInstanceConfig` (per-strategy name/symbol/quantity/confidence), `StrategyConfig` (aggregator threshold/cooldown)
-  - 52 unit tests, smoke test tool (`tools/test_strategy.cpp`)
-- **L4 AI Analysis** (2026-06-17): LLM-driven parameter adaptation
-  - `analysis_result`: Sentiment/Volatility enums, ParamDeltas (10 deltas 1:1 to StrategyParams), JSON ADL
-  - `twitter_feed`: X API v2 polling, rolling deque with ID dedup, `enabled=false` by default
-  - `news_feed`: NewsAPI/CryptoPanic dual-provider, URL dedup, `enabled=false` by default
-  - `prompt_builder`: Fixed system prompt enforcing JSON schema, dynamic user prompt
-  - `ai_client`: OpenAI/Claude dual-backend, injectable HttpTransport for testing, retry
-  - `param_advisor`: Safety-bounded deltas (max_delta + hard bounds clamp), atomic writes
-  - `ai_pipeline`: Full-cycle orchestrator, each step tolerates failure independently
-  - Config: `TwitterConfig`, `NewsConfig`, `AiConfig.baseUrl/maxRetries`; Error codes: 4002-4004
-  - StrategyParams: added `stop_loss_pct`, `take_profit_pct`; 43 tests, smoke tool (`--mock`)
-- **L5 Heartbeat Scheduler** (2026-06-17): 5-min AI analysis clock
-  - `task_queue`: Priority queue + worker jthread, exception-safe
-  - `heartbeat_scheduler`: asio::steady_timer, drift-free re-arm, manual trigger
-  - 7 unit tests
-- **L9 WebUI Dashboard** (2026-06-17): Browser-based real-time monitoring
-  - `snapshot_types`: 8 per-panel snapshot structs + nlohmann JSON ADL serialization
-  - `dashboard_state`: Tiered polling aggregator (200ms/500ms/1s/60s), std::jthread with stop_token
-  - `web_server`: uWebSockets HTTP server, static SPA serving, REST API (/api/status, /api/snapshot), bearer token auth, Host header validation, PIMPL pattern
-  - `ws_server`: WebSocket push server, client tracking, JSON broadcast, max client enforcement
-  - Frontend: vanilla HTML/CSS/JS dark-theme dashboard, 8 panels, WS auto-reconnect
-  - Interface gap bridges: TickerCache::symbols(), SymbolRegistry::symbols(), StrategyManager::snapshot(), AiPipeline::last_result(), OrderTracker::active_orders()+recent_reports(), RiskManager::risk_snapshot()
-  - Config: gated by `-DPULSE_ENABLE_WEBUI=ON`, error codes 9100-9105
-  - 57 unit tests, smoke test tool (`tools/test_webui.cpp`)
-- **Coding standards** (2026-06-15/16): AGENTS.md with Allman brace style, Yoda conditions, mandatory braces, English-only, detailed comments
+- **L2 Logging** (2026-06-15): spdlog async, per-module isolation, `PULSE_LOG_*` macros, 8 tests
+- **L1 Exchange REST** (2026-06-16/17): Gate.io v4 REST, libcurl + HMAC signing + retry + proxy, 11 tests
+- **L1 Exchange WebSocket** (2026-06-16/17): websocketpp + asio, auto-reconnect, proxy tunnel, private HMAC auth, 24 tests
+- **L3 Market Data** (2026-06-16): ticker_cache, symbol_registry, kline_buffer (seqlock), orderbook_manager, market_feed, 33 tests
+- **L8 Order Execution** (2026-06-16): order_executor (REST), order_tracker (WS + REST fallback), execution_report, 22 tests
+- **L7 Risk Management** (2026-06-16): position_manager, drawdown_guard, order_rate_limiter, risk_manager, stop_loss/take_profit engines, 92 tests
+- **L6 Strategy Engine** (2026-06-16): 3 strategies (momentum/orderbook/mean_reversion), signal_aggregator, strategy_manager (jthread per strategy), 52 tests
+- **L4 AI Analysis** (2026-06-17): ai_pipeline, twitter_feed, news_feed, prompt_builder, ai_client (OpenAI/Claude), param_advisor, 43 tests
+- **L5 Heartbeat** (2026-06-17): task_queue, heartbeat_scheduler (asio steady_timer), 7 tests
+- **L9 WebUI** (2026-06-17): dashboard_state (tiered polling), web_server (uWebSockets), ws_server (push broadcast), dark-theme SPA, 57 tests
+- **Coding standards** (2026-06-15/16): AGENTS.md, Allman braces, Yoda conditions, mandatory braces
 
 ### Test Summary
-- 357 tests total (with WEBUI): core 9 + logger 8 + exchange 35 + market 32 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
-- 319 tests (without WEBUI): same minus webui — all passing
+- 358 tests total (with WEBUI): core 9 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 — all passing
+- 320 tests (without WEBUI): same minus webui — all passing
 
 ### Milestones Achieved
 - **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
 - **M2** ✅: Automatic trading: Market Data → Strategy → Risk → Execution
 - **M3** ✅: AI adaptive — strategy parameters auto-tune every 5 min via LLM analysis
 - **M4** ✅: Complete product — all 9 layers operational, WebUI dashboard with real-time monitoring
+- **M5** ✅: Trading engine — all 9 layers wired into runnable process, `./run.sh trade` launches full system
 
 ### Next Steps (per roadmap)
-- All phases complete — Milestone M4 achieved. Future enhancements: MetricsCollector (L2), config file loading (TOML), SQLite trade recorder, TLS support, strategy parameter tuning via WebUI.
+- M1–M5 achieved. Future enhancements: TOML config file loading, SQLite trade recorder, MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI, backtesting system.
 
 ### Operational Setup (2026-06-17)
 - **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
-- **run.sh**: Convenience script in project root — `./run.sh {rest|ws|market|strategy|ai|webui|test}`
+- **run.sh**: Convenience script in project root — `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
   - Auto-sources `.env` for API credentials and proxy settings
-  - Commands: rest (REST API test), ws (WebSocket test), market, strategy, ai (mock), webui, test (357 unit tests)
+  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (358 unit tests)
 - **.env**: Gitignored file for runtime configuration
   - `GATE_API_KEY` / `GATE_API_SECRET` — Gate.io HMAC credentials
   - `HTTP_PROXY` / `HTTPS_PROXY` — Clash Verge proxy (`http://127.0.0.1:7897`)
@@ -187,6 +134,7 @@
 7. ✅ Phase 5: L6 Strategy Engine → 3 strategies, signal aggregator, 52 tests
 8. ✅ Phase 6: L5 + L4 AI Pipeline → **Milestone M3 achieved** (AI adaptive, 50 new tests)
 9. ✅ Phase 7: L9 WebUI → **Milestone M4 achieved** (DashboardState + WebServer + WsServer + Frontend SPA, 57 new tests)
+10. ✅ Phase 8: Trading Engine → **Milestone M5 achieved** (apps/pulsetrader/main.cpp, 9-layer wiring, WS JSON fix, operational guide)
 
 ## Notes
 
