@@ -2,13 +2,15 @@
 // types.hpp — Fundamental type aliases and enumerations for pulseTrader
 //
 // Centralises domain types so every layer speaks the same vocabulary:
-//   1. Timestamp  — nanosecond-precision wall-clock time
-//   2. Symbol     — Gate.io trading pair (e.g. "BTC_USDT")
-//   3. Price      — quote currency amount (e.g. USDT)
-//   4. Quantity   — base currency amount (e.g. BTC)
-//   5. Side       — Buy / Sell
-//   6. OrderType  — Market / Limit / PostOnly
+//   1. Timestamp   — nanosecond-precision wall-clock time
+//   2. Symbol      — Gate.io trading pair (e.g. "BTC_USDT")
+//   3. Price       — quote currency amount (e.g. USDT)
+//   4. Quantity    — base currency amount (e.g. BTC)
+//   5. Side        — Buy / Sell
+//   6. OrderType   — Market / Limit / PostOnly
 //   7. OrderStatus — lifecycle state of an order
+//   8. MarketType  — Spot / Futures discriminator
+//   9. MarginMode  — Cross / Isolated (futures only)
 
 #include <chrono>
 #include <cstdint>
@@ -83,6 +85,20 @@ enum class OrderStatus : std::uint8_t
     Rejected,        ///< Rejected by exchange or risk engine — terminal state.
 };
 
+/// Market type discriminator: Spot or Futures (USDT-settled perpetual).
+enum class MarketType : std::uint8_t
+{
+    Spot,    ///< Spot trading — currency pairs like BTC_USDT.
+    Futures, ///< Perpetual futures — contracts like BTC_USDT (USDT-settled).
+};
+
+/// Margin mode for futures positions.
+enum class MarginMode : std::uint8_t
+{
+    Cross,    ///< Cross margin — shared across all positions.
+    Isolated, ///< Isolated margin — dedicated margin per position.
+};
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
@@ -91,6 +107,32 @@ enum class OrderStatus : std::uint8_t
 [[nodiscard]] constexpr Side opposite(Side s) noexcept
 {
     return Side::Buy == s ? Side::Sell : Side::Buy;
+}
+
+/// Convert MarketType to a human-readable string.
+[[nodiscard]] constexpr const char* to_string(MarketType mt) noexcept
+{
+    switch (mt)
+    {
+    case MarketType::Spot:
+        return "spot";
+    case MarketType::Futures:
+        return "futures";
+    }
+    return "unknown";
+}
+
+/// Convert MarginMode to a human-readable string.
+[[nodiscard]] constexpr const char* to_string(MarginMode mm) noexcept
+{
+    switch (mm)
+    {
+    case MarginMode::Cross:
+        return "cross";
+    case MarginMode::Isolated:
+        return "isolated";
+    }
+    return "unknown";
 }
 
 } // namespace pulse

@@ -41,6 +41,30 @@ TEST(Timestamp, NowHasNanosecondResolution)
 }
 
 // ---------------------------------------------------------------------------
+// types.hpp — MarketType and MarginMode
+// ---------------------------------------------------------------------------
+
+TEST(MarketType, ToStringSpot)
+{
+    EXPECT_STREQ(to_string(MarketType::Spot), "spot");
+}
+
+TEST(MarketType, ToStringFutures)
+{
+    EXPECT_STREQ(to_string(MarketType::Futures), "futures");
+}
+
+TEST(MarginMode, ToStringCross)
+{
+    EXPECT_STREQ(to_string(MarginMode::Cross), "cross");
+}
+
+TEST(MarginMode, ToStringIsolated)
+{
+    EXPECT_STREQ(to_string(MarginMode::Isolated), "isolated");
+}
+
+// ---------------------------------------------------------------------------
 // error.hpp — Result<T>
 // ---------------------------------------------------------------------------
 
@@ -78,6 +102,7 @@ TEST(PulseConfig, ExchangeDefaults)
     // ExchangeConfig must ship with Gate.io production defaults
     ExchangeConfig cfg;
     EXPECT_EQ(cfg.restBaseUrl, "https://api.gateio.ws");
+    EXPECT_EQ(cfg.futuresWsUrl, "wss://fx-ws.gateio.ws/v4/ws/usdt");
     EXPECT_EQ(cfg.restTimeoutMs, 10'000u);
     EXPECT_EQ(cfg.maxRetries, 3u);
 }
@@ -96,4 +121,22 @@ TEST(PulseConfig, RiskDefaults)
     RiskConfig cfg;
     EXPECT_DOUBLE_EQ(cfg.maxDailyDrawdown, 0.02);
     EXPECT_EQ(cfg.maxOrdersPerSec, 5u);
+    EXPECT_DOUBLE_EQ(cfg.max_leverage, 10.0);
+    EXPECT_DOUBLE_EQ(cfg.max_margin_used, 0.5);
+}
+
+TEST(PulseConfig, StrategyInstanceDefaults)
+{
+    // StrategyInstanceConfig must default to Spot market, 1x leverage, Cross margin
+    StrategyInstanceConfig cfg;
+    EXPECT_EQ(cfg.market_type, MarketType::Spot);
+    EXPECT_DOUBLE_EQ(cfg.leverage, 1.0);
+    EXPECT_EQ(cfg.margin_mode, MarginMode::Cross);
+}
+
+TEST(PulseConfig, DefaultMarketType)
+{
+    // PulseConfig must default to Spot market type
+    PulseConfig cfg;
+    EXPECT_EQ(cfg.default_market_type, MarketType::Spot);
 }

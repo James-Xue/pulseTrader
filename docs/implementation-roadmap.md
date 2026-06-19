@@ -289,6 +289,78 @@
 
 ---
 
+## Phase 9 — Trading Engine (apps/pulsetrader)
+
+> ✅ **已完成** — `apps/pulsetrader/main.cpp` (9 层串联), `run.sh trade`, WS JSON 修复, 操作指南
+> ✅ **里程碑 M5**: 交易引擎 — 可运行完整交易系统
+
+## Phase 10 — TOML Config Loader
+
+> ✅ **已完成** — `config_loader` + `config_validator` + `trading.toml.example`, toml11 v4, 46 测试
+> ✅ **里程碑 M6**: 文件驱动配置 — `--config trading.toml`
+
+## Phase 11 — SQLite Trade Recorder
+
+> ✅ **已完成** — `trade_recorder`, 17 列表, 4 查询 API, 27 测试
+> ✅ **里程碑 M7**: SQLite 持久化交易记录
+
+## Phase 12 — Futures Config Foundation (M8)
+
+> ✅ **已完成** — MarketType/MarginMode 枚举, futures config 字段, 7xxx 错误码, 18 测试
+> ✅ **里程碑 M8**: 合约配置基础 — 类型/配置/校验三层就绪
+
+## Phase 13 — Futures Endpoint Router + WS Ping Fix (M9)
+
+> 🔲 **待实施**
+
+| Item | Detail |
+|------|--------|
+| Files | NEW `endpoint_router.hpp/.cpp`, MODIFY `gate_ws_client.cpp`, `gate_ws_channels.cpp`, `gate_rest_client.cpp` |
+| Scope | 纯函数路由 (MarketType→REST路径/WS频道/symbol key) + WS ping/pong 泛化 |
+| Key work | EndpointRouter::rest_path/ws_channel_prefix/symbol_key/needs_json_ping |
+| WS fix | Spot: JSON spot.ping/spot.pong; Futures: RFC 6455 (websocketpp 自动处理) |
+| REST | 新增 get_futures_contracts/get_futures_ticker/get_futures_accounts |
+| Test | 18 个: EndpointRouter×10, WS ping×4, REST×4 |
+
+## Phase 14 — Futures Market Data (M10)
+
+> 🔲 **待实施**
+
+| Item | Detail |
+|------|--------|
+| Files | `ticker_cache.hpp`, `symbol_registry.hpp/.cpp`, `market_feed.hpp/.cpp` |
+| Scope | Ticker 新增 funding_rate/mark_price/index_price/open_interest |
+| | SymbolInfo 新增 contract_multiplier/leverage_max/funding_interval/settle_currency |
+| | MarketFeed 构造函数接受 MarketType, 频道前缀参数化 |
+| Test | 14 个: Ticker×4, SymbolInfo×4, MarketFeed×3, SymbolRegistry×3 |
+
+## Phase 15 — Futures Risk & PnL (M11)
+
+> 🔲 **待实施**
+
+| Item | Detail |
+|------|--------|
+| Files | `risk_types.hpp`, `position_manager.hpp/.cpp`, `risk_manager.cpp` |
+| Scope | Position 新增 leverage/margin_used/liquidation_price/funding_accrued/contract_multiplier |
+| PnL | 统一公式: `direction × (current - entry) × qty × multiplier` (现货 mult=1.0) |
+| Margin | `notional / leverage`, 新增 max_leverage/max_margin_used 检查 |
+| Test | 15 个: PnL×5, 保证金×4, 强平价×3, 杠杆检查×3 |
+
+## Phase 16 — Futures Execution + Dual-Market Wiring (M12)
+
+> 🔲 **待实施**
+
+| Item | Detail |
+|------|--------|
+| Files | `order_executor.hpp/.cpp`, `execution_report.hpp`, `order_tracker.hpp/.cpp`, `main.cpp` |
+| Scope | OrderRequest 新增 market_type/leverage/reduce_only/margin_mode |
+| Orders | 现货: currency_pair/side/amount; 合约: contract/signed size/reduce_only |
+| Tracker | WS 频道 spot.orders vs futures.orders, REST 路径路由, fill 解析双格式 |
+| main.cpp | 双 WS 实例 + 双 MarketFeed, 策略按 market_type 路由 |
+| Test | 16 个: OrderExecutor×5, OrderTracker×3, ExecutionReport×4, main×4 |
+
+---
+
 ## Dependency Graph
 
 ```

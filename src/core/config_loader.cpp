@@ -148,6 +148,48 @@ PulseError parse_stop_mode(const std::string &str, StopMode &out)
 }
 
 // ---------------------------------------------------------------------------
+// parse_market_type — string to MarketType enum
+// ---------------------------------------------------------------------------
+PulseError parse_market_type(const std::string &str, MarketType &out)
+{
+    if ("spot" == str)
+    {
+        out = MarketType::Spot;
+        return {};
+    }
+    if ("futures" == str)
+    {
+        out = MarketType::Futures;
+        return {};
+    }
+
+    return PulseError{
+        ErrorCode::ConfigInvalidValue,
+        "market_type must be \"spot\" or \"futures\", got \"" + str + "\""};
+}
+
+// ---------------------------------------------------------------------------
+// parse_margin_mode — string to MarginMode enum
+// ---------------------------------------------------------------------------
+PulseError parse_margin_mode(const std::string &str, MarginMode &out)
+{
+    if ("cross" == str)
+    {
+        out = MarginMode::Cross;
+        return {};
+    }
+    if ("isolated" == str)
+    {
+        out = MarginMode::Isolated;
+        return {};
+    }
+
+    return PulseError{
+        ErrorCode::ConfigInvalidValue,
+        "margin_mode must be \"cross\" or \"isolated\", got \"" + str + "\""};
+}
+
+// ---------------------------------------------------------------------------
 // Section parsers — each reads one TOML [section] into a config struct
 // ---------------------------------------------------------------------------
 
@@ -164,6 +206,7 @@ PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
     out.apiSecret = toml::find_or(sec, "apiSecret", out.apiSecret);
     out.restBaseUrl = toml::find_or(sec, "restBaseUrl", out.restBaseUrl);
     out.wsUrl = toml::find_or(sec, "wsUrl", out.wsUrl);
+    out.futuresWsUrl = toml::find_or(sec, "futuresWsUrl", out.futuresWsUrl);
     out.proxyUrl = toml::find_or(sec, "proxyUrl", out.proxyUrl);
     out.restTimeoutMs =
         static_cast<std::uint32_t>(
@@ -462,6 +505,10 @@ PulseError parse_risk(const toml::value &root, RiskConfig &out)
                           static_cast<int>(out.maxOrdersPerSec)));
     out.maxSymbolNotional =
         find_double(sec, "maxSymbolNotional", out.maxSymbolNotional);
+    out.max_leverage =
+        find_double(sec, "max_leverage", out.max_leverage);
+    out.max_margin_used =
+        find_double(sec, "max_margin_used", out.max_margin_used);
 
     // Nested sub-tables.
     auto err = parse_stop_loss(sec, out.stop_loss);
@@ -495,6 +542,31 @@ PulseError parse_strategy_instance(const toml::value &tbl,
         static_cast<std::uint32_t>(
             toml::find_or(tbl, "poll_interval_ms",
                           static_cast<int>(out.poll_interval_ms)));
+
+    // Futures-specific fields.
+    out.leverage = find_double(tbl, "leverage", out.leverage);
+
+    if (tbl.contains("market_type"))
+    {
+        std::string mt_str = toml::find<std::string>(tbl, "market_type");
+        auto err = parse_market_type(mt_str, out.market_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    if (tbl.contains("margin_mode"))
+    {
+        std::string mm_str = toml::find<std::string>(tbl, "margin_mode");
+        auto err = parse_margin_mode(mm_str, out.margin_mode);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
 
     return {};
 }
@@ -704,6 +776,18 @@ Result<PulseConfig> load_config_file(const std::filesystem::path &path)
     if (ErrorCode::Ok != err.code)
     {
         return err;
+    }
+
+    // Top-level default_market_type.
+    if (root.contains("default_market_type"))
+    {
+        std::string mt_str = toml::find<std::string>(root, "default_market_type");
+        err = parse_market_type(mt_str, cfg.default_market_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
     }
 
     return cfg;

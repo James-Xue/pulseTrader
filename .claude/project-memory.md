@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-19
-> 文件大小：15204 字符 / 16000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：17931 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 
 ## Overview
 
@@ -98,6 +98,20 @@
 - **`trading.toml.example`**: Added `[sqlite]` section with `enabled = true`, `dbPath = "data/trades.db"`
 - **27 tests** (all `:memory:` SQLite): 15 core (open/close/insert/duplicate/partial fill/all-fields roundtrip) + 12 queries (filter by symbol/time/strategy, summary, win rate, daily PnL)
 
+### Futures Config M8 (2026-06-19)
+- **`src/core/types.hpp`**: New `MarketType` enum (`Spot`/`Futures`) and `MarginMode` enum (`Cross`/`Isolated`) with `to_string()` helpers
+- **`src/core/config.hpp`**: Futures fields added to existing structs:
+  - `ExchangeConfig.futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"` — Gate.io futures WS endpoint
+  - `StrategyInstanceConfig.market_type` / `leverage` / `margin_mode` — per-strategy futures config
+  - `RiskConfig.max_leverage` (1.0–125.0) / `max_margin_used` (0.0–1.0) — futures risk limits
+  - `PulseConfig.default_market_type` — global default for strategies without explicit setting
+- **`src/core/error.hpp`**: 7xxx range error codes (FuturesLeverageExceeded 7001, FuturesMarginInsufficient 7002, FuturesLiquidation 7003, FuturesFundingError 7004, FuturesContractNotFound 7005)
+- **`src/core/config_loader.cpp`**: TOML parsing for all new fields + `parse_market_type()`/`parse_margin_mode()` string-to-enum helpers
+- **`src/core/config_validator.cpp`**: leverage range (≥1.0, ≤max_leverage), max_leverage range (1.0–125.0), max_margin_used range (0.0–1.0), per-strategy leverage vs global max cross-check
+- **`trading.toml.example`**: futuresWsUrl, max_leverage/max_margin_used, commented futures strategy example with Chinese explanations
+- **All defaults backward-compatible**: MarketType::Spot, leverage=1.0, MarginMode::Cross, multiplier=1.0 — existing 404 tests unaffected
+- **18 new tests**: 4 MarketType/MarginMode to_string + 2 config defaults + 5 config_loader futures parsing + 7 config_validator futures validation
+
 ### Bug Fixes (2026-06-18)
 - **REST URL double path** (`config.hpp`): `restBaseUrl` changed to host only (`https://api.gateio.ws`), path includes `/api/v4`.
 - **WS subscribe race condition** (`gate_ws_client.cpp`): `subscribe()` now queues `PendingAction` and sends immediately if connected. Refactored `WsInternal` to member `shared_ptr`.
@@ -119,9 +133,9 @@
 - **Coding standards** (2026-06-15/16): AGENTS.md, Allman braces, Yoda conditions, mandatory braces
 
 ### Test Summary
-- 431 tests total (with WEBUI + SQLITE): core 9 + config_loader 22 + config_validator 24 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 — all passing
-- 404 tests (with WEBUI, without SQLITE): same minus trade_recorder — all passing
-- 366 tests (without WEBUI or SQLITE): same minus webui — all passing
+- 449 tests total (with WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 35 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 — all passing
+- 422 tests (with WEBUI, without SQLITE): same minus trade_recorder — all passing
+- 384 tests (without WEBUI or SQLITE): same minus webui — all passing
 
 ### Milestones Achieved
 - **M1** ✅: End-to-end Exchange → Market Data → Execution pipeline
@@ -131,15 +145,17 @@
 - **M5** ✅: Trading engine — all 9 layers wired into runnable process, `./run.sh trade` launches full system
 - **M6** ✅: TOML config — `--config trading.toml` file-driven configuration with `from_env:` syntax, validation, 46 new tests
 - **M7** ✅: SQLite trade recorder — 17-column trades table, 4 query APIs, WAL + mutex, strategy tracking via client_order_id, 27 new tests
+- **M8** ✅: Futures config foundation — MarketType/MarginMode enums, futures config fields, 7xxx error codes, TOML parsing + validation, 18 new tests
 
 ### Next Steps (per roadmap)
-- M1–M7 achieved. Next: backtesting system, simulated trading mode (Gate.io testnet), P&L dashboard (WebUI), MetricsCollector (L2), TLS support, strategy parameter tuning via WebUI.
+- M1–M8 achieved. Next: **M9 — EndpointRouter + WS ping/pong fix**, then M10 (futures market data), M11 (futures risk/PnL), M12 (futures execution + dual-market wiring). After M12: backtesting, simulated trading, P&L dashboard.
+- **Futures support plan**: 5 milestones (M8–M12), USDT-settled only, leverage up to exchange max (125x), simultaneous spot+futures via config. See plan at `.claude/plans/polished-wondering-lamport.md`.
 
 ### Operational Setup (2026-06-17)
 - **Branch status**: All feature branches merged into `main` and deleted (local + remote). Only `main` branch exists.
 - **run.sh**: Convenience script in project root — `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
   - Auto-sources `.env` for API credentials and proxy settings
-  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (431 unit tests)
+  - Commands: **trade** (trading engine — 9 layers), rest, ws, market, strategy, ai (mock), webui, test (449 unit tests)
 - **.env**: Gitignored file for runtime configuration
   - `GATE_API_KEY` / `GATE_API_SECRET` — Gate.io HMAC credentials
   - `HTTP_PROXY` / `HTTPS_PROXY` — Clash Verge proxy (`http://127.0.0.1:7897`)
@@ -176,6 +192,11 @@
 10. ✅ Phase 8: Trading Engine → **Milestone M5 achieved** (apps/pulsetrader/main.cpp, 9-layer wiring, WS JSON fix, operational guide)
 11. ✅ Phase 9: TOML Config Loader → **Milestone M6 achieved** (config_loader + config_validator + trading.toml.example, toml11 v4, 46 new tests, 404 total)
 12. ✅ Phase 10: SQLite Trade Recorder → **Milestone M7 achieved** (trade_recorder + trade_record + 17-column schema + 4 queries, SQLiteCpp, 27 new tests, 431 total)
+13. ✅ Phase 11: Futures Config Foundation → **Milestone M8 achieved** (MarketType/MarginMode enums, futures config fields, 7xxx errors, TOML parsing + validation, 18 new tests, 449 total)
+14. 🔲 Phase 12: Futures EndpointRouter + WS Ping Fix → M9 (endpoint_router.hpp/cpp, WS ping/pong generalization, dual WS URL support, 18 new tests)
+15. 🔲 Phase 13: Futures Market Data → M10 (futures ticker/mark_price/funding_rate, SymbolInfo contract_multiplier, dual MarketFeed, 14 new tests)
+16. 🔲 Phase 14: Futures Risk & PnL → M11 (unified PnL formula with multiplier, leverage/margin checks, liquidation price, 15 new tests)
+17. 🔲 Phase 15: Futures Execution + Dual-Market Wiring → M12 (futures order format, dual WS/MarketFeed in main.cpp, 16 new tests)
 
 ## Notes
 
