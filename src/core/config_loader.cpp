@@ -578,6 +578,21 @@ PulseError parse_webui(const toml::value &root, WebUiConfig &out)
     return {};
 }
 
+PulseError parse_sqlite(const toml::value &root, SqliteConfig &out)
+{
+    if (!root.contains("sqlite"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("sqlite");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
+
+    return {};
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -678,6 +693,13 @@ Result<PulseConfig> load_config_file(const std::filesystem::path &path)
     }
 
     err = parse_webui(root, cfg.webui);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parse_sqlite(root, cfg.sqlite);
 
     if (ErrorCode::Ok != err.code)
     {

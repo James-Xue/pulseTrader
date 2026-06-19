@@ -118,3 +118,9 @@ bindAddress = "127.0.0.1"          # 仅本机访问，不要暴露到网络
 port        = 8080
 authToken   = "from_env:PULSE_WEBUI_TOKEN"
 maxClients  = 4                    # 最大 WebSocket 连接数
+
+# ── SQLite 交易记录 ──────────────────────────────────────────────────
+# 需要编译时启用 -DPULSE_ENABLE_SQLITE=ON
+[sqlite]
+enabled = true
+dbPath  = "data/trades.db"         # SQLite 数据库文件路径

@@ -79,12 +79,14 @@ class OrderTracker
     ///   4. type             — market, limit, or post-only
     ///   5. requested_qty    — original order quantity
     ///   6. submit_mid_price — mid-price at submission time (for slippage calc)
+    ///   7. client_order_id  — optional client-assigned ID (strategy tracking)
     void track_order(const std::string &order_id,
         const Symbol &symbol,
         Side side,
         OrderType type,
         Quantity requested_qty,
-        Price submit_mid_price);
+        Price submit_mid_price,
+        const std::string &client_order_id = "");
 
     /// Stop tracking an order (reached terminal state).
     void stop_tracking(const std::string &order_id);
@@ -129,6 +131,7 @@ class OrderTracker
     struct TrackedOrder
     {
         std::string order_id;
+        std::string client_order_id;
         Symbol symbol;
         Side side;
         OrderType type;

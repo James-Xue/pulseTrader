@@ -22,6 +22,8 @@ namespace pulse
 //   2xxx   : exchange-specific (rate limits, balances, order validation)
 //   3xxx   : risk management rejections
 //   4xxx   : AI backend failures
+//   5xxx   : config loader
+//   6xxx   : trade recorder (SQLite)
 //   9xxx   : internal / programming errors
 //   91xx   : WebUI server errors
 // ---------------------------------------------------------------------------
@@ -69,6 +71,14 @@ enum class ErrorCode : std::uint32_t
     ConfigInvalidValue = 5003,  ///< Value present but outside valid range.
     ConfigEnvVarMissing = 5004, ///< from_env:VAR referenced but VAR is unset/empty.
     ConfigValidationError = 5005, ///< Semantic validation failure (cross-field).
+
+    // Trade Recorder (6xxx)
+    TradeRecorderDbError = 6000,      ///< SQLite open/create failed.
+    TradeRecorderInsertFailed = 6001, ///< INSERT statement execution failed.
+    TradeRecorderQueryFailed = 6002,  ///< SELECT query execution failed.
+    TradeRecorderNotOpen = 6003,      ///< Database connection is not open.
+    TradeRecorderSchemaError = 6004,  ///< Table creation or migration failed.
+    TradeRecorderDuplicate = 6005,    ///< Duplicate order_id (UNIQUE constraint).
 
     // WebUI (91xx)
     WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.

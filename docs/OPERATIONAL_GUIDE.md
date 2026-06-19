@@ -2,7 +2,7 @@
 
 > 本文档面向操作人员，说明如何将 pulseTrader 从当前状态推进到可实盘运行的交易系统。
 >
-> 最后更新：2026-06-19（TOML 配置加载已完成，指南同步更新）
+> 最后更新：2026-06-19（SQLite 交易记录器已完成，指南同步更新）
 
 ---
 
@@ -36,7 +36,7 @@
 | L8 | Execution | 订单生命周期管理 | ✅ | 22 |
 | L9 | WebUI | uWebSockets 暗色 SPA 监控面板 | ✅ | 57 |
 
-**404 测试全部通过** | 仅 `main` 分支 | Milestone M1–M6 全部达成
+**431 测试全部通过** | 仅 `main` 分支 | Milestone M1–M7 全部达成
 
 ### 当前可运行的命令
 
@@ -49,7 +49,7 @@
 ./run.sh strategy  # 测试策略引擎（模拟行情驱动 3 个策略）
 ./run.sh ai        # 测试 AI Pipeline（--mock 模式，不调用真实 LLM）
 ./run.sh webui     # 启动 WebUI 监控面板（浏览器 http://localhost:8080）
-./run.sh test      # 运行全部 404 个单元测试
+./run.sh test      # 运行全部 431 个单元测试
 ```
 
 ### 交易主程序（已完成）
@@ -71,9 +71,9 @@
 
 ### 必须实现（P0）
 
-| 模块 | 说明 | 预估工时 |
-|------|------|----------|
-| **交易记录器** | SQLite 持久化每笔订单、成交、P&L（当前无任何交易记录） | 2–3h |
+| 模块 | 说明 | 状态 |
+|------|------|------|
+| ~~交易记录器~~ | ~~SQLite 持久化每笔订单~~ | ✅ 已完成（Phase 2, M7） |
 
 ### 强烈建议（P1）
 
@@ -98,26 +98,45 @@
 ```
 ✅ Phase 0: 交易主程序                    ← 已完成（apps/pulsetrader/main.cpp, 9 层串联）
 ✅ Phase 1: TOML 配置文件加载             ← 已完成（config_loader + config_validator + trading.toml.example, 46 测试）
-Phase 2: SQLite 交易记录                  ← 当前阶段（预估 2–3h）
+✅ Phase 2: SQLite 交易记录               ← 已完成（trade_recorder, 17 列表, 4 查询 API, 27 测试, M7 达成）
 Phase 3: Gate.io testnet 模拟交易 1 周     ← 预估 1 周
 Phase 4: P&L 分析 + 策略调优               ← 预估 2–3 天
 Phase 5: 小资金实盘（100 USDT）            ← 持续观察
 Phase 6: 逐步加仓                         ← 根据数据决策
 ```
 
-### Phase 2 详细任务
+### Phase 2 详细任务（已完成）
 
 ```
-src/core/trade_recorder.cpp（新增）:
-  ├── SQLite 建表：trades (id, timestamp, symbol, side, quantity, price, fee, pnl, strategy_name)
-  ├── 每笔订单成交后 INSERT（通过 OrderTracker 完成回调触发）
-  ├── 查询接口：按日期/策略/币种筛选
+src/trade_recorder/（新增，已完成）:
+  ├── trade_record.hpp — TradeRecord (17 字段) + TradeSummary POD structs
+  ├── trade_recorder.hpp/cpp — RAII TradeRecorder, SQLite::Database, WAL + mutex
+  ├── 建表：trades (17 列: id, order_id, client_order_id, timestamp_ns, symbol,
+  │   side, order_type, requested_qty, filled_qty, avg_fill_price, submit_mid_price,
+  │   slippage_bps, fees, pnl, latency_ms, final_status, strategy_name)
+  ├── 4 个查询 API: get_trades / get_trades_by_strategy / get_summary / get_daily_pnl
+  ├── record_trade() — 线程安全 INSERT (mutex-guarded, UNIQUE order_id)
   └── CMake: -DPULSE_ENABLE_SQLITE=ON 启用
 
-apps/pulsetrader/main.cpp（改造）:
-  ├── 初始化 TradeRecorder（SQLite 连接）
+apps/pulsetrader/main.cpp（已改造）:
+  ├── #ifdef PULSE_ENABLE_SQLITE 初始化 TradeRecorder
   ├── OrderTracker 完成回调中调用 recorder.record_trade()
-  └── 优雅退出时关闭 SQLite 连接
+  ├── sig.strategy_id 通过 client_order_id 透传到 trade_recorder
+  └── 优雅退出时 checkpoint + close
+
+测试（27 个，全部通过）:
+  ├── test_trade_recorder.cpp — 15 核心测试
+  └── test_trade_queries.cpp — 12 查询测试
+```
+
+### Phase 3 详细任务
+
+```
+Phase 3: Gate.io testnet 模拟交易（下一步）:
+  ├── 修改 config.hpp: restBaseUrl / wsUrl 切换到 testnet 地址
+  ├── Gate.io testnet 仅支持合约，不支持现货 — 需要评估替代方案
+  ├── 可能的替代：本地模拟撮合引擎（paper trading mode）
+  └── 运行 1 周收集数据，验证策略盈利能力
 ```
 
 ---
@@ -586,7 +605,7 @@ cat logs/execution.log  # 下单失败？
 │  启动:  ./run.sh trade --config trading.toml     │
 │  监控:  ./run.sh webui → http://localhost:8080   │
 │  停止:  Ctrl+C（优雅退出，自动平仓）               │
-│  测试:  ./run.sh test（404 个单元测试）            │
+│  测试:  ./run.sh test（431 个单元测试）            │
 │  日志:  tail -f logs/*.log                       │
 ├─────────────────────────────────────────────────┤
 │  .env:        API Key / Secret / Proxy           │

@@ -23,7 +23,8 @@ void OrderTracker::track_order(const std::string &order_id,
     Side side,
     OrderType type,
     Quantity requested_qty,
-    Price submit_mid_price)
+    Price submit_mid_price,
+    const std::string &client_order_id)
 {
     PULSE_LOG_INFO("execution", "Tracking order: {} {} {} {}", order_id, symbol, requested_qty,
         side == Side::Buy ? "buy" : "sell");
@@ -41,6 +42,7 @@ void OrderTracker::track_order(const std::string &order_id,
     // Store tracked order metadata
     TrackedOrder order;
     order.order_id = order_id;
+    order.client_order_id = client_order_id;
     order.symbol = symbol;
     order.side = side;
     order.type = type;
@@ -239,6 +241,7 @@ ExecutionReport OrderTracker::generate_report(const TrackedOrder &order, Timesta
 {
     ExecutionReport report;
     report.order_id = order.order_id;
+    report.client_order_id = order.client_order_id;
     report.symbol = order.symbol;
     report.side = order.side;
     report.type = order.type;

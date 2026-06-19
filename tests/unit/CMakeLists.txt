@@ -13,3 +13,7 @@ add_subdirectory(heartbeat)
 if(PULSE_ENABLE_WEBUI)
     add_subdirectory(webui)
 endif()
+
+if(PULSE_ENABLE_SQLITE)
+    add_subdirectory(trade_recorder)
+endif()
