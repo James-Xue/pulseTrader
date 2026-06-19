@@ -25,7 +25,9 @@ void OrderBookManager::apply_snapshot(const Symbol &symbol, const nlohmann::json
 
     OrderBook book;
     book.symbol = symbol;
-    book.sequence_id = snapshot["lastUpdateId"].get<std::uint64_t>();
+    book.sequence_id = snapshot["lastUpdateId"].is_string()
+        ? std::stoull(snapshot["lastUpdateId"].get<std::string>())
+        : snapshot["lastUpdateId"].get<std::uint64_t>();
     book.timestamp = snapshot.value("time", static_cast<std::int64_t>(0));
 
     // Parse bids and asks.
@@ -54,7 +56,9 @@ void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &d
         return;
     }
 
-    const std::uint64_t delta_seq = delta["lastUpdateId"].get<std::uint64_t>();
+    const std::uint64_t delta_seq = delta["lastUpdateId"].is_string()
+        ? std::stoull(delta["lastUpdateId"].get<std::string>())
+        : delta["lastUpdateId"].get<std::uint64_t>();
 
     std::unique_lock<std::shared_mutex> write_lock(mutex_);
 
@@ -67,22 +71,19 @@ void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &d
     }
 
     // Validate sequence number.
+    // Gate.io's lastUpdateId is a GLOBAL counter shared across all symbols'
+    // order book updates, NOT a per-symbol sequential ID.  Gaps between
+    // consecutive deltas for the same symbol are normal (other symbols'
+    // updates increment the global counter in between).  We only reject
+    // stale or duplicate deltas (delta_seq <= last_seq).
     const auto seq_it = last_sequence_.find(symbol);
-    const std::uint64_t expected_seq = (seq_it != last_sequence_.end()) ? seq_it->second + 1 : 0;
+    const std::uint64_t last_seq = (seq_it != last_sequence_.end()) ? seq_it->second : 0;
 
-    if (delta_seq != expected_seq && 0 != expected_seq)
+    if (delta_seq <= last_seq && 0 != last_seq)
     {
-        PULSE_LOG_WARN("market",
-            "Sequence gap for {}: expected {}, got {} — requesting re-subscription",
-            symbol,
-            expected_seq,
-            delta_seq);
-
-        // Invoke re-subscribe callback (if set).
-        if (resubscribe_callback_)
-        {
-            resubscribe_callback_(symbol);
-        }
+        PULSE_LOG_DEBUG("market",
+            "Stale delta for {}: seq {} <= last {}, ignoring",
+            symbol, delta_seq, last_seq);
         return;
     }
 
@@ -180,8 +181,12 @@ void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, con
             continue;
         }
 
-        const Price price = level[0].get<Price>();
-        const Quantity qty = level[1].get<Quantity>();
+        const Price price = level[0].is_string()
+            ? std::stod(level[0].get<std::string>())
+            : level[0].get<Price>();
+        const Quantity qty = level[1].is_string()
+            ? std::stod(level[1].get<std::string>())
+            : level[1].get<Quantity>();
 
         if (qty > 0.0)
         {
@@ -205,8 +210,12 @@ void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &bo
             continue;
         }
 
-        const Price price = level[0].get<Price>();
-        const Quantity qty = level[1].get<Quantity>();
+        const Price price = level[0].is_string()
+            ? std::stod(level[0].get<std::string>())
+            : level[0].get<Price>();
+        const Quantity qty = level[1].is_string()
+            ? std::stod(level[1].get<std::string>())
+            : level[1].get<Quantity>();
 
         if (0.0 == qty)
         {
