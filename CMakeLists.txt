@@ -26,7 +26,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(PULSE_BUILD_TESTS   "Build unit and integration tests" ON)
 option(PULSE_BUILD_DEMOS   "Build demo programs"              OFF)
 option(PULSE_ENABLE_SQLITE "Enable SQLite trade recorder"     OFF)
-option(PULSE_ENABLE_TOML   "Enable TOML config file support"  OFF)
 option(PULSE_ENABLE_WEBUI  "Enable WebUI dashboard server"    OFF)
 
 # ---------------------------------------------------------------------------
@@ -42,6 +41,7 @@ find_package(spdlog        CONFIG REQUIRED)
 find_package(fmt           CONFIG REQUIRED)
 find_package(CURL          REQUIRED)
 find_package(OpenSSL       REQUIRED)
+find_package(toml11        CONFIG REQUIRED)
 
 # asio and websocketpp ship headers only; CONFIG mode may not be available
 # on all vcpkg triples — fall back to finding the include path manually.
@@ -55,10 +55,6 @@ endif()
 
 if(PULSE_ENABLE_SQLITE)
     find_package(SQLiteCpp CONFIG REQUIRED)
-endif()
-
-if(PULSE_ENABLE_TOML)
-    find_package(toml11 CONFIG REQUIRED)
 endif()
 
 # ---------------------------------------------------------------------------

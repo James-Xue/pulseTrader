@@ -12,11 +12,14 @@
 //   L9 WebUI     → optional real-time dashboard
 //
 // Usage:
-//   pulsetrader                  Start with default config + .env credentials
-//   pulsetrader --help           Print usage
-//   pulsetrader --version        Print version
+//   pulsetrader                          Start with default config + .env credentials
+//   pulsetrader --config trading.toml    Start with TOML config file
+//   pulsetrader --help                   Print usage
+//   pulsetrader --version                Print version
 
 #include "core/config.hpp"
+#include "core/config_loader.hpp"
+#include "core/config_validator.hpp"
 #include "core/types.hpp"
 #include "exchange/gate_rest_client.hpp"
 #include "exchange/gate_ws_client.hpp"
@@ -75,15 +78,20 @@ static void print_usage(const char* prog)
     std::cout
         << "pulseTrader v0.1.0 — AI-driven scalping framework\n\n"
         << "Usage:\n"
-        << "  " << prog << "                 Start trading engine\n"
-        << "  " << prog << " --help          Print this message\n"
-        << "  " << prog << " --version       Print version\n\n"
+        << "  " << prog << "                          Start with default config\n"
+        << "  " << prog << " --config <path>         Load config from TOML file\n"
+        << "  " << prog << " --help                  Print this message\n"
+        << "  " << prog << " --version               Print version\n\n"
         << "Environment variables (via .env or shell):\n"
-        << "  GATE_API_KEY      Gate.io API key (required)\n"
-        << "  GATE_API_SECRET   Gate.io API secret (required)\n"
+        << "  GATE_API_KEY      Gate.io API key (required without --config)\n"
+        << "  GATE_API_SECRET   Gate.io API secret (required without --config)\n"
         << "  HTTPS_PROXY       HTTP proxy for REST + WebSocket\n"
         << "  PULSE_WEBUI_PORT  WebUI listen port (default: 8080)\n"
-        << "  PULSE_WEBUI_TOKEN WebUI bearer token (default: pulsetrader)\n"
+        << "  PULSE_WEBUI_TOKEN WebUI bearer token (default: pulsetrader)\n\n"
+        << "TOML config (--config):\n"
+        << "  Use from_env:VAR_NAME syntax to read sensitive values from env.\n"
+        << "  Example: apiKey = \"from_env:GATE_API_KEY\"\n"
+        << "  See trading.toml.example for a complete template.\n"
         << std::endl;
 }
 
@@ -195,30 +203,87 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     // 0. Command-line parsing
     // ------------------------------------------------------------------
+    std::string config_path;
+
     for (int i = 1; i < argc; ++i)
     {
         std::string arg(argv[i]);
+
         if ("--help" == arg || "-h" == arg)
         {
             print_usage(argv[0]);
             return 0;
         }
+
         if ("--version" == arg || "-v" == arg)
         {
             std::cout << "pulseTrader v0.1.0" << std::endl;
             return 0;
         }
+
+        if ("--config" == arg)
+        {
+            if (i + 1 >= argc)
+            {
+                std::cerr << "Error: --config requires a file path argument.\n";
+                return 1;
+            }
+
+            config_path = argv[++i];
+            continue;
+        }
+
+        std::cerr << "Unknown argument: " << arg << "\n";
+        print_usage(argv[0]);
+        return 1;
     }
 
     // ------------------------------------------------------------------
     // 1. Build configuration
     // ------------------------------------------------------------------
-    auto cfg = build_default_config();
+    pulse::PulseConfig cfg;
+
+    if (!config_path.empty())
+    {
+        // Load from TOML file.
+        auto result = pulse::load_config_file(config_path);
+
+        if (!pulse::ok(result))
+        {
+            std::cerr << "Config error: "
+                      << pulse::error(result).message << "\n";
+            return 1;
+        }
+
+        cfg = pulse::value(result);
+    }
+    else
+    {
+        cfg = build_default_config();
+    }
+
+    // Validate regardless of source.
+    auto validation_err = pulse::validate_config(cfg);
+
+    if (pulse::ErrorCode::Ok != validation_err.code)
+    {
+        std::cerr << "Config validation: " << validation_err.message << "\n";
+        return 1;
+    }
 
     if (cfg.exchange.apiKey.empty() || cfg.exchange.apiSecret.empty())
     {
-        std::cerr << "Error: GATE_API_KEY and GATE_API_SECRET must be set.\n"
-                  << "  source .env  or  export GATE_API_KEY=... GATE_API_SECRET=...\n";
+        std::cerr << "Error: exchange.apiKey and exchange.apiSecret must be set.\n";
+
+        if (config_path.empty())
+        {
+            std::cerr << "  source .env  or  export GATE_API_KEY=... GATE_API_SECRET=...\n";
+        }
+        else
+        {
+            std::cerr << "  Use from_env:GATE_API_KEY / from_env:GATE_API_SECRET in TOML.\n";
+        }
+
         return 1;
     }
 

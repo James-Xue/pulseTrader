@@ -27,9 +27,9 @@ fi
 BUILD_DIR="build"
 
 usage() {
-    echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test}"
+    echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test} [args...]"
     echo ""
-    echo "  trade     启动交易主程序（9层全量运行）"
+    echo "  trade [--config <path>]  启动交易主程序（可选 TOML 配置文件）"
     echo "  rest      测试 Gate.io REST API"
     echo "  ws        测试 Gate.io WebSocket"
     echo "  market    测试行情数据管道"
@@ -47,7 +47,8 @@ fi
 case "$1" in
     trade)
         echo "=== pulseTrader Trading Engine ==="
-        "$BUILD_DIR/apps/pulsetrader/pulsetrader"
+        shift  # consume 'trade' argument
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" "$@"
         ;;
     rest)
         echo "=== Gate.io REST API ==="

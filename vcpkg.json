@@ -10,16 +10,13 @@
     "openssl",
     "asio",
     "websocketpp",
-    "gtest"
+    "gtest",
+    "toml11"
   ],
   "features": {
     "sqlite": {
       "description": "SQLite persistence for TradeRecorder (enable with -DPULSE_ENABLE_SQLITE=ON)",
       "dependencies": ["sqlitecpp"]
-    },
-    "toml": {
-      "description": "TOML configuration file support (enable with -DPULSE_ENABLE_TOML=ON)",
-      "dependencies": ["toml11"]
     },
     "webui": {
       "description": "WebUI dashboard server (enable with -DPULSE_ENABLE_WEBUI=ON)",

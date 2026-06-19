@@ -2,7 +2,7 @@
 
 > 本文档面向操作人员，说明如何将 pulseTrader 从当前状态推进到可实盘运行的交易系统。
 >
-> 最后更新：2026-06-19
+> 最后更新：2026-06-19（TOML 配置加载已完成，指南同步更新）
 
 ---
 
@@ -28,7 +28,7 @@
 |----|------|------|------|--------|
 | L1 | Exchange | Gate.io REST + WebSocket API | ✅ | 35 |
 | L2 | Logging | spdlog 异步日志 | ✅ | 8 |
-| L3 | Market Data | 行情热路径（延迟敏感） | ✅ | 32 |
+| L3 | Market Data | 行情热路径（延迟敏感） | ✅ | 33 |
 | L4 | AI Analysis | 社交/新闻 → LLM → 参数调整 | ✅ | 43 |
 | L5 | Heartbeat | 5 分钟 AI 时钟，TaskQueue | ✅ | 7 |
 | L6 | Strategy | EMA 交叉 / 订单簿失衡 / 布林带均值回归 | ✅ | 52 |
@@ -36,27 +36,34 @@
 | L8 | Execution | 订单生命周期管理 | ✅ | 22 |
 | L9 | WebUI | uWebSockets 暗色 SPA 监控面板 | ✅ | 57 |
 
-**357 测试全部通过** | 仅 `main` 分支 | Milestone M1–M4 全部达成
+**404 测试全部通过** | 仅 `main` 分支 | Milestone M1–M6 全部达成
 
 ### 当前可运行的命令
 
 ```bash
+./run.sh trade     # 启动交易主程序（9 层串联，完整交易系统）
+./run.sh trade --config trading.toml  # 使用 TOML 配置文件启动
 ./run.sh rest      # 测试 Gate.io REST 连接（公开 + 私有接口）
 ./run.sh ws        # 测试 WebSocket 实时行情 + 私有频道
 ./run.sh market    # 测试行情数据管道（WS → L3 组件）
 ./run.sh strategy  # 测试策略引擎（模拟行情驱动 3 个策略）
 ./run.sh ai        # 测试 AI Pipeline（--mock 模式，不调用真实 LLM）
 ./run.sh webui     # 启动 WebUI 监控面板（浏览器 http://localhost:8080）
-./run.sh test      # 运行全部 357 个单元测试
+./run.sh test      # 运行全部 404 个单元测试
 ```
 
-### ❌ 缺失的部分
+### 交易主程序（已完成）
 
-```
-./run.sh trade     # ← 没有这个！不存在交易主程序
-```
+`apps/pulsetrader/main.cpp`（约 630 行）串联 9 层，构成完整交易系统：
 
-`src/app/` 目录为空（仅有 `.gitkeep`）。**9 层代码全部作为独立库实现，但尚未串联为可运行的交易主程序。** 所有现有命令均为 smoke test 工具，不是生产级交易执行器。
+- **构造顺序**：L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
+- **信号流**：StrategyManager → SignalAggregator → app callback（风控检查 → OrderExecutor → OrderTracker）
+- **订单完成回调**：OrderTracker → PositionManager 开/平仓 + DrawdownGuard PnL 更新
+- **优雅退出**：SIGINT/SIGTERM → 原子 stop flag → 反序停止（WebUI → Heartbeat → Strategy → Market → WS → Logger）
+- **策略工厂**：`create_strategy()` 根据配置名称创建具体策略类（MomentumScalper / OrderBookScalper / MeanReversionScalper）
+- **默认配置**：2 个策略运行于 BTC_USDT，AI 关闭，WebUI 监听 :8080，凭证从 `.env` 读取
+
+所有现有命令均为 smoke test 工具，`./run.sh trade` 是唯一的生产级交易执行器。
 
 ---
 
@@ -66,8 +73,6 @@
 
 | 模块 | 说明 | 预估工时 |
 |------|------|----------|
-| **交易主程序** | `src/app/main.cpp`：串联 9 层生命周期（初始化 → 启动 → 运行 → 优雅退出） | 2–4h |
-| **配置文件加载** | TOML 或 JSON 配置解析（当前所有参数硬编码在 `config.hpp` 默认值中） | 2–3h |
 | **交易记录器** | SQLite 持久化每笔订单、成交、P&L（当前无任何交易记录） | 2–3h |
 
 ### 强烈建议（P1）
@@ -91,31 +96,28 @@
 ## 3. 开发路线图
 
 ```
-Phase 1: 交易主程序 + 配置加载          ← 当前阶段（预估 4–6h）
-Phase 2: SQLite 交易记录                ← 预估 2–3h
-Phase 3: Gate.io testnet 模拟交易 1 周   ← 预估 1 周
-Phase 4: P&L 分析 + 策略调优             ← 预估 2–3 天
-Phase 5: 小资金实盘（100 USDT）          ← 持续观察
-Phase 6: 逐步加仓                       ← 根据数据决策
+✅ Phase 0: 交易主程序                    ← 已完成（apps/pulsetrader/main.cpp, 9 层串联）
+✅ Phase 1: TOML 配置文件加载             ← 已完成（config_loader + config_validator + trading.toml.example, 46 测试）
+Phase 2: SQLite 交易记录                  ← 当前阶段（预估 2–3h）
+Phase 3: Gate.io testnet 模拟交易 1 周     ← 预估 1 周
+Phase 4: P&L 分析 + 策略调优               ← 预估 2–3 天
+Phase 5: 小资金实盘（100 USDT）            ← 持续观察
+Phase 6: 逐步加仓                         ← 根据数据决策
 ```
 
-### Phase 1 详细任务
+### Phase 2 详细任务
 
 ```
-src/app/main.cpp:
-  ├── 解析命令行参数（--config trading.toml）
-  ├── 加载 PulseConfig（从 TOML 文件）
-  ├── 初始化 L2 Logger
-  ├── 初始化 L1 Exchange（REST + WS）
-  ├── 初始化 L3 Market Data（ticker_cache, orderbook_manager, kline_buffer）
-  ├── 启动 MarketFeed（WS 订阅 symbols 列表）
-  ├── 初始化 L7 RiskManager
-  ├── 初始化 L8 OrderExecutor + OrderTracker
-  ├── 初始化 L6 StrategyManager（启动策略线程）
-  ├── 初始化 L4 AI Pipeline + L5 Heartbeat
-  ├── 初始化 L9 WebUI（如果启用）
-  ├── 注册 SIGINT/SIGTERM → 优雅退出
-  └── 主循环：等待信号 → 风控检查 → 下单 → 记录
+src/core/trade_recorder.cpp（新增）:
+  ├── SQLite 建表：trades (id, timestamp, symbol, side, quantity, price, fee, pnl, strategy_name)
+  ├── 每笔订单成交后 INSERT（通过 OrderTracker 完成回调触发）
+  ├── 查询接口：按日期/策略/币种筛选
+  └── CMake: -DPULSE_ENABLE_SQLITE=ON 启用
+
+apps/pulsetrader/main.cpp（改造）:
+  ├── 初始化 TradeRecorder（SQLite 连接）
+  ├── OrderTracker 完成回调中调用 recorder.record_trade()
+  └── 优雅退出时关闭 SQLite 连接
 ```
 
 ---
@@ -156,6 +158,10 @@ grep ".env" .gitignore  # 应该有输出
 
 ```toml
 # trading.toml — pulseTrader 交易配置
+# 完整模板见 trading.toml.example
+
+# 顶级键必须在所有 [section] 之前
+symbols = ["BTC_USDT", "ETH_USDT"]
 
 [exchange]
 apiKey = "from_env:GATE_API_KEY"
@@ -171,8 +177,6 @@ level = "info"
 logDir = "logs"
 toConsole = true
 toFile = true
-
-symbols = ["BTC_USDT", "ETH_USDT"]
 
 # --- 策略配置 ---
 [strategy]
@@ -582,7 +586,7 @@ cat logs/execution.log  # 下单失败？
 │  启动:  ./run.sh trade --config trading.toml     │
 │  监控:  ./run.sh webui → http://localhost:8080   │
 │  停止:  Ctrl+C（优雅退出，自动平仓）               │
-│  测试:  ./run.sh test（357 个单元测试）            │
+│  测试:  ./run.sh test（404 个单元测试）            │
 │  日志:  tail -f logs/*.log                       │
 ├─────────────────────────────────────────────────┤
 │  .env:        API Key / Secret / Proxy           │

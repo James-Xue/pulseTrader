@@ -1,0 +1,120 @@
+# trading.toml.example — pulseTrader 交易配置模板
+#
+# 复制本文件为 trading.toml 并按需修改。
+# "from_env:VAR_NAME" 语法从环境变量读取敏感值（推荐用于 API Key 等）。
+# 所有字段均可选 — 省略时使用合理默认值。
+#
+# 用法：
+#   ./run.sh trade --config trading.toml
+#   pulsetrader --config trading.toml
+
+# ── 交易币种（顶级键，必须在所有 [section] 之前）─────────────────────
+# WebSocket 订阅的币种列表，策略只能使用此列表中的币种。
+symbols = ["BTC_USDT", "ETH_USDT"]
+
+# ── 交易所 ────────────────────────────────────────────────────────────
+[exchange]
+apiKey              = "from_env:GATE_API_KEY"
+apiSecret           = "from_env:GATE_API_SECRET"
+restBaseUrl         = "https://api.gateio.ws"
+wsUrl               = "wss://api.gateio.ws/ws/v4/"
+proxyUrl            = "from_env:HTTPS_PROXY"
+restTimeoutMs       = 10000        # HTTP 超时（毫秒）
+maxRetries          = 3            # 网络失败重试次数
+wsReconnectBaseMs   = 1000         # WS 重连基础退避（毫秒）
+wsReconnectMaxMs    = 30000        # WS 重连最大退避（毫秒）
+
+# ── 日志 ─────────────────────────────────────────────────────────────
+[log]
+level     = "info"                 # trace | debug | info | warn | error | critical | off
+logDir    = "logs"
+toConsole = true                   # 同时输出到终端
+toFile    = true                   # 写入 logs/ 目录
+
+# ── 策略引擎 ─────────────────────────────────────────────────────────
+[strategy]
+signal_aggregator_threshold = 0.7  # 聚合信号置信度 ≥ 0.7 才执行
+signal_cooldown_sec         = 30   # 同币种信号冷却（秒）
+
+# 每个 [[strategy.instances]] 定义一个策略实例。
+# name 必须是: momentum_scalper | orderbook_scalper | mean_reversion_scalper
+
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "BTC_USDT"
+order_quantity  = 0.001            # 每笔 0.001 BTC（约 $65）
+min_confidence  = 0.6              # 信号置信度门槛（0.0–1.0）
+enabled         = true
+poll_interval_ms = 200             # 行情轮询间隔（毫秒）
+
+[[strategy.instances]]
+name            = "orderbook_scalper"
+symbol          = "BTC_USDT"
+order_quantity  = 0.001
+min_confidence  = 0.65
+enabled         = true
+poll_interval_ms = 100             # 订单簿策略需要更快轮询
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "ETH_USDT"
+order_quantity  = 0.01             # 每笔 0.01 ETH（约 $35）
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── 风控 ─────────────────────────────────────────────────────────────
+[risk]
+maxPositionNotional = 500          # 最大总持仓（USDT）
+maxOpenPositions    = 3            # 最多同时持仓数
+maxDailyDrawdown    = 0.02         # 日亏 ≥ 2% 停止开仓
+maxDrawdown         = 0.05         # 总回撤 ≥ 5% 全部停止
+maxOrdersPerSec     = 5            # 每秒最大下单数
+maxSymbolNotional   = 300          # 单币种最大持仓（USDT）
+
+[risk.stop_loss]
+mode            = "Trailing"       # Fixed | Trailing | TimeBased
+trailing_pct    = 0.005            # 追踪止损偏移 0.5%
+fixed_pct       = 0.01             # 固定止损 1%（mode=Fixed 时使用）
+max_hold_seconds = 300             # 最大持仓时间 5 分钟（mode=TimeBased 时使用）
+
+[risk.take_profit]
+enabled     = true
+targets_pct = [0.005, 0.01, 0.02]  # 止盈目标：+0.5%, +1%, +2%
+fractions   = [0.33, 0.33, 0.34]   # 每档平仓比例（总和 ≤ 1.0）
+
+# ── AI 分析 ──────────────────────────────────────────────────────────
+# heartbeatIntervalSec = 0 关闭 AI 调参（推荐初期关闭）
+[ai]
+backend              = "openai"    # "openai" 或 "claude"
+model                = "gpt-4o"
+apiKey               = "from_env:OPENAI_API_KEY"
+heartbeatIntervalSec = 0           # AI 分析间隔（秒），0 = 关闭
+requestTimeoutMs     = 30000
+maxRetries           = 2
+
+# ── Twitter/X 社交信号 ───────────────────────────────────────────────
+[twitter]
+enabled         = false
+bearerToken     = "from_env:TWITTER_BEARER_TOKEN"
+keywords        = ["bitcoin", "crypto", "BTC"]
+maxTweets       = 20               # 滚动窗口大小
+pollIntervalSec = 300              # 轮询间隔（秒）
+
+# ── 新闻信号 ─────────────────────────────────────────────────────────
+[news]
+enabled         = false
+apiKey          = "from_env:NEWS_API_KEY"
+provider        = "newsapi"        # "newsapi" 或 "cryptopanic"
+keywords        = ["bitcoin", "crypto regulation"]
+maxArticles     = 20
+pollIntervalSec = 300
+
+# ── WebUI 仪表盘 ─────────────────────────────────────────────────────
+# 需要编译时启用 -DPULSE_ENABLE_WEBUI=ON
+[webui]
+enabled     = true
+bindAddress = "127.0.0.1"          # 仅本机访问，不要暴露到网络
+port        = 8080
+authToken   = "from_env:PULSE_WEBUI_TOKEN"
+maxClients  = 4                    # 最大 WebSocket 连接数

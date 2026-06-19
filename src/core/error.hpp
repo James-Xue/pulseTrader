@@ -62,6 +62,14 @@ enum class ErrorCode : std::uint32_t
     AiSchemaMismatch = 4003,   ///< LLM response does not match the required JSON schema.
     AiParamOutOfBounds = 4004, ///< AI-proposed delta exceeded safety bounds (clamped, not fatal).
 
+    // Config (5xxx)
+    ConfigFileNotFound = 5000,  ///< TOML file path does not exist.
+    ConfigParseError = 5001,    ///< toml11 syntax error (malformed TOML).
+    ConfigMissingField = 5002,  ///< Required key absent from TOML tree.
+    ConfigInvalidValue = 5003,  ///< Value present but outside valid range.
+    ConfigEnvVarMissing = 5004, ///< from_env:VAR referenced but VAR is unset/empty.
+    ConfigValidationError = 5005, ///< Semantic validation failure (cross-field).
+
     // WebUI (91xx)
     WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.
     WebUiAuthFailed = 9101,     ///< Bearer token authentication rejected.
