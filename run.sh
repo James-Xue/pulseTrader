@@ -2,6 +2,7 @@
 # run.sh — pulseTrader 快捷运行脚本
 #
 # Usage:
+#   ./run.sh trade      启动交易主程序（9层全量运行）
 #   ./run.sh rest       测试 REST API（公开 + 私有接口）
 #   ./run.sh ws         测试 WebSocket（行情 + 私有频道）
 #   ./run.sh market     测试行情数据管道
@@ -26,8 +27,9 @@ fi
 BUILD_DIR="build"
 
 usage() {
-    echo "Usage: $0 {rest|ws|market|strategy|ai|webui|test}"
+    echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test}"
     echo ""
+    echo "  trade     启动交易主程序（9层全量运行）"
     echo "  rest      测试 Gate.io REST API"
     echo "  ws        测试 Gate.io WebSocket"
     echo "  market    测试行情数据管道"
@@ -43,6 +45,10 @@ if [ $# -eq 0 ]; then
 fi
 
 case "$1" in
+    trade)
+        echo "=== pulseTrader Trading Engine ==="
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader"
+        ;;
     rest)
         echo "=== Gate.io REST API ==="
         "$BUILD_DIR/tools/test_gate_rest"
