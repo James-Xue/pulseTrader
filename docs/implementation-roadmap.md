@@ -311,16 +311,16 @@
 
 ## Phase 13 — Futures Endpoint Router + WS Ping Fix (M9)
 
-> 🔲 **待实施**
+> ✅ **已完成** — EndpointRouter 纯函数路由 + WS ping/pong 泛化 + 合约 REST 便捷方法, 18 测试
 
 | Item | Detail |
 |------|--------|
 | Files | NEW `endpoint_router.hpp/.cpp`, MODIFY `gate_ws_client.cpp`, `gate_ws_channels.cpp`, `gate_rest_client.cpp` |
-| Scope | 纯函数路由 (MarketType→REST路径/WS频道/symbol key) + WS ping/pong 泛化 |
-| Key work | EndpointRouter::rest_path/ws_channel_prefix/symbol_key/needs_json_ping |
-| WS fix | Spot: JSON spot.ping/spot.pong; Futures: RFC 6455 (websocketpp 自动处理) |
+| Scope | 纯函数路由 (MarketType→REST路径/WS频道前缀/ping-pong频道) + WS ping/pong 泛化 |
+| Key work | EndpointRouter::rest_prefix/ws_channel/ping_channel/pong_channel/select_ws_url/needs_json_ping |
+| WS fix | Spot: JSON spot.ping/spot.pong; Futures: RFC 6455 (websocketpp 自动处理) + JSON 兼容 |
 | REST | 新增 get_futures_contracts/get_futures_ticker/get_futures_accounts |
-| Test | 18 个: EndpointRouter×10, WS ping×4, REST×4 |
+| Test | 18 个: EndpointRouter×13, WS ping/pong×3, 构造函数兼容×2 |
 
 ## Phase 14 — Futures Market Data (M10)
 

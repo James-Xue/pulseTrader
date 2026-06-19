@@ -17,6 +17,7 @@
 
 #include "exchange/gate_rest_client.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "exchange/gate_auth.hpp"
 #include "logging/logger.hpp"
 
@@ -90,7 +91,8 @@ bool is_retryable(long status_code)
 // GateRestClient implementation
 // ---------------------------------------------------------------------------
 
-GateRestClient::GateRestClient(const ExchangeConfig &config) : config_(config)
+GateRestClient::GateRestClient(const ExchangeConfig &config, MarketType market_type)
+    : config_(config), market_type_(market_type)
 {
     ensure_curl_init();
 }
@@ -329,6 +331,29 @@ Result<nlohmann::json> GateRestClient::get_spot_accounts()
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
     }
     return request("GET", "/api/v4/spot/accounts");
+}
+
+// ---------------------------------------------------------------------------
+// Futures endpoint wrappers
+// ---------------------------------------------------------------------------
+
+Result<nlohmann::json> GateRestClient::get_futures_contracts()
+{
+    return request("GET", EndpointRouter::contracts_path(MarketType::Futures));
+}
+
+Result<nlohmann::json> GateRestClient::get_futures_ticker(const std::string &contract)
+{
+    return request("GET", EndpointRouter::tickers_path(MarketType::Futures), "contract=" + contract);
+}
+
+Result<nlohmann::json> GateRestClient::get_futures_accounts()
+{
+    if (!has_credentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
+    }
+    return request("GET", EndpointRouter::accounts_path(MarketType::Futures));
 }
 
 } // namespace pulse::exchange

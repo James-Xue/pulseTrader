@@ -4,7 +4,7 @@
 // Manages a persistent WebSocket connection to Gate.io's v4 WS endpoint.
 // Features:
 //   1. Auto-reconnect with exponential backoff + jitter
-//   2. Server ping/pong handling (spot.ping → spot.pong)
+//   2. Server ping/pong handling (market-type-aware: spot.ping → spot.pong, futures.ping → futures.pong)
 //   3. Dynamic channel subscribe/unsubscribe via GateWsChannels registry
 //   4. Private channel authentication via HMAC-SHA512 (reuses gate_auth)
 //   5. Dedicated I/O thread with cooperative cancellation (std::jthread + stop_token)
@@ -15,6 +15,7 @@
 //   - channels() returns a reference to the thread-safe GateWsChannels registry
 
 #include "core/config.hpp"
+#include "core/types.hpp"
 #include "exchange/gate_ws_channels.hpp"
 
 #include <nlohmann/json.hpp>
@@ -91,11 +92,14 @@ class GateWsClient
   public:
     /// Construct a WebSocket client from exchange configuration.
     ///
-    /// Uses config.wsUrl for the endpoint, config.wsReconnectBaseMs / wsReconnectMaxMs
-    /// for backoff parameters, and config.apiKey / apiSecret for private channel auth.
+    /// Uses EndpointRouter::select_ws_url() to pick the correct WS endpoint based on
+    /// market_type (spot: config.wsUrl, futures: config.futuresWsUrl).
+    ///
+    /// Ping/pong handling is market-type-aware: spot replies to spot.ping with spot.pong,
+    /// futures replies to futures.ping with futures.pong.
     ///
     /// Does NOT start the I/O thread — call start() explicitly.
-    explicit GateWsClient(const ExchangeConfig &config);
+    explicit GateWsClient(const ExchangeConfig &config, MarketType market_type = MarketType::Spot);
 
     /// Destructor calls stop() if the I/O thread is still running.
     ~GateWsClient();
@@ -153,6 +157,7 @@ class GateWsClient
 
   private:
     ExchangeConfig config_;
+    MarketType market_type_;
     GateWsChannels channels_;
     std::atomic<WsConnectionState> state_{ WsConnectionState::Disconnected };
     std::jthread io_thread_;

@@ -18,6 +18,8 @@
 //   - Callbacks are invoked under a shared read lock — they must NOT call back
 //     into subscribe/unsubscribe (would deadlock)
 
+#include "core/types.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
@@ -97,9 +99,14 @@ class GateWsChannels
 
     /// Build a pong reply for a server-initiated ping.
     ///
-    /// Gate.io sends {"time": <int>, "channel": "spot.ping"} and expects
-    /// {"time": <same_int>, "channel": "spot.pong"} in reply.
-    [[nodiscard]] static nlohmann::json build_pong(const nlohmann::json &ping_frame);
+    /// Gate.io spot sends    {"time": <int>, "channel": "spot.ping"}    → reply {"time": <int>, "channel": "spot.pong"}
+    /// Gate.io futures sends {"time": <int>, "channel": "futures.ping"} → reply {"time": <int>, "channel": "futures.pong"}
+    ///
+    /// The pong channel is derived dynamically from the ping frame's channel
+    /// by replacing ".ping" with ".pong", so the MarketType parameter is used
+    /// only as a fallback when the channel field is absent.
+    [[nodiscard]] static nlohmann::json build_pong(const nlohmann::json &ping_frame,
+        MarketType mt = MarketType::Spot);
 
     /// Returns a list of currently subscribed channel names.
     ///
