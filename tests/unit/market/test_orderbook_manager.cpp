@@ -135,8 +135,10 @@ TEST(OrderBookManager, ApplyDeltaRemovesZeroQuantityLevels)
 // Sequence validation
 // ---------------------------------------------------------------------------
 
-TEST(OrderBookManager, SequenceGapTriggersResubscribe)
+TEST(OrderBookManager, SequenceGapIsAccepted)
 {
+    // Gate.io's lastUpdateId is a global counter shared across all symbols,
+    // so gaps between consecutive deltas for the same symbol are normal.
     OrderBookManager manager;
     std::string resubscribed_symbol;
     manager.set_resubscribe_callback([&resubscribed_symbol](const Symbol &s) { resubscribed_symbol = s; });
@@ -148,7 +150,7 @@ TEST(OrderBookManager, SequenceGapTriggersResubscribe)
     };
     manager.apply_snapshot("TEST_USDT", snapshot);
 
-    // Delta with gap: expected 101, got 105.
+    // Delta with gap: 100 → 105 (normal for Gate.io global sequence).
     const nlohmann::json delta = {
         { "lastUpdateId", 105 },
         { "bids", nlohmann::json::array() },
@@ -156,7 +158,34 @@ TEST(OrderBookManager, SequenceGapTriggersResubscribe)
     };
     manager.apply_delta("TEST_USDT", delta);
 
-    EXPECT_EQ(resubscribed_symbol, "TEST_USDT");
+    // Should NOT trigger re-subscribe — gaps are expected.
+    EXPECT_TRUE(resubscribed_symbol.empty());
+    EXPECT_TRUE(manager.contains("TEST_USDT"));
+}
+
+TEST(OrderBookManager, StaleDeltaIsRejected)
+{
+    OrderBookManager manager;
+
+    const nlohmann::json snapshot = {
+        { "lastUpdateId", 100 },
+        { "bids", nlohmann::json::array() },
+        { "asks", nlohmann::json::array() }
+    };
+    manager.apply_snapshot("TEST_USDT", snapshot);
+
+    // Stale delta: seq 95 <= last 100 — should be ignored.
+    const nlohmann::json stale_delta = {
+        { "lastUpdateId", 95 },
+        { "bids", nlohmann::json::array() },
+        { "asks", nlohmann::json::array() }
+    };
+    manager.apply_delta("TEST_USDT", stale_delta);
+
+    // Book should still have the snapshot's sequence.
+    auto book = manager.get("TEST_USDT");
+    ASSERT_TRUE(book.has_value());
+    EXPECT_EQ(book->sequence_id, 100u);
 }
 
 TEST(OrderBookManager, DeltaBeforeSnapshotIsIgnored)

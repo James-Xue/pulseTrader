@@ -204,7 +204,9 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
     }
 
     Kline kline;
-    kline.open_time = result["t"].get<std::int64_t>() * 1000; // Convert to ms.
+    kline.open_time = result["t"].is_string()
+        ? std::stoll(result["t"].get<std::string>()) * 1000
+        : result["t"].get<std::int64_t>() * 1000; // Convert to ms.
     kline.close_time = kline.open_time + 60000;               // 1 minute later.
     kline.open = std::stod(result["o"].get<std::string>());
     kline.high = std::stod(result["h"].get<std::string>());
