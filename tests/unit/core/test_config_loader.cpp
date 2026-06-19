@@ -585,5 +585,85 @@ mode = "InvalidMode"
     EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
 }
 
+// ---------------------------------------------------------------------------
+// Futures-specific config tests
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseExchange_FuturesWsUrl)
+{
+    TempToml tmp(R"(
+[exchange]
+futuresWsUrl = "wss://custom-futures-ws.example.com/v4/ws/usdt"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ("wss://custom-futures-ws.example.com/v4/ws/usdt",
+              value(result).exchange.futuresWsUrl);
+}
+
+TEST(ConfigLoader, ParseExchange_FuturesWsUrlDefault)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt",
+              value(result).exchange.futuresWsUrl);
+}
+
+TEST(ConfigLoader, ParseRisk_MaxLeverageAndMargin)
+{
+    TempToml tmp(R"(
+[risk]
+max_leverage = 20.0
+max_margin_used = 0.3
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_DOUBLE_EQ(20.0, value(result).risk.max_leverage);
+    EXPECT_DOUBLE_EQ(0.3, value(result).risk.max_margin_used);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_FuturesFields)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "momentum_scalper"
+symbol = "BTC_USDT"
+market_type = "futures"
+leverage = 10
+margin_mode = "isolated"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ(MarketType::Futures, inst.market_type);
+    EXPECT_DOUBLE_EQ(10.0, inst.leverage);
+    EXPECT_EQ(MarginMode::Isolated, inst.margin_mode);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_InvalidMarketType)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+market_type = "options"
+)");
+
+    auto result = load_config_file(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+}
+
 } // namespace
 } // namespace pulse

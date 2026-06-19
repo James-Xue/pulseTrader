@@ -12,12 +12,17 @@
 # WebSocket 订阅的币种列表，策略只能使用此列表中的币种。
 symbols = ["BTC_USDT", "ETH_USDT"]
 
+# ── 默认市场类型（可选，默认 spot）──────────────────────────────────
+# 策略未指定 market_type 时使用此值。可选: "spot" | "futures"
+# default_market_type = "spot"
+
 # ── 交易所 ────────────────────────────────────────────────────────────
 [exchange]
 apiKey              = "from_env:GATE_API_KEY"
 apiSecret           = "from_env:GATE_API_SECRET"
 restBaseUrl         = "https://api.gateio.ws"
 wsUrl               = "wss://api.gateio.ws/ws/v4/"
+futuresWsUrl        = "wss://fx-ws.gateio.ws/v4/ws/usdt"  # 合约 WS 地址（USDT 结算）
 proxyUrl            = "from_env:HTTPS_PROXY"
 restTimeoutMs       = 10000        # HTTP 超时（毫秒）
 maxRetries          = 3            # 网络失败重试次数
@@ -63,6 +68,21 @@ min_confidence  = 0.6
 enabled         = true
 poll_interval_ms = 500
 
+# ── 合约策略示例（取消注释启用）──────────────────────────────────────
+# 合约交易需要 Gate.io 合约账户和合约 API 权限。
+# ⚠️ 合约交易有爆仓风险，杠杆放大盈亏，请谨慎使用。
+#
+# [[strategy.instances]]
+# name            = "momentum_scalper"
+# symbol          = "BTC_USDT"
+# market_type     = "futures"       # 合约市场（默认 "spot"）
+# leverage        = 5               # 杠杆倍数（1.0 = 无杠杆，最大 125.0）
+# margin_mode     = "cross"         # 保证金模式: "cross"（全仓）| "isolated"（逐仓）
+# order_quantity  = 1               # 合约张数（整数，非 base 币量）
+# min_confidence  = 0.65
+# enabled         = true
+# poll_interval_ms = 200
+
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]
 maxPositionNotional = 500          # 最大总持仓（USDT）
@@ -71,6 +91,8 @@ maxDailyDrawdown    = 0.02         # 日亏 ≥ 2% 停止开仓
 maxDrawdown         = 0.05         # 总回撤 ≥ 5% 全部停止
 maxOrdersPerSec     = 5            # 每秒最大下单数
 maxSymbolNotional   = 300          # 单币种最大持仓（USDT）
+max_leverage        = 10.0         # 合约最大杠杆倍数（1.0–125.0）
+max_margin_used     = 0.5          # 保证金占总资产最大比例（0.0–1.0）
 
 [risk.stop_loss]
 mode            = "Trailing"       # Fixed | Trailing | TimeBased

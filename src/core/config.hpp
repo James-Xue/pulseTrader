@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "core/types.hpp"
+
 namespace pulse
 {
 
@@ -73,6 +75,7 @@ struct ExchangeConfig
     std::string apiSecret;
     std::string restBaseUrl = "https://api.gateio.ws";
     std::string wsUrl = "wss://api.gateio.ws/ws/v4/";
+    std::string futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"; ///< Gate.io futures WS endpoint (USDT-settled).
     std::string proxyUrl;                               ///< HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Falls back to HTTPS_PROXY env var.
     std::uint32_t restTimeoutMs = 10'000;    ///< Per-request timeout in milliseconds.
     std::uint32_t maxRetries = 3;            ///< Retries before giving up on a request.
@@ -166,6 +169,8 @@ struct RiskConfig
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
     double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
+    double max_leverage = 10.0;           ///< Maximum leverage allowed per position (futures).
+    double max_margin_used = 0.5;         ///< Maximum fraction of equity used as margin (futures).
     StopLossConfig stop_loss;             ///< Default stop-loss configuration.
     TakeProfitConfig take_profit;         ///< Default take-profit configuration.
 };
@@ -223,6 +228,9 @@ struct StrategyInstanceConfig
     double min_confidence = 0.6;              ///< Minimum confidence to emit a signal.
     bool enabled = true;                      ///< Whether this strategy is active.
     std::uint32_t poll_interval_ms = 500;     ///< Poll interval in milliseconds.
+    MarketType market_type = MarketType::Spot; ///< Market type: Spot or Futures.
+    double leverage = 1.0;                    ///< Leverage multiplier (1.0 = no leverage / spot).
+    MarginMode margin_mode = MarginMode::Cross; ///< Margin mode for futures (Cross or Isolated).
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +276,7 @@ struct PulseConfig
     WebUiConfig webui;
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
+    MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
 };
 
 } // namespace pulse

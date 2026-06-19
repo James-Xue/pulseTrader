@@ -311,5 +311,73 @@ TEST(ConfigValidator, AcceptsAllValidLogLevels)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Futures-specific validation tests
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, AcceptsFuturesStrategyWithLeverage)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].leverage = 5.0;
+    cfg.risk.max_leverage = 10.0;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code);
+}
+
+TEST(ConfigValidator, RejectsLeverageBelowOne)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].leverage = 0.5;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("leverage"));
+}
+
+TEST(ConfigValidator, RejectsLeverageExceedingMaxLeverage)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].leverage = 20.0;
+    cfg.risk.max_leverage = 10.0;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("exceeds"));
+}
+
+TEST(ConfigValidator, RejectsMaxLeverageOutOfRange)
+{
+    auto cfg = valid_config();
+    cfg.risk.max_leverage = 200.0; // > 125.0
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("max_leverage"));
+}
+
+TEST(ConfigValidator, RejectsMaxMarginUsedOutOfRange)
+{
+    auto cfg = valid_config();
+    cfg.risk.max_margin_used = 1.5; // > 1.0
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("max_margin_used"));
+}
+
+TEST(ConfigValidator, AcceptsDefaultLeverageOne)
+{
+    auto cfg = valid_config();
+    // Default leverage is 1.0 — should pass for both spot and futures
+    EXPECT_DOUBLE_EQ(1.0, cfg.strategy.strategies[0].leverage);
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code);
+}
+
+TEST(ConfigValidator, AcceptsMaxLeverageBoundary125)
+{
+    auto cfg = valid_config();
+    cfg.risk.max_leverage = 125.0; // boundary value
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code);
+}
+
 } // namespace
 } // namespace pulse

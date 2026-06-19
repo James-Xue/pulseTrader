@@ -24,6 +24,7 @@ namespace pulse
 //   4xxx   : AI backend failures
 //   5xxx   : config loader
 //   6xxx   : trade recorder (SQLite)
+//   7xxx   : futures-specific (leverage, margin, liquidation)
 //   9xxx   : internal / programming errors
 //   91xx   : WebUI server errors
 // ---------------------------------------------------------------------------
@@ -79,6 +80,13 @@ enum class ErrorCode : std::uint32_t
     TradeRecorderNotOpen = 6003,      ///< Database connection is not open.
     TradeRecorderSchemaError = 6004,  ///< Table creation or migration failed.
     TradeRecorderDuplicate = 6005,    ///< Duplicate order_id (UNIQUE constraint).
+
+    // Futures (7xxx)
+    FuturesLeverageExceeded = 7001,   ///< Requested leverage exceeds max_leverage or exchange limit.
+    FuturesMarginInsufficient = 7002, ///< Not enough margin to open/maintain position.
+    FuturesLiquidation = 7003,        ///< Position was liquidated by the exchange.
+    FuturesFundingError = 7004,       ///< Funding rate settlement error.
+    FuturesContractNotFound = 7005,   ///< Requested futures contract does not exist.
 
     // WebUI (91xx)
     WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.

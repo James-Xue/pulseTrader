@@ -88,6 +88,19 @@ PulseError validate_config(const PulseConfig &cfg)
                           "risk.maxSymbolNotional must be > 0"};
     }
 
+    // Futures-specific risk limits.
+    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 125.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.max_leverage must be in [1.0, 125.0]"};
+    }
+
+    if (cfg.risk.max_margin_used < 0.0 || cfg.risk.max_margin_used > 1.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.max_margin_used must be in [0.0, 1.0]"};
+    }
+
     // -----------------------------------------------------------------------
     // 4. Stop-loss parameters
     // -----------------------------------------------------------------------
@@ -192,6 +205,22 @@ PulseError validate_config(const PulseConfig &cfg)
         {
             return PulseError{ErrorCode::ConfigValidationError,
                               prefix + ".min_confidence must be in [0.0, 1.0]"};
+        }
+
+        // Futures-specific: leverage must be >= 1.0 and <= risk.max_leverage.
+        if (s.leverage < 1.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              prefix + ".leverage must be >= 1.0"};
+        }
+
+        if (s.leverage > cfg.risk.max_leverage)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".leverage (" + std::to_string(s.leverage)
+                    + ") exceeds risk.max_leverage ("
+                    + std::to_string(cfg.risk.max_leverage) + ")"};
         }
     }
 
