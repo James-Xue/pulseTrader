@@ -2,7 +2,15 @@
 
 > 分析日期: 2026-06-20
 > 分析范围: 9 层架构、~70 个源文件
-> 状态: 待逐项评审
+> 状态: 3/6 高优先级已修复，3 项待处理
+
+## 已完成修复
+
+| # | 问题 | 提交 | 说明 |
+|---|---|---|---|
+| 1 | PnL=0.0, 回撤保护失效 | `c857e21` | `close_position` 返回 `optional<double>`，main.cpp 累加后传给 DrawdownGuard |
+| 2 | AI 参数调优断联 | `786e9f8` | `StrategyManager.all_params()` 收集真实 params，AiPipeline 循环写入所有策略 |
+| 3 | `std::stod` 崩溃 WS 线程 | `7c052cf` | 新增 `safe_parse_double()`（from_chars），替换 34 处调用 + 10 个新测试 |
 
 ## 总览
 

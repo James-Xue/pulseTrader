@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-20
-> 文件大小：7890 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：8671 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -32,8 +32,8 @@
 ## Current State (M13 Done, 2026-06-20)
 
 ### Test Summary
-- **503 tests** (WEBUI + SQLITE): core 15 + config_loader 30 + config_validator 34 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 476 without SQLITE · 438 without WEBUI or SQLITE
+- **513 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 30 + config_validator 34 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 486 without SQLITE · 448 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -87,7 +87,15 @@
   - Bootstrap: always `connect()` even with empty token (server skips auth when `authToken` is empty)
   - `trading.toml`: `authToken = ""` for testnet dev mode (no auth prompt at all)
 
-### Next: Testnet Trading
+### Architecture Review Fixes (2026-06-20)
+- **#1 PnL 接通 DrawdownGuard** (`c857e21`): `close_position()` 返回 `optional<double>` 已实现 PnL，main.cpp 累加后传给 `drawdown_guard.record_pnl()`。回撤保护现已生效。
+- **#2 AI 反馈回路接通** (`786e9f8`): `StrategyManager.all_params()` 收集每个策略的真实 params 指针，`AiPipeline::run()` 改为 `vector<StrategyParams*>&`，ParamAdvisor 循环写入所有策略的 atomic params。
+- **#3 stod 防崩溃** (`7c052cf`): 新增 `safe_parse_double()` (基于 `std::from_chars`，无异常，locale-independent)，替换 34 处 `std::stod` 调用 + 10 个新测试。测试总数 513。
+
+### Next: Architecture Review Remaining + Testnet
+- 🔴 #4 RiskManager TOCTOU — `evaluate_order()` 三次独立 shared_lock 间存在竞态，需要 atomic reserve
+- 🔴 #5 OrderTracker 写锁下回调 — completion callback 在 unique_lock 下执行，存在锁排序耦合
+- 🔴 #6 ProxyTunnel 提取 — 300 行网络代码从 `gate_ws_client.cpp` 提取为独立模块
 - Run testnet for 1 week, collect strategy performance data
 - Verify signal quality and PnL in virtual fund environment
 - WebUI: http://127.0.0.1:8080 for real-time monitoring
