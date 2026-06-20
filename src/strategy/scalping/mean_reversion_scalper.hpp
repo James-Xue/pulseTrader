@@ -58,6 +58,8 @@ class MeanReversionScalper : public StrategyBase
     StrategyParams params_;
 
     std::int64_t last_signal_time_ms_{ 0 }; ///< Last signal timestamp (ms) for cooldown.
+    std::int64_t last_warmup_log_ms_{ 0 };  ///< Throttle warmup log to every 30 s.
+    std::int64_t last_no_data_log_ms_{ 0 }; ///< Throttle "no data" log to every 30 s.
 };
 
 } // namespace pulse::strategy

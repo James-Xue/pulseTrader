@@ -622,6 +622,11 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     // 10. Wire: aggregator output → risk check → execute → track
     // ------------------------------------------------------------------
+    // Reservation tracking: maps order_id → reservation_id for TOCTOU-safe
+    // notional reservation. Cancelled on order failure, consumed on fill.
+    std::mutex reservation_mutex;
+    std::unordered_map<std::string, std::uint64_t> order_reservations;
+
     aggregator.set_output_callback(
         [&](const pulse::strategy::TradingSignal& sig)
         {
@@ -702,6 +707,11 @@ int main(int argc, char* argv[])
                 auto err = error(result);
                 log_app->error("Order FAILED: {} (code={})",
                                err.message, static_cast<int>(err.code));
+                // Cancel the notional reservation since the order failed.
+                if (eval.reservation_id > 0)
+                {
+                    position_mgr.cancel_reservation(eval.reservation_id);
+                }
                 return;
             }
 
@@ -709,6 +719,13 @@ int main(int argc, char* argv[])
             log_app->info("Order PLACED: id={} status={}",
                           resp.order_id,
                           static_cast<int>(resp.status));
+
+            // Store reservation_id for the completion handler to consume.
+            if (eval.reservation_id > 0)
+            {
+                std::lock_guard lock(reservation_mutex);
+                order_reservations[resp.order_id] = eval.reservation_id;
+            }
 
             // Track order lifecycle via WS + REST polling fallback.
             if (track_ptr)
@@ -743,6 +760,17 @@ int main(int argc, char* argv[])
             double pnl = 0.0;
             if (pulse::Side::Buy == report.side)
             {
+                // Consume the notional reservation (if any) before opening.
+                {
+                    std::lock_guard lock(reservation_mutex);
+                    auto it = order_reservations.find(report.order_id);
+                    if (it != order_reservations.end())
+                    {
+                        position_mgr.consume_reservation(it->second);
+                        order_reservations.erase(it);
+                    }
+                }
+
                 auto open_result = position_mgr.open_position(
                     report.symbol,
                     report.side,
@@ -757,6 +785,17 @@ int main(int argc, char* argv[])
             }
             else
             {
+                // Consume the notional reservation for sell orders too.
+                {
+                    std::lock_guard lock(reservation_mutex);
+                    auto it = order_reservations.find(report.order_id);
+                    if (it != order_reservations.end())
+                    {
+                        position_mgr.consume_reservation(it->second);
+                        order_reservations.erase(it);
+                    }
+                }
+
                 // For sells, try to close matching positions.
                 auto positions = position_mgr.get_positions_by_symbol(
                     report.symbol);

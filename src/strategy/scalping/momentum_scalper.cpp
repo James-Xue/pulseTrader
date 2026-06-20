@@ -5,6 +5,7 @@
 #include "logging/logger.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace pulse::strategy
@@ -32,7 +33,27 @@ StrategyParams &MomentumScalper::params()
 
 void MomentumScalper::on_tick(const market::Ticker & /*ticker*/)
 {
-    // This strategy is kline-driven; tick updates are ignored.
+    // This strategy is kline-driven; tick updates are ignored for trading.
+    // However, we use on_tick() to detect "no kline data at all" (e.g. WS not connected).
+    auto *feed = context_.market_feed;
+    if (nullptr == feed)
+    {
+        return;
+    }
+
+    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(1);
+    if (candles.empty())
+    {
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        if (now_ms - last_no_data_log_ms_ >= 30'000)
+        {
+            PULSE_LOG_INFO("strategy",
+                "[{}] Waiting for kline data (WS may not be connected yet)", id());
+            last_no_data_log_ms_ = now_ms;
+        }
+    }
 }
 
 void MomentumScalper::on_orderbook(const market::OrderBook & /*book*/)
@@ -59,7 +80,17 @@ void MomentumScalper::on_kline(const market::Kline & /*kline*/)
     auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(needed);
     if (candles.size() < slow_period)
     {
-        // Not enough data yet — skip.
+        // Not enough data yet — log warmup progress every 30 seconds.
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        if (now_ms - last_warmup_log_ms_ >= 30'000)
+        {
+            PULSE_LOG_INFO("strategy",
+                "[{}] Warming up: {}/{} candles accumulated (need ~{} min of kline data)",
+                id(), candles.size(), slow_period, slow_period);
+            last_warmup_log_ms_ = now_ms;
+        }
         return;
     }
 

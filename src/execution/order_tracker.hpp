@@ -126,6 +126,22 @@ class OrderTracker
     ///   1. n — maximum number of reports to return (default: 20)
     [[nodiscard]] std::vector<ExecutionReport> recent_reports(std::size_t n = 20) const;
 
+  public:
+    /// Test-only: simulate a WS order update event (calls process_order_update).
+    /// Allows unit tests to exercise the state machine without a real WS connection.
+    void test_simulate_ws_update(const nlohmann::json &event)
+    {
+        process_order_update(event);
+    }
+
+    /// Test-only: try to acquire a shared read lock (returns immediately).
+    /// Used to verify that callbacks run outside the write lock.
+    [[nodiscard]] bool test_try_shared_lock()
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex_, std::try_to_lock);
+        return lock.owns_lock();
+    }
+
   private:
     exchange::GateWsClient &ws_client_;
     exchange::GateRestClient &rest_client_;

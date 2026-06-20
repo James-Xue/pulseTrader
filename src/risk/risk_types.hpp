@@ -50,15 +50,17 @@ enum class RiskDecision : std::uint8_t
 struct RiskEvalResult
 {
     RiskDecision decision;
-    Quantity approved_qty;      ///< Original or reduced quantity.
-    ErrorCode reason_code;      ///< ErrorCode::Ok if approved; specific code if rejected.
-    std::string reason_message; ///< Human-readable explanation.
+    Quantity approved_qty;       ///< Original or reduced quantity.
+    ErrorCode reason_code;       ///< ErrorCode::Ok if approved; specific code if rejected.
+    std::string reason_message;  ///< Human-readable explanation.
+    std::uint64_t reservation_id; ///< Atomic notional reservation handle (0 = none).
 
     RiskEvalResult()
         : decision{ RiskDecision::Approved }
         , approved_qty{ 0.0 }
         , reason_code{ ErrorCode::Ok }
         , reason_message{}
+        , reservation_id{ 0 }
     {
     }
 };

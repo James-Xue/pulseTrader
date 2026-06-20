@@ -6,6 +6,7 @@ add_library(pulse_exchange STATIC
     gate_rest_client.cpp
     gate_ws_channels.cpp
     gate_ws_client.cpp
+    proxy_tunnel.cpp
 )
 
 add_library(pulse::exchange ALIAS pulse_exchange)

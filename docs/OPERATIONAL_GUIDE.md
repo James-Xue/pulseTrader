@@ -231,7 +231,7 @@ toFile = true
 
 # --- 策略配置 ---
 [strategy]
-signal_aggregator_threshold = 0.7   # 聚合信号置信度 ≥ 0.7 才执行
+signal_aggregator_threshold = 0.6   # 聚合信号置信度 ≥ 0.6 才执行（单策略时匹配 min_confidence）
 signal_cooldown_sec = 30             # 同一币种信号冷却 30 秒
 
 [[strategy.instances]]
@@ -322,15 +322,31 @@ maxClients = 4
 
 ```bash
 # 终端 2：打开 WebUI
-./run.sh webui
-# 浏览器访问 http://localhost:8080
+# 浏览器访问 http://127.0.0.1:8080（trading.toml 已配好 WebUI）
 
 # 或直接查看日志
-tail -f logs/strategy.log    # 策略信号
-tail -f logs/execution.log   # 订单执行
+tail -f logs/strategy.log    # 策略信号 + 预热进度
+tail -f logs/exchange.log    # WS 连接状态
+tail -f logs/app.log         # 下单、风控决策
 tail -f logs/risk.log        # 风控事件
 tail -f logs/ai.log          # AI 分析结果
 ```
+
+> **⏱️ 策略预热期**
+>
+> K 线驱动的策略（momentum_scalper、mean_reversion_scalper）启动后需要积累 20–22 根
+> 1 分钟 K 线才能开始工作。预热期间 `logs/strategy.log` 会每 30 秒报告进度：
+>
+> ```
+> [MomentumScalper] Warming up: 8/21 candles accumulated (need ~21 min of kline data)
+> ```
+>
+> 如果 WS 未连接，会看到：
+> ```
+> [MomentumScalper] Waiting for kline data (WS may not be connected yet)
+> ```
+>
+> 请耐心等待至少 **25 分钟**，让策略完成预热。
 
 ### 4.5 停止交易
 
@@ -361,7 +377,7 @@ tail -f logs/ai.log          # AI 分析结果
 | `order_quantity` | 每笔下单量 | 从小开始（0.001 BTC），验证盈利后逐步加大 |
 | `min_confidence` | 信号置信度门槛 | 越高越保守（少交易但精准），越低越激进（多交易但噪音多） |
 | `poll_interval_ms` | 行情轮询频率 | 越低延迟越好，但 CPU 占用更高。建议 100–500ms |
-| `signal_aggregator_threshold` | 聚合信号执行门槛 | 0.7 = 需要多个策略共识才下单，降低则单策略也能触发 |
+| `signal_aggregator_threshold` | 聚合信号执行门槛 | 0.6 = 单策略即可触发下单；多策略共识时可提高到 0.7+ |
 | `signal_cooldown_sec` | 同币种信号冷却 | 防止连续下单。剥头皮建议 15–60 秒 |
 
 ### 5.2 EMA 交叉策略 (momentum_scalper)
@@ -650,9 +666,22 @@ cat logs/risk.log       # 风控触发？
 cat logs/execution.log  # 下单失败？
 
 # 6. WebUI
-./run.sh webui
-# 浏览器打开 http://localhost:8080 查看实时状态
+# 浏览器打开 http://127.0.0.1:8080 查看实时状态
 ```
+
+### Q7: 启动后一直没有下单？
+
+按以下清单逐项排查：
+
+1. **WS 是否连上了？** — `grep "WS connected" logs/exchange.log`
+   - 如果看到反复 `WS connection failed` → 检查代理 (`HTTPS_PROXY`) 是否正常
+2. **策略是否在预热？** — `tail -f logs/strategy.log`
+   - 看到 `Warming up: X/N candles` → 正常，需要等 ~22 分钟积累 K 线数据
+   - 看到 `Waiting for kline data` → WS 未连接，无行情数据流入
+3. **聚合器阈值是否太高？** — 单策略时 `signal_aggregator_threshold` 应 ≤ 策略的 `min_confidence`
+   - 默认 momentum_scalper 的 min_confidence=0.6，threshold 应设为 0.6
+4. **风控是否拒绝？** — `grep "REJECTED\|halted" logs/app.log`
+   - 可能触发：日回撤超限、仓位数量上限、频率限制
 
 ---
 

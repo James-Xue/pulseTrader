@@ -35,15 +35,18 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
     // Evaluate a proposed order against all risk rules sequentially:
     // 1. Check DrawdownGuard: is trading halted?
     // 2. Check OrderRateLimiter: token bucket has capacity?
-    // 3. Check PositionManager: portfolio limits OK?
+    // 3. Atomically check + reserve via PositionManager (TOCTOU-safe):
     //    - If full order fits: Approved
     //    - If partial order fits: Modified with reduced qty
     //    - If nothing fits: Rejected
-    // 4. All checks passed: Approved with original qty
+    //
+    // The atomic reserve_notional() call replaces the old 3-separate-lock
+    // pattern (can_open_position + portfolio_summary + symbol_notional)
+    // that was vulnerable to TOCTOU races under concurrent strategy threads.
 
     RiskEvalResult result;
 
-    // 1. Check drawdown guard.
+    // 1. Check drawdown guard (atomic load — safe outside the reserve).
     if (drawdown_guard_.is_halted())
     {
         PULSE_LOG_WARN("risk",
@@ -57,7 +60,7 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
         return result;
     }
 
-    // 2. Check rate limiter.
+    // 2. Check rate limiter (atomic CAS — safe outside the reserve).
     if (!rate_limiter_.try_acquire())
     {
         PULSE_LOG_WARN("risk",
@@ -70,69 +73,16 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
         return result;
     }
 
-    // 3. Check position limits.
-    const double proposed_notional = order.quantity * order.price;
+    // 3. Atomic check + reserve — single lock, no TOCTOU gaps.
+    const auto reservation = position_manager_.reserve_notional(
+        order.symbol, order.quantity, order.price);
 
-    if (position_manager_.can_open_position(order.symbol, order.quantity, order.price))
-    {
-        // Full order fits within all limits.
-        result.decision = RiskDecision::Approved;
-        result.approved_qty = order.quantity;
-        result.reason_code = ErrorCode::Ok;
-        result.reason_message = "";
-        return result;
-    }
+    result.decision = reservation.decision;
+    result.approved_qty = reservation.approved_qty;
+    result.reason_code = reservation.reason_code;
+    result.reason_message = reservation.reason_message;
+    result.reservation_id = reservation.approved ? reservation.reservation_id : 0;
 
-    // Full order doesn't fit — check if a reduced order can fit.
-    const auto summary = position_manager_.portfolio_summary();
-    const double remaining_notional = config_.maxPositionNotional - summary.total_notional;
-    const double sym_notional = position_manager_.symbol_notional(order.symbol);
-    const double remaining_sym_notional = config_.maxSymbolNotional - sym_notional;
-
-    // Use the smaller remaining budget.
-    const double budget = std::min(remaining_notional, remaining_sym_notional);
-
-    // Check position count limit.
-    if (summary.open_position_count >= config_.maxOpenPositions)
-    {
-        PULSE_LOG_WARN("risk",
-            "Order rejected: max open positions ({}) reached", config_.maxOpenPositions);
-
-        result.decision = RiskDecision::Rejected;
-        result.approved_qty = 0.0;
-        result.reason_code = ErrorCode::PositionLimitHit;
-        result.reason_message = "Maximum open positions reached";
-        return result;
-    }
-
-    if (budget > 0.0 && order.price > 0.0)
-    {
-        // Compute maximum quantity that fits within remaining budget.
-        const double reduced_qty = budget / order.price;
-
-        if (reduced_qty > 0.0 && reduced_qty < order.quantity)
-        {
-            PULSE_LOG_INFO("risk",
-                "Order modified: {} qty reduced from {} to {} (notional budget: {:.2f})",
-                order.symbol, order.quantity, reduced_qty, budget);
-
-            result.decision = RiskDecision::Modified;
-            result.approved_qty = reduced_qty;
-            result.reason_code = ErrorCode::Ok;
-            result.reason_message = "Quantity reduced to fit position limit";
-            return result;
-        }
-    }
-
-    // Nothing fits — reject.
-    PULSE_LOG_WARN("risk",
-        "Order rejected: no remaining notional budget for {} (proposed: {:.2f})",
-        order.symbol, proposed_notional);
-
-    result.decision = RiskDecision::Rejected;
-    result.approved_qty = 0.0;
-    result.reason_code = ErrorCode::PositionLimitHit;
-    result.reason_message = "Position notional limit reached";
     return result;
 }
 
