@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-497%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-503%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -15,7 +15,7 @@ pulseTrader is a C++20 quantitative trading framework purpose-built for high-fre
 
 The framework ships three production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M12 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, and a complete trading engine wiring all layers into a single runnable process.
+**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), and a complete trading engine wiring all layers into a single runnable process.
 
 ---
 
@@ -46,6 +46,7 @@ For the full architecture document including module responsibilities, key files,
 - **Three built-in scalping strategies** — `MomentumScalper` (EMA crossover), `OrderBookScalper` (bid/ask imbalance), and `MeanReversionScalper` (Bollinger Band reversion), each running on its own `std::jthread`.
 - **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights updated after each AI cycle.
 - **Gate.io spot + futures integration** — Native REST (HMAC-SHA512 signed) and WebSocket channels for both spot and USDT perpetual futures, with EndpointRouter for market-type-aware routing, incremental order book updates, proxy tunnel support, and dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker).
+- **Testnet support** — `PULSE_NETWORK=testnet` env switch routes REST API to Gate.io testnet (`api-testnet.gateapi.io`) for virtual fund trading while using mainnet WebSocket for identical real-time market data. TOML `testnet = true` in `[exchange]` section for file-driven config. Validator rejects spot strategies in testnet mode (futures-only).
 - **Lock-free parameter hot-reload** — Strategy tunable values are stored as `std::atomic<double>`; `ParamAdvisor` updates them from the AI thread with zero locking overhead on the strategy side.
 - **Layered risk management** — Fixed, trailing, and time-based stops; partial take-profit ladders; cross-strategy position limits; daily drawdown circuit breaker; token-bucket order rate limiter; futures-specific leverage limit and margin sufficiency checks with liquidation price estimation.
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
@@ -140,7 +141,7 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (497 tests)
+# 4. Run tests (503 tests)
 ctest --test-dir build --output-on-failure
 ```
 
@@ -156,10 +157,23 @@ Optional CMake flags:
 Create a `.env` file in the project root with your credentials:
 
 ```bash
-GATE_API_KEY=your_api_key
-GATE_API_SECRET=your_api_secret
-HTTPS_PROXY=http://127.0.0.1:7897    # optional, for proxy tunnel
-HTTP_PROXY=http://127.0.0.1:7897     # optional
+# Network mode: "mainnet" (real funds) or "testnet" (virtual funds)
+PULSE_NETWORK=testnet
+
+# Mainnet API Key (https://www.gate.io/myaccount/api_key_manage)
+GATE_MAINNET_API_KEY=your_mainnet_key
+GATE_MAINNET_API_SECRET=your_mainnet_secret
+
+# Testnet API Key (https://fx-testnet.gateio.ws)
+GATE_TESTNET_API_KEY=your_testnet_key
+GATE_TESTNET_API_SECRET=your_testnet_secret
+
+# Proxy (optional)
+HTTPS_PROXY=http://127.0.0.1:7897
+HTTP_PROXY=http://127.0.0.1:7897
+
+# WebUI
+PULSE_WEBUI_TOKEN=your_webui_token
 ```
 
 For strategy parameters, risk limits, and AI settings, copy and edit the example TOML config:
@@ -172,7 +186,10 @@ cp trading.toml.example trading.toml
 ### Run
 
 ```bash
-# Start the trading engine (all 9 layers)
+# Start the trading engine (all 9 layers, auto-loads trading.toml if present)
+./run.sh trade
+
+# Start with explicit config
 ./run.sh trade --config trading.toml
 
 # Open WebUI dashboard (browser → http://localhost:8080)
@@ -184,7 +201,7 @@ cp trading.toml.example trading.toml
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 497 unit tests
+./run.sh test        # Run all 503 unit tests
 ```
 
 ---
@@ -253,6 +270,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 | M10 | Futures market data (mark_price, funding_rate, dual MarketFeed) | ✅ |
 | M11 | Futures risk & PnL (leverage, margin, liquidation) | ✅ |
 | M12 | Futures execution + dual-market wiring | ✅ |
+| M13 | Testnet support — `PULSE_NETWORK` env switch, testnet URL override, validator guard | ✅ |
 
 ---
 
@@ -263,6 +281,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **SQLite trade recorder** — Persistent trade history with strategy tracking
 - [x] **WebUI dashboard** — Real-time uWebSockets monitoring SPA
 - [x] **Futures support** — Gate.io USDT perpetual contracts (M10: market data, M11: risk/PnL, M12: execution + dual-market wiring)
+- [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
 - [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
 - [ ] **Paper trading mode** — Full dry-run simulation with live market data but no real order submission
 - [ ] **P&L dashboard** — WebUI panel with daily/weekly/monthly P&L, win rate, and profit factor

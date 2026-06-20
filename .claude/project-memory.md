@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-19
-> 文件大小：5932 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> Last updated: 2026-06-20
+> 文件大小：6874 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -29,11 +29,11 @@
 - Vendored: uWebSockets + uSockets in `third_party/`
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M12 Done, 2026-06-19)
+## Current State (M13 Done, 2026-06-20)
 
 ### Test Summary
-- **497 tests** (WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 470 without SQLITE · 432 without WEBUI or SQLITE
+- **503 tests** (WEBUI + SQLITE): core 15 + config_loader 30 + config_validator 34 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 476 without SQLITE · 438 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -62,14 +62,25 @@
   - `TradingSignal`: market_type field, auto-set by emit_signal()
   - `main.cpp`: dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker), strategy→market routing
   - 7 new tests
+- **M13** ✅: Testnet Support
+  - `ExchangeConfig`: `bool testnet` field
+  - `PULSE_NETWORK` env var: "mainnet" (default) / "testnet" switch
+  - Testnet REST: `https://api-testnet.gateapi.io` (correct URL, not `fx-api-testnet`)
+  - Testnet WS: uses mainnet `fx-ws.gateio.ws` (testnet WS unreachable from China; data identical)
+  - TOML `[exchange] testnet = true` overrides REST URL automatically
+  - Config validator: rejects spot strategies in testnet mode (futures-only)
+  - `run.sh`: auto-loads `trading.toml` if no `--config` specified
+  - WebUI null guard: uses futures feed/tracker when spot unavailable
+  - SQLite: auto-creates `data/` directory for dbPath
+  - `.env` structure: `GATE_MAINNET_*` / `GATE_TESTNET_*` key separation
+  - 6 new tests (3 loader + 3 validator)
 
-### Next: Testnet + Paper Trading
-- Gate.io testnet API setup (separate API keys)
-- Paper trading mode (simulate fills without real orders)
-- Integration testing with live futures market data
-- Performance benchmarking (latency, throughput)
+### Next: Testnet Trading
+- Run testnet for 1 week, collect strategy performance data
+- Verify signal quality and PnL in virtual fund environment
+- WebUI: http://127.0.0.1:8080 for real-time monitoring
 
-Then: 小资金实盘 → production hardening
+Then: P&L analysis → 小资金实盘 → production hardening
 
 ## Config Structure
 
@@ -77,7 +88,7 @@ Key files: `src/core/config.hpp` (all structs), `config_loader.cpp` (TOML→stru
 
 ```
 PulseConfig
-├── ExchangeConfig   (apiKey, apiSecret, restBaseUrl, wsUrl, futuresWsUrl, proxyUrl)
+├── ExchangeConfig   (apiKey, apiSecret, restBaseUrl, wsUrl, futuresWsUrl, proxyUrl, testnet)
 ├── LogConfig        (level, logDir, toConsole, toFile)
 ├── StrategyConfig   (aggregator_threshold, cooldown_sec, instances[])
 │   └── StrategyInstanceConfig (name, symbol, market_type, leverage, margin_mode, ...)
@@ -107,9 +118,11 @@ PulseConfig
 
 - **Branch**: only `main` exists
 - **run.sh**: `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
-- **.env**: `GATE_API_KEY`, `GATE_API_SECRET`, `HTTP_PROXY`, `HTTPS_PROXY` (→ `127.0.0.1:7897`)
+- **run.sh trade**: auto-loads `trading.toml` if no `--config` specified
+- **.env**: `PULSE_NETWORK` (mainnet/testnet), `GATE_MAINNET_*`, `GATE_TESTNET_*`, `HTTPS_PROXY`
 - **Git proxy**: `http.proxy` / `https.proxy` = `http://127.0.0.1:7897`
-- ⚠️ **Mainnet** — real money at risk
+- ⚠️ **Mainnet** — real money at risk when `PULSE_NETWORK=mainnet`
+- ✅ **Testnet** — virtual funds when `PULSE_NETWORK=testnet` (futures only)
 
 ## Code Conventions
 
