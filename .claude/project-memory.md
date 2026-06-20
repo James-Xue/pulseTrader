@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-20
-> 文件大小：6874 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：7890 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -74,6 +74,18 @@
   - SQLite: auto-creates `data/` directory for dbPath
   - `.env` structure: `GATE_MAINNET_*` / `GATE_TESTNET_*` key separation
   - 6 new tests (3 loader + 3 validator)
+
+### Post-M13 Bugfixes (2026-06-20)
+- **Ctrl+C graceful shutdown** — 3-layer fix in `gate_ws_client.cpp`:
+  1. `GateWsClient::stop()`: `io_ctx_ptr->stop()` to force-stop asio event loop (unblocks `client.run()`)
+  2. `ProxyTunnel` accept thread: `poll()` + 200ms timeout instead of blocking `accept()` (Linux `close()` can't interrupt blocking `accept()`)
+  3. `ProxyTunnel` relay threads: no longer `detach()`; `stop()` closes sockets then `join()`s all relay threads
+  4. `run_io_loop()`: explicit `tunnel->stop()` + `tunnel.reset()` before function return (correct cleanup order)
+  5. `WsInternal`: added `io_ctx_ptr` field, set after `init_asio()`, cleared after `client.run()` returns
+- **WebUI token caching** — `frontend/app.js`:
+  - `getToken()`: URL param → `localStorage('pulseToken')` → `prompt()`, cached on first entry
+  - Bootstrap: always `connect()` even with empty token (server skips auth when `authToken` is empty)
+  - `trading.toml`: `authToken = ""` for testnet dev mode (no auth prompt at all)
 
 ### Next: Testnet Trading
 - Run testnet for 1 week, collect strategy performance data
