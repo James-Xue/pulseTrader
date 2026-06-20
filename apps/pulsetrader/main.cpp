@@ -52,6 +52,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -287,6 +288,20 @@ int main(int argc, char* argv[])
         }
 
         cfg = pulse::value(result);
+
+        // TOML mode: if testnet=true, override URLs to testnet endpoints
+        // (unless user explicitly set non-default URLs in TOML).
+        if (cfg.exchange.testnet)
+        {
+            if ("https://api.gateio.ws" == cfg.exchange.restBaseUrl)
+            {
+                cfg.exchange.restBaseUrl = "https://api-testnet.gateapi.io";
+            }
+            if ("wss://fx-ws.gateio.ws/v4/ws/usdt" == cfg.exchange.futuresWsUrl)
+            {
+                cfg.exchange.futuresWsUrl = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+            }
+        }
     }
     else
     {
@@ -440,6 +455,14 @@ int main(int argc, char* argv[])
 
     if (cfg.sqlite.enabled)
     {
+        // Ensure parent directory exists.
+        std::filesystem::path db_dir =
+            std::filesystem::path(cfg.sqlite.dbPath).parent_path();
+        if (!db_dir.empty())
+        {
+            std::filesystem::create_directories(db_dir);
+        }
+
         auto rec_result = pulse::trade_recorder::TradeRecorder::open(
             cfg.sqlite.dbPath);
 
@@ -575,9 +598,13 @@ int main(int argc, char* argv[])
 
     if (cfg.webui.enabled)
     {
+        // Pick whichever market feed/tracker is available.
+        auto& ui_feed    = spot_feed    ? *spot_feed    : *futures_feed;
+        auto& ui_tracker = spot_tracker ? *spot_tracker : *futures_tracker;
+
         dashboard_state = std::make_unique<pulse::webui::DashboardState>(
-            cfg.webui, *spot_feed, strategy_mgr, risk_mgr,
-            *spot_tracker, ai_pipeline);
+            cfg.webui, ui_feed, strategy_mgr, risk_mgr,
+            ui_tracker, ai_pipeline);
 
         web_server = std::make_unique<pulse::webui::WebServer>(
             cfg.webui, *dashboard_state, "frontend");
