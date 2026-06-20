@@ -18,6 +18,7 @@
 #include "core/types.hpp"
 #include "risk/risk_types.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -26,6 +27,41 @@
 
 namespace pulse::risk
 {
+
+// ---------------------------------------------------------------------------
+// NotionalReservation — atomic reservation of notional budget
+//
+// Created by reserve_notional() when an order is approved. The reservation
+// ensures subsequent limit checks see the reserved amount, preventing
+// double-spend between concurrent evaluate_order() calls.
+//
+// Lifecycle:
+//   1. reserve_notional() creates a reservation (approved=true)
+//   2. On order fill: consume_reservation() frees the reservation
+//      (open_position() no longer re-validates the reserved budget)
+//   3. On order failure: cancel_reservation() releases the budget
+// ---------------------------------------------------------------------------
+struct NotionalReservation
+{
+    std::uint64_t reservation_id; ///< Unique handle for consume/cancel.
+    bool approved;                ///< Whether the reservation was granted.
+    double approved_qty;          ///< Original or reduced quantity.
+    double reserved_notional;     ///< Notional budget reserved.
+    RiskDecision decision;        ///< Approved, Modified, or Rejected.
+    ErrorCode reason_code;        ///< ErrorCode::Ok if approved.
+    std::string reason_message;   ///< Human-readable explanation.
+
+    NotionalReservation()
+        : reservation_id{ 0 }
+        , approved{ false }
+        , approved_qty{ 0.0 }
+        , reserved_notional{ 0.0 }
+        , decision{ RiskDecision::Rejected }
+        , reason_code{ ErrorCode::PositionLimitHit }
+        , reason_message{}
+    {
+    }
+};
 
 // ---------------------------------------------------------------------------
 // PositionManager — tracks open positions and enforces portfolio limits
@@ -121,11 +157,44 @@ class PositionManager
     /// Returns the current number of open positions.
     [[nodiscard]] int open_position_count() const;
 
+    // --- Atomic notional reservation (TOCTOU-safe) ---
+
+    /// Atomically check all limits and reserve notional budget.
+    ///
+    /// Performs the same checks as can_open_position() + portfolio_summary() +
+    /// symbol_notional(), but under a SINGLE exclusive lock. The reserved
+    /// notional is visible to subsequent reserve_notional() calls, preventing
+    /// double-spend between concurrent strategy threads.
+    ///
+    /// Returns a NotionalReservation with a unique reservation_id.
+    /// The caller must later call consume_reservation() (on fill) or
+    /// cancel_reservation() (on failure) to release the budget.
+    [[nodiscard]] NotionalReservation reserve_notional(
+        const Symbol &symbol, Quantity qty, Price price);
+
+    /// Consume a reservation when an order is filled.
+    /// The reserved budget is released; open_position() trusts the reservation.
+    void consume_reservation(std::uint64_t reservation_id);
+
+    /// Cancel a reservation when an order fails or is rejected.
+    /// The reserved budget is released back to the available pool.
+    void cancel_reservation(std::uint64_t reservation_id);
+
   private:
     RiskConfig config_;
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, Position> positions_; ///< position_id -> Position.
     std::uint64_t next_position_id_{ 0 };                 ///< Monotonic ID counter.
+
+    /// Pending notional reservations (prevents TOCTOU double-spend).
+    struct PendingReservation
+    {
+        Symbol symbol;
+        double notional;
+        double qty;
+    };
+    std::unordered_map<std::uint64_t, PendingReservation> pending_reservations_;
+    std::uint64_t next_reservation_id_{ 1 }; ///< Monotonic reservation counter.
 
     /// Generate a unique position ID from symbol, side, and counter.
     [[nodiscard]] std::string generate_position_id(const Symbol &symbol, Side side);

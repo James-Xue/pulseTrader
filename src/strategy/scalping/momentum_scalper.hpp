@@ -60,6 +60,8 @@ class MomentumScalper : public StrategyBase
     double prev_ema_fast_{ 0.0 }; ///< Previous fast EMA value (for crossover detection).
     double prev_ema_slow_{ 0.0 }; ///< Previous slow EMA value (for crossover detection).
     bool has_prev_{ false };      ///< Whether we have a previous EMA to compare against.
+    std::int64_t last_warmup_log_ms_{ 0 }; ///< Throttle warmup log to every 30 s.
+    std::int64_t last_no_data_log_ms_{ 0 }; ///< Throttle "no data" log to every 30 s.
 
     /// Compute EMA from a series of close prices.
     ///

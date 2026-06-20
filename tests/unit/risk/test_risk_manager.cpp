@@ -349,3 +349,97 @@ TEST_F(RiskManagerTest, FuturesOrder_LeverageAtBoundary)
 
     EXPECT_NE(RiskDecision::Rejected, result.decision);
 }
+
+// ---------------------------------------------------------------------------
+// Atomic notional reservation (TOCTOU-safe)
+// ---------------------------------------------------------------------------
+
+TEST_F(RiskManagerTest, ReserveNotional_ReturnsReservationId)
+{
+    // evaluate_order() with approval should return a non-zero reservation_id.
+    const auto order = make_order("BTC_USDT", Side::Buy, 0.001, 50000.0);
+    const auto result = risk_manager_.evaluate_order(order);
+
+    EXPECT_EQ(RiskDecision::Approved, result.decision);
+    EXPECT_GT(result.reservation_id, 0u);
+}
+
+TEST_F(RiskManagerTest, ReserveNotional_CancelFreesBudget)
+{
+    // After cancelling a reservation, the budget should be available again.
+    // Open 4 positions (of max 5), then reserve the 5th, cancel it, and
+    // verify a new reservation succeeds.
+    for (int i = 0; i < 4; ++i)
+    {
+        auto r = risk_manager_.evaluate_order(make_order(
+            "SYM_" + std::to_string(i), Side::Buy, 0.001, 10.0));
+        (void)position_manager_.open_position(
+            "SYM_" + std::to_string(i), Side::Buy, 0.001, 10.0, "s1");
+        // Reservation auto-consumed by open_position.
+    }
+
+    // Reserve 5th position.
+    auto r5 = risk_manager_.evaluate_order(
+        make_order("SYM_4", Side::Buy, 0.001, 10.0));
+    EXPECT_EQ(RiskDecision::Approved, r5.decision);
+    EXPECT_GT(r5.reservation_id, 0u);
+
+    // Cancel it (order failed on exchange).
+    position_manager_.cancel_reservation(r5.reservation_id);
+
+    // Now a new reservation should succeed (only 4 positions open).
+    auto r6 = risk_manager_.evaluate_order(
+        make_order("SYM_5", Side::Buy, 0.001, 10.0));
+    EXPECT_EQ(RiskDecision::Approved, r6.decision);
+}
+
+TEST_F(RiskManagerTest, ReserveNotional_StaleBudgetPrevented)
+{
+    // Two consecutive reservations should not double-spend.
+    // Config: maxPositionNotional = 1000, maxSymbolNotional = 500, maxOpenPositions = 5.
+    // Use different symbols to avoid symbol notional limits.
+    // Reserve 400 notional for SYM_A, then 400 for SYM_B, then try 400 for SYM_C.
+    // After A + B = 800, only 200 remains for C → Modified.
+    auto r1 = risk_manager_.evaluate_order(
+        make_order("SYM_A", Side::Buy, 4.0, 100.0)); // 400 notional
+    EXPECT_EQ(RiskDecision::Approved, r1.decision);
+
+    auto r2 = risk_manager_.evaluate_order(
+        make_order("SYM_B", Side::Buy, 4.0, 100.0)); // 400 notional
+    EXPECT_EQ(RiskDecision::Approved, r2.decision);
+
+    // Third: only 200 remaining → Modified with qty = 200/100 = 2.0.
+    auto r3 = risk_manager_.evaluate_order(
+        make_order("SYM_C", Side::Buy, 4.0, 100.0)); // 400 requested
+    EXPECT_EQ(RiskDecision::Modified, r3.decision);
+    EXPECT_DOUBLE_EQ(2.0, r3.approved_qty);
+}
+
+TEST_F(RiskManagerTest, ReserveNotional_ModifiedWithReducedQty)
+{
+    // When only partial budget is available, reserve should return Modified.
+    // Config: maxPositionNotional = 1000, maxSymbolNotional = 500.
+    // Reserve 400 for SYM_A, then 400 for SYM_B → uses 800 of 1000 total.
+    // Then try 400 for SYM_C → only 200 remaining → Modified.
+    auto r1 = risk_manager_.evaluate_order(
+        make_order("SYM_A", Side::Buy, 4.0, 100.0)); // 400 notional
+    EXPECT_EQ(RiskDecision::Approved, r1.decision);
+
+    auto r2 = risk_manager_.evaluate_order(
+        make_order("SYM_B", Side::Buy, 4.0, 100.0)); // 400 notional
+    EXPECT_EQ(RiskDecision::Approved, r2.decision);
+
+    // Third: 400 requested, but only 200 remaining → Modified qty = 2.0.
+    auto r3 = risk_manager_.evaluate_order(
+        make_order("SYM_C", Side::Buy, 4.0, 100.0));
+    EXPECT_EQ(RiskDecision::Modified, r3.decision);
+    EXPECT_DOUBLE_EQ(2.0, r3.approved_qty);
+}
+
+TEST_F(RiskManagerTest, ReserveNotional_CancelZeroIsNoOp)
+{
+    // Cancelling reservation_id=0 should be safe (no-op).
+    position_manager_.cancel_reservation(0);
+    // No crash = success.
+    SUCCEED();
+}

@@ -8,6 +8,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 using namespace pulse;
 using namespace pulse::execution;
@@ -179,4 +182,145 @@ TEST_F(OrderTrackerSnapshotTest, RecentReportsRespectsLimit)
     // With no completed reports, even a large limit returns empty.
     const auto reports = tracker_->recent_reports(100);
     EXPECT_TRUE(reports.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Callback safety tests — verifies the "invoke outside lock" fix
+//
+// These tests use friend access to call process_order_update() directly,
+// simulating WS events without requiring a real WebSocket connection.
+// ---------------------------------------------------------------------------
+
+class OrderTrackerCallbackTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        ExchangeConfig config;
+        ws_client_ = std::make_unique<GateWsClient>(config);
+        rest_client_ = std::make_unique<GateRestClient>(config);
+        tracker_ = std::make_unique<OrderTracker>(*ws_client_, *rest_client_);
+    }
+
+    std::unique_ptr<GateWsClient> ws_client_;
+    std::unique_ptr<GateRestClient> rest_client_;
+    std::unique_ptr<OrderTracker> tracker_;
+};
+
+TEST_F(OrderTrackerCallbackTest, CompletionCallbackInvokedOutsideLock)
+{
+    // Verify: when an order reaches terminal state via process_order_update(),
+    // the completion callback is invoked AFTER the mutex is released.
+    // If the callback tries to acquire a shared_lock, it must succeed
+    // (proving the write_lock was released first).
+
+    tracker_->track_order("test_order_1", "BTC_USDT", Side::Buy, OrderType::Market,
+                          0.001, 50000.0);
+
+    std::atomic<bool> callback_invoked{ false };
+    std::atomic<bool> lock_acquired_in_callback{ false };
+
+    tracker_->set_completion_callback(
+        [this, &callback_invoked, &lock_acquired_in_callback](const ExecutionReport &report)
+        {
+            callback_invoked = true;
+
+            // Try to acquire a shared lock — this would deadlock if the
+            // write_lock is still held by process_order_update().
+            lock_acquired_in_callback = tracker_->test_try_shared_lock();
+        });
+
+    // Simulate a "closed" (filled) WS event.
+    nlohmann::json ws_event;
+    ws_event["id"] = "test_order_1";
+    ws_event["status"] = "closed";
+    ws_event["filled_total"] = "0.001";
+    ws_event["avg_deal_price"] = "50001";
+    ws_event["fee"] = "0.05";
+
+    tracker_->test_simulate_ws_update(ws_event);
+
+    EXPECT_TRUE(callback_invoked.load());
+    EXPECT_TRUE(lock_acquired_in_callback.load());
+}
+
+TEST_F(OrderTrackerCallbackTest, SetCompletionCallbackThreadSafe)
+{
+    // Verify: concurrent calls to set_completion_callback() don't cause
+    // a data race with process_order_update() reading the callback.
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> callback_count{ 0 };
+
+    // Writer thread: repeatedly sets new callbacks.
+    std::thread writer([&]()
+    {
+        int i = 0;
+        while (!stop.load())
+        {
+            tracker_->set_completion_callback(
+                [&callback_count, i](const ExecutionReport &)
+                {
+                    callback_count++;
+                });
+            i++;
+            std::this_thread::sleep_for(std::chrono::microseconds(10));
+        }
+    });
+
+    // Run for 50ms — enough iterations to catch a race if one exists.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    stop.store(true);
+    writer.join();
+
+    // No crash = no data race detected (TSAN would catch this).
+    SUCCEED();
+}
+
+TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
+{
+    // Verify: process_order_update() with terminal status generates a correct
+    // ExecutionReport and removes the order from active_orders().
+
+    tracker_->track_order("report_test_1", "ETH_USDT", Side::Sell, OrderType::Limit,
+                          2.0, 3000.0, "strategy_alpha");
+
+    // First: partial fill (non-terminal) — should NOT trigger callback.
+    nlohmann::json partial_event;
+    partial_event["id"] = "report_test_1";
+    partial_event["status"] = "open";
+    partial_event["filled_total"] = "1.0";
+    partial_event["avg_deal_price"] = "3001";
+
+    std::atomic<bool> callback_called{ false };
+    tracker_->set_completion_callback([&](const ExecutionReport &)
+    {
+        callback_called = true;
+    });
+
+    tracker_->test_simulate_ws_update(partial_event);
+    EXPECT_FALSE(callback_called.load());
+    EXPECT_EQ(tracker_->active_orders().size(), 1u);
+
+    // Second: full fill (terminal) — should trigger callback.
+    nlohmann::json filled_event;
+    filled_event["id"] = "report_test_1";
+    filled_event["status"] = "closed";
+    filled_event["filled_total"] = "2.0";
+    filled_event["avg_deal_price"] = "3002";
+    filled_event["fee"] = "0.1";
+
+    tracker_->test_simulate_ws_update(filled_event);
+
+    EXPECT_TRUE(callback_called.load());
+    EXPECT_TRUE(tracker_->active_orders().empty());
+
+    // Report should be in recent_reports.
+    const auto reports = tracker_->recent_reports(1);
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports[0].order_id, "report_test_1");
+    EXPECT_EQ(reports[0].symbol, "ETH_USDT");
+    EXPECT_EQ(reports[0].side, Side::Sell);
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 2.0);
+    EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 3002.0);
 }

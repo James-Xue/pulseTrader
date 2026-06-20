@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-20
-> 文件大小：8671 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：9911 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -32,8 +32,8 @@
 ## Current State (M13 Done, 2026-06-20)
 
 ### Test Summary
-- **513 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 30 + config_validator 34 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 486 without SQLITE · 448 without WEBUI or SQLITE
+- **528 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 30 + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 38 + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 501 without SQLITE · 463 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -86,6 +86,12 @@
   - `getToken()`: URL param → `localStorage('pulseToken')` → `prompt()`, cached on first entry
   - Bootstrap: always `connect()` even with empty token (server skips auth when `authToken` is empty)
   - `trading.toml`: `authToken = ""` for testnet dev mode (no auth prompt at all)
+- **Strategy warmup diagnostics** — kline-driven strategies now log progress during cold start:
+  - `MomentumScalper` / `MeanReversionScalper` `on_tick()`: logs "Waiting for kline data" every 30s when no klines exist (WS not connected)
+  - `on_kline()`: logs "Warming up: X/N candles accumulated" every 30s when insufficient data for EMA/BB computation
+  - New members: `last_warmup_log_ms_`, `last_no_data_log_ms_` in both `.hpp` headers
+- **Aggregator threshold lowered** — `trading.toml` `signal_aggregator_threshold` from 0.7 → 0.6 to match single-strategy min_confidence, preventing valid signals from being silently dropped
+- **OPERATIONAL_GUIDE.md 更新** — §4.4 添加策略预热期说明（日志示例 + "至少等 25 分钟"）、§5.1 更新 threshold 调优说明、新增 Q7"启动后一直没有下单？"排查清单
 
 ### Architecture Review Fixes (2026-06-20)
 - **#1 PnL 接通 DrawdownGuard** (`c857e21`): `close_position()` 返回 `optional<double>` 已实现 PnL，main.cpp 累加后传给 `drawdown_guard.record_pnl()`。回撤保护现已生效。
@@ -93,9 +99,9 @@
 - **#3 stod 防崩溃** (`7c052cf`): 新增 `safe_parse_double()` (基于 `std::from_chars`，无异常，locale-independent)，替换 34 处 `std::stod` 调用 + 10 个新测试。测试总数 513。
 
 ### Next: Architecture Review Remaining + Testnet
-- 🔴 #4 RiskManager TOCTOU — `evaluate_order()` 三次独立 shared_lock 间存在竞态，需要 atomic reserve
-- 🔴 #5 OrderTracker 写锁下回调 — completion callback 在 unique_lock 下执行，存在锁排序耦合
-- 🔴 #6 ProxyTunnel 提取 — 300 行网络代码从 `gate_ws_client.cpp` 提取为独立模块
+- ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。
+- ✅ #5 OrderTracker 写锁下回调 — "锁内收集，锁外执行"模式：`process_order_update()` 和 `poll_order_status()` 的 `completion_callback_` 在 unique_lock 释放后调用。`set_completion_callback()` 加锁保护。新增 `test_simulate_ws_update()` / `test_try_shared_lock()` 测试接口。3 新测试。
+- ✅ #6 ProxyTunnel 提取 — 373 行网络代码从 `gate_ws_client.cpp` 提取为 `proxy_tunnel.hpp/.cpp`。修复 2 个隐藏 bug：(1) `handle_connection` 线程从 `.detach()` 改为可 join；(2) relay socket/thread 注册合并为单个 lock_guard 作用域。删除 58 行死代码（SSL relay 重载）。7 新测试。
 - Run testnet for 1 week, collect strategy performance data
 - Verify signal quality and PnL in virtual fund environment
 - WebUI: http://127.0.0.1:8080 for real-time monitoring

@@ -98,6 +98,7 @@ std::optional<ExecutionReport> OrderTracker::get_report(const std::string &order
 
 void OrderTracker::set_completion_callback(CompletionCallback callback)
 {
+    std::unique_lock<std::shared_mutex> write_lock(mutex_);
     completion_callback_ = std::move(callback);
 }
 
@@ -118,6 +119,11 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
     // Parse status
     const std::string status_str = resp.value("status", "");
     const OrderStatus new_status = parse_status(status_str);
+
+    // Prepare callback data under lock, invoke outside lock to avoid
+    // lock-ordering coupling with downstream mutexes (PositionManager, etc.)
+    std::optional<ExecutionReport> completed_report;
+    CompletionCallback callback_copy;
 
     // Update tracked order
     {
@@ -145,20 +151,22 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
                 if (val.has_value()) it->second.fees = val.value();
             }
 
-            // Check if terminal state
+            // Check if terminal state — collect report + callback under lock
             if (is_terminal_status(new_status))
             {
-                const ExecutionReport report = generate_report(it->second, now());
-                completed_reports_[order_id] = report;
+                completed_report = generate_report(it->second, now());
+                completed_reports_[order_id] = *completed_report;
 
-                if (completion_callback_)
-                {
-                    completion_callback_(report);
-                }
-
+                callback_copy = completion_callback_;
                 tracked_orders_.erase(it);
             }
         }
+    } // write_lock released
+
+    // Invoke callback outside lock — no lock-ordering coupling
+    if (completed_report && callback_copy)
+    {
+        callback_copy(*completed_report);
     }
 
     return new_status;
@@ -202,49 +210,59 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
 
     PULSE_LOG_DEBUG("execution", "Order update: {} -> {}", order_id, status_str);
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    auto it = tracked_orders_.find(order_id);
-    if (it == tracked_orders_.end())
-    {
-        return; // Not tracking this order
-    }
+    // Prepare callback data under lock, invoke outside lock to avoid
+    // lock-ordering coupling with downstream mutexes (PositionManager, etc.)
+    std::optional<ExecutionReport> completed_report;
+    CompletionCallback callback_copy;
 
-    // Update order state
-    it->second.status = new_status;
-    it->second.last_update_time = now();
-
-    // Parse fill details
-    if (update.contains("filled_total"))
     {
-        auto val = safe_parse_double(update["filled_total"].get<std::string>());
-        if (val.has_value()) it->second.filled_qty = val.value();
-    }
-    if (update.contains("avg_deal_price"))
-    {
-        auto val = safe_parse_double(update["avg_deal_price"].get<std::string>());
-        if (val.has_value()) it->second.avg_fill_price = val.value();
-    }
-    if (update.contains("fee"))
-    {
-        auto val = safe_parse_double(update["fee"].get<std::string>());
-        if (val.has_value()) it->second.fees = val.value();
-    }
-
-    // Check if terminal state
-    if (is_terminal_status(new_status))
-    {
-        const ExecutionReport report = generate_report(it->second, now());
-        completed_reports_[order_id] = report;
-
-        PULSE_LOG_INFO("execution", "Order completed: {} {} filled_qty={} avg_price={} slippage={}bps",
-            order_id, status_str, report.filled_qty, report.avg_fill_price, report.slippage_bps);
-
-        if (completion_callback_)
+        std::unique_lock<std::shared_mutex> write_lock(mutex_);
+        auto it = tracked_orders_.find(order_id);
+        if (it == tracked_orders_.end())
         {
-            completion_callback_(report);
+            return; // Not tracking this order
         }
 
-        tracked_orders_.erase(it);
+        // Update order state
+        it->second.status = new_status;
+        it->second.last_update_time = now();
+
+        // Parse fill details
+        if (update.contains("filled_total"))
+        {
+            auto val = safe_parse_double(update["filled_total"].get<std::string>());
+            if (val.has_value()) it->second.filled_qty = val.value();
+        }
+        if (update.contains("avg_deal_price"))
+        {
+            auto val = safe_parse_double(update["avg_deal_price"].get<std::string>());
+            if (val.has_value()) it->second.avg_fill_price = val.value();
+        }
+        if (update.contains("fee"))
+        {
+            auto val = safe_parse_double(update["fee"].get<std::string>());
+            if (val.has_value()) it->second.fees = val.value();
+        }
+
+        // Check if terminal state — collect report + callback under lock
+        if (is_terminal_status(new_status))
+        {
+            completed_report = generate_report(it->second, now());
+            completed_reports_[order_id] = *completed_report;
+
+            PULSE_LOG_INFO("execution", "Order completed: {} {} filled_qty={} avg_price={} slippage={}bps",
+                order_id, status_str, completed_report->filled_qty,
+                completed_report->avg_fill_price, completed_report->slippage_bps);
+
+            callback_copy = completion_callback_;
+            tracked_orders_.erase(it);
+        }
+    } // write_lock released
+
+    // Invoke callback outside lock — no lock-ordering coupling
+    if (completed_report && callback_copy)
+    {
+        callback_copy(*completed_report);
     }
 }
 

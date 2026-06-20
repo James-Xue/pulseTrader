@@ -152,6 +152,19 @@ Result<std::string> PositionManager::open_position(
 
     positions_[pos_id] = pos;
 
+    // Auto-consume a matching pending reservation (same symbol).
+    // In the normal flow, reserve_notional() creates a reservation, then
+    // open_position() is called on fill. We consume the first matching
+    // reservation to keep the pending count accurate.
+    for (auto it = pending_reservations_.begin(); it != pending_reservations_.end(); ++it)
+    {
+        if (it->second.symbol == symbol)
+        {
+            pending_reservations_.erase(it);
+            break;
+        }
+    }
+
     PULSE_LOG_INFO("risk",
         "Opened {} position {} : {} {} {} @ {:.2f} (lev={:.1f}x, strategy: {})",
         MarketType::Futures == market_type ? "futures" : "spot",
@@ -434,6 +447,172 @@ int PositionManager::open_position_count() const
 {
     std::shared_lock<std::shared_mutex> read_lock(mutex_);
     return static_cast<int>(positions_.size());
+}
+
+// ---------------------------------------------------------------------------
+// Atomic notional reservation (TOCTOU-safe evaluate + reserve)
+// ---------------------------------------------------------------------------
+
+NotionalReservation PositionManager::reserve_notional(
+    const Symbol &symbol, Quantity qty, Price price)
+{
+    // Atomically check all limits and reserve notional budget under a single
+    // exclusive lock. This prevents the TOCTOU race where two concurrent
+    // evaluate_order() calls see stale portfolio data and both approve orders
+    // that together exceed the limit.
+    //
+    // The reserved notional is added to pending_reservations_, so subsequent
+    // reserve_notional() calls see it and won't double-spend.
+
+    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+
+    NotionalReservation res;
+    res.reservation_id = next_reservation_id_++;
+
+    const double proposed_notional = qty * price;
+
+    // Compute current totals under the lock.
+    double total_notional = 0.0;
+    double sym_notional = 0.0;
+    for (const auto &[id, pos] : positions_)
+    {
+        total_notional += pos.notional_value;
+        if (pos.symbol == symbol)
+        {
+            sym_notional += pos.notional_value;
+        }
+    }
+
+    // Add pending reservations to totals (prevents double-spend).
+    for (const auto &[id, pend] : pending_reservations_)
+    {
+        total_notional += pend.notional;
+        if (pend.symbol == symbol)
+        {
+            sym_notional += pend.notional;
+        }
+    }
+
+    const int open_count = static_cast<int>(positions_.size())
+                         + static_cast<int>(pending_reservations_.size());
+
+    // Check if the full order fits within all limits.
+    if (total_notional + proposed_notional <= config_.maxPositionNotional
+        && open_count < config_.maxOpenPositions
+        && sym_notional + proposed_notional <= config_.maxSymbolNotional)
+    {
+        res.approved = true;
+        res.decision = RiskDecision::Approved;
+        res.approved_qty = qty;
+        res.reserved_notional = proposed_notional;
+        res.reason_code = ErrorCode::Ok;
+        res.reason_message = "";
+    }
+    else if (open_count >= config_.maxOpenPositions)
+    {
+        // Hard reject: position count limit reached.
+        res.approved = false;
+        res.decision = RiskDecision::Rejected;
+        res.approved_qty = 0.0;
+        res.reserved_notional = 0.0;
+        res.reason_code = ErrorCode::PositionLimitHit;
+        res.reason_message = "Maximum open positions reached";
+    }
+    else
+    {
+        // Try reduced quantity.
+        const double remaining_pos = config_.maxPositionNotional - total_notional;
+        const double remaining_sym = config_.maxSymbolNotional - sym_notional;
+        const double budget = std::min(remaining_pos, remaining_sym);
+
+        if (budget > 0.0 && price > 0.0)
+        {
+            const double reduced_qty = budget / price;
+            if (reduced_qty > 0.0 && reduced_qty < qty)
+            {
+                res.approved = true;
+                res.decision = RiskDecision::Modified;
+                res.approved_qty = reduced_qty;
+                res.reserved_notional = reduced_qty * price;
+                res.reason_code = ErrorCode::Ok;
+                res.reason_message = "Quantity reduced to fit position limit";
+            }
+            else
+            {
+                res.approved = false;
+                res.decision = RiskDecision::Rejected;
+                res.approved_qty = 0.0;
+                res.reserved_notional = 0.0;
+                res.reason_code = ErrorCode::PositionLimitHit;
+                res.reason_message = "No remaining notional budget";
+            }
+        }
+        else
+        {
+            res.approved = false;
+            res.decision = RiskDecision::Rejected;
+            res.approved_qty = 0.0;
+            res.reserved_notional = 0.0;
+            res.reason_code = ErrorCode::PositionLimitHit;
+            res.reason_message = "Position notional limit reached";
+        }
+    }
+
+    // Store the reservation so subsequent checks see it.
+    if (res.approved)
+    {
+        pending_reservations_[res.reservation_id] = {
+            symbol, res.reserved_notional, res.approved_qty };
+
+        PULSE_LOG_INFO("risk",
+            "Reserved notional: id={} {} qty={} notional={:.2f} (decision: {})",
+            res.reservation_id, symbol, res.approved_qty,
+            res.reserved_notional,
+            res.decision == RiskDecision::Modified ? "Modified" : "Approved");
+    }
+    else
+    {
+        PULSE_LOG_WARN("risk",
+            "Reservation rejected: id={} {} reason={}",
+            res.reservation_id, symbol, res.reason_message);
+    }
+
+    return res;
+}
+
+void PositionManager::consume_reservation(std::uint64_t reservation_id)
+{
+    // Called when an order is filled. Removes the pending reservation so the
+    // budget is freed. open_position() will record the actual position.
+    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    auto it = pending_reservations_.find(reservation_id);
+    if (it != pending_reservations_.end())
+    {
+        PULSE_LOG_DEBUG("risk",
+            "Consumed reservation: id={} symbol={} notional={:.2f}",
+            reservation_id, it->second.symbol, it->second.notional);
+        pending_reservations_.erase(it);
+    }
+}
+
+void PositionManager::cancel_reservation(std::uint64_t reservation_id)
+{
+    // Called when an order fails or is rejected after reserve_notional().
+    // Releases the reserved budget back to the available pool.
+    if (0 == reservation_id)
+    {
+        return; // No reservation to cancel.
+    }
+
+    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    auto it = pending_reservations_.find(reservation_id);
+    if (it != pending_reservations_.end())
+    {
+        PULSE_LOG_INFO("risk",
+            "Cancelled reservation: id={} symbol={} notional={:.2f}",
+            reservation_id, it->second.symbol, it->second.notional);
+        pending_reservations_.erase(it);
+    }
 }
 
 // ---------------------------------------------------------------------------
