@@ -15,7 +15,7 @@ pulseTrader is a C++20 quantitative trading framework purpose-built for high-fre
 
 The framework ships three production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), and a complete trading engine wiring all layers into a single runnable process.
+**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in ~1s via io_context stop + ProxyTunnel poll-based cleanup), WebUI with localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
 
 ---
 
@@ -52,8 +52,8 @@ For the full architecture document including module responsibilities, key files,
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with real-time monitoring, tiered polling (200ms–5min), bearer token auth, localhost-only binding.
-- **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (SIGINT/SIGTERM → reverse-order stop → auto-close positions).
+- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with real-time monitoring, tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
+- **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (~1s: SIGINT → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
 
 ---
 

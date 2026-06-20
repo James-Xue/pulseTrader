@@ -2,7 +2,7 @@
 
 > 本文档面向操作人员，说明如何将 pulseTrader 从当前状态推进到可实盘运行的交易系统。
 >
-> 最后更新：2026-06-20（M13 Testnet 支持已完成，指南同步更新）
+> 最后更新：2026-06-20（Ctrl+C 优雅退出修复 + WebUI token 缓存 + 免认证模式）
 
 ---
 
@@ -59,7 +59,7 @@
 - **构造顺序**：L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
 - **信号流**：StrategyManager → SignalAggregator → app callback（风控检查 → OrderExecutor → OrderTracker）
 - **订单完成回调**：OrderTracker → PositionManager 开/平仓 + DrawdownGuard PnL 更新
-- **优雅退出**：SIGINT/SIGTERM → 原子 stop flag → 反序停止（WebUI → Heartbeat → Strategy → Market → WS → Logger）
+- **优雅退出**：SIGINT/SIGTERM → 原子 stop flag → 反序停止（WebUI → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger）
 - **策略工厂**：`create_strategy()` 根据配置名称创建具体策略类（MomentumScalper / OrderBookScalper / MeanReversionScalper）
 - **默认配置**：2 个策略运行于 BTC_USDT，AI 关闭，WebUI 监听 :8080，凭证从 `.env` 读取
 
@@ -287,9 +287,16 @@ requestTimeoutMs = 30000
 enabled = true
 bindAddress = "127.0.0.1"
 port = 8080
-authToken = "your-secret-token-here"
+authToken = ""                         # 空字符串 = 免认证（开发/testnet 推荐）
+                                       # 生产环境建议设置 token 或从 .env 读取：
+                                       # authToken = "from_env:PULSE_WEBUI_TOKEN"
 maxClients = 4
 ```
+
+> **WebUI 认证说明**：
+> - `authToken = ""` → 免认证，打开浏览器直接使用（适合 testnet 开发）
+> - `authToken = "xxx"` → 首次访问弹出输入框，输入后缓存到 localStorage，刷新不再重复输入
+> - 也可通过 URL 传参免弹窗：`http://localhost:8080/?token=xxx`
 
 ### 4.3 启动交易
 
@@ -329,12 +336,18 @@ tail -f logs/ai.log          # AI 分析结果
 
 ```bash
 # 优雅退出：Ctrl+C 或发送 SIGTERM
-# 主程序会：
-#   1. 停止策略引擎（不再产生新信号）
-#   2. 平掉所有持仓（market order 平仓）
-#   3. 关闭 WS 连接
-#   4. 刷新日志
-#   5. 退出
+# 主程序会反序停止各层：
+#   1. L9: 停止 WebUI 服务器
+#   2. L6: 停止策略引擎（不再产生新信号）
+#   3. L3: 停止行情订阅（WS 取消订阅 channels）
+#   4. L1: 停止 WS 事件循环（io_context::stop）
+#          → 关闭 ProxyTunnel（poll 超时退出 accept 线程，
+#            关闭 relay socket，join relay 线程）
+#   5. L8+: 关闭 SQLite trade recorder
+#   6. L2: 刷新日志
+#   7. 退出
+#
+# 整个退出流程通常在 1 秒内完成
 ```
 
 ---
@@ -571,7 +584,7 @@ apiSecret = "from_env:GATE_TESTNET_API_SECRET"
 ```
 
 注意事项：
-- Testnet REST 地址：`https://api-testnet.gateio.ws`（虚拟资金）
+- Testnet REST 地址：`https://api-testnet.gateapi.io`（虚拟资金，代码根据 `testnet=true` 自动设置）
 - 行情 WS 使用主网（testnet WS 国内不可达，行情数据主网/测试网完全相同）
 - Testnet 仅支持合约（futures），不支持现货 — 策略必须设 `market_type = "futures"`
 - Testnet API Key 需在 https://fx-testnet.gateio.ws 单独创建
@@ -651,7 +664,7 @@ cat logs/execution.log  # 下单失败？
 ├─────────────────────────────────────────────────┤
 │  启动:  ./run.sh trade（自动加载 trading.toml）   │
 │  监控:  ./run.sh webui → http://localhost:8080   │
-│  停止:  Ctrl+C（优雅退出，自动平仓）               │
+│  停止:  Ctrl+C（~1秒优雅退出）                     │
 │  测试:  ./run.sh test（503 个单元测试）            │
 │  日志:  tail -f logs/*.log                       │
 ├─────────────────────────────────────────────────┤
