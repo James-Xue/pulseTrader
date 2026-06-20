@@ -131,15 +131,18 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
             // Parse fill details if available
             if (resp.contains("filled_total"))
             {
-                it->second.filled_qty = std::stod(resp["filled_total"].get<std::string>());
+                auto val = safe_parse_double(resp["filled_total"].get<std::string>());
+                if (val.has_value()) it->second.filled_qty = val.value();
             }
             if (resp.contains("avg_deal_price"))
             {
-                it->second.avg_fill_price = std::stod(resp["avg_deal_price"].get<std::string>());
+                auto val = safe_parse_double(resp["avg_deal_price"].get<std::string>());
+                if (val.has_value()) it->second.avg_fill_price = val.value();
             }
             if (resp.contains("fee"))
             {
-                it->second.fees = std::stod(resp["fee"].get<std::string>());
+                auto val = safe_parse_double(resp["fee"].get<std::string>());
+                if (val.has_value()) it->second.fees = val.value();
             }
 
             // Check if terminal state
@@ -213,15 +216,18 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
     // Parse fill details
     if (update.contains("filled_total"))
     {
-        it->second.filled_qty = std::stod(update["filled_total"].get<std::string>());
+        auto val = safe_parse_double(update["filled_total"].get<std::string>());
+        if (val.has_value()) it->second.filled_qty = val.value();
     }
     if (update.contains("avg_deal_price"))
     {
-        it->second.avg_fill_price = std::stod(update["avg_deal_price"].get<std::string>());
+        auto val = safe_parse_double(update["avg_deal_price"].get<std::string>());
+        if (val.has_value()) it->second.avg_fill_price = val.value();
     }
     if (update.contains("fee"))
     {
-        it->second.fees = std::stod(update["fee"].get<std::string>());
+        auto val = safe_parse_double(update["fee"].get<std::string>());
+        if (val.has_value()) it->second.fees = val.value();
     }
 
     // Check if terminal state

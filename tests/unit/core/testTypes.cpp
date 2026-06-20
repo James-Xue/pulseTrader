@@ -140,3 +140,74 @@ TEST(PulseConfig, DefaultMarketType)
     PulseConfig cfg;
     EXPECT_EQ(cfg.default_market_type, MarketType::Spot);
 }
+
+// ---------------------------------------------------------------------------
+// types.hpp — safe_parse_double
+// ---------------------------------------------------------------------------
+
+TEST(SafeParseDouble, ValidPositiveNumber)
+{
+    auto result = safe_parse_double("123.456");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), 123.456);
+}
+
+TEST(SafeParseDouble, ValidNegativeNumber)
+{
+    auto result = safe_parse_double("-0.00123");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), -0.00123);
+}
+
+TEST(SafeParseDouble, ValidInteger)
+{
+    auto result = safe_parse_double("50000");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), 50000.0);
+}
+
+TEST(SafeParseDouble, ValidZero)
+{
+    auto result = safe_parse_double("0.0");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), 0.0);
+}
+
+TEST(SafeParseDouble, ValidScientificNotation)
+{
+    auto result = safe_parse_double("1.5e-4");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), 1.5e-4);
+}
+
+TEST(SafeParseDouble, EmptyStringReturnsNullopt)
+{
+    auto result = safe_parse_double("");
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SafeParseDouble, InvalidStringReturnsNullopt)
+{
+    auto result = safe_parse_double("N/A");
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SafeParseDouble, PartialParseReturnsNullopt)
+{
+    // "123abc" — from_chars stops at 'a', ptr != end → nullopt
+    auto result = safe_parse_double("123abc");
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SafeParseDouble, WhitespaceReturnsNullopt)
+{
+    auto result = safe_parse_double("  42  ");
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SafeParseDouble, VerySmallNumber)
+{
+    auto result = safe_parse_double("0.00000001");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_DOUBLE_EQ(result.value(), 0.00000001);
+}

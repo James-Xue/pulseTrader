@@ -158,32 +158,40 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
     {
         // Futures ticker format.
         ticker.symbol = result["contract"].get<std::string>();
-        ticker.last = std::stod(result["last"].get<std::string>());
+
+        auto last_opt = safe_parse_double(result["last"].get<std::string>());
+        if (!last_opt.has_value())
+        {
+            PULSE_LOG_WARN("market", "Malformed futures ticker 'last' for {}, skipping",
+                           ticker.symbol);
+            return;
+        }
+        ticker.last = last_opt.value();
 
         if (result.contains("mark_price") && !result["mark_price"].is_null())
         {
-            ticker.mark_price = std::stod(result["mark_price"].get<std::string>());
+            ticker.mark_price = safe_parse_double(result["mark_price"].get<std::string>()).value_or(0.0);
         }
 
         if (result.contains("index_price") && !result["index_price"].is_null())
         {
-            ticker.index_price = std::stod(result["index_price"].get<std::string>());
+            ticker.index_price = safe_parse_double(result["index_price"].get<std::string>()).value_or(0.0);
         }
 
         if (result.contains("funding_rate") && !result["funding_rate"].is_null())
         {
-            ticker.funding_rate = std::stod(result["funding_rate"].get<std::string>());
+            ticker.funding_rate = safe_parse_double(result["funding_rate"].get<std::string>()).value_or(0.0);
         }
 
         // Futures uses volume_24h (in contracts) instead of base_volume.
         if (result.contains("volume_24h") && !result["volume_24h"].is_null())
         {
-            ticker.volume_24h = std::stod(result["volume_24h"].get<std::string>());
+            ticker.volume_24h = safe_parse_double(result["volume_24h"].get<std::string>()).value_or(0.0);
         }
 
         if (result.contains("change_percentage"))
         {
-            ticker.change_pct = std::stod(result["change_percentage"].get<std::string>());
+            ticker.change_pct = safe_parse_double(result["change_percentage"].get<std::string>()).value_or(0.0);
         }
 
         // Futures tickers don't have bid/ask in the ticker channel (those come from orderbook).
@@ -194,11 +202,19 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
     {
         // Spot ticker format (unchanged).
         ticker.symbol = result["currency_pair"].get<std::string>();
-        ticker.last = std::stod(result["last"].get<std::string>());
-        ticker.bid = std::stod(result["highest_bid"].get<std::string>());
-        ticker.ask = std::stod(result["lowest_ask"].get<std::string>());
-        ticker.volume_24h = std::stod(result["base_volume"].get<std::string>());
-        ticker.change_pct = std::stod(result["change_percentage"].get<std::string>());
+
+        auto last_opt = safe_parse_double(result["last"].get<std::string>());
+        if (!last_opt.has_value())
+        {
+            PULSE_LOG_WARN("market", "Malformed spot ticker 'last' for {}, skipping",
+                           ticker.symbol);
+            return;
+        }
+        ticker.last = last_opt.value();
+        ticker.bid = safe_parse_double(result["highest_bid"].get<std::string>()).value_or(0.0);
+        ticker.ask = safe_parse_double(result["lowest_ask"].get<std::string>()).value_or(0.0);
+        ticker.volume_24h = safe_parse_double(result["base_volume"].get<std::string>()).value_or(0.0);
+        ticker.change_pct = safe_parse_double(result["change_percentage"].get<std::string>()).value_or(0.0);
     }
     else
     {
@@ -303,11 +319,24 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
         ? std::stoll(result["t"].get<std::string>()) * 1000
         : result["t"].get<std::int64_t>() * 1000; // Convert to ms.
     kline.close_time = kline.open_time + 60000;               // 1 minute later.
-    kline.open = std::stod(result["o"].get<std::string>());
-    kline.high = std::stod(result["h"].get<std::string>());
-    kline.low = std::stod(result["l"].get<std::string>());
-    kline.close = std::stod(result["c"].get<std::string>());
-    kline.volume = std::stod(result["v"].get<std::string>());
+
+    auto open  = safe_parse_double(result["o"].get<std::string>());
+    auto high  = safe_parse_double(result["h"].get<std::string>());
+    auto low   = safe_parse_double(result["l"].get<std::string>());
+    auto close = safe_parse_double(result["c"].get<std::string>());
+    auto vol   = safe_parse_double(result["v"].get<std::string>());
+
+    if (!open || !high || !low || !close || !vol)
+    {
+        PULSE_LOG_WARN("market", "Malformed kline OHLCV for {}, skipping", symbol);
+        return;
+    }
+
+    kline.open   = open.value();
+    kline.high   = high.value();
+    kline.low    = low.value();
+    kline.close  = close.value();
+    kline.volume = vol.value();
     kline.closed = true; // Assume closed for simplicity (could check if current candle).
 
     auto &buffer = get_kline_buffer(symbol);
