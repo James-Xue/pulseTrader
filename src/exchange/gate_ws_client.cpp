@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+
+#include <poll.h>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -136,7 +138,7 @@ public:
         acceptor_->listen();
         local_port_ = acceptor_->local_endpoint().port();
 
-        // 3. Start accept thread (blocking I/O, independent of io_ctx_)
+        // 3. Start accept thread (poll-based so stop() can interrupt it)
         running_ = true;
         accept_thread_ = std::thread([this, proxy_host, proxy_port]()
         {
@@ -144,9 +146,24 @@ public:
             {
                 try
                 {
+                    // Use poll() with timeout so we can check running_ periodically
+                    struct pollfd pfd;
+                    pfd.fd = acceptor_->native_handle();
+                    pfd.events = POLLIN;
+                    pfd.revents = 0;
+
+                    const int ret = ::poll(&pfd, 1, 200); // 200ms timeout
+                    if (ret <= 0)
+                    {
+                        continue; // timeout or error — check running_ again
+                    }
+
                     asio::ip::tcp::socket local_sock(io_ctx_);
                     acceptor_->accept(local_sock);
-                    std::thread(&ProxyTunnel::handle_connection, this, std::move(local_sock), proxy_host, proxy_port)
+
+                    // Spawn handle_connection — it tracks its own relay threads
+                    std::thread(
+                        &ProxyTunnel::handle_connection, this, std::move(local_sock), proxy_host, proxy_port)
                         .detach();
                 }
                 catch (const std::exception &)
@@ -655,7 +672,6 @@ void GateWsClient::stop()
     io_thread_.request_stop();
 
     // 2. Force-stop the io_context to unblock client.run()
-    //    This is more reliable than close() — it causes run() to return immediately.
     {
         std::lock_guard lock(internal_->hdl_mutex);
         if (internal_->io_ctx_ptr)
@@ -992,6 +1008,11 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
     state_.store(WsConnectionState::Disconnected, std::memory_order_release);
     PULSE_LOG_INFO("exchange", "WS I/O thread exiting");
+    if (tunnel)
+    {
+        tunnel->stop();
+        tunnel.reset();
+    }
 }
 
 } // namespace pulse::exchange
