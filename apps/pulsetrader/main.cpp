@@ -120,8 +120,8 @@ static pulse::PulseConfig build_default_config()
         cfg.exchange.apiKey    = env_or("GATE_TESTNET_API_KEY", "");
         cfg.exchange.apiSecret = env_or("GATE_TESTNET_API_SECRET", "");
         cfg.exchange.restBaseUrl     = "https://api-testnet.gateapi.io";
-        cfg.exchange.wsUrl           = "wss://api.gateio.ws/ws/v4/";  // Spot WS same on testnet (no spot testnet).
-        cfg.exchange.futuresWsUrl    = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+        cfg.exchange.wsUrl           = "wss://api.gateio.ws/ws/v4/";  // Spot WS (same data as testnet).
+        cfg.exchange.futuresWsUrl    = "wss://fx-ws.gateio.ws/v4/ws/usdt"; // Mainnet WS for market data (testnet WS unreachable; data is identical).
     }
     else
     {
@@ -297,10 +297,8 @@ int main(int argc, char* argv[])
             {
                 cfg.exchange.restBaseUrl = "https://api-testnet.gateapi.io";
             }
-            if ("wss://fx-ws.gateio.ws/v4/ws/usdt" == cfg.exchange.futuresWsUrl)
-            {
-                cfg.exchange.futuresWsUrl = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
-            }
+            // Note: futuresWsUrl stays as mainnet (fx-ws.gateio.ws) —
+            // testnet WS is unreachable from China, and market data is identical.
         }
     }
     else
