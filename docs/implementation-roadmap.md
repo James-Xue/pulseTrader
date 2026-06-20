@@ -324,40 +324,44 @@
 
 ## Phase 14 — Futures Market Data (M10)
 
-> 🔲 **待实施**
+> ✅ **已完成** — Ticker/SymbolInfo 合约字段, 双 MarketFeed, EndpointRouter orders 路由, 11 测试
 
 | Item | Detail |
 |------|--------|
-| Files | `ticker_cache.hpp`, `symbol_registry.hpp/.cpp`, `market_feed.hpp/.cpp` |
-| Scope | Ticker 新增 funding_rate/mark_price/index_price/open_interest |
-| | SymbolInfo 新增 contract_multiplier/leverage_max/funding_interval/settle_currency |
-| | MarketFeed 构造函数接受 MarketType, 频道前缀参数化 |
-| Test | 14 个: Ticker×4, SymbolInfo×4, MarketFeed×3, SymbolRegistry×3 |
+| Files | `ticker_cache.hpp`, `symbol_registry.hpp/.cpp`, `market_feed.hpp/.cpp`, `endpoint_router.hpp/.cpp`, `gate_rest_client.hpp/.cpp` |
+| Scope | Ticker 新增 mark_price/index_price/funding_rate |
+| | SymbolInfo 新增 quanto_multiplier/leverage_max/min/maintenance_rate/funding_interval/order_size_min/max/market_type |
+| | MarketFeed 构造函数接受 MarketType, 频道前缀参数化, 双格式 JSON 解析 |
+| | EndpointRouter 新增 orders_path/order_path/leverage_path |
+| | GateRestClient 新增 post/cancel/get_futures_order |
+| Test | 11 个: EndpointRouter×6, TickerCache×2, SymbolRegistry×3 |
 
 ## Phase 15 — Futures Risk & PnL (M11)
 
-> 🔲 **待实施**
+> ✅ **已完成** — 杠杆感知 PnL, 合约仓位管理, 合约风控检查, 12 测试
 
 | Item | Detail |
 |------|--------|
-| Files | `risk_types.hpp`, `position_manager.hpp/.cpp`, `risk_manager.cpp` |
-| Scope | Position 新增 leverage/margin_used/liquidation_price/funding_accrued/contract_multiplier |
-| PnL | 统一公式: `direction × (current - entry) × qty × multiplier` (现货 mult=1.0) |
-| Margin | `notional / leverage`, 新增 max_leverage/max_margin_used 检查 |
-| Test | 15 个: PnL×5, 保证金×4, 强平价×3, 杠杆检查×3 |
+| Files | `risk_types.hpp`, `position_manager.hpp/.cpp`, `risk_manager.hpp/.cpp` |
+| Scope | Position 新增 leverage/margin_mode/margin_used/liquidation_price/quanto_multiplier/market_type |
+| PnL | 统一公式: `direction × (current - entry) × qty × quanto_multiplier × leverage` (现货 defaults=1.0) |
+| Margin | `qty × entry × quanto / leverage`, 新增 evaluate_futures_order() 杠杆/保证金检查 |
+| | PortfolioSummary 新增 total_margin_used/futures_position_count |
+| Test | 12 个: PositionManager×8, RiskManager×4 |
 
 ## Phase 16 — Futures Execution + Dual-Market Wiring (M12)
 
-> 🔲 **待实施**
+> ✅ **已完成** — 合约订单执行, 双市场基础设施串联, 策略市场路由, 7 测试
 
 | Item | Detail |
 |------|--------|
-| Files | `order_executor.hpp/.cpp`, `execution_report.hpp`, `order_tracker.hpp/.cpp`, `main.cpp` |
-| Scope | OrderRequest 新增 market_type/leverage/reduce_only/margin_mode |
-| Orders | 现货: currency_pair/side/amount; 合约: contract/signed size/reduce_only |
-| Tracker | WS 频道 spot.orders vs futures.orders, REST 路径路由, fill 解析双格式 |
-| main.cpp | 双 WS 实例 + 双 MarketFeed, 策略按 market_type 路由 |
-| Test | 16 个: OrderExecutor×5, OrderTracker×3, ExecutionReport×4, main×4 |
+| Files | `order_executor.hpp/.cpp`, `order_tracker.hpp/.cpp`, `signal_types.hpp`, `strategy_manager.cpp`, `main.cpp` |
+| Scope | OrderRequest 新增 market_type/leverage/reduce_only/contract_size |
+| Orders | 现货: currency_pair/side/amount; 合约: contract/signed size/reduce_only/tif |
+| Tracker | WS 频道参数化 (spot.orders vs futures.orders), REST 路径路由, 响应解析双格式 (int id, finish_as) |
+| Signal | TradingSignal 新增 market_type, emit_signal() 自动填入策略 market_type |
+| main.cpp | 按需创建双市场基础设施 (REST/WS/Feed/Executor/Tracker), 策略按 market_type 路由 |
+| Test | 7 个: OrderRequest×4, TradingSignal×3 |
 
 ---
 

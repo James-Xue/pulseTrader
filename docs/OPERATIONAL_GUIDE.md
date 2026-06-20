@@ -2,7 +2,7 @@
 
 > 本文档面向操作人员，说明如何将 pulseTrader 从当前状态推进到可实盘运行的交易系统。
 >
-> 最后更新：2026-06-19（M9 EndpointRouter + WS ping/pong 已完成，指南同步更新）
+> 最后更新：2026-06-19（M12 合约执行+双市场串联已完成，指南同步更新）
 
 ---
 
@@ -26,17 +26,17 @@
 
 | 层 | 模块 | 职责 | 状态 | 测试数 |
 |----|------|------|------|--------|
-| L1 | Exchange | Gate.io REST + WebSocket API | ✅ | 35 |
+| L1 | Exchange | Gate.io REST + WebSocket API (spot + futures) | ✅ | 59 |
 | L2 | Logging | spdlog 异步日志 | ✅ | 8 |
-| L3 | Market Data | 行情热路径（延迟敏感） | ✅ | 33 |
+| L3 | Market Data | 行情热路径（延迟敏感，双市场） | ✅ | 38 |
 | L4 | AI Analysis | 社交/新闻 → LLM → 参数调整 | ✅ | 43 |
 | L5 | Heartbeat | 5 分钟 AI 时钟，TaskQueue | ✅ | 7 |
-| L6 | Strategy | EMA 交叉 / 订单簿失衡 / 布林带均值回归 | ✅ | 52 |
-| L7 | Risk Management | 仓位管理 / 回撤保护 / 限流 / 止损止盈 | ✅ | 92 |
-| L8 | Execution | 订单生命周期管理 | ✅ | 22 |
+| L6 | Strategy | EMA 交叉 / 订单簿失衡 / 布林带均值回归 | ✅ | 59 |
+| L7 | Risk Management | 仓位管理 / 回撤保护 / 限流 / 止损止盈 / 合约杠杆风控 | ✅ | 104 |
+| L8 | Execution | 订单生命周期管理（双市场） | ✅ | 26 |
 | L9 | WebUI | uWebSockets 暗色 SPA 监控面板 | ✅ | 57 |
 
-**467 测试全部通过** | 仅 `main` 分支 | Milestone M1–M9 全部达成
+**497 测试全部通过** | 仅 `main` 分支 | Milestone M1–M12 全部达成
 
 ### 当前可运行的命令
 
@@ -49,7 +49,7 @@
 ./run.sh strategy  # 测试策略引擎（模拟行情驱动 3 个策略）
 ./run.sh ai        # 测试 AI Pipeline（--mock 模式，不调用真实 LLM）
 ./run.sh webui     # 启动 WebUI 监控面板（浏览器 http://localhost:8080）
-./run.sh test      # 运行全部 467 个单元测试
+./run.sh test      # 运行全部 497 个单元测试
 ```
 
 ### 交易主程序（已完成）
@@ -74,12 +74,12 @@
 | 模块 | 说明 | 状态 |
 |------|------|------|
 | ~~交易记录器~~ | ~~SQLite 持久化每笔订单~~ | ✅ 已完成（Phase 2, M7） |
-| **合约交易支持** | Gate.io USDT 永续合约（EndpointRouter + 双 WS + 合约 PnL/杠杆/保证金） | 🔲 Phase 5–7 (M10–M12) |
+| **合约交易支持** | Gate.io USDT 永续合约（双市场基础设施 + 合约 PnL/杠杆/保证金） | ✅ 已完成 (M10–M12) |
 | — 配置基础 | MarketType/MarginMode 枚举, 合约配置字段, 7xxx 错误码 | ✅ 已完成（Phase 3, M8） |
 | — 交换层路由 | EndpointRouter, WS ping/pong 泛化, 合约 REST 便捷方法 | ✅ 已完成（Phase 4, M9） |
-| — 合约行情 | futures ticker/funding_rate/mark_price, SymbolInfo 合约乘数, 双 MarketFeed | 🔲 M10 |
-| — 合约风控 | 统一 PnL 公式 (qty×price×multiplier), 杠杆/保证金检查, 强平价 | 🔲 M11 |
-| — 合约执行 | futures 订单格式 (contract/signed size), OrderTracker 双市场, main.cpp 串联 | 🔲 M12 |
+| — 合约行情 | futures ticker/funding_rate/mark_price, SymbolInfo 合约乘数, 双 MarketFeed | ✅ 已完成（M10） |
+| — 合约风控 | 杠杆感知 PnL (qty×price×quanto×leverage), 杠杆/保证金检查, 强平价 | ✅ 已完成（M11） |
+| — 合约执行 | futures 订单格式 (contract/signed size), OrderTracker 双市场, main.cpp 串联 | ✅ 已完成（M12） |
 
 ### 强烈建议（P1）
 
@@ -107,9 +107,9 @@
 ✅ Phase 2: SQLite 交易记录               ← 已完成（trade_recorder, 17 列表, 4 查询 API, 27 测试, M7 达成）
 ✅ Phase 3: 合约配置基础 (M8)             ← 已完成（MarketType/MarginMode 枚举, 合约字段, 7xxx 错误码, 18 测试）
 ✅ Phase 4: 合约交换层 (M9)                  ← 已完成（EndpointRouter + WS ping/pong 泛化, 合约 REST, 18 测试）
-Phase 5: 合约行情数据 (M10)               ← futures ticker/funding_rate/mark_price, 双 MarketFeed, 预估 2-3 天
-Phase 6: 合约风控 & PnL (M11)             ← 统一 PnL 公式, 杠杆/保证金检查, 预估 2-3 天
-Phase 7: 合约执行 & 双市场串联 (M12)      ← futures 订单格式, main.cpp 双 WS/Feed, 预估 3-4 天
+✅ Phase 5: 合约行情数据 (M10)              ← 已完成（Ticker/SymbolInfo 合约字段, 双 MarketFeed, 11 测试）
+✅ Phase 6: 合约风控 & PnL (M11)            ← 已完成（杠杆感知 PnL, 保证金/杠杆检查, 强平价, 12 测试）
+✅ Phase 7: 合约执行 & 双市场串联 (M12)     ← 已完成（futures 订单, 双 Executor/Tracker, main.cpp 路由, 7 测试）
 Phase 8: Gate.io testnet 模拟交易 1 周     ← 预估 1 周
 Phase 9: P&L 分析 + 策略调优               ← 预估 2–3 天
 Phase 10: 小资金实盘（100 USDT）           ← 持续观察
@@ -616,7 +616,7 @@ cat logs/execution.log  # 下单失败？
 │  启动:  ./run.sh trade --config trading.toml     │
 │  监控:  ./run.sh webui → http://localhost:8080   │
 │  停止:  Ctrl+C（优雅退出，自动平仓）               │
-│  测试:  ./run.sh test（467 个单元测试）            │
+│  测试:  ./run.sh test（497 个单元测试）            │
 │  日志:  tail -f logs/*.log                       │
 ├─────────────────────────────────────────────────┤
 │  .env:        API Key / Secret / Proxy           │
