@@ -379,5 +379,39 @@ TEST(ConfigValidator, AcceptsMaxLeverageBoundary125)
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
+// ---------------------------------------------------------------------------
+// Testnet validation tests
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, RejectsTestnetWithSpotStrategy)
+{
+    auto cfg = valid_config();
+    cfg.exchange.testnet = true;
+    cfg.strategy.strategies[0].market_type = MarketType::Spot;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("testnet"));
+}
+
+TEST(ConfigValidator, AcceptsTestnetWithFuturesStrategy)
+{
+    auto cfg = valid_config();
+    cfg.exchange.testnet = true;
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].leverage = 5.0;
+    cfg.risk.max_leverage = 10.0;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, AcceptsMainnetWithSpotStrategy)
+{
+    auto cfg = valid_config();
+    cfg.exchange.testnet = false;
+    cfg.strategy.strategies[0].market_type = MarketType::Spot;
+    auto err = validate_config(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code);
+}
+
 } // namespace
 } // namespace pulse

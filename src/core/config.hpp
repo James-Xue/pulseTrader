@@ -81,6 +81,7 @@ struct ExchangeConfig
     std::uint32_t maxRetries = 3;            ///< Retries before giving up on a request.
     std::uint32_t wsReconnectBaseMs = 1'000; ///< Base backoff for WS reconnection (ms).
     std::uint32_t wsReconnectMaxMs = 30'000; ///< Max backoff cap for WS reconnection (ms).
+    bool testnet = false;                     ///< True = use Gate.io testnet (virtual funds, futures only).
 };
 
 // ---------------------------------------------------------------------------
