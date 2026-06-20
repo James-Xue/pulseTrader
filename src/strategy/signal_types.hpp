@@ -14,6 +14,7 @@
 //   - Aggregated by SignalAggregator
 //   - Carries confidence (0.0–1.0) for weighted voting
 //   - Carries strategy_id for traceability
+//   - Carries market_type for routing to correct executor
 
 #include "core/types.hpp"
 
@@ -54,6 +55,7 @@ struct TradingSignal
     std::string strategy_id;    ///< Unique ID of the emitting strategy.
     Timestamp timestamp;        ///< When the signal was generated.
     std::string reason;         ///< Human-readable explanation.
+    MarketType market_type;     ///< Spot or Futures (for routing to correct executor).
 
     /// Default constructor.
     TradingSignal()
@@ -64,6 +66,7 @@ struct TradingSignal
         , strategy_id{}
         , timestamp{}
         , reason{}
+        , market_type{ MarketType::Spot }
     {
     }
 };

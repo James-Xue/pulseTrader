@@ -27,6 +27,12 @@ struct OrderRequest
     Price price;                ///< Limit price (required for Limit/PostOnly, ignored for Market).
     std::string client_order_id; ///< Optional client-assigned ID for tracking.
 
+    // Futures-specific fields (defaults make spot orders work unchanged).
+    MarketType market_type;     ///< Spot or Futures (default Spot).
+    double leverage;            ///< Leverage multiplier (futures only, default 1.0).
+    bool reduce_only;           ///< Reduce-only flag (futures only, default false).
+    int contract_size;          ///< Order size in contracts (futures only, 0 = use quantity).
+
     /// Default constructor.
     OrderRequest()
         : symbol{}
@@ -35,6 +41,10 @@ struct OrderRequest
         , quantity{ 0.0 }
         , price{ 0.0 }
         , client_order_id{}
+        , market_type{ MarketType::Spot }
+        , leverage{ 1.0 }
+        , reduce_only{ false }
+        , contract_size{ 0 }
     {
     }
 };
@@ -64,11 +74,15 @@ class OrderExecutor
 {
   public:
     /// Construct an OrderExecutor with a reference to the REST client.
-    explicit OrderExecutor(exchange::GateRestClient &rest_client);
+    ///
+    /// market_type selects spot or futures order endpoints and body format.
+    explicit OrderExecutor(exchange::GateRestClient &rest_client,
+                           MarketType market_type = MarketType::Spot);
 
     /// Place an order on Gate.io.
     ///
-    /// Sends POST /api/v4/spot/orders with the given parameters.
+    /// Spot:    POST /api/v4/spot/orders
+    /// Futures: POST /api/v4/futures/usdt/orders
     /// Retries up to 3 times on transient failures (5xx, timeout).
     ///
     /// Returns OrderResponse with order_id on success, or PulseError on failure.
@@ -76,16 +90,18 @@ class OrderExecutor
 
     /// Cancel an order by order_id.
     ///
-    /// Sends DELETE /api/v4/spot/orders/{order_id}.
+    /// Spot:    DELETE /api/v4/spot/orders/{order_id}
+    /// Futures: DELETE /api/v4/futures/usdt/orders/{order_id}
     /// Returns true on success, false on failure (check logs for details).
     [[nodiscard]] bool cancel_order(const std::string &order_id);
 
   private:
     exchange::GateRestClient &rest_client_;
+    MarketType market_type_;
 
     /// Build Gate.io order JSON body from OrderRequest.
     ///
-    /// Gate.io format:
+    /// Spot format:
     /// {
     ///   "currency_pair": "BTC_USDT",
     ///   "type": "limit",
@@ -94,17 +110,21 @@ class OrderExecutor
     ///   "price": "50000",
     ///   "time_in_force": "gtc"
     /// }
+    ///
+    /// Futures format:
+    /// {
+    ///   "contract": "BTC_USDT",
+    ///   "size": 100,
+    ///   "price": "50000",
+    ///   "tif": "gtc",
+    ///   "reduce_only": false
+    /// }
     [[nodiscard]] nlohmann::json build_order_body(const OrderRequest &req) const;
 
     /// Parse Gate.io order response JSON into OrderResponse.
     ///
-    /// Gate.io response format:
-    /// {
-    ///   "id": "12345",
-    ///   "status": "open",
-    ///   "currency_pair": "BTC_USDT",
-    ///   ...
-    /// }
+    /// Spot:    "id" (string), "status" (open/closed/cancelled)
+    /// Futures: "id" (integer), "status" (open/finished), "finish_as" (filled/cancelled)
     [[nodiscard]] OrderResponse parse_order_response(const nlohmann::json &resp) const;
 };
 

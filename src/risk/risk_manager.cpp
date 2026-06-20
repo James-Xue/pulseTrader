@@ -137,6 +137,55 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
 }
 
 // ---------------------------------------------------------------------------
+// Futures order evaluation
+// ---------------------------------------------------------------------------
+
+RiskEvalResult RiskManager::evaluate_futures_order(
+    const execution::OrderRequest &order, double leverage, double equity)
+{
+    RiskEvalResult result;
+
+    // 1. Check leverage limit.
+    if (leverage > config_.max_leverage)
+    {
+        PULSE_LOG_WARN("risk",
+            "Futures order rejected: leverage {:.1f}x exceeds max {:.1f}x",
+            leverage, config_.max_leverage);
+
+        result.decision = RiskDecision::Rejected;
+        result.approved_qty = 0.0;
+        result.reason_code = ErrorCode::FuturesLeverageExceeded;
+        result.reason_message = "Leverage exceeds maximum allowed";
+        return result;
+    }
+
+    // 2. Check margin sufficiency.
+    // proposed_margin = qty * price / leverage (simplified; quanto handled by caller)
+    const double proposed_margin = order.quantity * order.price / leverage;
+    const auto summary = position_manager_.portfolio_summary();
+    const double total_margin_after = summary.total_margin_used + proposed_margin;
+    const double max_margin = equity * config_.max_margin_used;
+
+    if (total_margin_after > max_margin)
+    {
+        PULSE_LOG_WARN("risk",
+            "Futures order rejected: margin {:.2f} + proposed {:.2f} exceeds {:.2f} "
+            "({:.1f}% of equity {:.2f})",
+            summary.total_margin_used, proposed_margin, max_margin,
+            config_.max_margin_used * 100, equity);
+
+        result.decision = RiskDecision::Rejected;
+        result.approved_qty = 0.0;
+        result.reason_code = ErrorCode::FuturesMarginInsufficient;
+        result.reason_message = "Insufficient margin for futures position";
+        return result;
+    }
+
+    // 3. Delegate to standard evaluate_order() for drawdown/rate/position limits.
+    return evaluate_order(order);
+}
+
+// ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
 

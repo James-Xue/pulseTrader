@@ -117,4 +117,35 @@ std::string EndpointRouter::accounts_path(MarketType mt)
     return rest_prefix(mt) + "/accounts";
 }
 
+// ---------------------------------------------------------------------------
+// orders_path
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::orders_path(MarketType mt)
+{
+    return rest_prefix(mt) + "/orders";
+}
+
+// ---------------------------------------------------------------------------
+// order_path — specific order by ID
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::order_path(MarketType mt, const std::string &order_id)
+{
+    return rest_prefix(mt) + "/orders/" + order_id;
+}
+
+// ---------------------------------------------------------------------------
+// leverage_path — futures only
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::leverage_path(MarketType mt, const std::string &contract)
+{
+    switch (mt)
+    {
+    case MarketType::Spot:
+        return ""; // Not applicable for spot.
+    case MarketType::Futures:
+        return "/api/v4/futures/usdt/positions/" + contract + "/leverage";
+    }
+    return "";
+}
+
 } // namespace pulse::exchange

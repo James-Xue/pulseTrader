@@ -2,23 +2,28 @@
 
 #include "market/market_feed.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "logging/logger.hpp"
 
 namespace pulse::market
 {
 
 using namespace pulse::logging;
+using pulse::exchange::EndpointRouter;
 
-MarketFeed::MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client)
+MarketFeed::MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
+                       MarketType market_type)
     : ws_client_{ ws_client }
     , rest_client_{ rest_client }
-    , symbol_registry_{ rest_client }
+    , market_type_{ market_type }
+    , symbol_registry_{ rest_client, market_type }
 {
 }
 
 void MarketFeed::start(const std::vector<Symbol> &symbols)
 {
-    PULSE_LOG_INFO("market", "Starting MarketFeed for {} symbols", symbols.size());
+    const std::string mt_label = MarketType::Futures == market_type_ ? "futures" : "spot";
+    PULSE_LOG_INFO("market", "Starting {} MarketFeed for {} symbols", mt_label, symbols.size());
 
     // 1. Load symbol metadata from REST.
     if (!symbol_registry_.load_from_rest())
@@ -32,11 +37,15 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         kline_buffers_.try_emplace(symbol, 500);
     }
 
-    // 3. Subscribe to WebSocket channels.
+    // 3. Subscribe to WebSocket channels (market-type-aware).
     subscribed_symbols_ = symbols;
 
+    const std::string tickers_ch = EndpointRouter::ws_channel(market_type_, "tickers");
+    const std::string orderbook_ch = EndpointRouter::ws_channel(market_type_, "order_book");
+    const std::string candlesticks_ch = EndpointRouter::ws_channel(market_type_, "candlesticks");
+
     // Tickers: real-time price updates.
-    ws_client_.subscribe("spot.tickers",
+    ws_client_.subscribe(tickers_ch,
         symbols,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { on_ticker_update(result, full_frame); });
@@ -51,7 +60,7 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     orderbook_payload.push_back("10");
     orderbook_payload.push_back("100ms");
 
-    ws_client_.subscribe("spot.order_book",
+    ws_client_.subscribe(orderbook_ch,
         orderbook_payload,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { on_orderbook_update(result, full_frame); });
@@ -65,20 +74,21 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     }
     kline_payload.push_back("1m");
 
-    ws_client_.subscribe("spot.candlesticks",
+    ws_client_.subscribe(candlesticks_ch,
         kline_payload,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { on_kline_update(result, full_frame); });
 
-    PULSE_LOG_INFO("market", "MarketFeed started — subscribed to {} symbols", symbols.size());
+    PULSE_LOG_INFO("market", "{} MarketFeed started — subscribed to {} symbols",
+                   mt_label, symbols.size());
 }
 
 void MarketFeed::stop()
 {
     PULSE_LOG_INFO("market", "Stopping MarketFeed");
-    ws_client_.unsubscribe("spot.tickers");
-    ws_client_.unsubscribe("spot.order_book");
-    ws_client_.unsubscribe("spot.candlesticks");
+    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "tickers"));
+    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "order_book"));
+    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "candlesticks"));
     subscribed_symbols_.clear();
 }
 
@@ -111,7 +121,7 @@ OrderBookManager &MarketFeed::orderbook_manager()
 
 void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // Gate.io ticker format:
+    // Gate.io spot ticker format:
     // {
     //   "currency_pair": "BTC_USDT",
     //   "last": "50000",
@@ -123,21 +133,79 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
     //   "high_24h": "51000",
     //   "low_24h": "49000"
     // }
+    //
+    // Gate.io futures ticker format:
+    // {
+    //   "contract": "BTC_USDT",
+    //   "last": "50000.5",
+    //   "change_percentage": "2.5",
+    //   "funding_rate": "0.0001",
+    //   "mark_price": "50000.5",
+    //   "index_price": "50001.0",
+    //   "volume_24h": "123456789",
+    //   "quanto_multiplier": "0.0001"
+    // }
 
-    if (!result.is_object() || !result.contains("currency_pair"))
+    if (!result.is_object())
     {
         return;
     }
 
     Ticker ticker;
-    ticker.symbol = result["currency_pair"].get<std::string>();
-    ticker.last = std::stod(result["last"].get<std::string>());
-    ticker.bid = std::stod(result["highest_bid"].get<std::string>());
-    ticker.ask = std::stod(result["lowest_ask"].get<std::string>());
-    ticker.volume_24h = std::stod(result["base_volume"].get<std::string>());
-    ticker.change_pct = std::stod(result["change_percentage"].get<std::string>());
-    ticker.timestamp = full_frame.value("time", static_cast<std::int64_t>(0));
 
+    // Determine format by checking which identifier field is present.
+    if (result.contains("contract"))
+    {
+        // Futures ticker format.
+        ticker.symbol = result["contract"].get<std::string>();
+        ticker.last = std::stod(result["last"].get<std::string>());
+
+        if (result.contains("mark_price") && !result["mark_price"].is_null())
+        {
+            ticker.mark_price = std::stod(result["mark_price"].get<std::string>());
+        }
+
+        if (result.contains("index_price") && !result["index_price"].is_null())
+        {
+            ticker.index_price = std::stod(result["index_price"].get<std::string>());
+        }
+
+        if (result.contains("funding_rate") && !result["funding_rate"].is_null())
+        {
+            ticker.funding_rate = std::stod(result["funding_rate"].get<std::string>());
+        }
+
+        // Futures uses volume_24h (in contracts) instead of base_volume.
+        if (result.contains("volume_24h") && !result["volume_24h"].is_null())
+        {
+            ticker.volume_24h = std::stod(result["volume_24h"].get<std::string>());
+        }
+
+        if (result.contains("change_percentage"))
+        {
+            ticker.change_pct = std::stod(result["change_percentage"].get<std::string>());
+        }
+
+        // Futures tickers don't have bid/ask in the ticker channel (those come from orderbook).
+        ticker.bid = 0.0;
+        ticker.ask = 0.0;
+    }
+    else if (result.contains("currency_pair"))
+    {
+        // Spot ticker format (unchanged).
+        ticker.symbol = result["currency_pair"].get<std::string>();
+        ticker.last = std::stod(result["last"].get<std::string>());
+        ticker.bid = std::stod(result["highest_bid"].get<std::string>());
+        ticker.ask = std::stod(result["lowest_ask"].get<std::string>());
+        ticker.volume_24h = std::stod(result["base_volume"].get<std::string>());
+        ticker.change_pct = std::stod(result["change_percentage"].get<std::string>());
+    }
+    else
+    {
+        return; // Unknown format.
+    }
+
+    ticker.timestamp = full_frame.value("time", static_cast<std::int64_t>(0));
     ticker_cache_.update(ticker.symbol, ticker);
 }
 
@@ -146,14 +214,27 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
     // Gate.io order book format:
     // Snapshot: {"lastUpdateId": 123, "bids": [[price, qty], ...], "asks": [[price, qty], ...]}
     // Delta: same format with incrementing lastUpdateId
+    //
+    // Symbol field:
+    //   Spot:    result["s"] = "BTC_USDT"
+    //   Futures: result["c"] = "BTC_USDT" (contract name)
 
     if (!result.is_object())
     {
         return;
     }
 
-    // Gate.io order_book puts the symbol in result["s"], not in the outer frame.
-    const std::string symbol = result.value("s", "");
+    // Extract symbol — try spot "s" first, then futures "c".
+    std::string symbol;
+    if (result.contains("s"))
+    {
+        symbol = result["s"].get<std::string>();
+    }
+    else if (result.contains("c"))
+    {
+        symbol = result["c"].get<std::string>();
+    }
+
     if (symbol.empty())
     {
         return;
@@ -180,7 +261,7 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
 
 void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // Gate.io K-line format:
+    // Gate.io K-line format (same for spot and futures):
     // {
     //   "t": 1234567890,  // open time (Unix seconds)
     //   "v": "123.45",    // volume
@@ -191,13 +272,27 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
     //   "n": "1m",        // interval
     //   "a": "6172800"    // quote volume
     // }
+    //
+    // Symbol field in outer frame:
+    //   Spot:    full_frame["currency_pair"] = "BTC_USDT"
+    //   Futures: full_frame["contract"] = "BTC_USDT"
 
     if (!result.is_object() || !result.contains("t"))
     {
         return;
     }
 
-    const std::string symbol = full_frame.value("currency_pair", "");
+    // Extract symbol — try spot "currency_pair" first, then futures "contract".
+    std::string symbol;
+    if (full_frame.contains("currency_pair"))
+    {
+        symbol = full_frame["currency_pair"].get<std::string>();
+    }
+    else if (full_frame.contains("contract"))
+    {
+        symbol = full_frame["contract"].get<std::string>();
+    }
+
     if (symbol.empty())
     {
         return;

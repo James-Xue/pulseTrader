@@ -292,3 +292,60 @@ TEST_F(RiskManagerTest, RiskSnapshotReflectsHaltedState)
     EXPECT_NE(ErrorCode::Ok, snap.halt_reason);
     EXPECT_GT(snap.max_drawdown, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// M11: Futures order evaluation tests
+// ---------------------------------------------------------------------------
+
+TEST_F(RiskManagerTest, FuturesOrder_LeverageExceeded)
+{
+    // config_.max_leverage defaults to 10.0
+    // Requesting 20x leverage should be rejected with FuturesLeverageExceeded (7001).
+    const auto order = make_order();
+    const auto result = risk_manager_.evaluate_futures_order(order, 20.0, 10000.0);
+
+    EXPECT_EQ(RiskDecision::Rejected, result.decision);
+    EXPECT_EQ(ErrorCode::FuturesLeverageExceeded, result.reason_code);
+}
+
+TEST_F(RiskManagerTest, FuturesOrder_MarginInsufficient)
+{
+    // config_.max_margin_used defaults to 0.5 (50% of equity)
+    // equity = 1000, max margin = 500
+    // proposed margin = 0.01 * 50000 / 5 = 100 → OK (within 500)
+    // But let's make it exceed: qty=1, price=50000, leverage=2 → margin=25000 > 500
+    OrderRequest order;
+    order.symbol = "BTC_USDT";
+    order.side = Side::Buy;
+    order.type = OrderType::Limit;
+    order.quantity = 1.0;
+    order.price = 50000.0;
+
+    const auto result = risk_manager_.evaluate_futures_order(order, 2.0, 1000.0);
+
+    EXPECT_EQ(RiskDecision::Rejected, result.decision);
+    EXPECT_EQ(ErrorCode::FuturesMarginInsufficient, result.reason_code);
+}
+
+TEST_F(RiskManagerTest, FuturesOrder_Approved)
+{
+    // Reasonable futures order within all limits.
+    // equity=10000, leverage=5x, qty=0.001, price=50000
+    // margin = 0.001 * 50000 / 5 = 10 → well within 5000 (50% of 10000)
+    const auto order = make_order("BTC_USDT", Side::Buy, 0.001, 50000.0);
+    const auto result = risk_manager_.evaluate_futures_order(order, 5.0, 10000.0);
+
+    EXPECT_EQ(RiskDecision::Approved, result.decision);
+    EXPECT_DOUBLE_EQ(0.001, result.approved_qty);
+    EXPECT_EQ(ErrorCode::Ok, result.reason_code);
+}
+
+TEST_F(RiskManagerTest, FuturesOrder_LeverageAtBoundary)
+{
+    // Leverage exactly at max_leverage should be approved.
+    config_.max_leverage = 10.0;
+    const auto order = make_order("BTC_USDT", Side::Buy, 0.001, 50000.0);
+    const auto result = risk_manager_.evaluate_futures_order(order, 10.0, 10000.0);
+
+    EXPECT_NE(RiskDecision::Rejected, result.decision);
+}

@@ -98,6 +98,24 @@ class EndpointRouter
     /// Spot:    "/api/v4/spot/accounts"
     /// Futures: "/api/v4/futures/usdt/accounts"
     [[nodiscard]] static std::string accounts_path(MarketType mt);
+
+    /// Path to place or list orders.
+    ///
+    /// Spot:    "/api/v4/spot/orders"
+    /// Futures: "/api/v4/futures/usdt/orders"
+    [[nodiscard]] static std::string orders_path(MarketType mt);
+
+    /// Path to get or cancel a specific order by ID.
+    ///
+    /// Spot:    "/api/v4/spot/orders/{order_id}"
+    /// Futures: "/api/v4/futures/usdt/orders/{order_id}"
+    [[nodiscard]] static std::string order_path(MarketType mt, const std::string &order_id);
+
+    /// Path to set position leverage (futures only).
+    ///
+    /// Futures: "/api/v4/futures/usdt/positions/{contract}/leverage"
+    /// Spot:    returns empty string (not applicable).
+    [[nodiscard]] static std::string leverage_path(MarketType mt, const std::string &contract = "");
 };
 
 } // namespace pulse::exchange

@@ -3,15 +3,17 @@
 //
 // Integrates all L3 components (TickerCache, SymbolRegistry, KlineBuffer, OrderBookManager)
 // and subscribes to Gate.io WebSocket channels to route incoming events to the appropriate
-// data structure.
+// data structure. Supports both spot and futures markets via MarketType parameter.
 //
 // Usage:
-//   MarketFeed feed(ws_client, rest_client);
+//   MarketFeed feed(ws_client, rest_client);                    // spot (default)
+//   MarketFeed futures_feed(ws_client, rest_client, Futures);   // futures
 //   feed.start({"BTC_USDT", "ETH_USDT"});
 //   auto ticker = feed.ticker_cache().get("BTC_USDT");
 //   auto book = feed.orderbook_manager().top_bids("BTC_USDT", 5);
 //   feed.stop();
 
+#include "core/types.hpp"
 #include "exchange/gate_rest_client.hpp"
 #include "exchange/gate_ws_client.hpp"
 #include "market/kline_buffer.hpp"
@@ -35,7 +37,9 @@ class MarketFeed
     /// Construct a MarketFeed with references to the WS and REST clients.
     ///
     /// Does NOT start subscriptions — call start() explicitly.
-    MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client);
+    /// MarketType selects which WS channels to subscribe to (spot.* vs futures.*).
+    MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
+               MarketType market_type = MarketType::Spot);
 
     /// Start subscribing to market data channels for the given symbols.
     ///
@@ -67,6 +71,7 @@ class MarketFeed
   private:
     exchange::GateWsClient &ws_client_;
     exchange::GateRestClient &rest_client_;
+    MarketType market_type_;
 
     TickerCache ticker_cache_;
     SymbolRegistry symbol_registry_;

@@ -204,6 +204,9 @@ create_strategy(const std::string& name,
 // ===========================================================================
 int main(int argc, char* argv[])
 {
+    using pulse::MarketType;
+    using pulse::MarginMode;
+
     // ------------------------------------------------------------------
     // 0. Command-line parsing
     // ------------------------------------------------------------------
@@ -306,19 +309,69 @@ int main(int argc, char* argv[])
     }
 
     // ------------------------------------------------------------------
-    // 3. L1: Exchange clients
+    // 3. L1: Exchange clients (dual-market support)
     // ------------------------------------------------------------------
-    pulse::exchange::GateRestClient rest_client(cfg.exchange);
-    pulse::exchange::GateWsClient   ws_client(cfg.exchange);
+    // Detect which market types are needed by enabled strategies.
+    bool has_spot = false;
+    bool has_futures = false;
+    for (const auto& inst : cfg.strategy.strategies)
+    {
+        if (!inst.enabled) continue;
+        if (MarketType::Futures == inst.market_type) has_futures = true;
+        else has_spot = true;
+    }
+    // Default to spot if no strategies configured (backward compatibility).
+    if (!has_spot && !has_futures) has_spot = true;
 
-    log->info("[L1] Exchange clients created");
+    // Spot infrastructure.
+    std::unique_ptr<pulse::exchange::GateRestClient> spot_rest;
+    std::unique_ptr<pulse::exchange::GateWsClient>   spot_ws;
+    std::unique_ptr<pulse::market::MarketFeed>       spot_feed;
+    std::unique_ptr<pulse::execution::OrderExecutor>  spot_executor;
+    std::unique_ptr<pulse::execution::OrderTracker>   spot_tracker;
+
+    // Futures infrastructure.
+    std::unique_ptr<pulse::exchange::GateRestClient> futures_rest;
+    std::unique_ptr<pulse::exchange::GateWsClient>   futures_ws;
+    std::unique_ptr<pulse::market::MarketFeed>       futures_feed;
+    std::unique_ptr<pulse::execution::OrderExecutor>  futures_executor;
+    std::unique_ptr<pulse::execution::OrderTracker>   futures_tracker;
+
+    if (has_spot)
+    {
+        spot_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Spot);
+        spot_ws = std::make_unique<pulse::exchange::GateWsClient>(
+            cfg.exchange, MarketType::Spot);
+        spot_feed = std::make_unique<pulse::market::MarketFeed>(
+            *spot_ws, *spot_rest, MarketType::Spot);
+        spot_executor = std::make_unique<pulse::execution::OrderExecutor>(
+            *spot_rest, MarketType::Spot);
+        spot_tracker = std::make_unique<pulse::execution::OrderTracker>(
+            *spot_ws, *spot_rest, MarketType::Spot);
+        log->info("[L1] Spot exchange clients created");
+    }
+
+    if (has_futures)
+    {
+        futures_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Futures);
+        futures_ws = std::make_unique<pulse::exchange::GateWsClient>(
+            cfg.exchange, MarketType::Futures);
+        futures_feed = std::make_unique<pulse::market::MarketFeed>(
+            *futures_ws, *futures_rest, MarketType::Futures);
+        futures_executor = std::make_unique<pulse::execution::OrderExecutor>(
+            *futures_rest, MarketType::Futures);
+        futures_tracker = std::make_unique<pulse::execution::OrderTracker>(
+            *futures_ws, *futures_rest, MarketType::Futures);
+        log->info("[L1] Futures exchange clients created");
+    }
 
     // ------------------------------------------------------------------
-    // 4. L3: Market Data
+    // 4. L3: Market Data (per-market feeds already created above)
     // ------------------------------------------------------------------
-    pulse::market::MarketFeed market_feed(ws_client, rest_client);
-
-    log->info("[L3] Market feed created");
+    log->info("[L3] Market feed(s) ready (spot={}, futures={})",
+              has_spot ? "yes" : "no", has_futures ? "yes" : "no");
 
     // ------------------------------------------------------------------
     // 5. L7: Risk Management
@@ -334,12 +387,9 @@ int main(int argc, char* argv[])
               cfg.risk.maxPositionNotional, cfg.risk.maxDailyDrawdown * 100);
 
     // ------------------------------------------------------------------
-    // 6. L8: Order Execution
+    // 6. L8: Order Execution (per-market executors already created above)
     // ------------------------------------------------------------------
-    pulse::execution::OrderExecutor executor(rest_client);
-    pulse::execution::OrderTracker  order_tracker(ws_client, rest_client);
-
-    log->info("[L8] Order executor + tracker created");
+    log->info("[L8] Order executor + tracker ready");
 
     // ------------------------------------------------------------------
     // 6b. Trade Recorder (optional, Phase 2)
@@ -390,8 +440,31 @@ int main(int argc, char* argv[])
             continue;
         }
 
-        pulse::strategy::StrategyContext ctx(market_feed, risk_mgr,
-                                             executor, inst_cfg);
+        // Select the correct MarketFeed and OrderExecutor for this strategy's market.
+        pulse::market::MarketFeed* feed_ptr = nullptr;
+        pulse::execution::OrderExecutor* exec_ptr = nullptr;
+
+        if (MarketType::Futures == inst_cfg.market_type && futures_feed)
+        {
+            feed_ptr = futures_feed.get();
+            exec_ptr = futures_executor.get();
+        }
+        else if (spot_feed)
+        {
+            feed_ptr = spot_feed.get();
+            exec_ptr = spot_executor.get();
+        }
+
+        if (!feed_ptr || !exec_ptr)
+        {
+            log->warn("No {} infrastructure available for strategy '{}', skipping",
+                      MarketType::Futures == inst_cfg.market_type ? "futures" : "spot",
+                      inst_cfg.name);
+            continue;
+        }
+
+        pulse::strategy::StrategyContext ctx(*feed_ptr, risk_mgr,
+                                             *exec_ptr, inst_cfg);
 
         auto strat = create_strategy(inst_cfg.name, ctx);
         if (!strat)
@@ -400,9 +473,10 @@ int main(int argc, char* argv[])
             continue;
         }
 
-        log->info("[L6] Registered strategy: {} on {} (qty={}, conf={:.2f})",
+        log->info("[L6] Registered strategy: {} on {} (qty={}, conf={:.2f}, market={})",
                   inst_cfg.name, inst_cfg.symbol,
-                  inst_cfg.order_quantity, inst_cfg.min_confidence);
+                  inst_cfg.order_quantity, inst_cfg.min_confidence,
+                  MarketType::Futures == inst_cfg.market_type ? "futures" : "spot");
 
         strategy_mgr.register_strategy(std::move(strat));
     }
@@ -461,8 +535,8 @@ int main(int argc, char* argv[])
     if (cfg.webui.enabled)
     {
         dashboard_state = std::make_unique<pulse::webui::DashboardState>(
-            cfg.webui, market_feed, strategy_mgr, risk_mgr,
-            order_tracker, ai_pipeline);
+            cfg.webui, *spot_feed, strategy_mgr, risk_mgr,
+            *spot_tracker, ai_pipeline);
 
         web_server = std::make_unique<pulse::webui::WebServer>(
             cfg.webui, *dashboard_state, "frontend");
@@ -506,10 +580,21 @@ int main(int argc, char* argv[])
             req.symbol   = sig.symbol;
             req.side     = side;
             req.type     = OrderType::Market;
-            req.quantity = cfg.strategy.strategies.empty()
-                           ? 0.001
-                           : cfg.strategy.strategies[0].order_quantity;
             req.price    = sig.price;
+            req.market_type = sig.market_type;
+
+            // Find strategy config for leverage/quantity settings.
+            req.quantity = 0.001;
+            for (const auto& inst : cfg.strategy.strategies)
+            {
+                if (inst.name == sig.strategy_id)
+                {
+                    req.quantity = inst.order_quantity;
+                    req.market_type = inst.market_type;
+                    req.leverage = inst.leverage;
+                    break;
+                }
+            }
 
             // Risk evaluation.
             auto eval = risk_mgr.evaluate_order(req);
@@ -543,7 +628,12 @@ int main(int argc, char* argv[])
                           sig.reason);
 
             // Place order via REST.
-            auto result = executor.place_order(req);
+            auto* exec_ptr = (MarketType::Futures == req.market_type && futures_executor)
+                ? futures_executor.get() : spot_executor.get();
+            auto* track_ptr = (MarketType::Futures == req.market_type && futures_tracker)
+                ? futures_tracker.get() : spot_tracker.get();
+
+            auto result = exec_ptr->place_order(req);
             if (!ok(result))
             {
                 auto err = error(result);
@@ -558,18 +648,21 @@ int main(int argc, char* argv[])
                           static_cast<int>(resp.status));
 
             // Track order lifecycle via WS + REST polling fallback.
-            order_tracker.track_order(resp.order_id, req.symbol,
-                                      req.side, req.type,
-                                      req.quantity, sig.price,
-                                      sig.strategy_id);
+            if (track_ptr)
+            {
+                track_ptr->track_order(resp.order_id, req.symbol,
+                                        req.side, req.type,
+                                        req.quantity, sig.price,
+                                        sig.strategy_id);
+            }
         });
 
     // ------------------------------------------------------------------
     // 11. Wire: order completion → update position manager + log
     // ------------------------------------------------------------------
-    order_tracker.set_completion_callback(
-        [&](const pulse::execution::ExecutionReport& report)
-        {
+    // Shared completion handler for both spot and futures trackers.
+    auto completion_handler = [&](const pulse::execution::ExecutionReport& report)
+    {
             auto log_app = pulse::logging::Logger::get("app");
 
             log_app->info("Order COMPLETED: id={} {} {} {:.6f} @ {:.2f} "
@@ -637,7 +730,16 @@ int main(int argc, char* argv[])
                 }
             }
 #endif
-        });
+    };
+
+    if (spot_tracker)
+    {
+        spot_tracker->set_completion_callback(completion_handler);
+    }
+    if (futures_tracker)
+    {
+        futures_tracker->set_completion_callback(completion_handler);
+    }
 
     // ------------------------------------------------------------------
     // 12. Signal handler — SIGINT / SIGTERM
@@ -650,13 +752,28 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     log->info("Starting trading engine...");
 
-    // L1: WebSocket connection.
-    ws_client.start();
-    log->info("[L1] WebSocket connecting...");
+    // L1: WebSocket connections.
+    if (spot_ws)
+    {
+        spot_ws->start();
+        log->info("[L1] Spot WebSocket connecting...");
+    }
+    if (futures_ws)
+    {
+        futures_ws->start();
+        log->info("[L1] Futures WebSocket connecting...");
+    }
 
     // L3: Subscribe to market data channels.
-    market_feed.start(cfg.symbols);
-    log->info("[L3] Market feed started for {} symbol(s)", cfg.symbols.size());
+    if (spot_feed)
+    {
+        spot_feed->start(cfg.symbols);
+    }
+    if (futures_feed)
+    {
+        futures_feed->start(cfg.symbols);
+    }
+    log->info("[L3] Market feed(s) started for {} symbol(s)", cfg.symbols.size());
 
     // L6: Spawn strategy threads.
     strategy_mgr.start();
@@ -731,13 +848,15 @@ int main(int argc, char* argv[])
     strategy_mgr.stop();
     log->info("[L6] Strategy threads stopped");
 
-    // L3: Market feed
-    market_feed.stop();
-    log->info("[L3] Market feed stopped");
+    // L3: Market feeds
+    if (futures_feed) futures_feed->stop();
+    if (spot_feed) spot_feed->stop();
+    log->info("[L3] Market feed(s) stopped");
 
-    // L1: WebSocket
-    ws_client.stop();
-    log->info("[L1] WebSocket disconnected");
+    // L1: WebSockets
+    if (futures_ws) futures_ws->stop();
+    if (spot_ws) spot_ws->stop();
+    log->info("[L1] WebSocket(s) disconnected");
 
     // Summary
     auto portfolio = position_mgr.portfolio_summary();

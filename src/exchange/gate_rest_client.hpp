@@ -116,6 +116,22 @@ class GateRestClient
     /// Requires valid API key and secret.
     [[nodiscard]] Result<nlohmann::json> get_futures_accounts();
 
+    /// POST /api/v4/futures/usdt/orders — place a futures order.
+    ///
+    /// body should contain: contract, size, price, tif, text, reduce_only, etc.
+    /// Returns the order object on success.
+    [[nodiscard]] Result<nlohmann::json> post_futures_order(const nlohmann::json &body);
+
+    /// DELETE /api/v4/futures/usdt/orders/{order_id} — cancel a futures order.
+    ///
+    /// Returns the cancelled order object on success.
+    [[nodiscard]] Result<nlohmann::json> cancel_futures_order(const std::string &order_id);
+
+    /// GET /api/v4/futures/usdt/orders/{order_id} — query a futures order.
+    ///
+    /// Returns the order object with current status.
+    [[nodiscard]] Result<nlohmann::json> get_futures_order(const std::string &order_id);
+
     // -----------------------------------------------------------------------
     // Generic request (for future expansion)
     // -----------------------------------------------------------------------

@@ -90,6 +90,14 @@ struct Position
     Timestamp open_time;      ///< When the position was opened.
     std::string strategy_id;  ///< Owning strategy identifier.
 
+    // Futures-specific fields (defaults make spot positions work unchanged).
+    MarketType market_type;      ///< Spot or Futures.
+    double leverage;             ///< Leverage multiplier (1.0 = no leverage / spot).
+    MarginMode margin_mode;      ///< Cross or Isolated (futures only).
+    double margin_used;          ///< Margin used = qty * entry * quanto / leverage.
+    Price liquidation_price;     ///< Estimated liquidation price (futures only).
+    double quanto_multiplier;    ///< Contract multiplier (1.0 for spot).
+
     Position()
         : position_id{}
         , symbol{}
@@ -101,6 +109,12 @@ struct Position
         , notional_value{ 0.0 }
         , open_time{}
         , strategy_id{}
+        , market_type{ MarketType::Spot }
+        , leverage{ 1.0 }
+        , margin_mode{ MarginMode::Cross }
+        , margin_used{ 0.0 }
+        , liquidation_price{ 0.0 }
+        , quanto_multiplier{ 1.0 }
     {
     }
 };
@@ -120,12 +134,16 @@ struct PortfolioSummary
     double total_notional;        ///< Sum of notional values across all positions.
     double total_unrealized_pnl;  ///< Sum of unrealized PnL.
     double net_exposure;          ///< Net directional exposure (long - short notional).
+    double total_margin_used;     ///< Total margin used across futures positions.
+    int futures_position_count;   ///< Number of open futures positions.
 
     PortfolioSummary()
         : open_position_count{ 0 }
         , total_notional{ 0.0 }
         , total_unrealized_pnl{ 0.0 }
         , net_exposure{ 0.0 }
+        , total_margin_used{ 0.0 }
+        , futures_position_count{ 0 }
     {
     }
 };

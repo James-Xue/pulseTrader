@@ -356,4 +356,31 @@ Result<nlohmann::json> GateRestClient::get_futures_accounts()
     return request("GET", EndpointRouter::accounts_path(MarketType::Futures));
 }
 
+Result<nlohmann::json> GateRestClient::post_futures_order(const nlohmann::json &body)
+{
+    if (!has_credentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures order"};
+    }
+    return request("POST", EndpointRouter::orders_path(MarketType::Futures), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::cancel_futures_order(const std::string &order_id)
+{
+    if (!has_credentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel futures order"};
+    }
+    return request("DELETE", EndpointRouter::order_path(MarketType::Futures, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::get_futures_order(const std::string &order_id)
+{
+    if (!has_credentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query futures order"};
+    }
+    return request("GET", EndpointRouter::order_path(MarketType::Futures, order_id));
+}
+
 } // namespace pulse::exchange
