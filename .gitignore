@@ -58,3 +58,6 @@ logs/
 # CTest temporary files
 Testing/
 
+
+# Local config files
+trading.toml
