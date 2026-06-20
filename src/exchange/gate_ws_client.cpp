@@ -162,7 +162,7 @@ public:
         return "wss://127.0.0.1:" + std::to_string(local_port_) + target_path_;
     }
 
-    /// Stop the tunnel — close acceptor and join accept thread
+    /// Stop the tunnel — close acceptor, sockets, and join all threads
     void stop()
     {
         running_ = false;
@@ -174,6 +174,34 @@ public:
         if (accept_thread_.joinable())
         {
             accept_thread_.join();
+        }
+
+        // Close all relay sockets to unblock read_some() calls
+        {
+            std::lock_guard lock(relay_mutex_);
+            for (auto &sock : relay_sockets_)
+            {
+                if (sock && sock->is_open())
+                {
+                    asio::error_code ec;
+                    sock->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+                    sock->close(ec);
+                }
+            }
+        }
+
+        // Join all relay threads
+        {
+            std::lock_guard lock(relay_mutex_);
+            for (auto &t : relay_threads_)
+            {
+                if (t.joinable())
+                {
+                    t.join();
+                }
+            }
+            relay_threads_.clear();
+            relay_sockets_.clear();
         }
     }
 
@@ -223,21 +251,34 @@ private:
             auto local_ptr = std::make_shared<asio::ip::tcp::socket>(std::move(local_sock));
             auto remote_ptr = std::make_shared<asio::ip::tcp::socket>(std::move(remote_sock));
 
+            // Track sockets so stop() can close them to unblock relay threads
+            {
+                std::lock_guard lock(relay_mutex_);
+                relay_sockets_.push_back(local_ptr);
+                relay_sockets_.push_back(remote_ptr);
+            }
+
             // Local → Remote (websocketpp → proxy → server)
-            std::thread([local_ptr, remote_ptr]()
+            std::thread t1([local_ptr, remote_ptr]()
             {
                 relay_data(*local_ptr, *remote_ptr);
-            }).detach();
+            });
 
             // Remote → Local (server → proxy → websocketpp)
-            std::thread([local_ptr, remote_ptr]()
+            std::thread t2([local_ptr, remote_ptr]()
             {
                 relay_data(*remote_ptr, *local_ptr);
                 // When remote→local ends, close both to unblock the other direction
                 asio::error_code ec;
                 local_ptr->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
                 remote_ptr->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-            }).detach();
+            });
+
+            {
+                std::lock_guard lock(relay_mutex_);
+                relay_threads_.push_back(std::move(t1));
+                relay_threads_.push_back(std::move(t2));
+            }
         }
         catch (const std::exception &e)
         {
@@ -338,6 +379,10 @@ private:
     std::thread accept_thread_;
     std::atomic<bool> running_{ false };
     std::uint16_t local_port_ = 0;
+
+    std::mutex relay_mutex_;
+    std::vector<std::thread> relay_threads_;
+    std::vector<std::shared_ptr<asio::ip::tcp::socket>> relay_sockets_;
 };
 
 // ---------------------------------------------------------------------------
@@ -438,6 +483,10 @@ struct WsInternal
     // Pointer to the active WsClient (valid while client.run() is executing).
     // Used by send_queued() to send messages from external threads.
     WsClient *client_ptr{ nullptr };
+
+    // Pointer to the active io_context (valid while client.run() is executing).
+    // Used by stop() to post a close operation and unblock the event loop.
+    asio::io_context *io_ctx_ptr{ nullptr };
 
     /// Process all queued actions on the I/O thread.
     /// Called after connection is established.
@@ -605,7 +654,17 @@ void GateWsClient::stop()
     // 1. Request the I/O thread to stop
     io_thread_.request_stop();
 
-    // 2. Wait for the thread to finish (it will exit the reconnect loop on stop_token)
+    // 2. Force-stop the io_context to unblock client.run()
+    //    This is more reliable than close() — it causes run() to return immediately.
+    {
+        std::lock_guard lock(internal_->hdl_mutex);
+        if (internal_->io_ctx_ptr)
+        {
+            internal_->io_ctx_ptr->stop();
+        }
+    }
+
+    // 3. Wait for the thread to finish
     io_thread_.join();
     state_.store(WsConnectionState::Disconnected, std::memory_order_release);
     PULSE_LOG_INFO("exchange", "WS client stopped");
@@ -721,6 +780,7 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
             // 3. Initialise the asio transport
             client.init_asio();
+            internal_->io_ctx_ptr = &client.get_io_context();
 
             // 4. Set TLS handler for wss:// connections
             //    When using a proxy tunnel, we connect via wss:// to 127.0.0.1
@@ -870,6 +930,7 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
             client.run();
             PULSE_LOG_DEBUG("exchange", "client.run() returned");
             internal_->client_ptr = nullptr;
+            internal_->io_ctx_ptr = nullptr;
 
             // Check if we should stop or reconnect
             if (stop_token.stop_requested())
