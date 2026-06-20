@@ -48,7 +48,13 @@ case "$1" in
     trade)
         echo "=== pulseTrader Trading Engine ==="
         shift  # consume 'trade' argument
-        "$BUILD_DIR/apps/pulsetrader/pulsetrader" "$@"
+        # 如果没有手动指定 --config，且 trading.toml 存在，自动使用
+        if [ $# -eq 0 ] && [ -f trading.toml ]; then
+            echo "📄 自动加载 trading.toml"
+            "$BUILD_DIR/apps/pulsetrader/pulsetrader" --config trading.toml
+        else
+            "$BUILD_DIR/apps/pulsetrader/pulsetrader" "$@"
+        fi
         ;;
     rest)
         echo "=== Gate.io REST API ==="
