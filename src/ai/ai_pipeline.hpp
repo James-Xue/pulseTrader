@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <shared_mutex>
+#include <vector>
 
 namespace pulse::ai
 {
@@ -60,17 +61,20 @@ class AiPipeline
     ///   2. Poll news feed (if enabled) — failure logged, not fatal
     ///   3. Build prompt from market data + social signals
     ///   4. Call LLM and parse response
-    ///   5. Apply validated parameter deltas
+    ///   5. Apply validated parameter deltas to ALL strategy params
     ///
     /// Parameters:
-    ///   1. snapshot — current market data (ticker + recent klines)
-    ///   2. params   — strategy parameters to update atomically
+    ///   1. snapshot    — current market data (ticker + recent klines)
+    ///   2. all_params  — pointers to each strategy's StrategyParams;
+    ///                    the first is used for prompt building (read),
+    ///                    all are updated by ParamAdvisor (write)
     ///
     /// Returns:
     ///   - AnalysisResult on success (params may have been updated)
     ///   - PulseError on failure (params unchanged)
-    [[nodiscard]] Result<AnalysisResult> run(const MarketSnapshot &snapshot,
-                                             strategy::StrategyParams &params);
+    [[nodiscard]] Result<AnalysisResult> run(
+        const MarketSnapshot &snapshot,
+        std::vector<strategy::StrategyParams *> &all_params);
 
     /// Access the Twitter feed component (for testing / inspection).
     [[nodiscard]] TwitterFeed &twitter_feed();

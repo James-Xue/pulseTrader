@@ -116,6 +116,13 @@ class StrategyManager
     /// Safe to call from the WebUI thread while strategy threads are running.
     [[nodiscard]] std::vector<StrategySnapshot> snapshot() const;
 
+    /// Returns mutable pointers to each registered strategy's params.
+    ///
+    /// Used by the AI pipeline (HeartbeatScheduler → ParamAdvisor) to write
+    /// parameter deltas directly to each strategy's own StrategyParams.
+    /// Must be called after all strategies are registered (before or after start()).
+    [[nodiscard]] std::vector<StrategyParams *> all_params();
+
   private:
     std::vector<std::unique_ptr<StrategyBase>> strategies_;
     std::vector<std::jthread> threads_;

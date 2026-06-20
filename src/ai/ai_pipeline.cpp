@@ -45,10 +45,10 @@ AiPipeline::AiPipeline(const AiConfig &ai_config,
 //   - Param apply: always succeeds (clamps out-of-range values)
 // ---------------------------------------------------------------------------
 Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
-                                       strategy::StrategyParams &params)
+                                       std::vector<strategy::StrategyParams *> &all_params)
 {
-    PULSE_LOG_INFO("ai", "AI pipeline cycle started for symbol={}",
-                   snapshot.ticker.symbol);
+    PULSE_LOG_INFO("ai", "AI pipeline cycle started for symbol={} ({} strategy params)",
+                   snapshot.ticker.symbol, all_params.size());
 
     // 1. Poll Twitter feed (failure is non-fatal)
     std::string tweet_text;
@@ -80,9 +80,11 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
                        e.what());
     }
 
-    // 3. Build system + user prompt from available data
+    // 3. Build system + user prompt from available data.
+    //    Use the first strategy's params for the prompt (current values shown to LLM).
+    //    Precondition: all_params is non-empty (guaranteed by HeartbeatScheduler).
     auto [system_prompt, user_prompt] = prompt_builder_.build(
-        snapshot, tweet_text, news_text, params);
+        snapshot, tweet_text, news_text, *all_params[0]);
 
     PULSE_LOG_INFO("ai", "Prompt built: system={} chars, user={} chars",
                    system_prompt.size(), user_prompt.size());
@@ -99,9 +101,18 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
         return err;
     }
 
-    // 5. Apply validated parameter deltas to StrategyParams
+    // 5. Apply validated parameter deltas to ALL strategy params.
     const auto &analysis = value(result);
-    auto updates = param_advisor_.apply(analysis, params);
+    std::vector<heartbeat::OnParamUpdate> updates;
+    for (auto *params_ptr : all_params)
+    {
+        auto batch = param_advisor_.apply(analysis, *params_ptr);
+        // Collect updates from the first strategy only (all get the same deltas).
+        if (updates.empty())
+        {
+            updates = std::move(batch);
+        }
+    }
 
     if (updates.empty())
     {
