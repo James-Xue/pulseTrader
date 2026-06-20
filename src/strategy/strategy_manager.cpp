@@ -159,6 +159,17 @@ std::vector<StrategySnapshot> StrategyManager::snapshot() const
     return result;
 }
 
+std::vector<StrategyParams *> StrategyManager::all_params()
+{
+    std::vector<StrategyParams *> result;
+    result.reserve(strategies_.size());
+    for (const auto &s : strategies_)
+    {
+        result.push_back(&s->params());
+    }
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // strategy_loop — the main loop for a single strategy thread
 // ---------------------------------------------------------------------------

@@ -273,7 +273,7 @@ Strategy thread
 ## 待讨论
 
 - [x] #1 PnL 计算方案 — `close_position` 返回 `std::optional<double>`（已实现 PnL），main.cpp 累加后传给 `drawdown_guard.record_pnl()` ✅
-- [ ] #2 AI 反馈回路：`shared_params` 需要和策略实例的 params 指向同一份内存
+- [x] #2 AI 反馈回路 — `StrategyManager.all_params()` 收集每个策略的真实 params 指针，`HeartbeatScheduler` + `AiPipeline::run()` 改为 `vector<StrategyParams*>`，ParamAdvisor 写入所有策略 ✅
 - [ ] #3 `std::stod` → 安全的 `std::from_chars` 或手写 parse + 异常兜底
 - [ ] #4 TOCTOU: 考虑在 `evaluate_order()` 中引入 atomic reserve + rollback 机制
 - [ ] #5 回调从锁下移出：先收集结果，释放锁后再执行回调

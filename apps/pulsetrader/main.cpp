@@ -568,19 +568,16 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     pulse::ai::AiPipeline ai_pipeline(cfg.ai, cfg.twitter, cfg.news);
 
-    // We need a StrategyParams& for the heartbeat.  Since each strategy
-    // owns its own params, we create a shared one here and the heartbeat
-    // writes AI deltas to it.  Strategies read their own params on the
-    // hot path.  (Future: unify all strategies to share one params.)
-    pulse::strategy::StrategyParams shared_params;
-
     std::unique_ptr<pulse::heartbeat::HeartbeatScheduler> heartbeat;
     if (cfg.ai.heartbeatIntervalSec > 0 && !cfg.ai.apiKey.empty())
     {
+        // Wire AI to each strategy's actual params (not a disconnected copy).
+        auto all_params = strategy_mgr.all_params();
         heartbeat = std::make_unique<pulse::heartbeat::HeartbeatScheduler>(
-            cfg.ai, ai_pipeline, shared_params);
-        log->info("[L5] Heartbeat scheduler created (interval: {}s)",
-                  cfg.ai.heartbeatIntervalSec);
+            cfg.ai, ai_pipeline, std::move(all_params));
+        log->info("[L5] Heartbeat scheduler created (interval: {}s, {} strategy params)",
+                  cfg.ai.heartbeatIntervalSec,
+                  strategy_mgr.strategy_count());
     }
     else
     {

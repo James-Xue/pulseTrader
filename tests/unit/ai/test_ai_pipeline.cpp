@@ -92,9 +92,10 @@ TEST(AiPipeline, SuccessfulCycle)
     snapshot.ticker.symbol = "BTC_USDT";
     snapshot.ticker.last = 65000.0;
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params);
+    auto result = pipeline.run(snapshot, params_vec);
 
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(value(result).sentiment, Sentiment::Bullish);
@@ -114,9 +115,10 @@ TEST(AiPipeline, LLMFailurePreservesParams)
     MarketSnapshot snapshot;
     snapshot.ticker.symbol = "BTC_USDT";
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params);
+    auto result = pipeline.run(snapshot, params_vec);
 
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(error(result).code, ErrorCode::HttpError);
@@ -134,9 +136,10 @@ TEST(AiPipeline, SchemaMismatchPreservesParams)
     MarketSnapshot snapshot;
     snapshot.ticker.symbol = "BTC_USDT";
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params);
+    auto result = pipeline.run(snapshot, params_vec);
 
     EXPECT_FALSE(ok(result));
 
@@ -153,8 +156,9 @@ TEST(AiPipeline, ZeroDeltasNoChange)
     MarketSnapshot snapshot;
     snapshot.ticker.symbol = "BTC_USDT";
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
-    auto result = pipeline.run(snapshot, params);
+    auto result = pipeline.run(snapshot, params_vec);
     ASSERT_TRUE(ok(result));
 
     // order_quantity_delta was 0, so no change
@@ -195,8 +199,9 @@ TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
     snapshot.ticker.symbol = "BTC_USDT";
     snapshot.ticker.last = 65000.0;
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
-    auto run_result = pipeline.run(snapshot, params);
+    auto run_result = pipeline.run(snapshot, params_vec);
     ASSERT_TRUE(ok(run_result));
 
     // last_result() should now be populated.
@@ -214,8 +219,9 @@ TEST(AiPipeline, LastResultRemainsNullAfterFailedRun)
     MarketSnapshot snapshot;
     snapshot.ticker.symbol = "BTC_USDT";
     StrategyParams params;
+    std::vector<StrategyParams *> params_vec{ &params };
 
-    auto run_result = pipeline.run(snapshot, params);
+    auto run_result = pipeline.run(snapshot, params_vec);
     ASSERT_FALSE(ok(run_result));
 
     // last_result() should still be nullptr.

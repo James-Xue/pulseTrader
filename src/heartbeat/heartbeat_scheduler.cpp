@@ -20,14 +20,14 @@ namespace pulse::heartbeat
 // ---------------------------------------------------------------------------
 HeartbeatScheduler::HeartbeatScheduler(const AiConfig &config,
                                        ai::AiPipeline &pipeline,
-                                       strategy::StrategyParams &params)
+                                       std::vector<strategy::StrategyParams *> all_params)
     : config_{ config }
     , pipeline_{ pipeline }
-    , params_{ params }
+    , all_params_{ std::move(all_params) }
     , timer_{ io_ctx_ }
 {
-    PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler created (interval={}s)",
-                   config_.heartbeatIntervalSec);
+    PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler created (interval={}s, {} strategy params)",
+                   config_.heartbeatIntervalSec, all_params_.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ void HeartbeatScheduler::run_pipeline()
     snapshot.ticker.symbol = "BTC_USDT";
 
     // Run the pipeline — errors are logged internally
-    auto result = pipeline_.run(snapshot, params_);
+    auto result = pipeline_.run(snapshot, all_params_);
 
     if (ok(result))
     {

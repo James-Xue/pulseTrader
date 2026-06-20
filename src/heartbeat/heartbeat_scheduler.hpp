@@ -30,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
@@ -46,12 +47,13 @@ class HeartbeatScheduler
     /// Construct the scheduler.
     ///
     /// Parameters:
-    ///   1. config  — AiConfig with heartbeat interval and retry settings
-    ///   2. pipeline — reference to the AiPipeline to execute on each beat
-    ///   3. params  — reference to the StrategyParams to update
+    ///   1. config     — AiConfig with heartbeat interval and retry settings
+    ///   2. pipeline   — reference to the AiPipeline to execute on each beat
+    ///   3. all_params — mutable pointers to each strategy's StrategyParams;
+    ///                   the AI pipeline writes deltas to all of them
     HeartbeatScheduler(const AiConfig &config,
                        ai::AiPipeline &pipeline,
-                       strategy::StrategyParams &params);
+                       std::vector<strategy::StrategyParams *> all_params);
 
     /// Destructor — calls stop() if still running.
     ~HeartbeatScheduler();
@@ -93,7 +95,7 @@ class HeartbeatScheduler
 
     AiConfig config_;                            ///< Heartbeat configuration.
     ai::AiPipeline &pipeline_;                   ///< AI pipeline reference.
-    strategy::StrategyParams &params_;           ///< Strategy params reference.
+    std::vector<strategy::StrategyParams *> all_params_; ///< Per-strategy params.
 
     asio::io_context io_ctx_;                    ///< ASIO I/O context for timer.
     asio::steady_timer timer_;                   ///< Periodic timer.

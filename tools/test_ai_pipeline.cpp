@@ -175,7 +175,8 @@ int main(int argc, char *argv[])
 
     // 6. Run the pipeline
     std::cout << "\n--- Running AI Pipeline ---\n";
-    auto result = pipeline.run(snapshot, params);
+    std::vector<pulse::strategy::StrategyParams *> params_vec{ &params };
+    auto result = pipeline.run(snapshot, params_vec);
 
     if (ok(result))
     {
