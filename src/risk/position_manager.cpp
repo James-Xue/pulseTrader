@@ -161,14 +161,15 @@ Result<std::string> PositionManager::open_position(
     return pos_id;
 }
 
-bool PositionManager::close_position(const std::string &position_id, Quantity close_qty, Price exit_price)
+std::optional<double> PositionManager::close_position(const std::string &position_id, Quantity close_qty, Price exit_price)
 {
     // Close a position fully or partially:
     // 1. Acquire exclusive lock
-    // 2. Find position by ID; return false if not found
-    // 3. If close_qty >= position.quantity: erase (full close)
-    // 4. Else: reduce quantity, recalculate notional and PnL (partial close)
-    // 5. Log and return true
+    // 2. Find position by ID; return nullopt if not found
+    // 3. Compute realized PnL for the closed portion
+    // 4. If close_qty >= position.quantity: erase (full close)
+    // 5. Else: reduce quantity, recalculate notional and unrealized PnL (partial close)
+    // 6. Log and return realized PnL
 
     std::unique_lock<std::shared_mutex> write_lock(mutex_);
 
@@ -176,19 +177,30 @@ bool PositionManager::close_position(const std::string &position_id, Quantity cl
     if (positions_.end() == it)
     {
         PULSE_LOG_WARN("risk", "close_position: position {} not found", position_id);
-        return false;
+        return std::nullopt;
     }
 
     auto &pos = it->second;
+
+    // Actual closed quantity (capped at position size for full close).
+    const double closed_qty = std::min(close_qty, pos.quantity);
+
+    // Realized PnL for the closed portion.
+    //   long:  (exit - entry) * qty * quanto * leverage
+    //   short: (entry - exit) * qty * quanto * leverage
+    const double direction = (Side::Buy == pos.side) ? 1.0 : -1.0;
+    const double realized_pnl =
+        direction * (exit_price - pos.entry_price) * closed_qty
+        * pos.quanto_multiplier * pos.leverage;
 
     if (close_qty >= pos.quantity)
     {
         // Full close — remove the position.
         PULSE_LOG_INFO("risk",
-            "Closed position {} : {} {} @ {:.2f} (was {} @ {:.2f})",
+            "Closed position {} : {} {} @ {:.2f} (was {} @ {:.2f}), realized PnL={:.4f}",
             position_id, pos.symbol,
             (Side::Buy == pos.side ? "BUY" : "SELL"),
-            exit_price, pos.quantity, pos.entry_price);
+            exit_price, pos.quantity, pos.entry_price, realized_pnl);
 
         positions_.erase(it);
     }
@@ -209,11 +221,13 @@ bool PositionManager::close_position(const std::string &position_id, Quantity cl
         }
 
         PULSE_LOG_INFO("risk",
-            "Partial close position {} : closed {} @ {:.2f}, remaining {} (PnL: {:.4f})",
-            position_id, close_qty, exit_price, pos.quantity, pos.unrealized_pnl);
+            "Partial close position {} : closed {} @ {:.2f}, remaining {} "
+            "(unrealized PnL: {:.4f}, realized PnL: {:.4f})",
+            position_id, close_qty, exit_price, pos.quantity,
+            pos.unrealized_pnl, realized_pnl);
     }
 
-    return true;
+    return realized_pnl;
 }
 
 void PositionManager::update_price(const std::string &position_id, Price current_price)

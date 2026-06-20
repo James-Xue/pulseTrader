@@ -69,8 +69,14 @@ class PositionManager
     ///   1. If close_qty >= position.quantity: position is removed (full close)
     ///   2. Otherwise: position.quantity is reduced (partial close)
     ///
-    /// Returns true on success, false if position_id not found.
-    [[nodiscard]] bool close_position(const std::string &position_id, Quantity close_qty, Price exit_price);
+    /// Returns the realized PnL for the closed portion on success, or
+    /// std::nullopt if position_id was not found.
+    ///
+    /// Realized PnL formula (closed portion):
+    ///   long:  (exit_price - entry_price) * closed_qty * quanto * leverage
+    ///   short: (entry_price - exit_price) * closed_qty * quanto * leverage
+    [[nodiscard]] std::optional<double> close_position(
+        const std::string &position_id, Quantity close_qty, Price exit_price);
 
     /// Update mark price for a position (called on each tick for PnL recalculation).
     ///
