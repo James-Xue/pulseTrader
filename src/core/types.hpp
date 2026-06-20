@@ -12,9 +12,12 @@
 //   8. MarketType  — Spot / Futures discriminator
 //   9. MarginMode  — Cross / Isolated (futures only)
 
+#include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace pulse
 {
@@ -133,6 +136,29 @@ enum class MarginMode : std::uint8_t
         return "isolated";
     }
     return "unknown";
+}
+
+/// Parse a string to double without throwing exceptions.
+///
+/// Uses std::from_chars (C++17) for locale-independent, non-throwing parsing.
+/// Returns std::nullopt on empty input, whitespace-only input, or parse failure.
+///
+/// This is the safe replacement for std::stod() in exchange data parsing —
+/// std::stod throws std::invalid_argument on malformed input, which can crash
+/// the WebSocket event thread.
+[[nodiscard]] inline std::optional<double> safe_parse_double(std::string_view sv) noexcept
+{
+    if (sv.empty())
+    {
+        return std::nullopt;
+    }
+    double result = 0.0;
+    const auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), result);
+    if (std::make_error_code(ec) != std::errc{} || ptr != sv.data() + sv.size())
+    {
+        return std::nullopt;
+    }
+    return result;
 }
 
 } // namespace pulse

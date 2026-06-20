@@ -230,13 +230,13 @@ std::optional<SymbolInfo> SymbolRegistry::parse_currency_pair(const nlohmann::js
     // Parse min_base_amount (optional, default 0).
     if (obj.contains("min_base_amount") && !obj["min_base_amount"].is_null())
     {
-        info.min_base_amount = std::stod(obj["min_base_amount"].get<std::string>());
+        info.min_base_amount = safe_parse_double(obj["min_base_amount"].get<std::string>()).value_or(0.0);
     }
 
     // Parse min_quote_amount (optional, default 0).
     if (obj.contains("min_quote_amount") && !obj["min_quote_amount"].is_null())
     {
-        info.min_quote_amount = std::stod(obj["min_quote_amount"].get<std::string>());
+        info.min_quote_amount = safe_parse_double(obj["min_quote_amount"].get<std::string>()).value_or(0.0);
     }
 
     // min_notional = max(min_quote_amount, price * min_base_amount)
@@ -274,24 +274,24 @@ std::optional<SymbolInfo> SymbolRegistry::parse_futures_contract(const nlohmann:
     // Contract multiplier (how much base asset one contract represents).
     if (obj.contains("quanto_multiplier") && !obj["quanto_multiplier"].is_null())
     {
-        info.quanto_multiplier = std::stod(obj["quanto_multiplier"].get<std::string>());
+        info.quanto_multiplier = safe_parse_double(obj["quanto_multiplier"].get<std::string>()).value_or(1.0);
     }
 
     // Leverage bounds.
     if (obj.contains("leverage_max") && !obj["leverage_max"].is_null())
     {
-        info.leverage_max = std::stod(obj["leverage_max"].get<std::string>());
+        info.leverage_max = safe_parse_double(obj["leverage_max"].get<std::string>()).value_or(1.0);
     }
 
     if (obj.contains("leverage_min") && !obj["leverage_min"].is_null())
     {
-        info.leverage_min = std::stod(obj["leverage_min"].get<std::string>());
+        info.leverage_min = safe_parse_double(obj["leverage_min"].get<std::string>()).value_or(1.0);
     }
 
     // Maintenance margin rate.
     if (obj.contains("maintenance_rate") && !obj["maintenance_rate"].is_null())
     {
-        info.maintenance_rate = std::stod(obj["maintenance_rate"].get<std::string>());
+        info.maintenance_rate = safe_parse_double(obj["maintenance_rate"].get<std::string>()).value_or(0.0);
     }
 
     // Funding interval in seconds.
@@ -314,7 +314,7 @@ std::optional<SymbolInfo> SymbolRegistry::parse_futures_contract(const nlohmann:
     // Price precision — order_price_round is the minimum price increment.
     if (obj.contains("order_price_round") && !obj["order_price_round"].is_null())
     {
-        info.tick_size = std::stod(obj["order_price_round"].get<std::string>());
+        info.tick_size = safe_parse_double(obj["order_price_round"].get<std::string>()).value_or(0.0);
     }
 
     // Contracts trade in whole units.

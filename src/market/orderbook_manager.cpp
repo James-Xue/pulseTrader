@@ -181,12 +181,30 @@ void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, con
             continue;
         }
 
-        const Price price = level[0].is_string()
-            ? std::stod(level[0].get<std::string>())
-            : level[0].get<Price>();
-        const Quantity qty = level[1].is_string()
-            ? std::stod(level[1].get<std::string>())
-            : level[1].get<Quantity>();
+        Price price;
+        Quantity qty;
+
+        if (level[0].is_string())
+        {
+            auto opt = safe_parse_double(level[0].get<std::string>());
+            if (!opt.has_value()) continue;
+            price = opt.value();
+        }
+        else
+        {
+            price = level[0].get<Price>();
+        }
+
+        if (level[1].is_string())
+        {
+            auto opt = safe_parse_double(level[1].get<std::string>());
+            if (!opt.has_value()) continue;
+            qty = opt.value();
+        }
+        else
+        {
+            qty = level[1].get<Quantity>();
+        }
 
         if (qty > 0.0)
         {
@@ -210,12 +228,30 @@ void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &bo
             continue;
         }
 
-        const Price price = level[0].is_string()
-            ? std::stod(level[0].get<std::string>())
-            : level[0].get<Price>();
-        const Quantity qty = level[1].is_string()
-            ? std::stod(level[1].get<std::string>())
-            : level[1].get<Quantity>();
+        Price price;
+        Quantity qty;
+
+        if (level[0].is_string())
+        {
+            auto opt = safe_parse_double(level[0].get<std::string>());
+            if (!opt.has_value()) continue;
+            price = opt.value();
+        }
+        else
+        {
+            price = level[0].get<Price>();
+        }
+
+        if (level[1].is_string())
+        {
+            auto opt = safe_parse_double(level[1].get<std::string>());
+            if (!opt.has_value()) continue;
+            qty = opt.value();
+        }
+        else
+        {
+            qty = level[1].get<Quantity>();
+        }
 
         if (0.0 == qty)
         {
