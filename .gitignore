@@ -61,3 +61,6 @@ Testing/
 
 # Local config files
 trading.toml
+
+# SQLite database
+data/
