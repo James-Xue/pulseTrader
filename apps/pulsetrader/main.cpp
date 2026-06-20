@@ -742,7 +742,8 @@ int main(int argc, char* argv[])
                           report.slippage_bps,
                           report.latency.count());
 
-            // Update position manager.
+            // Update position manager and compute realized PnL.
+            double pnl = 0.0;
             if (pulse::Side::Buy == report.side)
             {
                 auto open_result = position_mgr.open_position(
@@ -764,11 +765,14 @@ int main(int argc, char* argv[])
                     report.symbol);
                 for (const auto& pos : positions)
                 {
-                    if (position_mgr.close_position(
+                    auto close_result = position_mgr.close_position(
                             pos.position_id, report.filled_qty,
-                            report.avg_fill_price))
+                            report.avg_fill_price);
+                    if (close_result.has_value())
                     {
-                        log_app->info("Closed position {}", pos.position_id);
+                        pnl += close_result.value();
+                        log_app->info("Closed position {} (realized PnL: {:.4f})",
+                                      pos.position_id, close_result.value());
                     }
                     else
                     {
@@ -779,7 +783,6 @@ int main(int argc, char* argv[])
             }
 
             // Update drawdown guard with realized PnL.
-            double pnl = 0.0;  // Simplified — real PnL needs position tracking.
             drawdown_guard.record_pnl(pnl);
 
             // Record trade in SQLite (if enabled).

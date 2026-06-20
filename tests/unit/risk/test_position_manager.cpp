@@ -145,7 +145,10 @@ TEST(PositionManager, FullCloseRemovesPosition)
     auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
-    EXPECT_TRUE(pm.close_position(value(r), 0.01, 51000.0));
+    auto pnl = pm.close_position(value(r), 0.01, 51000.0);
+    ASSERT_TRUE(pnl.has_value());
+    // Buy 0.01 BTC @ 50000, sell @ 51000 → PnL = (51000-50000)*0.01 = 10.0
+    EXPECT_DOUBLE_EQ(10.0, pnl.value());
     EXPECT_EQ(0, pm.open_position_count());
     EXPECT_FALSE(pm.get_position(value(r)).has_value());
 }
@@ -156,7 +159,10 @@ TEST(PositionManager, PartialCloseReducesQuantity)
     auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
-    EXPECT_TRUE(pm.close_position(value(r), 0.005, 51000.0));
+    auto pnl = pm.close_position(value(r), 0.005, 51000.0);
+    ASSERT_TRUE(pnl.has_value());
+    // Buy 0.01 @ 50000, close 0.005 @ 51000 → realized = (51000-50000)*0.005 = 5.0
+    EXPECT_DOUBLE_EQ(5.0, pnl.value());
     EXPECT_EQ(1, pm.open_position_count());
 
     const auto pos = pm.get_position(value(r));
@@ -165,10 +171,11 @@ TEST(PositionManager, PartialCloseReducesQuantity)
     EXPECT_DOUBLE_EQ(51000.0, pos->current_price);
 }
 
-TEST(PositionManager, CloseNonExistentReturnsFalse)
+TEST(PositionManager, CloseNonExistentReturnsNullopt)
 {
     PositionManager pm(make_config());
-    EXPECT_FALSE(pm.close_position("nonexistent", 0.01, 50000.0));
+    auto result = pm.close_position("nonexistent", 0.01, 50000.0);
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST(PositionManager, PartialCloseRecalculatesPnl)
@@ -178,7 +185,10 @@ TEST(PositionManager, PartialCloseRecalculatesPnl)
     ASSERT_TRUE(ok(r));
 
     // Close half at 52000 — remaining 0.005 BTC, unrealized PnL = (52000-50000)*0.005 = 10.
-    EXPECT_TRUE(pm.close_position(value(r), 0.005, 52000.0));
+    auto pnl = pm.close_position(value(r), 0.005, 52000.0);
+    ASSERT_TRUE(pnl.has_value());
+    // Realized PnL for closed half: (52000-50000)*0.005 = 10.0
+    EXPECT_DOUBLE_EQ(10.0, pnl.value());
 
     const auto pos = pm.get_position(value(r));
     ASSERT_TRUE(pos.has_value());
