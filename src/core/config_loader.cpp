@@ -224,6 +224,7 @@ PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "wsReconnectMaxMs",
                           static_cast<int>(out.wsReconnectMaxMs)));
+    out.testnet = toml::find_or(sec, "testnet", out.testnet);
 
     return {};
 }

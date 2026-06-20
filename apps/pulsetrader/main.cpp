@@ -108,12 +108,36 @@ static pulse::PulseConfig build_default_config()
 
     PulseConfig cfg;
 
-    // L1: Exchange — credentials from environment
-    cfg.exchange.apiKey     = env_or("GATE_API_KEY", "");
-    cfg.exchange.apiSecret  = env_or("GATE_API_SECRET", "");
+    // Detect network mode: "mainnet" (default) or "testnet".
+    std::string network = env_or("PULSE_NETWORK", "mainnet");
+    bool is_testnet = ("testnet" == network);
+
+    // L1: Exchange — credentials and URLs depend on network mode.
+    if (is_testnet)
+    {
+        cfg.exchange.testnet = true;
+        cfg.exchange.apiKey    = env_or("GATE_TESTNET_API_KEY", "");
+        cfg.exchange.apiSecret = env_or("GATE_TESTNET_API_SECRET", "");
+        cfg.exchange.restBaseUrl     = "https://api-testnet.gateapi.io";
+        cfg.exchange.wsUrl           = "wss://api.gateio.ws/ws/v4/";  // Spot WS same on testnet (no spot testnet).
+        cfg.exchange.futuresWsUrl    = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+    }
+    else
+    {
+        // Backward compatible: try GATE_MAINNET_* first, fall back to GATE_*.
+        cfg.exchange.apiKey = env_or("GATE_MAINNET_API_KEY",
+                                     env_or("GATE_API_KEY", ""));
+        cfg.exchange.apiSecret = env_or("GATE_MAINNET_API_SECRET",
+                                        env_or("GATE_API_SECRET", ""));
+        cfg.exchange.restBaseUrl = env_or("GATE_MAINNET_REST_URL",
+                                          "https://api.gateio.ws");
+        cfg.exchange.wsUrl = env_or("GATE_MAINNET_SPOT_WS_URL",
+                                    "wss://api.gateio.ws/ws/v4/");
+        cfg.exchange.futuresWsUrl = env_or("GATE_MAINNET_FUTURES_WS_URL",
+                                           "wss://fx-ws.gateio.ws/v4/ws/usdt");
+    }
+
     cfg.exchange.proxyUrl   = env_or("HTTPS_PROXY", env_or("HTTP_PROXY", ""));
-    cfg.exchange.restBaseUrl = "https://api.gateio.ws";
-    cfg.exchange.wsUrl       = "wss://api.gateio.ws/ws/v4/";
 
     // L2: Logging
     cfg.log.level    = "info";
@@ -284,11 +308,18 @@ int main(int argc, char* argv[])
 
         if (config_path.empty())
         {
-            std::cerr << "  source .env  or  export GATE_API_KEY=... GATE_API_SECRET=...\n";
+            if (cfg.exchange.testnet)
+            {
+                std::cerr << "  Set PULSE_NETWORK=testnet and GATE_TESTNET_API_KEY / GATE_TESTNET_API_SECRET in .env\n";
+            }
+            else
+            {
+                std::cerr << "  source .env  or  export GATE_MAINNET_API_KEY=... GATE_MAINNET_API_SECRET=...\n";
+            }
         }
         else
         {
-            std::cerr << "  Use from_env:GATE_API_KEY / from_env:GATE_API_SECRET in TOML.\n";
+            std::cerr << "  Use from_env:GATE_MAINNET_API_KEY / from_env:GATE_MAINNET_API_SECRET in TOML.\n";
         }
 
         return 1;
@@ -303,6 +334,16 @@ int main(int argc, char* argv[])
     log->info("pulseTrader v0.1.0 starting...");
     log->info("Exchange: Gate.io (REST + WS)");
     log->info("Symbols:  {}", fmt::join(cfg.symbols, ", "));
+
+    if (cfg.exchange.testnet)
+    {
+        log->warn("========================================");
+        log->warn("TESTNET MODE — using virtual funds");
+        log->warn("REST: {}", cfg.exchange.restBaseUrl);
+        log->warn("WS:   {}", cfg.exchange.futuresWsUrl);
+        log->warn("========================================");
+    }
+
     if (!cfg.exchange.proxyUrl.empty())
     {
         log->info("Proxy:    {}", cfg.exchange.proxyUrl);

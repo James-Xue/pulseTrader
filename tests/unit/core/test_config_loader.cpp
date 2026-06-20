@@ -665,5 +665,51 @@ market_type = "options"
     EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
 }
 
+// ---------------------------------------------------------------------------
+// Testnet config tests
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseExchange_TestnetTrue)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "testnet_key"
+apiSecret = "testnet_secret"
+testnet = true
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).exchange.testnet);
+    EXPECT_EQ("testnet_key", value(result).exchange.apiKey);
+}
+
+TEST(ConfigLoader, ParseExchange_TestnetFalse)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+testnet = false
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_FALSE(value(result).exchange.testnet);
+}
+
+TEST(ConfigLoader, ParseExchange_TestnetDefaultFalse)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_FALSE(value(result).exchange.testnet);
+}
+
 } // namespace
 } // namespace pulse

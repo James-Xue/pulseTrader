@@ -222,6 +222,16 @@ PulseError validate_config(const PulseConfig &cfg)
                     + ") exceeds risk.max_leverage ("
                     + std::to_string(cfg.risk.max_leverage) + ")"};
         }
+
+        // Testnet only supports futures — spot has no testnet endpoint.
+        if (cfg.exchange.testnet && MarketType::Spot == s.market_type)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".market_type \"spot\" is not supported in testnet "
+                    "mode (Gate.io testnet is futures-only). "
+                    "Set market_type = \"futures\" or testnet = false."};
+        }
     }
 
     // -----------------------------------------------------------------------
