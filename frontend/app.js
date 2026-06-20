@@ -19,15 +19,25 @@
     let authToken = '';
 
     /**
-     * Extract the auth token from URL query parameters, or prompt the user.
+     * Extract the auth token from URL query parameters, localStorage, or prompt the user.
+     * Cached in localStorage so the prompt only appears once.
      */
     function getToken() {
         const params = new URLSearchParams(window.location.search);
-        const token = params.get('token');
-        if (token) {
-            return token;
+        const urlToken = params.get('token');
+        if (urlToken) {
+            localStorage.setItem('pulseToken', urlToken);
+            return urlToken;
         }
-        return prompt('Enter auth token:', '') || '';
+        const cached = localStorage.getItem('pulseToken');
+        if (cached) {
+            return cached;
+        }
+        const token = prompt('Enter auth token:', '') || '';
+        if (token) {
+            localStorage.setItem('pulseToken', token);
+        }
+        return token;
     }
 
     /**
@@ -568,11 +578,6 @@
     // =========================================================================
 
     authToken = getToken();
-    if (authToken) {
-        connect();
-    } else {
-        setStatus(false);
-        document.getElementById('status-text').textContent = 'No token';
-    }
+    connect();
 
 })();
