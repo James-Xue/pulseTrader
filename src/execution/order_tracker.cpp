@@ -2,6 +2,7 @@
 
 #include "execution/order_tracker.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "logging/logger.hpp"
 
 #include <algorithm>
@@ -10,10 +11,13 @@ namespace pulse::execution
 {
 
 using namespace pulse::logging;
+using pulse::exchange::EndpointRouter;
 
-OrderTracker::OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client)
+OrderTracker::OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
+                           MarketType market_type)
     : ws_client_{ ws_client }
     , rest_client_{ rest_client }
+    , market_type_{ market_type }
     , ws_subscribed_{ false }
 {
 }
@@ -32,7 +36,8 @@ void OrderTracker::track_order(const std::string &order_id,
     // Subscribe to WS private channel if not already done
     if (!ws_subscribed_)
     {
-        ws_client_.subscribe_private("spot.orders",
+        const std::string orders_channel = EndpointRouter::ws_channel(market_type_, "orders");
+        ws_client_.subscribe_private(orders_channel,
             {},
             [this](const nlohmann::json &result, const nlohmann::json & /*full_frame*/)
             { on_order_update(result); });
@@ -100,7 +105,7 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
 {
     PULSE_LOG_DEBUG("execution", "Polling order status: {}", order_id);
 
-    const std::string path = "/api/v4/spot/orders/" + order_id;
+    const std::string path = EndpointRouter::order_path(market_type_, order_id);
     auto result = rest_client_.request("GET", path);
 
     if (!ok(result))

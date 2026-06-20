@@ -73,3 +73,35 @@ TEST(TradingSignal, CopyConstruction)
     EXPECT_EQ(original.strategy_id, copy.strategy_id);
     EXPECT_EQ(original.reason, copy.reason);
 }
+
+// ---------------------------------------------------------------------------
+// M12: market_type field
+// ---------------------------------------------------------------------------
+
+TEST(TradingSignal, DefaultMarketTypeIsSpot)
+{
+    TradingSignal signal;
+    EXPECT_EQ(MarketType::Spot, signal.market_type);
+}
+
+TEST(TradingSignal, FuturesMarketType)
+{
+    TradingSignal signal;
+    signal.type = SignalType::Buy;
+    signal.symbol = "BTC_USDT";
+    signal.confidence = 0.9;
+    signal.price = 50000.0;
+    signal.market_type = MarketType::Futures;
+
+    EXPECT_EQ(MarketType::Futures, signal.market_type);
+}
+
+TEST(TradingSignal, CopyPreservesMarketType)
+{
+    TradingSignal original;
+    original.market_type = MarketType::Futures;
+    original.symbol = "BTC_USDT";
+
+    TradingSignal copy = original;
+    EXPECT_EQ(MarketType::Futures, copy.market_type);
+}

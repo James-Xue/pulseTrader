@@ -2,6 +2,7 @@
 
 #include "execution/order_executor.hpp"
 
+#include "exchange/endpoint_router.hpp"
 #include "logging/logger.hpp"
 
 #include <charconv>
@@ -10,9 +11,11 @@ namespace pulse::execution
 {
 
 using namespace pulse::logging;
+using pulse::exchange::EndpointRouter;
 
-OrderExecutor::OrderExecutor(exchange::GateRestClient &rest_client)
+OrderExecutor::OrderExecutor(exchange::GateRestClient &rest_client, MarketType market_type)
     : rest_client_{ rest_client }
+    , market_type_{ market_type }
 {
 }
 
@@ -34,7 +37,7 @@ Result<OrderResponse> OrderExecutor::place_order(const OrderRequest &req)
     const std::string body = body_json.dump();
 
     // Submit order via REST (retry logic is in GateRestClient::request)
-    auto result = rest_client_.request("POST", "/api/v4/spot/orders", "", body);
+    auto result = rest_client_.request("POST", EndpointRouter::orders_path(market_type_), "", body);
 
     if (!ok(result))
     {
@@ -55,7 +58,7 @@ bool OrderExecutor::cancel_order(const std::string &order_id)
 {
     PULSE_LOG_INFO("execution", "Cancelling order: {}", order_id);
 
-    const std::string path = "/api/v4/spot/orders/" + order_id;
+    const std::string path = EndpointRouter::order_path(market_type_, order_id);
     auto result = rest_client_.request("DELETE", path);
 
     if (!ok(result))
@@ -71,31 +74,62 @@ bool OrderExecutor::cancel_order(const std::string &order_id)
 nlohmann::json OrderExecutor::build_order_body(const OrderRequest &req) const
 {
     nlohmann::json body;
-    body["currency_pair"] = req.symbol;
-    body["side"] = (Side::Buy == req.side) ? "buy" : "sell";
 
-    // Order type
-    switch (req.type)
+    if (MarketType::Futures == market_type_)
     {
-    case OrderType::Market:
-        body["type"] = "market";
-        break;
-    case OrderType::Limit:
-        body["type"] = "limit";
-        body["price"] = std::to_string(req.price);
-        body["time_in_force"] = "gtc"; // Good-til-cancelled
-        break;
-    case OrderType::PostOnly:
-        body["type"] = "limit";
-        body["price"] = std::to_string(req.price);
-        body["time_in_force"] = "poc"; // Post-only-cancel
-        break;
+        // --- Futures order format ---
+        body["contract"] = req.symbol;
+
+        // Size: positive = buy/long, negative = sell/short (in contracts).
+        int size = req.contract_size;
+        if (0 == size)
+        {
+            // If contract_size not set, use quantity as contract count (rounded).
+            size = static_cast<int>(std::round(req.quantity));
+        }
+        body["size"] = (Side::Sell == req.side) ? -size : size;
+
+        // Price: "0" for market orders (with tif=ioc), actual price for limit.
+        if (OrderType::Market == req.type)
+        {
+            body["price"] = "0";
+            body["tif"] = "ioc"; // Immediate-or-cancel for market orders.
+        }
+        else
+        {
+            body["price"] = std::to_string(req.price);
+            body["tif"] = (OrderType::PostOnly == req.type) ? "poc" : "gtc";
+        }
+
+        body["reduce_only"] = req.reduce_only;
+    }
+    else
+    {
+        // --- Spot order format (unchanged) ---
+        body["currency_pair"] = req.symbol;
+        body["side"] = (Side::Buy == req.side) ? "buy" : "sell";
+
+        switch (req.type)
+        {
+        case OrderType::Market:
+            body["type"] = "market";
+            break;
+        case OrderType::Limit:
+            body["type"] = "limit";
+            body["price"] = std::to_string(req.price);
+            body["time_in_force"] = "gtc";
+            break;
+        case OrderType::PostOnly:
+            body["type"] = "limit";
+            body["price"] = std::to_string(req.price);
+            body["time_in_force"] = "poc";
+            break;
+        }
+
+        body["amount"] = std::to_string(req.quantity);
     }
 
-    // Quantity (Gate.io uses "amount" for base currency quantity)
-    body["amount"] = std::to_string(req.quantity);
-
-    // Optional client order ID
+    // Optional client order ID (same format for both markets).
     if (!req.client_order_id.empty())
     {
         body["text"] = "t-" + req.client_order_id; // Gate.io prefix: "t-"
@@ -108,21 +142,46 @@ OrderResponse OrderExecutor::parse_order_response(const nlohmann::json &resp) co
 {
     OrderResponse result;
 
-    // Order ID
+    // Order ID — spot returns string, futures returns integer.
     if (resp.contains("id"))
     {
-        result.order_id = resp["id"].get<std::string>();
+        if (resp["id"].is_number())
+        {
+            result.order_id = std::to_string(resp["id"].get<std::int64_t>());
+        }
+        else
+        {
+            result.order_id = resp["id"].get<std::string>();
+        }
     }
 
-    // Status
-    if (resp.contains("status"))
+    // Status — spot uses "status" (open/closed/cancelled),
+    // futures uses "status" (open/finished) + "finish_as" (filled/cancelled/etc).
+    if (MarketType::Futures == market_type_ && resp.contains("finish_as"))
+    {
+        const std::string finish_as = resp["finish_as"].get<std::string>();
+        if ("filled" == finish_as)
+        {
+            result.status = OrderStatus::Filled;
+        }
+        else if ("cancelled" == finish_as || "reduce_only" == finish_as
+                 || "position_closed" == finish_as)
+        {
+            result.status = OrderStatus::Cancelled;
+        }
+        else
+        {
+            result.status = OrderStatus::Open;
+        }
+    }
+    else if (resp.contains("status"))
     {
         const std::string status_str = resp["status"].get<std::string>();
         if ("open" == status_str)
         {
             result.status = OrderStatus::Open;
         }
-        else if ("closed" == status_str)
+        else if ("closed" == status_str || "finished" == status_str)
         {
             result.status = OrderStatus::Filled;
         }
@@ -136,11 +195,22 @@ OrderResponse OrderExecutor::parse_order_response(const nlohmann::json &resp) co
         }
     }
 
-    // Submit time
+    // Submit time — futures uses float (with fractional seconds), spot uses int.
     if (resp.contains("create_time"))
     {
-        const std::int64_t create_time_ms = resp["create_time"].get<std::int64_t>() * 1000; // Gate.io uses seconds
-        result.submit_time = Timestamp{ std::chrono::milliseconds{ create_time_ms } };
+        if (resp["create_time"].is_number_float())
+        {
+            // Futures: float seconds (e.g. 1700000000.123)
+            const double create_time_sec = resp["create_time"].get<double>();
+            result.submit_time = Timestamp{ std::chrono::milliseconds{
+                static_cast<std::int64_t>(create_time_sec * 1000) } };
+        }
+        else
+        {
+            // Spot: integer seconds
+            const std::int64_t create_time_ms = resp["create_time"].get<std::int64_t>() * 1000;
+            result.submit_time = Timestamp{ std::chrono::milliseconds{ create_time_ms } };
+        }
     }
     else
     {

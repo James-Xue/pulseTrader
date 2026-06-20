@@ -128,6 +128,48 @@ TEST(SymbolRegistry, SymbolsConsistentWithSize)
     EXPECT_EQ(registry.symbols().size(), registry.size());
 }
 
+// ---------------------------------------------------------------------------
+// Futures-specific tests
+// ---------------------------------------------------------------------------
+
+TEST(SymbolRegistry, SymbolInfoDefaults_SpotCompatible)
+{
+    // Default-constructed SymbolInfo must be spot-compatible.
+    SymbolInfo info;
+    EXPECT_EQ(MarketType::Spot, info.market_type);
+    EXPECT_DOUBLE_EQ(1.0, info.quanto_multiplier);
+    EXPECT_DOUBLE_EQ(1.0, info.leverage_max);
+    EXPECT_DOUBLE_EQ(1.0, info.leverage_min);
+    EXPECT_DOUBLE_EQ(0.0, info.maintenance_rate);
+    EXPECT_EQ(0, info.funding_interval);
+    EXPECT_EQ(0, info.order_size_min);
+    EXPECT_EQ(0, info.order_size_max);
+}
+
+TEST(SymbolRegistry, FuturesRegistryConstructor)
+{
+    // SymbolRegistry with Futures market type should construct without error.
+    ExchangeConfig config;
+    GateRestClient rest_client(config);
+    SymbolRegistry registry(rest_client, MarketType::Futures);
+
+    EXPECT_EQ(0u, registry.size());
+}
+
+TEST(SymbolRegistry, FuturesRegistryGetReturnsNullopt)
+{
+    // Futures registry with no data returns nullopt.
+    ExchangeConfig config;
+    GateRestClient rest_client(config);
+    SymbolRegistry registry(rest_client, MarketType::Futures);
+
+    EXPECT_FALSE(registry.get("BTC_USDT").has_value());
+}
+
+// Note: Testing parse_futures_contract and validate_order with futures data
+// requires a live or mock REST client. Integration tests in tools/ cover
+// the full flow. The struct defaults and constructor are validated here.
+
 // Note: Testing symbols() with populated data requires a live or mock REST
 // client (load_from_rest is the only public path to inject SymbolInfo).
 // Integration tests in tools/ will cover the populated case.

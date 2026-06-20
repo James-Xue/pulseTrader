@@ -372,3 +372,141 @@ TEST(PositionManager, ConcurrentReadsAndWritesAreSafe)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     stop.store(true);
 }
+
+// ---------------------------------------------------------------------------
+// M11: Futures position tests
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, FuturesPositionDefaultFields)
+{
+    // Default Position should have spot-compatible defaults.
+    Position pos;
+    EXPECT_EQ(MarketType::Spot, pos.market_type);
+    EXPECT_DOUBLE_EQ(1.0, pos.leverage);
+    EXPECT_EQ(MarginMode::Cross, pos.margin_mode);
+    EXPECT_DOUBLE_EQ(0.0, pos.margin_used);
+    EXPECT_DOUBLE_EQ(0.0, pos.liquidation_price);
+    EXPECT_DOUBLE_EQ(1.0, pos.quanto_multiplier);
+}
+
+TEST(PositionManager, OpenFuturesPosition_SetsFields)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    auto result = pm.open_position(
+        "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
+
+    ASSERT_TRUE(pulse::ok(result));
+
+    const auto pos = pm.get_position(pulse::value(result));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(MarketType::Futures, pos->market_type);
+    EXPECT_DOUBLE_EQ(10.0, pos->leverage);
+    EXPECT_EQ(MarginMode::Cross, pos->margin_mode);
+    EXPECT_DOUBLE_EQ(0.0001, pos->quanto_multiplier);
+}
+
+TEST(PositionManager, OpenFuturesPosition_MarginCalculation)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // margin = qty * entry * quanto / leverage = 10 * 50000 * 0.0001 / 10 = 5.0
+    auto result = pm.open_position(
+        "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
+
+    ASSERT_TRUE(pulse::ok(result));
+
+    const auto pos = pm.get_position(pulse::value(result));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_NEAR(5.0, pos->margin_used, 1e-9);
+}
+
+TEST(PositionManager, OpenFuturesPosition_LiquidationPriceBuy)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // liq = entry * (1 - 1/leverage + maintenance_rate)
+    //     = 50000 * (1 - 1/10 + 0.005) = 50000 * 0.905 = 45250
+    auto result = pm.open_position(
+        "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
+
+    ASSERT_TRUE(pulse::ok(result));
+
+    const auto pos = pm.get_position(pulse::value(result));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_NEAR(45250.0, pos->liquidation_price, 1.0);
+}
+
+TEST(PositionManager, OpenFuturesPosition_LiquidationPriceSell)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // liq = entry * (1 + 1/leverage - maintenance_rate)
+    //     = 50000 * (1 + 1/10 - 0.005) = 50000 * 1.095 = 54750
+    auto result = pm.open_position(
+        "BTC_USDT", Side::Sell, 10, 50000.0, "scalper",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
+
+    ASSERT_TRUE(pulse::ok(result));
+
+    const auto pos = pm.get_position(pulse::value(result));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_NEAR(54750.0, pos->liquidation_price, 1.0);
+}
+
+TEST(PositionManager, UpdatePrice_FuturesPnlWithLeverage)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // Open 10x leveraged buy: 10 contracts @ 50000, quanto=0.0001
+    auto result = pm.open_position(
+        "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
+
+    ASSERT_TRUE(pulse::ok(result));
+    const std::string pos_id = pulse::value(result);
+
+    // Price moves to 51000 (+2%)
+    // PnL = (51000 - 50000) * 10 * 0.0001 * 10 = 1000 * 10 * 0.0001 * 10 = 10.0
+    pm.update_price(pos_id, 51000.0);
+
+    const auto pos = pm.get_position(pos_id);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_NEAR(10.0, pos->unrealized_pnl, 1e-6);
+}
+
+TEST(PositionManager, CalculatePnl_SpotEquivalent)
+{
+    // Verify spot PnL is unchanged when using default leverage=1.0, quanto=1.0.
+    // Open spot buy: 0.001 BTC @ 50000, price moves to 51000.
+    // Expected PnL = (51000 - 50000) * 0.001 = 1.0
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    auto result = pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
+    ASSERT_TRUE(pulse::ok(result));
+
+    pm.update_price(pulse::value(result), 51000.0);
+
+    const auto pos = pm.get_position(pulse::value(result));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_NEAR(1.0, pos->unrealized_pnl, 1e-9);
+}
+
+TEST(PositionManager, PortfolioSummary_FuturesFields)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // Open 1 spot + 1 futures position.
+    (void)pm.open_position("ETH_USDT", Side::Buy, 1.0, 3000.0, "s1");
+    (void)pm.open_position(
+        "BTC_USDT", Side::Buy, 10, 50000.0, "s2",
+        MarketType::Futures, 5.0, MarginMode::Cross, 0.0001, 0.005);
+
+    const auto summary = pm.portfolio_summary();
+    EXPECT_EQ(2, summary.open_position_count);
+    EXPECT_EQ(1, summary.futures_position_count);
+    EXPECT_GT(summary.total_margin_used, 0.0);
+}

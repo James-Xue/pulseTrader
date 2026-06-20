@@ -29,9 +29,21 @@ Result<std::string> PositionManager::open_position(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id)
 {
+    // Delegate to the full overload with spot defaults.
+    return open_position(symbol, side, qty, entry_price, strategy_id,
+                         MarketType::Spot, 1.0, MarginMode::Cross, 1.0, 0.0);
+}
+
+Result<std::string> PositionManager::open_position(
+    const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+    const std::string &strategy_id,
+    MarketType market_type, double leverage, MarginMode margin_mode,
+    double quanto_multiplier, double maintenance_rate)
+{
     // Open a new position after validating all portfolio limits:
     // 1. Acquire exclusive (write) lock
-    // 2. Compute proposed notional: qty * entry_price
+    // 2. Compute proposed notional: qty * entry_price * quanto_multiplier
+    //    (for spot, quanto_multiplier=1.0 so this is just qty * entry_price)
     // 3. Check total notional + proposed <= maxPositionNotional
     // 4. Check open position count < maxOpenPositions
     // 5. Check per-symbol notional + proposed <= maxSymbolNotional
@@ -40,7 +52,7 @@ Result<std::string> PositionManager::open_position(
 
     std::unique_lock<std::shared_mutex> write_lock(mutex_);
 
-    const double proposed_notional = qty * entry_price;
+    const double proposed_notional = qty * entry_price * quanto_multiplier;
 
     // 3. Check total notional limit.
     double total_notional = 0.0;
@@ -103,12 +115,48 @@ Result<std::string> PositionManager::open_position(
     pos.open_time = now();
     pos.strategy_id = strategy_id;
 
+    // Futures-specific fields.
+    pos.market_type = market_type;
+    pos.leverage = leverage;
+    pos.margin_mode = margin_mode;
+    pos.quanto_multiplier = quanto_multiplier;
+
+    // Margin calculation (futures only; spot = 0).
+    if (MarketType::Futures == market_type && leverage > 0.0)
+    {
+        pos.margin_used = qty * entry_price * quanto_multiplier / leverage;
+    }
+    else
+    {
+        pos.margin_used = 0.0;
+    }
+
+    // Estimated liquidation price (futures only).
+    if (MarketType::Futures == market_type && leverage > 1.0)
+    {
+        if (Side::Buy == side)
+        {
+            // Long: liq = entry * (1 - 1/leverage + maintenance_rate)
+            pos.liquidation_price = entry_price * (1.0 - 1.0 / leverage + maintenance_rate);
+        }
+        else
+        {
+            // Short: liq = entry * (1 + 1/leverage - maintenance_rate)
+            pos.liquidation_price = entry_price * (1.0 + 1.0 / leverage - maintenance_rate);
+        }
+    }
+    else
+    {
+        pos.liquidation_price = 0.0;
+    }
+
     positions_[pos_id] = pos;
 
     PULSE_LOG_INFO("risk",
-        "Opened position {} : {} {} {} @ {:.2f} (strategy: {})",
+        "Opened {} position {} : {} {} {} @ {:.2f} (lev={:.1f}x, strategy: {})",
+        MarketType::Futures == market_type ? "futures" : "spot",
         pos_id, symbol, (Side::Buy == side ? "BUY" : "SELL"),
-        qty, entry_price, strategy_id);
+        qty, entry_price, leverage, strategy_id);
 
     return pos_id;
 }
@@ -149,9 +197,16 @@ bool PositionManager::close_position(const std::string &position_id, Quantity cl
         // Partial close — reduce quantity and recalculate.
         pos.quantity -= close_qty;
         pos.current_price = exit_price;
-        pos.notional_value = std::abs(pos.quantity * pos.current_price);
+        pos.notional_value = std::abs(pos.quantity * pos.current_price * pos.quanto_multiplier);
         pos.unrealized_pnl = calculate_unrealized_pnl(
-            pos.side, pos.entry_price, pos.current_price, pos.quantity);
+            pos.side, pos.entry_price, pos.current_price, pos.quantity,
+            pos.leverage, pos.quanto_multiplier);
+
+        // Recalculate margin for remaining quantity.
+        if (MarketType::Futures == pos.market_type && pos.leverage > 0.0)
+        {
+            pos.margin_used = pos.quantity * pos.entry_price * pos.quanto_multiplier / pos.leverage;
+        }
 
         PULSE_LOG_INFO("risk",
             "Partial close position {} : closed {} @ {:.2f}, remaining {} (PnL: {:.4f})",
@@ -179,8 +234,9 @@ void PositionManager::update_price(const std::string &position_id, Price current
     auto &pos = it->second;
     pos.current_price = current_price;
     pos.unrealized_pnl = calculate_unrealized_pnl(
-        pos.side, pos.entry_price, current_price, pos.quantity);
-    pos.notional_value = std::abs(pos.quantity * current_price);
+        pos.side, pos.entry_price, current_price, pos.quantity,
+        pos.leverage, pos.quanto_multiplier);
+    pos.notional_value = std::abs(pos.quantity * current_price * pos.quanto_multiplier);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +334,13 @@ PortfolioSummary PositionManager::portfolio_summary() const
         {
             summary.net_exposure -= pos.notional_value;
         }
+
+        // Futures-specific aggregation.
+        if (MarketType::Futures == pos.market_type)
+        {
+            summary.total_margin_used += pos.margin_used;
+            ++summary.futures_position_count;
+        }
     }
 
     return summary;
@@ -370,17 +433,20 @@ std::string PositionManager::generate_position_id(const Symbol &symbol, Side sid
         + std::to_string(next_position_id_);
 }
 
-double PositionManager::calculate_unrealized_pnl(Side side, Price entry, Price current, Quantity qty)
+double PositionManager::calculate_unrealized_pnl(
+    Side side, Price entry, Price current, Quantity qty,
+    double leverage, double quanto_multiplier)
 {
-    // Buy: profit when current > entry -> (current - entry) * qty
-    // Sell: profit when current < entry -> (entry - current) * qty
+    // Buy: profit when current > entry -> (current - entry) * qty * quanto * leverage
+    // Sell: profit when current < entry -> (entry - current) * qty * quanto * leverage
+    // For spot: leverage=1.0, quanto_multiplier=1.0 → original formula.
     if (Side::Buy == side)
     {
-        return (current - entry) * qty;
+        return (current - entry) * qty * quanto_multiplier * leverage;
     }
     else
     {
-        return (entry - current) * qty;
+        return (entry - current) * qty * quanto_multiplier * leverage;
     }
 }
 

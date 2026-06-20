@@ -65,7 +65,10 @@ class OrderTracker
     using CompletionCallback = std::function<void(const ExecutionReport &)>;
 
     /// Construct an OrderTracker with WS and REST clients.
-    OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client);
+    ///
+    /// market_type selects which WS channel and REST paths to use.
+    OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
+                 MarketType market_type = MarketType::Spot);
 
     /// Start tracking an order.
     ///
@@ -126,6 +129,7 @@ class OrderTracker
   private:
     exchange::GateWsClient &ws_client_;
     exchange::GateRestClient &rest_client_;
+    MarketType market_type_;
 
     /// Internal state for a tracked order.
     struct TrackedOrder

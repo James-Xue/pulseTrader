@@ -49,8 +49,12 @@ void StrategyBase::emit_signal(const TradingSignal &signal)
         return;
     }
 
-    // 3. Forward to the callback (typically StrategyManager → SignalAggregator).
-    signal_callback_(signal);
+    // 3. Ensure market_type is set from strategy config (allows downstream routing).
+    TradingSignal enriched = signal;
+    enriched.market_type = context_.config.market_type;
+
+    // 4. Forward to the callback (typically StrategyManager → SignalAggregator).
+    signal_callback_(enriched);
 }
 
 // ---------------------------------------------------------------------------

@@ -144,4 +144,49 @@ TEST(EndpointRouterTest, SelectWsUrl_DefaultConfig)
     EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", EndpointRouter::select_ws_url(cfg, MarketType::Futures));
 }
 
+// ---------------------------------------------------------------------------
+// Test 14: OrdersPath_Spot — spot orders endpoint
+// ---------------------------------------------------------------------------
+TEST(EndpointRouterTest, OrdersPath_Spot)
+{
+    EXPECT_EQ("/api/v4/spot/orders", EndpointRouter::orders_path(MarketType::Spot));
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: OrdersPath_Futures — futures orders endpoint
+// ---------------------------------------------------------------------------
+TEST(EndpointRouterTest, OrdersPath_Futures)
+{
+    EXPECT_EQ("/api/v4/futures/usdt/orders", EndpointRouter::orders_path(MarketType::Futures));
+}
+
+// ---------------------------------------------------------------------------
+// Test 16: OrderPath_WithId — specific order path with ID
+// ---------------------------------------------------------------------------
+TEST(EndpointRouterTest, OrderPath_SpotWithId)
+{
+    EXPECT_EQ("/api/v4/spot/orders/12345",
+              EndpointRouter::order_path(MarketType::Spot, "12345"));
+}
+
+TEST(EndpointRouterTest, OrderPath_FuturesWithId)
+{
+    EXPECT_EQ("/api/v4/futures/usdt/orders/67890",
+              EndpointRouter::order_path(MarketType::Futures, "67890"));
+}
+
+// ---------------------------------------------------------------------------
+// Test 17: LeveragePath_Futures — futures leverage endpoint
+// ---------------------------------------------------------------------------
+TEST(EndpointRouterTest, LeveragePath_Futures)
+{
+    EXPECT_EQ("/api/v4/futures/usdt/positions/BTC_USDT/leverage",
+              EndpointRouter::leverage_path(MarketType::Futures, "BTC_USDT"));
+}
+
+TEST(EndpointRouterTest, LeveragePath_Spot_Empty)
+{
+    EXPECT_EQ("", EndpointRouter::leverage_path(MarketType::Spot, "BTC_USDT"));
+}
+
 } // namespace pulse::exchange::test

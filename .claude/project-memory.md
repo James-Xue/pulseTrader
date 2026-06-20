@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-19
-> 文件大小：4896 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：5932 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -29,11 +29,11 @@
 - Vendored: uWebSockets + uSockets in `third_party/`
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M9 Done, 2026-06-19)
+## Current State (M12 Done, 2026-06-19)
 
 ### Test Summary
-- **467 tests** (WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 53 + market 33 + execution 22 + risk 92 + strategy 52 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 440 without SQLITE · 402 without WEBUI or SQLITE
+- **497 tests** (WEBUI + SQLITE): core 15 + config_loader 27 + config_validator 31 + logger 8 + exchange 59 + market 38 + execution 26 + risk 104 + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 470 without SQLITE · 432 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -41,19 +41,35 @@
 - **M7** ✅: SQLite trade recorder (17-col schema, 4 queries)
 - **M8** ✅: Futures config foundation (MarketType/MarginMode enums, 7xxx errors)
 - **M9** ✅: EndpointRouter + WS ping/pong fix
-  - `src/exchange/endpoint_router.hpp/cpp` — `MarketType` → REST paths / WS prefixes / ping-pong channels
-  - `GateWsClient(config, MarketType=Spot)` — URL via `EndpointRouter::select_ws_url()`, ping/pong generalized
-  - `GateWsChannels::build_pong(frame, MarketType)` — dynamic `.ping`→`.pong` derivation
-  - `GateRestClient(config, MarketType=Spot)` — +3 futures methods (contracts/ticker/accounts)
-  - 18 tests (13 EndpointRouter + 3 build_pong + 2 constructor compat)
+- **M10** ✅: Futures Market Data
+  - `Ticker`: mark_price, index_price, funding_rate fields
+  - `SymbolInfo`: quanto_multiplier, leverage_max/min, maintenance_rate, funding_interval, order_size_min/max, market_type
+  - `SymbolRegistry`: MarketType param, `parse_futures_contract()`, futures validate_order()
+  - `MarketFeed`: MarketType param, EndpointRouter channel routing, dual-format JSON parsing
+  - `EndpointRouter`: orders_path(), order_path(), leverage_path()
+  - `GateRestClient`: post/cancel/get_futures_order()
+  - 11 new tests
+- **M11** ✅: Futures Risk / PnL
+  - `Position`: market_type, leverage, margin_mode, margin_used, liquidation_price, quanto_multiplier
+  - `PortfolioSummary`: total_margin_used, futures_position_count
+  - `PositionManager`: leverage-aware PnL (`calculate_unrealized_pnl` with leverage/quanto), futures open_position overload, liquidation price estimation
+  - `RiskManager`: evaluate_futures_order() — leverage + margin checks, first use of 7xxx error codes
+  - 12 new tests
+- **M12** ✅: Futures Execution + Dual-Market Wiring
+  - `OrderRequest`: market_type, leverage, reduce_only, contract_size
+  - `OrderExecutor`: MarketType param, futures order body (contract/size/tif), futures response parsing (int id, finish_as)
+  - `OrderTracker`: MarketType param, EndpointRouter WS/REST routing
+  - `TradingSignal`: market_type field, auto-set by emit_signal()
+  - `main.cpp`: dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker), strategy→market routing
+  - 7 new tests
 
-### Next: M10 — Futures Market Data
-- futures ticker / mark_price / funding_rate parsing
-- `SymbolInfo.contract_multiplier` field
-- dual MarketFeed (spot + futures)
-- ~14 new tests
+### Next: Testnet + Paper Trading
+- Gate.io testnet API setup (separate API keys)
+- Paper trading mode (simulate fills without real orders)
+- Integration testing with live futures market data
+- Performance benchmarking (latency, throughput)
 
-Then M11 (futures risk/PnL) → M12 (futures execution + dual-market wiring) → testnet → paper trading → 小资金实盘
+Then: 小资金实盘 → production hardening
 
 ## Config Structure
 

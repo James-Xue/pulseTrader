@@ -255,3 +255,42 @@ TEST(TickerCache, SymbolsDoesNotDuplicateAfterOverwrite)
     EXPECT_EQ(result.size(), 1u);
     EXPECT_EQ(result[0], "BTC_USDT");
 }
+
+// ---------------------------------------------------------------------------
+// Futures-specific Ticker tests
+// ---------------------------------------------------------------------------
+
+TEST(TickerCache, DefaultTicker_FuturesFieldsZero)
+{
+    // Default-constructed Ticker should have futures fields at zero.
+    Ticker t;
+    EXPECT_DOUBLE_EQ(0.0, t.mark_price);
+    EXPECT_DOUBLE_EQ(0.0, t.index_price);
+    EXPECT_DOUBLE_EQ(0.0, t.funding_rate);
+}
+
+TEST(TickerCache, FuturesTicker_PopulatedFields)
+{
+    // Futures ticker should carry mark_price, index_price, funding_rate.
+    TickerCache cache;
+
+    Ticker t;
+    t.symbol = "BTC_USDT";
+    t.last = 50000.5;
+    t.mark_price = 50001.0;
+    t.index_price = 50001.5;
+    t.funding_rate = 0.0001;
+    t.volume_24h = 123456789.0;
+    t.change_pct = 2.5;
+    t.timestamp = 1700000000000;
+
+    cache.update("BTC_USDT", t);
+
+    const auto opt = cache.get("BTC_USDT");
+    ASSERT_TRUE(opt.has_value());
+    EXPECT_DOUBLE_EQ(50001.0, opt->mark_price);
+    EXPECT_DOUBLE_EQ(50001.5, opt->index_price);
+    EXPECT_DOUBLE_EQ(0.0001, opt->funding_rate);
+    EXPECT_EQ("BTC_USDT", opt->symbol);
+    EXPECT_DOUBLE_EQ(50000.5, opt->last);
+}

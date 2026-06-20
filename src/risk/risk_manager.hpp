@@ -56,6 +56,20 @@ class RiskManager
     /// Returns RiskEvalResult with decision, approved_qty, and reason.
     [[nodiscard]] RiskEvalResult evaluate_order(const execution::OrderRequest &order);
 
+    /// Evaluate a futures order — adds leverage and margin checks before
+    /// delegating to evaluate_order() for the standard drawdown/rate/position checks.
+    ///
+    /// Additional checks:
+    ///   1. Leverage <= config.max_leverage → else FuturesLeverageExceeded (7001)
+    ///   2. Total margin + proposed margin <= equity * config.max_margin_used → else FuturesMarginInsufficient (7002)
+    ///
+    /// Parameters:
+    ///   - order:    the proposed order
+    ///   - leverage: requested leverage multiplier
+    ///   - equity:   current account equity (for margin sufficiency check)
+    [[nodiscard]] RiskEvalResult evaluate_futures_order(
+        const execution::OrderRequest &order, double leverage, double equity);
+
     // --- Access sub-components ---
     [[nodiscard]] PositionManager &position_manager();
     [[nodiscard]] DrawdownGuard &drawdown_guard();

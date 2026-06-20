@@ -34,6 +34,11 @@ struct Ticker
     Price change_pct;         ///< 24-hour price change percentage.
     std::int64_t timestamp;   ///< Unix timestamp in milliseconds.
 
+    // Futures-specific fields (zero for spot).
+    Price mark_price;         ///< Mark price (futures only).
+    Price index_price;        ///< Index price (futures only).
+    double funding_rate;      ///< Funding rate (futures only, e.g. 0.0001 = 0.01%).
+
     /// Default constructor — zero-initializes all fields.
     Ticker()
         : symbol{}
@@ -43,6 +48,9 @@ struct Ticker
         , volume_24h{ 0.0 }
         , change_pct{ 0.0 }
         , timestamp{ 0 }
+        , mark_price{ 0.0 }
+        , index_price{ 0.0 }
+        , funding_rate{ 0.0 }
     {
     }
 };

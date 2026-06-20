@@ -50,6 +50,20 @@ class PositionManager
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         const std::string &strategy_id);
 
+    /// Open a futures position with leverage and margin parameters.
+    ///
+    /// In addition to standard portfolio limits, computes:
+    ///   - margin_used = qty * entry_price * quanto_multiplier / leverage
+    ///   - notional = qty * entry_price * quanto_multiplier * leverage
+    ///   - liquidation_price (estimated)
+    ///
+    /// Returns position_id on success, PulseError if any limit is exceeded.
+    [[nodiscard]] Result<std::string> open_position(
+        const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+        const std::string &strategy_id,
+        MarketType market_type, double leverage, MarginMode margin_mode,
+        double quanto_multiplier, double maintenance_rate);
+
     /// Close a position (fully or partially).
     ///
     ///   1. If close_qty >= position.quantity: position is removed (full close)
@@ -111,8 +125,13 @@ class PositionManager
     [[nodiscard]] std::string generate_position_id(const Symbol &symbol, Side side);
 
     /// Calculate unrealized PnL for a position.
-    /// Buy: (current - entry) * qty; Sell: (entry - current) * qty.
-    [[nodiscard]] static double calculate_unrealized_pnl(Side side, Price entry, Price current, Quantity qty);
+    /// Buy: (current - entry) * qty * quanto * leverage
+    /// Sell: (entry - current) * qty * quanto * leverage
+    /// Default leverage=1.0 and quanto_multiplier=1.0 make spot PnL identical
+    /// to the original formula.
+    [[nodiscard]] static double calculate_unrealized_pnl(
+        Side side, Price entry, Price current, Quantity qty,
+        double leverage = 1.0, double quanto_multiplier = 1.0);
 };
 
 } // namespace pulse::risk

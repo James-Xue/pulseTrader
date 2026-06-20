@@ -3,6 +3,7 @@
 //
 // Stores trading instrument metadata (tick size, lot size, min notional) fetched
 // from Gate.io REST API. Used to validate order parameters before submission.
+// Supports both spot and futures markets via MarketType parameter.
 //
 // Thread safety:
 //   - load_from_rest() is called once at startup (exclusive write lock)
@@ -34,6 +35,16 @@ struct SymbolInfo
     Quantity min_base_amount;   ///< Minimum base currency amount per order.
     bool trading_enabled;       ///< Whether trading is currently enabled.
 
+    // Futures-specific fields (defaults make spot instruments work unchanged).
+    double quanto_multiplier;   ///< Contract multiplier (e.g. 0.0001 = 1 contract = 0.0001 BTC).
+    double leverage_max;        ///< Maximum leverage (e.g. 125).
+    double leverage_min;        ///< Minimum leverage (e.g. 1).
+    double maintenance_rate;    ///< Maintenance margin rate (e.g. 0.005).
+    int funding_interval;       ///< Funding rate interval in seconds (e.g. 28800 = 8h).
+    int order_size_min;         ///< Minimum order size in contracts.
+    int order_size_max;         ///< Maximum order size in contracts.
+    MarketType market_type;     ///< Spot or Futures.
+
     /// Default constructor — zero-initializes all fields.
     SymbolInfo()
         : symbol{}
@@ -43,6 +54,14 @@ struct SymbolInfo
         , min_quote_amount{ 0.0 }
         , min_base_amount{ 0.0 }
         , trading_enabled{ false }
+        , quanto_multiplier{ 1.0 }
+        , leverage_max{ 1.0 }
+        , leverage_min{ 1.0 }
+        , maintenance_rate{ 0.0 }
+        , funding_interval{ 0 }
+        , order_size_min{ 0 }
+        , order_size_max{ 0 }
+        , market_type{ MarketType::Spot }
     {
     }
 };
@@ -62,13 +81,16 @@ class SymbolRegistry
     /// Construct a registry with a reference to the REST client.
     ///
     /// Does NOT fetch data — call load_from_rest() explicitly.
-    explicit SymbolRegistry(exchange::GateRestClient &rest_client);
+    /// MarketType selects which endpoint to load from (spot or futures).
+    explicit SymbolRegistry(exchange::GateRestClient &rest_client,
+                            MarketType market_type = MarketType::Spot);
 
-    /// Fetch all currency pairs from Gate.io REST API and populate the registry.
+    /// Fetch all instruments from Gate.io REST API and populate the registry.
     ///
-    /// Calls GET /api/v4/spot/currency_pairs and parses the JSON response.
+    /// Spot:    GET /api/v4/spot/currency_pairs
+    /// Futures: GET /api/v4/futures/usdt/contracts
+    ///
     /// Replaces any existing data (safe to call multiple times for refresh).
-    ///
     /// Returns true on success, false on network/parse error.
     bool load_from_rest();
 
@@ -99,10 +121,11 @@ class SymbolRegistry
 
   private:
     exchange::GateRestClient &rest_client_;
+    MarketType market_type_;
     mutable std::shared_mutex mutex_;
     std::unordered_map<Symbol, SymbolInfo> symbols_;
 
-    /// Parse a single currency pair JSON object into SymbolInfo.
+    /// Parse a single currency pair JSON object into SymbolInfo (spot).
     ///
     /// Gate.io format:
     /// {
@@ -117,6 +140,24 @@ class SymbolRegistry
     ///   "trade_status": "tradable"
     /// }
     [[nodiscard]] static std::optional<SymbolInfo> parse_currency_pair(const nlohmann::json &obj);
+
+    /// Parse a single futures contract JSON object into SymbolInfo.
+    ///
+    /// Gate.io format:
+    /// {
+    ///   "name": "BTC_USDT",
+    ///   "quanto_multiplier": "0.0001",
+    ///   "leverage_min": "1",
+    ///   "leverage_max": "125",
+    ///   "maintenance_rate": "0.005",
+    ///   "funding_interval": 28800,
+    ///   "order_size_min": 1,
+    ///   "order_size_max": 1000000,
+    ///   "order_price_round": "0.1",
+    ///   "mark_price": "50000.5",
+    ///   "funding_rate": "0.0001"
+    /// }
+    [[nodiscard]] static std::optional<SymbolInfo> parse_futures_contract(const nlohmann::json &obj);
 };
 
 } // namespace pulse::market
