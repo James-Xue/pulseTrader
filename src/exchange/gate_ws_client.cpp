@@ -511,13 +511,6 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                 {
                     // 1. Parse the incoming frame as JSON
                     const std::string &body = msg->get_payload();
-
-                    // Diagnostic: log every incoming frame at INFO level.
-                    // This is essential for detecting whether the server is sending data at all.
-                    // Truncate to 200 chars to avoid flooding logs with large orderbook snapshots.
-                    const auto channel_preview = body.size() <= 200 ? body : body.substr(0, 200) + "...";
-                    PULSE_LOG_INFO("exchange", "WS RX {} bytes: {}", body.size(), channel_preview);
-
                     auto frame = nlohmann::json::parse(body, nullptr, false);
 
                     if (frame.is_discarded())
@@ -539,7 +532,66 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                         return;
                     }
 
-                    // 3. Dispatch to channel handler
+                    // 3. Diagnostic: log a compact summary of each data frame
+                    if (frame.contains("channel") && frame.contains("event"))
+                    {
+                        const auto &ch = frame["channel"];
+                        const auto &ev = frame["event"];
+
+                        // Skip subscription confirmations (already logged by send_queued)
+                        if ("subscribe" != ev.get<std::string>()
+                            && "unsubscribe" != ev.get<std::string>())
+                        {
+                            // Extract key fields for a compact one-line summary
+                            std::string summary;
+                            if (frame.contains("result"))
+                            {
+                                const auto &r = frame["result"];
+                                if (r.is_array() && !r.empty())
+                                {
+                                    const auto &first = r[0];
+                                    // Ticker: show contract + last price
+                                    if (first.contains("last"))
+                                    {
+                                        summary = first.value("contract", "?")
+                                            + " last=" + first.value("last", "?");
+                                    }
+                                    // Kline: show symbol/time + close price
+                                    else if (first.contains("c"))
+                                    {
+                                        summary = "close=" + first.value("c", "?")
+                                            + " h=" + first.value("h", "?")
+                                            + " l=" + first.value("l", "?");
+                                    }
+                                    // Orderbook: show symbol
+                                    else if (first.contains("s"))
+                                    {
+                                        summary = first.value("s", "?") + " ob_update";
+                                    }
+                                    else
+                                    {
+                                        summary = "array[" + std::to_string(r.size()) + "]";
+                                    }
+                                }
+                                else if (r.is_object())
+                                {
+                                    if (r.contains("last"))
+                                    {
+                                        summary = r.value("contract", "?")
+                                            + " last=" + r.value("last", "?");
+                                    }
+                                    else
+                                    {
+                                        summary = "object";
+                                    }
+                                }
+                            }
+                            PULSE_LOG_INFO("exchange", "WS {} {} {}",
+                                ch.get<std::string>(), ev.get<std::string>(), summary);
+                        }
+                    }
+
+                    // 4. Dispatch to channel handler
                     if (!channels.dispatch(frame))
                     {
                         const auto channel_name = frame.value("channel", "unknown");
