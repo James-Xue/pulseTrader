@@ -75,7 +75,7 @@ namespace url
     // Testnet (virtual funds, futures only)
     inline constexpr const char* kTestnetRest = "https://api-testnet.gateapi.io";
     inline constexpr const char* kTestnetSpotWs = "wss://api.gateio.ws/ws/v4/"; ///< No separate testnet spot WS.
-    inline constexpr const char* kTestnetFuturesWs = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+    inline constexpr const char* kTestnetFuturesWs = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
 } // namespace url
 
 // ---------------------------------------------------------------------------
