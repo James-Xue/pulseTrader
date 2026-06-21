@@ -131,6 +131,15 @@
 - 3 新测试 (spot/futures kline JSON 格式 + payload 顺序)
 - 540 测试全绿
 
+### Account Balance Display (2026-06-21)
+- **AccountBalance struct**: total, available, unrealised_pnl, position_margin, order_margin, currency
+- **REST parsing**: `GateRestClient::get_futures_account_balance()` — parses Gate.io futures account JSON (all values as strings → safe_parse_double)
+- **DashboardState**: 10 秒轮询 REST 获取账户余额，存入 `AccountSnapshot`
+- **WebUI 顶部状态栏**: Total / Available / Unrealized PnL / Margin Used（深色主题，10 秒刷新）
+- **心跳日志**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
+- `Result<T>` 是 `std::variant<T, PulseError>` — 用 `ok()` / `value()` / `error()` 而非 `has_value()`
+- 540 测试全绿
+
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。
 - ✅ #5 OrderTracker 写锁下回调 — "锁内收集，锁外执行"模式：`process_order_update()` 和 `poll_order_status()` 的 `completion_callback_` 在 unique_lock 释放后调用。`set_completion_callback()` 加锁保护。新增 `test_simulate_ws_update()` / `test_try_shared_lock()` 测试接口。3 新测试。
