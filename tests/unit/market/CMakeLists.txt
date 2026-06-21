@@ -3,6 +3,7 @@ add_executable(test_market
     test_symbol_registry.cpp
     test_kline_buffer.cpp
     test_orderbook_manager.cpp
+    test_market_feed_stats.cpp
 )
 
 target_link_libraries(test_market
