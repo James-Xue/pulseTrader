@@ -498,3 +498,42 @@ tbody tr:hover {
 .portfolio-summary .summary-label {
     color: #a0a0c0;
 }
+
+/* === Account Balance Bar === */
+.account-bar {
+    display: flex;
+    gap: 24px;
+    padding: 10px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    font-size: 0.9em;
+}
+
+.account-bar.hidden {
+    display: none;
+}
+
+.account-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.account-label {
+    color: #a0a0c0;
+    font-size: 0.85em;
+}
+
+.account-value {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+
+.account-value.positive {
+    color: #4caf50;
+}
+
+.account-value.negative {
+    color: #f44336;
+}

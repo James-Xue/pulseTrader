@@ -21,6 +21,26 @@
         </div>
     </header>
 
+    <!-- Account balance bar: exchange-reported equity (updated every 10s) -->
+    <div id="account-bar" class="account-bar hidden">
+        <span class="account-item">
+            <span class="account-label">Total</span>
+            <span class="account-value" id="account-total">—</span>
+        </span>
+        <span class="account-item">
+            <span class="account-label">Available</span>
+            <span class="account-value" id="account-available">—</span>
+        </span>
+        <span class="account-item">
+            <span class="account-label">Unrealized PnL</span>
+            <span class="account-value" id="account-pnl">—</span>
+        </span>
+        <span class="account-item">
+            <span class="account-label">Margin Used</span>
+            <span class="account-value" id="account-margin">—</span>
+        </span>
+    </div>
+
     <main class="dashboard-grid">
         <!-- Panel 1: Order Book -->
         <section class="panel" id="panel-orderbook">

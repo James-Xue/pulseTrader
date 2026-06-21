@@ -116,6 +116,12 @@ class GateRestClient
     /// Requires valid API key and secret.
     [[nodiscard]] Result<nlohmann::json> get_futures_accounts();
 
+    /// GET /api/v4/futures/usdt/accounts — fetch and parse futures account balance.
+    ///
+    /// Convenience wrapper around get_futures_accounts() that returns a parsed
+    /// AccountBalance struct with total equity, available balance, unrealized PnL, etc.
+    [[nodiscard]] Result<AccountBalance> get_futures_account_balance();
+
     /// POST /api/v4/futures/usdt/orders — place a futures order.
     ///
     /// body should contain: contract, size, price, tif, text, reduce_only, etc.

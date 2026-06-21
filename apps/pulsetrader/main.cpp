@@ -247,7 +247,8 @@ static void log_system_heartbeat(
     const pulse::exchange::GateWsClient* spot_ws,
     const pulse::exchange::GateWsClient* futures_ws,
     const pulse::strategy::StrategyManager& strategy_mgr,
-    const pulse::risk::PositionManager& position_mgr)
+    const pulse::risk::PositionManager& position_mgr,
+    pulse::exchange::GateRestClient* rest_client)
 {
     // --- Uptime formatting ---
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
@@ -362,6 +363,21 @@ static void log_system_heartbeat(
     msg << " | positions " << position_mgr.open_position_count()
         << " (notional " << std::fixed << std::setprecision(2)
         << portfolio.total_notional << " USDT)";
+
+    // Account balance (fetched via REST, cached).
+    if (nullptr != rest_client)
+    {
+        auto bal_result = rest_client->get_futures_account_balance();
+        if (ok(bal_result))
+        {
+            const auto &bal = value(bal_result);
+            msg << " | account " << std::fixed << std::setprecision(2)
+                << bal.total << " " << bal.currency
+                << " (avail " << bal.available
+                << ", pnl " << (bal.unrealised_pnl >= 0 ? "+" : "")
+                << bal.unrealised_pnl << ")";
+        }
+    }
 
     PULSE_LOG_INFO("system", "{}", msg.str());
 
@@ -729,13 +745,14 @@ int main(int argc, char* argv[])
 
     if (cfg.webui.enabled)
     {
-        // Pick whichever market feed/tracker is available.
+        // Pick whichever market feed/tracker/rest is available.
         auto& ui_feed    = spot_feed    ? *spot_feed    : *futures_feed;
         auto& ui_tracker = spot_tracker ? *spot_tracker : *futures_tracker;
+        auto* ui_rest    = futures_rest ? futures_rest.get() : spot_rest.get();
 
         dashboard_state = std::make_unique<pulse::webui::DashboardState>(
             cfg.webui, ui_feed, strategy_mgr, risk_mgr,
-            ui_tracker, ai_pipeline);
+            ui_tracker, ai_pipeline, ui_rest);
 
         web_server = std::make_unique<pulse::webui::WebServer>(
             cfg.webui, *dashboard_state, "frontend");
@@ -1074,7 +1091,8 @@ int main(int argc, char* argv[])
                 spot_ws.get(),
                 futures_ws.get(),
                 strategy_mgr,
-                position_mgr);
+                position_mgr,
+                futures_rest ? futures_rest.get() : spot_rest.get());
         }
     }
 
