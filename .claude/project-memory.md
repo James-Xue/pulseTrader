@@ -32,8 +32,8 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **537 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 43 (+5 feed_stats) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 510 without SQLITE · 472 without WEBUI or SQLITE
+- **540 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 513 without SQLITE · 475 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -122,6 +122,14 @@
 - **改动**: `market_feed.hpp` (+FeedStats +3 atomic) · `market_feed.cpp` (+计数器 +stats()) · `main.cpp` (+log_system_heartbeat +修改主循环)
 - 5 新测试 (FeedStats 初始化/并发/delta 计算)
 - 537 测试全绿
+
+### WebUI K 线图修复 (2026-06-21)
+- **Bug #1 (致命)**: `on_kline_update()` 从 `full_frame["contract"]` 提取合约名，但 futures candlesticks 外层帧没有 `contract` 字段，合约名在 `result["n"]` 中 → 100% futures K 线数据被静默丢弃
+- **Bug #2 (高)**: K 线订阅 payload 顺序错误 `["BTC_USDT", "1m"]`，Gate.io 要求 `["1m", "BTC_USDT"]`（interval 在前）
+- **Bug #3 (低)**: `poll_klines()` 仅在 `open_time` 变化时推送快照（~60 秒一次），当前 K 线的 OHLCV 变化不反映到前端。新增 `last_kline_close_` map 检测价格变动
+- **分析文档**: `docs/kline-bug-analysis-2026-06-21.md`
+- 3 新测试 (spot/futures kline JSON 格式 + payload 顺序)
+- 540 测试全绿
 
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。
