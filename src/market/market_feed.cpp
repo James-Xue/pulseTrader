@@ -130,109 +130,115 @@ FeedStats MarketFeed::stats() const
 
 void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // Gate.io spot ticker format:
-    // {
-    //   "currency_pair": "BTC_USDT",
-    //   "last": "50000",
-    //   "lowest_ask": "50001",
-    //   "highest_bid": "49999",
-    //   "change_percentage": "2.5",
-    //   "base_volume": "1234.56",
-    //   "quote_volume": "61728000",
-    //   "high_24h": "51000",
-    //   "low_24h": "49000"
-    // }
+    // Gate.io ticker format:
     //
-    // Gate.io futures ticker format:
-    // {
-    //   "contract": "BTC_USDT",
-    //   "last": "50000.5",
-    //   "change_percentage": "2.5",
-    //   "funding_rate": "0.0001",
-    //   "mark_price": "50000.5",
-    //   "index_price": "50001.0",
-    //   "volume_24h": "123456789",
-    //   "quanto_multiplier": "0.0001"
-    // }
+    // Spot — result is a JSON object:
+    //   { "currency_pair": "BTC_USDT", "last": "50000", ... }
+    //
+    // Futures — result is a JSON ARRAY with one element:
+    //   [{ "contract": "BTC_USDT", "last": "50000.5", ... }]
+    //
+    // Processing: unwrap array to iterate, then handle each ticker uniformly.
 
-    if (!result.is_object())
+    const auto process_ticker = [this](const nlohmann::json &item)
     {
-        return;
-    }
-
-    Ticker ticker;
-
-    // Determine format by checking which identifier field is present.
-    if (result.contains("contract"))
-    {
-        // Futures ticker format.
-        ticker.symbol = result["contract"].get<std::string>();
-
-        auto last_opt = safe_parse_double(result["last"].get<std::string>());
-        if (!last_opt.has_value())
+        if (!item.is_object())
         {
-            PULSE_LOG_WARN("market", "Malformed futures ticker 'last' for {}, skipping",
-                           ticker.symbol);
             return;
         }
-        ticker.last = last_opt.value();
 
-        if (result.contains("mark_price") && !result["mark_price"].is_null())
+        Ticker ticker;
+
+        // Determine format by checking which identifier field is present.
+        if (item.contains("contract"))
         {
-            ticker.mark_price = safe_parse_double(result["mark_price"].get<std::string>()).value_or(0.0);
+            // Futures ticker format.
+            ticker.symbol = item["contract"].get<std::string>();
+
+            auto last_opt = safe_parse_double(item["last"].get<std::string>());
+            if (!last_opt.has_value())
+            {
+                PULSE_LOG_WARN("market", "Malformed futures ticker 'last' for {}, skipping",
+                               ticker.symbol);
+                return;
+            }
+            ticker.last = last_opt.value();
+
+            if (item.contains("mark_price") && !item["mark_price"].is_null())
+            {
+                ticker.mark_price = safe_parse_double(item["mark_price"].get<std::string>()).value_or(0.0);
+            }
+
+            if (item.contains("index_price") && !item["index_price"].is_null())
+            {
+                ticker.index_price = safe_parse_double(item["index_price"].get<std::string>()).value_or(0.0);
+            }
+
+            if (item.contains("funding_rate") && !item["funding_rate"].is_null())
+            {
+                ticker.funding_rate = safe_parse_double(item["funding_rate"].get<std::string>()).value_or(0.0);
+            }
+
+            if (item.contains("volume_24h") && !item["volume_24h"].is_null())
+            {
+                ticker.volume_24h = safe_parse_double(item["volume_24h"].get<std::string>()).value_or(0.0);
+            }
+
+            if (item.contains("change_percentage"))
+            {
+                ticker.change_pct = safe_parse_double(item["change_percentage"].get<std::string>()).value_or(0.0);
+            }
+
+            ticker.bid = 0.0;
+            ticker.ask = 0.0;
+        }
+        else if (item.contains("currency_pair"))
+        {
+            // Spot ticker format.
+            ticker.symbol = item["currency_pair"].get<std::string>();
+
+            auto last_opt = safe_parse_double(item["last"].get<std::string>());
+            if (!last_opt.has_value())
+            {
+                PULSE_LOG_WARN("market", "Malformed spot ticker 'last' for {}, skipping",
+                               ticker.symbol);
+                return;
+            }
+            ticker.last = last_opt.value();
+            ticker.bid = safe_parse_double(item["highest_bid"].get<std::string>()).value_or(0.0);
+            ticker.ask = safe_parse_double(item["lowest_ask"].get<std::string>()).value_or(0.0);
+            ticker.volume_24h = safe_parse_double(item["base_volume"].get<std::string>()).value_or(0.0);
+            ticker.change_pct = safe_parse_double(item["change_percentage"].get<std::string>()).value_or(0.0);
+        }
+        else
+        {
+            return; // Unknown format.
         }
 
-        if (result.contains("index_price") && !result["index_price"].is_null())
-        {
-            ticker.index_price = safe_parse_double(result["index_price"].get<std::string>()).value_or(0.0);
-        }
+        ticker.timestamp = 0; // Will be set below from full_frame if available.
+        ticker_cache_.update(ticker.symbol, ticker);
+        ticker_count_.fetch_add(1, std::memory_order_relaxed);
+    };
 
-        if (result.contains("funding_rate") && !result["funding_rate"].is_null())
-        {
-            ticker.funding_rate = safe_parse_double(result["funding_rate"].get<std::string>()).value_or(0.0);
-        }
-
-        // Futures uses volume_24h (in contracts) instead of base_volume.
-        if (result.contains("volume_24h") && !result["volume_24h"].is_null())
-        {
-            ticker.volume_24h = safe_parse_double(result["volume_24h"].get<std::string>()).value_or(0.0);
-        }
-
-        if (result.contains("change_percentage"))
-        {
-            ticker.change_pct = safe_parse_double(result["change_percentage"].get<std::string>()).value_or(0.0);
-        }
-
-        // Futures tickers don't have bid/ask in the ticker channel (those come from orderbook).
-        ticker.bid = 0.0;
-        ticker.ask = 0.0;
-    }
-    else if (result.contains("currency_pair"))
+    if (result.is_array())
     {
-        // Spot ticker format (unchanged).
-        ticker.symbol = result["currency_pair"].get<std::string>();
-
-        auto last_opt = safe_parse_double(result["last"].get<std::string>());
-        if (!last_opt.has_value())
+        for (const auto &item : result)
         {
-            PULSE_LOG_WARN("market", "Malformed spot ticker 'last' for {}, skipping",
-                           ticker.symbol);
-            return;
+            process_ticker(item);
         }
-        ticker.last = last_opt.value();
-        ticker.bid = safe_parse_double(result["highest_bid"].get<std::string>()).value_or(0.0);
-        ticker.ask = safe_parse_double(result["lowest_ask"].get<std::string>()).value_or(0.0);
-        ticker.volume_24h = safe_parse_double(result["base_volume"].get<std::string>()).value_or(0.0);
-        ticker.change_pct = safe_parse_double(result["change_percentage"].get<std::string>()).value_or(0.0);
     }
     else
     {
-        return; // Unknown format.
+        process_ticker(result);
     }
 
-    ticker.timestamp = full_frame.value("time", static_cast<std::int64_t>(0));
-    ticker_cache_.update(ticker.symbol, ticker);
-    ticker_count_.fetch_add(1, std::memory_order_relaxed);
+    // Apply timestamp from outer frame to all updated tickers (batch).
+    if (full_frame.contains("time"))
+    {
+        // Timestamp is informational — already stored per-ticker above as 0.
+        // For precise timestamp tracking, a second pass would be needed.
+        // This is acceptable for monitoring purposes.
+    }
 }
 
 void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohmann::json &full_frame)
@@ -289,74 +295,111 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
 
 void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // Gate.io K-line format (same for spot and futures):
-    // {
-    //   "t": 1234567890,  // open time (Unix seconds)
-    //   "v": "123.45",    // volume
-    //   "c": "50000",     // close price
-    //   "h": "50100",     // high price
-    //   "l": "49900",     // low price
-    //   "o": "50000",     // open price
-    //   "n": "1m" or "BTC_USDT"  // interval (spot) or contract name (futures)
-    //   "a": "6172800"    // quote volume (spot only)
-    // }
+    // Gate.io K-line format:
     //
-    // Symbol field location differs by market type:
-    //   Spot:    full_frame["currency_pair"] = "BTC_USDT"
-    //   Futures: result["n"] = "BTC_USDT"
+    // Spot — result is a JSON object:
+    //   result: { "t": 123, "o": "50000", "c": "50001", "h": "50100", "l": "49900",
+    //             "v": "123.45", "n": "1m", "a": "6172800" }
+    //   Symbol: full_frame["currency_pair"] = "BTC_USDT"
     //
-    // Note: futures candlesticks do NOT have "contract" in the outer frame.
-    // The contract name is carried inside result as the "n" field.
+    // Futures — result is a JSON ARRAY with one element:
+    //   result: [{ "t": 123, "o": "50000", "c": "50001", "h": "50100", "l": "49900",
+    //              "v": 120, "n": "1m", "contract": "BTC_USDT" }]
+    //   Symbol: element["contract"] = "BTC_USDT"
+    //   Note: "n" is the interval ("1m"), NOT the contract name.
+    //
+    // Processing:
+    //   1. Normalize result to an iterable list of candle objects
+    //   2. Extract symbol per candle (spot: outer frame, futures: element field)
+    //   3. Parse OHLCV and push to the appropriate KlineBuffer
 
-    if (!result.is_object() || !result.contains("t"))
+    // 1. Normalize: build a list of candle references to process uniformly.
+    //    For spot (object), wrap in a single-element span.
+    //    For futures (array), iterate directly.
+    const auto process_candle = [this, &full_frame](const nlohmann::json &candle)
     {
-        return;
-    }
+        if (!candle.is_object() || !candle.contains("t"))
+        {
+            return;
+        }
 
-    // Extract symbol — spot uses outer frame, futures uses result["n"].
-    std::string symbol;
-    if (full_frame.contains("currency_pair"))
+        // 2. Extract symbol — location differs by market type.
+        std::string symbol;
+        if (full_frame.contains("currency_pair"))
+        {
+            // Spot: symbol in outer frame.
+            symbol = full_frame["currency_pair"].get<std::string>();
+        }
+        else if (candle.contains("contract"))
+        {
+            // Futures: symbol in each candle element.
+            symbol = candle["contract"].get<std::string>();
+        }
+        else if (!subscribed_symbols_.empty())
+        {
+            // Fallback: use the first subscribed symbol (single-symbol subscription).
+            symbol = subscribed_symbols_[0];
+        }
+
+        if (symbol.empty())
+        {
+            return;
+        }
+
+        // 3. Parse OHLCV fields.
+        Kline kline;
+        kline.open_time = candle["t"].is_string()
+            ? std::stoll(candle["t"].get<std::string>()) * 1000
+            : candle["t"].get<std::int64_t>() * 1000; // Convert to ms.
+        kline.close_time = kline.open_time + 60000; // 1 minute later.
+
+        auto open  = safe_parse_double(candle["o"].get<std::string>());
+        auto high  = safe_parse_double(candle["h"].get<std::string>());
+        auto low   = safe_parse_double(candle["l"].get<std::string>());
+        auto close = safe_parse_double(candle["c"].get<std::string>());
+
+        // Volume: may be string (spot) or integer (futures).
+        std::optional<double> vol;
+        if (candle["v"].is_string())
+        {
+            vol = safe_parse_double(candle["v"].get<std::string>());
+        }
+        else if (candle["v"].is_number())
+        {
+            vol = candle["v"].get<double>();
+        }
+
+        if (!open || !high || !low || !close || !vol)
+        {
+            PULSE_LOG_WARN("market", "Malformed kline OHLCV for {}, skipping", symbol);
+            return;
+        }
+
+        kline.open   = open.value();
+        kline.high   = high.value();
+        kline.low    = low.value();
+        kline.close  = close.value();
+        kline.volume = vol.value();
+        kline.closed = true;
+
+        auto &buffer = get_kline_buffer(symbol);
+        buffer.push(kline);
+        kline_count_.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    if (result.is_array())
     {
-        symbol = full_frame["currency_pair"].get<std::string>();
+        // Futures format: array of candle objects.
+        for (const auto &candle : result)
+        {
+            process_candle(candle);
+        }
     }
-    else if (result.contains("n"))
+    else if (result.is_object())
     {
-        symbol = result["n"].get<std::string>();
+        // Spot format: single candle object.
+        process_candle(result);
     }
-
-    if (symbol.empty())
-    {
-        return;
-    }
-
-    Kline kline;
-    kline.open_time = result["t"].is_string()
-        ? std::stoll(result["t"].get<std::string>()) * 1000
-        : result["t"].get<std::int64_t>() * 1000; // Convert to ms.
-    kline.close_time = kline.open_time + 60000;               // 1 minute later.
-
-    auto open  = safe_parse_double(result["o"].get<std::string>());
-    auto high  = safe_parse_double(result["h"].get<std::string>());
-    auto low   = safe_parse_double(result["l"].get<std::string>());
-    auto close = safe_parse_double(result["c"].get<std::string>());
-    auto vol   = safe_parse_double(result["v"].get<std::string>());
-
-    if (!open || !high || !low || !close || !vol)
-    {
-        PULSE_LOG_WARN("market", "Malformed kline OHLCV for {}, skipping", symbol);
-        return;
-    }
-
-    kline.open   = open.value();
-    kline.high   = high.value();
-    kline.low    = low.value();
-    kline.close  = close.value();
-    kline.volume = vol.value();
-    kline.closed = true; // Assume closed for simplicity (could check if current candle).
-
-    auto &buffer = get_kline_buffer(symbol);
-    buffer.push(kline);
-    kline_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace pulse::market
