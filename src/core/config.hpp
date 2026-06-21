@@ -60,23 +60,44 @@ struct TakeProfitConfig
 };
 
 // ---------------------------------------------------------------------------
+// URL Constants — Gate.io mainnet and testnet endpoint addresses
+//
+// Centralised here to eliminate hardcoded URL strings across the codebase.
+// When testnet=true, config_loader automatically switches URL defaults.
+// ---------------------------------------------------------------------------
+namespace url
+{
+    // Mainnet (production, real funds)
+    inline constexpr const char* kMainnetRest = "https://api.gateio.ws";
+    inline constexpr const char* kMainnetSpotWs = "wss://api.gateio.ws/ws/v4/";
+    inline constexpr const char* kMainnetFuturesWs = "wss://fx-ws.gateio.ws/v4/ws/usdt";
+
+    // Testnet (virtual funds, futures only)
+    inline constexpr const char* kTestnetRest = "https://api-testnet.gateapi.io";
+    inline constexpr const char* kTestnetSpotWs = "wss://api.gateio.ws/ws/v4/"; ///< No separate testnet spot WS.
+    inline constexpr const char* kTestnetFuturesWs = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+} // namespace url
+
+// ---------------------------------------------------------------------------
 // ExchangeConfig — Gate.io REST + WebSocket connection parameters
 //
 // Fields:
 //   1. apiKey / apiSecret  — HMAC-SHA512 credentials from Gate.io API management
 //   2. restBaseUrl         — v4 REST endpoint (public + private)
-//   3. wsUrl               — v4 WebSocket endpoint for real-time feeds
-//   4. restTimeoutMs       — Per-request HTTP timeout in milliseconds
-//   5. maxRetries          — Retry count for transient network failures
+//   3. wsUrl               — v4 WebSocket endpoint for spot real-time feeds
+//   4. futuresWsUrl        — v4 WebSocket endpoint for futures real-time feeds
+//   5. restTimeoutMs       — Per-request HTTP timeout in milliseconds
+//   6. maxRetries          — Retry count for transient network failures
+//   7. testnet             — True = use Gate.io testnet (URLs auto-switch in config_loader)
 // ---------------------------------------------------------------------------
 struct ExchangeConfig
 {
     std::string apiKey;
     std::string apiSecret;
-    std::string restBaseUrl = "https://api.gateio.ws";
-    std::string wsUrl = "wss://api.gateio.ws/ws/v4/";
-    std::string futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"; ///< Gate.io futures WS endpoint (USDT-settled).
-    std::string proxyUrl;                               ///< HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Falls back to HTTPS_PROXY env var.
+    std::string restBaseUrl = url::kMainnetRest;         ///< v4 REST endpoint.
+    std::string wsUrl = url::kMainnetSpotWs;             ///< Spot WebSocket endpoint.
+    std::string futuresWsUrl = url::kMainnetFuturesWs;   ///< Futures WebSocket endpoint (USDT-settled).
+    std::string proxyUrl;                                ///< HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Falls back to HTTPS_PROXY env var.
     std::uint32_t restTimeoutMs = 10'000;    ///< Per-request timeout in milliseconds.
     std::uint32_t maxRetries = 3;            ///< Retries before giving up on a request.
     std::uint32_t wsReconnectBaseMs = 1'000; ///< Base backoff for WS reconnection (ms).

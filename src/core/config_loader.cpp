@@ -202,11 +202,27 @@ PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
 
     const auto &sec = root.at("exchange");
 
-    out.apiKey = toml::find_or(sec, "apiKey", out.apiKey);
-    out.apiSecret = toml::find_or(sec, "apiSecret", out.apiSecret);
+    // Step 1: Read testnet flag FIRST — it determines URL defaults.
+    out.testnet = toml::find_or(sec, "testnet", out.testnet);
+
+    // Step 2: Set URL defaults based on network mode.
+    // When testnet=true, all URLs switch to testnet endpoints.
+    // Explicit TOML values in Step 3 will override these defaults.
+    if (out.testnet)
+    {
+        out.restBaseUrl = url::kTestnetRest;
+        out.wsUrl = url::kTestnetSpotWs;
+        out.futuresWsUrl = url::kTestnetFuturesWs;
+    }
+
+    // Step 3: Load URL fields — explicit TOML values override the defaults above.
     out.restBaseUrl = toml::find_or(sec, "restBaseUrl", out.restBaseUrl);
     out.wsUrl = toml::find_or(sec, "wsUrl", out.wsUrl);
     out.futuresWsUrl = toml::find_or(sec, "futuresWsUrl", out.futuresWsUrl);
+
+    // Step 4: Load remaining fields.
+    out.apiKey = toml::find_or(sec, "apiKey", out.apiKey);
+    out.apiSecret = toml::find_or(sec, "apiSecret", out.apiSecret);
     out.proxyUrl = toml::find_or(sec, "proxyUrl", out.proxyUrl);
     out.restTimeoutMs =
         static_cast<std::uint32_t>(
@@ -224,7 +240,6 @@ PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "wsReconnectMaxMs",
                           static_cast<int>(out.wsReconnectMaxMs)));
-    out.testnet = toml::find_or(sec, "testnet", out.testnet);
 
     return {};
 }

@@ -119,9 +119,9 @@ static pulse::PulseConfig build_default_config()
         cfg.exchange.testnet = true;
         cfg.exchange.apiKey    = env_or("GATE_TESTNET_API_KEY", "");
         cfg.exchange.apiSecret = env_or("GATE_TESTNET_API_SECRET", "");
-        cfg.exchange.restBaseUrl     = "https://api-testnet.gateapi.io";
-        cfg.exchange.wsUrl           = "wss://api.gateio.ws/ws/v4/";  // Spot WS (same data as testnet).
-        cfg.exchange.futuresWsUrl    = "wss://fx-ws.gateio.ws/v4/ws/usdt"; // Mainnet WS for market data (testnet WS unreachable; data is identical).
+        cfg.exchange.restBaseUrl   = pulse::url::kTestnetRest;
+        cfg.exchange.wsUrl         = pulse::url::kTestnetSpotWs;
+        cfg.exchange.futuresWsUrl  = pulse::url::kTestnetFuturesWs;
     }
     else
     {
@@ -289,17 +289,8 @@ int main(int argc, char* argv[])
 
         cfg = pulse::value(result);
 
-        // TOML mode: if testnet=true, override URLs to testnet endpoints
-        // (unless user explicitly set non-default URLs in TOML).
-        if (cfg.exchange.testnet)
-        {
-            if ("https://api.gateio.ws" == cfg.exchange.restBaseUrl)
-            {
-                cfg.exchange.restBaseUrl = "https://api-testnet.gateapi.io";
-            }
-            // Note: futuresWsUrl stays as mainnet (fx-ws.gateio.ws) —
-            // testnet WS is unreachable from China, and market data is identical.
-        }
+        // Note: testnet URL switching is handled by config_loader::parse_exchange()
+        // which reads testnet flag first and sets URL defaults accordingly.
     }
     else
     {
@@ -352,8 +343,9 @@ int main(int argc, char* argv[])
     {
         log->warn("========================================");
         log->warn("TESTNET MODE — using virtual funds");
-        log->warn("REST: {}", cfg.exchange.restBaseUrl);
-        log->warn("WS:   {}", cfg.exchange.futuresWsUrl);
+        log->warn("REST:        {}", cfg.exchange.restBaseUrl);
+        log->warn("Spot WS:     {}", cfg.exchange.wsUrl);
+        log->warn("Futures WS:  {}", cfg.exchange.futuresWsUrl);
         log->warn("========================================");
     }
 

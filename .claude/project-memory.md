@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-20
-> 文件大小：9911 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> Last updated: 2026-06-21
+> 文件大小：10633 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -29,11 +29,11 @@
 - Vendored: uWebSockets + uSockets in `third_party/`
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M13 Done, 2026-06-20)
+## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **528 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 30 + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 38 + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 501 without SQLITE · 463 without WEBUI or SQLITE
+- **532 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 38 + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 505 without SQLITE · 467 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -98,7 +98,16 @@
 - **#2 AI 反馈回路接通** (`786e9f8`): `StrategyManager.all_params()` 收集每个策略的真实 params 指针，`AiPipeline::run()` 改为 `vector<StrategyParams*>&`，ParamAdvisor 循环写入所有策略的 atomic params。
 - **#3 stod 防崩溃** (`7c052cf`): 新增 `safe_parse_double()` (基于 `std::from_chars`，无异常，locale-independent)，替换 34 处 `std::stod` 调用 + 10 个新测试。测试总数 513。
 
-### Next: Architecture Review Remaining + Testnet
+### Testnet URL Auto-Switch Fix (2026-06-21)
+- **问题**: `testnet=true` 时只有 REST URL 切换到测试网，WS URL 保持主网（私有频道认证失败）
+- **方案**: `config_loader.cpp` 调整加载顺序 — 先读 `testnet` flag → 按网络模式设 URL 默认值 → 再用 `find_or` 加载 URL 字段
+- **效果**: `testnet=true` 时 REST/Spot WS/Futures WS 全部自动切换为测试网地址；显式 TOML URL 可覆盖（中国用户回退主网 WS）
+- **改动**: `config.hpp` 新增 `pulse::url` 命名空间（6 个 URL 常量）; `config_loader.cpp` 调整 `parse_exchange()` 加载顺序; `main.cpp` 删除旧 override 块 + banner 显示全部 3 URL; `trading.toml` 简化（删除显式 URL）
+- **新增 4 测试**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
+- **笔记本环境搭建**: apt 安装 libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0（~/.local）
+- 532 测试全绿（原 528 + 4 新测试）
+
+### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。
 - ✅ #5 OrderTracker 写锁下回调 — "锁内收集，锁外执行"模式：`process_order_update()` 和 `poll_order_status()` 的 `completion_callback_` 在 unique_lock 释放后调用。`set_completion_callback()` 加锁保护。新增 `test_simulate_ws_update()` / `test_try_shared_lock()` 测试接口。3 新测试。
 - ✅ #6 ProxyTunnel 提取 — 373 行网络代码从 `gate_ws_client.cpp` 提取为 `proxy_tunnel.hpp/.cpp`。修复 2 个隐藏 bug：(1) `handle_connection` 线程从 `.detach()` 改为可 join；(2) relay socket/thread 注册合并为单个 lock_guard 作用域。删除 58 行死代码（SSL relay 重载）。7 新测试。
