@@ -28,13 +28,15 @@ DashboardState::DashboardState(const WebUiConfig &config,
                                strategy::StrategyManager &strategy_mgr,
                                risk::RiskManager &risk_mgr,
                                execution::OrderTracker &order_tracker,
-                               ai::AiPipeline &ai_pipeline)
+                               ai::AiPipeline &ai_pipeline,
+                               exchange::GateRestClient *rest_client)
     : config_{ config }
     , market_feed_{ market_feed }
     , strategy_mgr_{ strategy_mgr }
     , risk_mgr_{ risk_mgr }
     , order_tracker_{ order_tracker }
     , ai_pipeline_{ ai_pipeline }
+    , rest_client_{ rest_client }
 {
 }
 
@@ -102,10 +104,11 @@ void DashboardState::poll_loop(std::stop_token stoken)
     running_.store(true, std::memory_order_release);
 
     // Track last-poll times for each tier.
-    auto last_fast   = Clock::now();
-    auto last_medium = Clock::now();
-    auto last_slow   = Clock::now();
-    auto last_ai     = Clock::now();
+    auto last_fast    = Clock::now();
+    auto last_medium  = Clock::now();
+    auto last_slow    = Clock::now();
+    auto last_ai      = Clock::now();
+    auto last_account = Clock::now();
 
     // Persistent snapshot that accumulates updates from each tier.
     // Only the changed panel is overwritten on each iteration; the rest
@@ -156,6 +159,14 @@ void DashboardState::poll_loop(std::stop_token stoken)
         {
             poll_ai(snap);
             last_ai = now;
+            updated = true;
+        }
+
+        // 6. Account tier: 10 s — exchange-reported account balance.
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_account).count() >= 10000)
+        {
+            poll_account(snap);
+            last_account = now;
             updated = true;
         }
 
@@ -326,6 +337,37 @@ void DashboardState::poll_ai(DashboardSnapshot &snap)
         {
             snap.ai.available = false;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// poll_account — 10 s: exchange-reported account balance
+// ---------------------------------------------------------------------------
+
+void DashboardState::poll_account(DashboardSnapshot &snap)
+{
+    if (nullptr == rest_client_)
+    {
+        snap.account.available = false;
+        return;
+    }
+
+    auto result = rest_client_->get_futures_account_balance();
+    if (ok(result))
+    {
+        const auto &bal = value(result);
+        snap.account.available         = true;
+        snap.account.total             = bal.total;
+        snap.account.available_balance = bal.available;
+        snap.account.unrealised_pnl    = bal.unrealised_pnl;
+        snap.account.position_margin   = bal.position_margin;
+        snap.account.order_margin      = bal.order_margin;
+        snap.account.currency          = bal.currency;
+    }
+    else
+    {
+        // REST failure — keep previous data, mark as stale.
+        snap.account.available = false;
     }
 }
 

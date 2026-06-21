@@ -335,6 +335,31 @@ struct StrategiesSnapshot
 };
 
 // ---------------------------------------------------------------------------
+// AccountSnapshot — exchange-reported account balance
+// ---------------------------------------------------------------------------
+struct AccountSnapshot
+{
+    bool available;             ///< Whether account data was successfully fetched.
+    double total;               ///< Total equity.
+    double available_balance;   ///< Available for new orders.
+    double unrealised_pnl;      ///< Unrealized PnL.
+    double position_margin;     ///< Margin locked in positions.
+    double order_margin;        ///< Margin reserved for open orders.
+    std::string currency;       ///< Settlement currency (e.g. "USDT").
+
+    AccountSnapshot()
+        : available{ false }
+        , total{ 0.0 }
+        , available_balance{ 0.0 }
+        , unrealised_pnl{ 0.0 }
+        , position_margin{ 0.0 }
+        , order_margin{ 0.0 }
+        , currency{}
+    {
+    }
+};
+
+// ---------------------------------------------------------------------------
 // DashboardSnapshot — unified aggregate of all panel snapshots
 //
 // Produced by DashboardState::poll_loop() at tiered intervals.
@@ -342,6 +367,7 @@ struct StrategiesSnapshot
 struct DashboardSnapshot
 {
     std::int64_t timestamp_ms;       ///< When this snapshot was assembled (ms).
+    AccountSnapshot account;         ///< Account balance panel.
     OrderBookSnapshot order_book;    ///< Order book panel.
     KlineSnapshot kline;             ///< K-line panel.
     PositionsSnapshot positions;     ///< Positions panel.
@@ -353,6 +379,7 @@ struct DashboardSnapshot
 
     DashboardSnapshot()
         : timestamp_ms{ 0 }
+        , account{}
         , order_book{}
         , kline{}
         , positions{}
@@ -438,11 +465,25 @@ inline void to_json(nlohmann::json &j, const StrategiesSnapshot &snap)
     j["strategies"] = snap.strategies;
 }
 
+/// Serialize AccountSnapshot to JSON.
+inline void to_json(nlohmann::json &j, const AccountSnapshot &snap)
+{
+    j = nlohmann::json::object();
+    j["available"]         = snap.available;
+    j["total"]             = snap.total;
+    j["available_balance"] = snap.available_balance;
+    j["unrealised_pnl"]    = snap.unrealised_pnl;
+    j["position_margin"]   = snap.position_margin;
+    j["order_margin"]      = snap.order_margin;
+    j["currency"]          = snap.currency;
+}
+
 /// Serialize DashboardSnapshot to JSON.
 inline void to_json(nlohmann::json &j, const DashboardSnapshot &snap)
 {
     j = nlohmann::json::object();
     j["timestamp_ms"] = snap.timestamp_ms;
+    j["account"] = snap.account;
     j["order_book"] = snap.order_book;
     j["kline"] = snap.kline;
     j["positions"] = snap.positions;

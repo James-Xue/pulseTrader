@@ -112,6 +112,7 @@
     // =========================================================================
 
     function dispatch(snap) {
+        renderAccount(snap.account);
         renderOrderBook(snap.order_book);
         renderKline(snap.kline);
         renderPositions(snap.positions);
@@ -158,6 +159,37 @@
         if (!ms) { return '—'; }
         var d = new Date(ms);
         return d.toLocaleTimeString();
+    }
+
+    // =========================================================================
+    // Account Balance Bar
+    // =========================================================================
+
+    function renderAccount(acct) {
+        var bar = document.getElementById('account-bar');
+        if (!bar) { return; }
+
+        if (!acct || !acct.available) {
+            bar.classList.add('hidden');
+            return;
+        }
+
+        bar.classList.remove('hidden');
+        var cur = acct.currency || 'USDT';
+
+        document.getElementById('account-total').textContent =
+            fmt(acct.total) + ' ' + cur;
+        document.getElementById('account-available').textContent =
+            fmt(acct.available_balance) + ' ' + cur;
+
+        var pnlEl = document.getElementById('account-pnl');
+        pnlEl.textContent = (acct.unrealised_pnl >= 0 ? '+' : '') +
+            fmt(acct.unrealised_pnl) + ' ' + cur;
+        pnlEl.className = 'account-value ' + pnlClass(acct.unrealised_pnl);
+
+        var marginUsed = (acct.position_margin || 0) + (acct.order_margin || 0);
+        document.getElementById('account-margin').textContent =
+            fmt(marginUsed) + ' ' + cur;
     }
 
     // =========================================================================

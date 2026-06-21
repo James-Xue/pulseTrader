@@ -102,6 +102,20 @@ enum class MarginMode : std::uint8_t
     Isolated, ///< Isolated margin — dedicated margin per position.
 };
 
+/// Exchange-reported account balance (futures).
+///
+/// Fetched via GET /api/v4/futures/{settle}/accounts.
+/// All monetary values are in the settlement currency (e.g., USDT).
+struct AccountBalance
+{
+    double total           = 0.0; ///< Total equity (available + margins + unrealised PnL).
+    double available       = 0.0; ///< Available for new orders.
+    double unrealised_pnl  = 0.0; ///< Unrealized PnL from open positions.
+    double position_margin = 0.0; ///< Margin locked in positions.
+    double order_margin    = 0.0; ///< Margin reserved for open orders.
+    std::string currency;         ///< Settlement currency (e.g. "USDT").
+};
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------

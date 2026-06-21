@@ -22,6 +22,7 @@
 
 #include "ai/ai_pipeline.hpp"
 #include "core/config.hpp"
+#include "exchange/gate_rest_client.hpp"
 #include "execution/order_tracker.hpp"
 #include "market/market_feed.hpp"
 #include "risk/risk_manager.hpp"
@@ -67,12 +68,14 @@ class DashboardState
     ///   4. risk_mgr      — L7 risk manager (risk snapshot, positions)
     ///   5. order_tracker — L8 order tracker (active orders, execution reports)
     ///   6. ai_pipeline   — L4 AI pipeline (analysis result)
+    ///   7. rest_client   — L1 REST client (account balance, optional — may be null)
     DashboardState(const WebUiConfig &config,
                    market::MarketFeed &market_feed,
                    strategy::StrategyManager &strategy_mgr,
                    risk::RiskManager &risk_mgr,
                    execution::OrderTracker &order_tracker,
-                   ai::AiPipeline &ai_pipeline);
+                   ai::AiPipeline &ai_pipeline,
+                   exchange::GateRestClient *rest_client = nullptr);
 
     /// Destructor — stops polling if still running.
     ~DashboardState();
@@ -164,6 +167,12 @@ class DashboardState
     /// candle has formed and the kline snapshot is updated.
     void poll_klines(DashboardSnapshot &snap);
 
+    /// Account tier (10 s): exchange-reported account balance.
+    ///
+    /// Fetches futures account balance via REST and stores in snap.account.
+    /// Gracefully handles REST failures (sets available = false).
+    void poll_account(DashboardSnapshot &snap);
+
     // --- Configuration ---
     const WebUiConfig &config_;
 
@@ -173,6 +182,7 @@ class DashboardState
     risk::RiskManager &risk_mgr_;
     execution::OrderTracker &order_tracker_;
     ai::AiPipeline &ai_pipeline_;
+    exchange::GateRestClient *rest_client_; ///< Optional — may be null.
 
     // --- Polling thread ---
     std::jthread poll_thread_;

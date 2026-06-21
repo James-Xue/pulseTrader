@@ -356,6 +356,25 @@ Result<nlohmann::json> GateRestClient::get_futures_accounts()
     return request("GET", EndpointRouter::accounts_path(MarketType::Futures));
 }
 
+Result<AccountBalance> GateRestClient::get_futures_account_balance()
+{
+    auto result = get_futures_accounts();
+    if (!ok(result))
+    {
+        return error(result);
+    }
+
+    const auto &j = value(result);
+    AccountBalance bal;
+    bal.total           = safe_parse_double(j.value("total", "0")).value_or(0.0);
+    bal.available       = safe_parse_double(j.value("available", "0")).value_or(0.0);
+    bal.unrealised_pnl  = safe_parse_double(j.value("unrealised_pnl", "0")).value_or(0.0);
+    bal.position_margin = safe_parse_double(j.value("position_margin", "0")).value_or(0.0);
+    bal.order_margin    = safe_parse_double(j.value("order_margin", "0")).value_or(0.0);
+    bal.currency        = j.value("currency", "USDT");
+    return bal;
+}
+
 Result<nlohmann::json> GateRestClient::post_futures_order(const nlohmann::json &body)
 {
     if (!has_credentials())
