@@ -141,7 +141,7 @@ The Exchange layer is the sole point of contact with Gate.io. It abstracts all p
 
 The Logging & Monitoring layer provides observability for all system activity without imposing latency on the hot path. All I/O in this layer is asynchronous. This is a cross-cutting infrastructure layer used by all other layers.
 
-- **Logger** — Wraps `spdlog` with per-module named loggers (exchange, market, strategy, heartbeat, ai, risk, execution). Log level is configurable per module at runtime. Asynchronous sink with a bounded queue to prevent back-pressure on callers.
+- **Logger** — Wraps `spdlog` with per-module named loggers (exchange, market, strategy, heartbeat, ai, risk, execution, system). Log level is configurable per module at runtime. Asynchronous sink with a bounded queue to prevent back-pressure on callers. The `system` module emits a periodic heartbeat log every 60 seconds summarizing market data rates, WS status, strategy activity, and position exposure.
 - **TradeRecorder** — Persists `ExecutionReport` records to CSV (default) or SQLite (optional, via SQLiteCpp). Used for post-session PnL analysis and audit trail.
 - **MetricsCollector** — Accumulates and computes trading performance metrics on a rolling basis: net PnL, gross PnL, win rate, average win/loss ratio, Sharpe ratio, maximum drawdown, and trade count. Metrics are queryable at any time by the alert system or an external monitoring interface.
 - **AlertManager** — Fires outbound alerts when configurable thresholds are breached (e.g., daily loss limit approached, strategy halted, WebSocket disconnect). Supports webhook (generic HTTP POST with JSON payload) and Telegram Bot API transports.
@@ -168,7 +168,7 @@ The Logging & Monitoring layer provides observability for all system activity wi
 
 The Market Data layer receives raw frames from the Exchange layer (Layer 1) and maintains authoritative, always-consistent in-memory views of the market that strategy threads can query with minimal latency.
 
-- **Market feed dispatcher** — Routes incoming WebSocket events to the appropriate sub-component (order book, K-line, ticker). Runs on a single dedicated thread to avoid lock contention on the hot path.
+- **Market feed dispatcher** — Routes incoming WebSocket events to the appropriate sub-component (order book, K-line, ticker). Runs on a single dedicated thread to avoid lock contention on the hot path. Maintains atomic event counters (`FeedStats`) for monitoring — ticker, orderbook, and kline counts — with negligible hot-path cost (relaxed `fetch_add`).
 - **Order book manager** — Applies incremental updates (snapshot + delta sequence) to maintain a full sorted order book. Validates sequence numbers and requests re-subscription on gaps.
 - **K-line ring buffer** — Thread-safe circular buffer storing the N most recent candles per symbol/interval. Readers (strategy threads) hold no locks; they read via a snapshot copy-on-query pattern backed by a seqlock.
 - **Ticker cache** — Lock-free cache of the latest ticker (best bid/ask, last price, 24h vol) per symbol, updated via `std::atomic` stores.
@@ -528,7 +528,7 @@ DashboardState thread  (Layer 9, low priority, independent of hot path)
 
 | Thread                      | Responsibility                                                           | Lifecycle                          |
 | --------------------------- | ------------------------------------------------------------------------ | ---------------------------------- |
-| Main thread                 | Startup, config loading, component wiring                                | Blocks on shutdown signal          |
+| Main thread                 | Startup, config loading, component wiring; periodic system heartbeat log (60s) | Blocks on shutdown signal          |
 | WebSocket I/O thread        | `asio::io_context` for WS connection and heartbeat pings                 | Runs for process lifetime          |
 | Market data dispatch thread | Routes WS frames to Layer 3 sub-components                               | Runs for process lifetime          |
 | Strategy threads (N)        | One `std::jthread` per active strategy; reads market data, emits signals | Started/stopped by StrategyManager |

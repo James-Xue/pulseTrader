@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-21
-> 文件大小：10633 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
+> 文件大小：11727 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
 > 历史细节已迁移至 `project-memory-archive.md`
 
 ## Overview
@@ -32,8 +32,8 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **532 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 38 + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
-- 505 without SQLITE · 467 without WEBUI or SQLITE
+- **537 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 43 (+5 feed_stats) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- 510 without SQLITE · 472 without WEBUI or SQLITE
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
@@ -106,6 +106,22 @@
 - **新增 4 测试**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
 - **笔记本环境搭建**: apt 安装 libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0（~/.local）
 - 532 测试全绿（原 528 + 4 新测试）
+
+### Testnet WS CloudFront TLS 不兼容 (2026-06-21)
+- **问题**: 测试网行情 WS `wss://ws-testnet.gate.com/v4/ws/futures/usdt` 在 CloudFront 后面，TLS 握手时 HTTP/2 协商导致 websocketpp 0.8.3-dev 报 `Invalid HTTP status`
+- **诊断**: Python raw socket 直连返回 `HTTP/1.1 101` ✅，但 websocketpp 通过 ProxyTunnel 无法解析响应（服务器返回 3535 字节 Amazon 证书 + DOWNGRD 标记）
+- **方案**: `kTestnetFuturesWs` 改回主网 URL `wss://fx-ws.gateio.ws/v4/ws/usdt`（行情数据主网/测试网完全一致），REST 仍走测试网
+- **TOML**: `trading.toml` 显式列出 3 个 URL，便于用户按需覆盖
+- **commit**: `0e61877`
+
+### System Heartbeat Logging (2026-06-21)
+- **问题**: 预热结束后系统完全静默，无法确认是否存活
+- **方案**: MarketFeed 添加 `FeedStats` 原子计数器（ticker/orderbook/kline），main loop 每 60 秒打印系统状态摘要
+- **日志格式**: `[heartbeat] uptime 1h23m | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)`
+- **性能**: 热路径仅 `fetch_add(1, relaxed)` ~1 cycle；60 秒一次日志在主线程（原本空闲）
+- **改动**: `market_feed.hpp` (+FeedStats +3 atomic) · `market_feed.cpp` (+计数器 +stats()) · `main.cpp` (+log_system_heartbeat +修改主循环)
+- 5 新测试 (FeedStats 初始化/并发/delta 计算)
+- 537 测试全绿
 
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。

@@ -21,12 +21,30 @@
 #include "market/symbol_registry.hpp"
 #include "market/ticker_cache.hpp"
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace pulse::market
 {
+
+// ---------------------------------------------------------------------------
+// FeedStats — snapshot of MarketFeed event counters
+//
+// All counters are monotonically increasing since MarketFeed::start().
+// Thread-safe: each counter is an independent std::atomic with relaxed ordering.
+// The snapshot itself is NOT atomic (each field is read independently) —
+// this is acceptable for monitoring/logging where slight inconsistency
+// between fields is harmless.
+// ---------------------------------------------------------------------------
+struct FeedStats
+{
+    std::uint64_t ticker_count;    ///< Total ticker updates successfully processed.
+    std::uint64_t orderbook_count; ///< Total order book updates successfully processed.
+    std::uint64_t kline_count;     ///< Total K-line updates successfully processed.
+};
 
 // ---------------------------------------------------------------------------
 // MarketFeed — dispatcher that wires WS events to L3 components
@@ -68,6 +86,12 @@ class MarketFeed
     /// Access the order book manager (read-only for strategy threads).
     [[nodiscard]] OrderBookManager &orderbook_manager();
 
+    /// Return a snapshot of the event counters.
+    ///
+    /// Thread-safe (relaxed atomic loads). Suitable for periodic polling
+    /// from a monitoring thread — NOT for precise per-event accounting.
+    [[nodiscard]] FeedStats stats() const;
+
   private:
     exchange::GateWsClient &ws_client_;
     exchange::GateRestClient &rest_client_;
@@ -79,6 +103,17 @@ class MarketFeed
     std::unordered_map<Symbol, KlineBuffer> kline_buffers_; ///< Per-symbol K-line buffers.
 
     std::vector<Symbol> subscribed_symbols_;
+
+    // --- Event counters (relaxed atomics, incremented on WS I/O thread) ---
+    //
+    // These use std::memory_order_relaxed because:
+    //   1. They are monitoring counters, not synchronization primitives
+    //   2. The only ordering guarantee needed is "increment happens before read"
+    //      which is satisfied by the atomic itself on x86 (strongly ordered)
+    //   3. On ARM, relaxed avoids expensive barrier instructions on the hot path
+    std::atomic<std::uint64_t> ticker_count_{ 0 };
+    std::atomic<std::uint64_t> orderbook_count_{ 0 };
+    std::atomic<std::uint64_t> kline_count_{ 0 };
 
     /// Parse a ticker update JSON and store in TickerCache.
     void on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame);

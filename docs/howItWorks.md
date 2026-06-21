@@ -144,6 +144,18 @@ ParamAdvisor  validates the deltas against safety bounds,
 
 ---
 
+## System Heartbeat (every 60 seconds)
+
+While the AI cycle runs every 5 minutes, the main thread emits a compact heartbeat log every 60 seconds so you can confirm the system is alive and receiving data:
+
+```
+[heartbeat] uptime 1h23m | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)
+```
+
+The heartbeat reads atomic counters from `MarketFeed` (ticker/orderbook/kline counts), queries WS connection state, strategy thread activity, and position exposure — all lock-free or shared-lock reads that never block the hot path. Delta rates (events/sec since last heartbeat) make it easy to spot stalled data streams at a glance.
+
+---
+
 ## Three Core Design Ideas (Plain Language)
 
 ### 1. Layered isolation

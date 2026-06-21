@@ -119,6 +119,15 @@ OrderBookManager &MarketFeed::orderbook_manager()
     return orderbook_manager_;
 }
 
+FeedStats MarketFeed::stats() const
+{
+    return FeedStats{
+        .ticker_count    = ticker_count_.load(std::memory_order_relaxed),
+        .orderbook_count = orderbook_count_.load(std::memory_order_relaxed),
+        .kline_count     = kline_count_.load(std::memory_order_relaxed),
+    };
+}
+
 void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     // Gate.io spot ticker format:
@@ -223,6 +232,7 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
 
     ticker.timestamp = full_frame.value("time", static_cast<std::int64_t>(0));
     ticker_cache_.update(ticker.symbol, ticker);
+    ticker_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohmann::json &full_frame)
@@ -273,6 +283,8 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
         delta["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
         orderbook_manager_.apply_delta(symbol, delta);
     }
+
+    orderbook_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame)
@@ -341,6 +353,7 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
 
     auto &buffer = get_kline_buffer(symbol);
     buffer.push(kline);
+    kline_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace pulse::market

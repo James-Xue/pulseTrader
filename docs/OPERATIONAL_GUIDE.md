@@ -316,6 +316,9 @@ maxClients = 4
 # [INFO] AI Pipeline: heartbeat every 300s, next run in 5min
 # [INFO] WebUI: http://127.0.0.1:8080
 # [INFO] Trading engine started. Press Ctrl+C to stop.
+#
+# 启动后约 60 秒，系统会开始每 60 秒打印一行心跳日志：
+# [INFO] [heartbeat] uptime 1m00s | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)
 ```
 
 ### 4.4 监控运行
@@ -325,6 +328,7 @@ maxClients = 4
 # 浏览器访问 http://127.0.0.1:8080（trading.toml 已配好 WebUI）
 
 # 或直接查看日志
+tail -f logs/system.log      # 系统心跳（每 60 秒：行情速率、WS 状态、策略、持仓）
 tail -f logs/strategy.log    # 策略信号 + 预热进度
 tail -f logs/exchange.log    # WS 连接状态
 tail -f logs/app.log         # 下单、风控决策
@@ -673,14 +677,17 @@ cat logs/execution.log  # 下单失败？
 
 按以下清单逐项排查：
 
-1. **WS 是否连上了？** — `grep "WS connected" logs/exchange.log`
+1. **系统是否存活？** — `tail -f logs/system.log`
+   - 每 60 秒看到 `[heartbeat] uptime ...` → 系统正常运行中，只是尚未触发交易信号
+   - 如果 60 秒后仍无任何输出 → 进程可能已挂起，检查 `logs/exchange.log` 排查 WS 连接
+2. **WS 是否连上了？** — `grep "WS connected" logs/exchange.log`
    - 如果看到反复 `WS connection failed` → 检查代理 (`HTTPS_PROXY`) 是否正常
-2. **策略是否在预热？** — `tail -f logs/strategy.log`
+3. **策略是否在预热？** — `tail -f logs/strategy.log`
    - 看到 `Warming up: X/N candles` → 正常，需要等 ~22 分钟积累 K 线数据
    - 看到 `Waiting for kline data` → WS 未连接，无行情数据流入
-3. **聚合器阈值是否太高？** — 单策略时 `signal_aggregator_threshold` 应 ≤ 策略的 `min_confidence`
+4. **聚合器阈值是否太高？** — 单策略时 `signal_aggregator_threshold` 应 ≤ 策略的 `min_confidence`
    - 默认 momentum_scalper 的 min_confidence=0.6，threshold 应设为 0.6
-4. **风控是否拒绝？** — `grep "REJECTED\|halted" logs/app.log`
+5. **风控是否拒绝？** — `grep "REJECTED\|halted" logs/app.log`
    - 可能触发：日回撤超限、仓位数量上限、频率限制
 
 ---
@@ -694,7 +701,7 @@ cat logs/execution.log  # 下单失败？
 │  启动:  ./run.sh trade（自动加载 trading.toml）   │
 │  监控:  ./run.sh webui → http://localhost:8080   │
 │  停止:  Ctrl+C（~1秒优雅退出）                     │
-│  测试:  ./run.sh test（503 个单元测试）            │
+│  测试:  ./run.sh test（537 个单元测试）            │
 │  日志:  tail -f logs/*.log                       │
 ├─────────────────────────────────────────────────┤
 │  .env:         PULSE_NETWORK / API Key / Proxy   │

@@ -53,8 +53,10 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -222,6 +224,148 @@ create_strategy(const std::string& name,
         return std::make_unique<MeanReversionScalper>(ctx);
     }
     return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// log_system_heartbeat — periodic system health summary
+//
+// Logs a single compact line every 60 seconds showing:
+//   - Process uptime (human-readable)
+//   - Market data rates (events/sec, delta since last call)
+//   - WebSocket connection states
+//   - Strategy thread activity
+//   - Open position count and notional exposure
+//
+// Thread safety:
+//   Called only from the main thread. All accessed methods are thread-safe
+//   (atomic loads, shared_mutex reads).
+// ---------------------------------------------------------------------------
+static void log_system_heartbeat(
+    std::chrono::steady_clock::time_point start_time,
+    const pulse::market::MarketFeed* spot_feed,
+    const pulse::market::MarketFeed* futures_feed,
+    const pulse::exchange::GateWsClient* spot_ws,
+    const pulse::exchange::GateWsClient* futures_ws,
+    const pulse::strategy::StrategyManager& strategy_mgr,
+    const pulse::risk::PositionManager& position_mgr)
+{
+    // --- Uptime formatting ---
+    const auto elapsed = std::chrono::steady_clock::now() - start_time;
+    const auto total_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+    const auto hours   = total_sec / 3600;
+    const auto minutes = (total_sec % 3600) / 60;
+    const auto seconds = total_sec % 60;
+
+    std::ostringstream oss;
+
+    if (0 < hours)
+    {
+        oss << hours << "h" << std::setfill('0') << std::setw(2) << minutes << "m";
+    }
+    else if (0 < minutes)
+    {
+        oss << minutes << "m" << std::setfill('0') << std::setw(2) << seconds << "s";
+    }
+    else
+    {
+        oss << seconds << "s";
+    }
+
+    const std::string uptime_str = oss.str();
+
+    // --- Market data rates (delta over 60s interval) ---
+    // Static locals persist previous readings for delta computation.
+    // These are only accessed from the main thread, so no race.
+    static pulse::market::FeedStats prev_spot    = { 0, 0, 0 };
+    static pulse::market::FeedStats prev_futures = { 0, 0, 0 };
+    static bool first_call = true;
+
+    // Format a market feed section: "100 tick/s  10 kline/s  80 ob/s"
+    auto format_feed = [&](const pulse::market::MarketFeed* feed,
+                           pulse::market::FeedStats& prev,
+                           std::ostringstream& out)
+    {
+        if (nullptr == feed)
+        {
+            return;
+        }
+
+        const auto cur = feed->stats();
+
+        if (first_call)
+        {
+            // First heartbeat: no delta available, show cumulative.
+            prev = cur;
+            out << cur.ticker_count << " tick  "
+                << cur.kline_count << " kline  "
+                << cur.orderbook_count << " ob (init)";
+            return;
+        }
+
+        // Delta rate over 60-second interval.
+        constexpr double kIntervalSec = 60.0;
+        const auto tick_d  = cur.ticker_count    - prev.ticker_count;
+        const auto kline_d = cur.kline_count     - prev.kline_count;
+        const auto ob_d    = cur.orderbook_count - prev.orderbook_count;
+        prev = cur;
+
+        out << static_cast<std::uint64_t>(tick_d / kIntervalSec) << " tick/s  "
+            << static_cast<std::uint64_t>(kline_d / kIntervalSec) << " kline/s  "
+            << static_cast<std::uint64_t>(ob_d / kIntervalSec) << " ob/s";
+    };
+
+    // --- WS connection state labels ---
+    auto ws_label = [](const pulse::exchange::GateWsClient* ws) -> const char*
+    {
+        if (nullptr == ws)
+        {
+            return "n/a";
+        }
+
+        switch (ws->state())
+        {
+            case pulse::exchange::WsConnectionState::Connected:    return "connected";
+            case pulse::exchange::WsConnectionState::Connecting:   return "connecting";
+            case pulse::exchange::WsConnectionState::Disconnected: return "disconnected";
+        }
+        return "unknown";
+    };
+
+    // --- Build the log message ---
+    std::ostringstream msg;
+    msg << "[heartbeat] uptime " << uptime_str;
+
+    // Spot section (omitted if no spot feed).
+    if (nullptr != spot_feed)
+    {
+        msg << " | spot ";
+        format_feed(spot_feed, prev_spot, msg);
+    }
+
+    // Futures section (omitted if no futures feed).
+    if (nullptr != futures_feed)
+    {
+        msg << " | futures ";
+        format_feed(futures_feed, prev_futures, msg);
+    }
+
+    // WS status.
+    msg << " | ws spot=" << ws_label(spot_ws)
+        << " futures=" << ws_label(futures_ws);
+
+    // Strategy status.
+    msg << " | strategies " << strategy_mgr.running_count()
+        << "/" << strategy_mgr.strategy_count() << " running";
+
+    // Position status.
+    const auto portfolio = position_mgr.portfolio_summary();
+    msg << " | positions " << position_mgr.open_position_count()
+        << " (notional " << std::fixed << std::setprecision(2)
+        << portfolio.total_notional << " USDT)";
+
+    PULSE_LOG_INFO("system", "{}", msg.str());
+
+    first_call = false;
 }
 
 // ===========================================================================
@@ -904,14 +1048,34 @@ int main(int argc, char* argv[])
 #endif
 
     // ------------------------------------------------------------------
-    // 14. Main loop — wait for stop signal
+    // 14. Main loop — wait for stop signal with periodic heartbeat
     // ------------------------------------------------------------------
     log->info("Trading engine started. Press Ctrl+C to stop.");
     log->info("──────────────────────────────────────────────────");
 
+    // Capture start time for uptime calculation.
+    const auto engine_start = std::chrono::steady_clock::now();
+
+    // Heartbeat interval: 60 seconds / 200ms sleep = 300 iterations.
+    constexpr int kHeartbeatIntervalTicks = 300;
+    int heartbeat_counter = 0;
+
     while (!g_stop_requested.load(std::memory_order_acquire))
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        if (++heartbeat_counter >= kHeartbeatIntervalTicks)
+        {
+            heartbeat_counter = 0;
+            log_system_heartbeat(
+                engine_start,
+                spot_feed.get(),
+                futures_feed.get(),
+                spot_ws.get(),
+                futures_ws.get(),
+                strategy_mgr,
+                position_mgr);
+        }
     }
 
     // ------------------------------------------------------------------
