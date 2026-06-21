@@ -247,15 +247,22 @@ void DashboardState::poll_klines(DashboardSnapshot &snap)
         return;
     }
 
-    // 3. Compare open_time with the last known open_time to detect new candles.
+    // 3. Compare open_time and close price to detect new candles or within-candle updates.
+    //    Gate.io pushes OHLCV changes every ~2s for the current candle, but open_time
+    //    only changes when a new candle forms (~60s). We track both to keep the chart live.
     const auto it = last_kline_open_times_.find(symbol);
-    const bool is_new = (last_kline_open_times_.end() == it)
-                     || (it->second != latest_kline->open_time);
+    const bool is_new_candle = (last_kline_open_times_.end() == it)
+                            || (it->second != latest_kline->open_time);
 
-    if (is_new)
+    const auto close_it = last_kline_close_.find(symbol);
+    const bool price_changed = (last_kline_close_.end() == close_it)
+                            || (close_it->second != latest_kline->close);
+
+    if (is_new_candle || price_changed)
     {
-        // New candle detected — update the kline snapshot.
+        // New candle or within-candle update — push the full snapshot.
         last_kline_open_times_[symbol] = latest_kline->open_time;
+        last_kline_close_[symbol] = latest_kline->close;
         snap.kline.symbol = symbol;
         snap.kline.candles = kline_buf.snapshot(100);
     }

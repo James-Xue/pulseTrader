@@ -66,13 +66,13 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         { on_orderbook_update(result, full_frame); });
 
     // K-lines: 1-minute interval.
-    // Gate.io format: payload = ["BTC_USDT", "1m"]
+    // Gate.io format: payload = ["1m", "BTC_USDT"] (interval first, then symbols).
     std::vector<std::string> kline_payload;
+    kline_payload.push_back("1m");
     for (const auto &symbol : symbols)
     {
         kline_payload.push_back(symbol);
     }
-    kline_payload.push_back("1m");
 
     ws_client_.subscribe(candlesticks_ch,
         kline_payload,
@@ -297,28 +297,31 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
     //   "h": "50100",     // high price
     //   "l": "49900",     // low price
     //   "o": "50000",     // open price
-    //   "n": "1m",        // interval
-    //   "a": "6172800"    // quote volume
+    //   "n": "1m" or "BTC_USDT"  // interval (spot) or contract name (futures)
+    //   "a": "6172800"    // quote volume (spot only)
     // }
     //
-    // Symbol field in outer frame:
+    // Symbol field location differs by market type:
     //   Spot:    full_frame["currency_pair"] = "BTC_USDT"
-    //   Futures: full_frame["contract"] = "BTC_USDT"
+    //   Futures: result["n"] = "BTC_USDT"
+    //
+    // Note: futures candlesticks do NOT have "contract" in the outer frame.
+    // The contract name is carried inside result as the "n" field.
 
     if (!result.is_object() || !result.contains("t"))
     {
         return;
     }
 
-    // Extract symbol — try spot "currency_pair" first, then futures "contract".
+    // Extract symbol — spot uses outer frame, futures uses result["n"].
     std::string symbol;
     if (full_frame.contains("currency_pair"))
     {
         symbol = full_frame["currency_pair"].get<std::string>();
     }
-    else if (full_frame.contains("contract"))
+    else if (result.contains("n"))
     {
-        symbol = full_frame["contract"].get<std::string>();
+        symbol = result["n"].get<std::string>();
     }
 
     if (symbol.empty())

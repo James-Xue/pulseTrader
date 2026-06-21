@@ -186,7 +186,10 @@ class DashboardState
     SnapshotCallback snapshot_callback_;
 
     // --- Kline change detection state ---
+    // Tracks open_time for new-candle detection and close price for
+    // within-candle updates (Gate.io pushes OHLCV changes every ~2s).
     std::unordered_map<Symbol, std::int64_t> last_kline_open_times_;
+    std::unordered_map<Symbol, double> last_kline_close_;
 
     // --- AI change detection state ---
     std::shared_ptr<const ai::AnalysisResult> last_ai_result_{ nullptr };
