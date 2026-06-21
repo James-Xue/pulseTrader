@@ -462,7 +462,8 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     }
                     state_.store(WsConnectionState::Connected, std::memory_order_release);
                     attempt = 0; // reset backoff on successful connection
-                    PULSE_LOG_INFO("exchange", "WS connected to {}", config_.wsUrl);
+                    PULSE_LOG_INFO("exchange", "WS connected (market={})",
+                        MarketType::Futures == market_type_ ? "futures" : "spot");
 
                     // Re-subscribe all active channels
                     const auto active = channels.active_channels();
@@ -510,6 +511,13 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                 {
                     // 1. Parse the incoming frame as JSON
                     const std::string &body = msg->get_payload();
+
+                    // Diagnostic: log every incoming frame at INFO level.
+                    // This is essential for detecting whether the server is sending data at all.
+                    // Truncate to 200 chars to avoid flooding logs with large orderbook snapshots.
+                    const auto channel_preview = body.size() <= 200 ? body : body.substr(0, 200) + "...";
+                    PULSE_LOG_INFO("exchange", "WS RX {} bytes: {}", body.size(), channel_preview);
+
                     auto frame = nlohmann::json::parse(body, nullptr, false);
 
                     if (frame.is_discarded())
@@ -535,7 +543,7 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                     if (!channels.dispatch(frame))
                     {
                         const auto channel_name = frame.value("channel", "unknown");
-                        PULSE_LOG_DEBUG("exchange", "WS frame for unhandled channel: {}", channel_name);
+                        PULSE_LOG_WARN("exchange", "WS frame for unhandled channel: {}", channel_name);
                     }
                 });
 
