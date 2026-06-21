@@ -23,7 +23,7 @@ symbols = ["BTC_USDT", "ETH_USDT"]
 # 开启 testnet 后，REST/WS URL 自动切换为测试网地址，通常不需要手动设置。
 testnet             = false
 # 以下 URL 通常不需要手动设置 — testnet=true 时自动切换。
-# 如需覆盖（例如中国用户测试网 WS 不可达时回退主网行情 WS），取消注释并修改：
+# 如需显式配置或覆盖（例如中国用户回退主网行情 WS），取消注释并修改：
 # restBaseUrl       = "https://api.gateio.ws"
 # wsUrl             = "wss://api.gateio.ws/ws/v4/"
 # futuresWsUrl      = "wss://fx-ws.gateio.ws/v4/ws/usdt"
