@@ -3,9 +3,11 @@
 #include "market/market_feed.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -113,4 +115,77 @@ TEST(MarketFeedStats, DeltaComputationZeroActivity)
     EXPECT_DOUBLE_EQ(0.0, tick_delta / kIntervalSec);
     EXPECT_DOUBLE_EQ(0.0, ob_delta / kIntervalSec);
     EXPECT_DOUBLE_EQ(0.0, kline_delta / kIntervalSec);
+}
+
+// ---------------------------------------------------------------------------
+// Kline JSON format — symbol extraction differences between spot and futures
+//
+// These tests validate the JSON structure assumptions used by
+// MarketFeed::on_kline_update(). The symbol field location differs:
+//   Spot:    full_frame["currency_pair"] = "BTC_USDT"
+//   Futures: result["n"] = "BTC_USDT"
+// ---------------------------------------------------------------------------
+
+TEST(MarketFeedStats, SpotKlineFrameHasCurrencyPairInOuterFrame)
+{
+    // Spot kline frame: symbol is in the outer frame as "currency_pair".
+    // The result object does NOT contain the contract name in "n" — it's the interval.
+    const nlohmann::json frame = nlohmann::json::parse(R"({
+        "time": 1542162490,
+        "channel": "spot.candlesticks",
+        "event": "update",
+        "result": { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": "120", "n": "1m", "a": "762012" },
+        "currency_pair": "BTC_USDT"
+    })");
+
+    const auto &result = frame["result"];
+
+    // Spot: symbol comes from outer frame.
+    EXPECT_TRUE(frame.contains("currency_pair"));
+    EXPECT_EQ("BTC_USDT", frame["currency_pair"].get<std::string>());
+
+    // In spot, result["n"] is the interval, NOT the contract name.
+    EXPECT_TRUE(result.contains("n"));
+    EXPECT_EQ("1m", result["n"].get<std::string>());
+}
+
+TEST(MarketFeedStats, FuturesKlineFrameHasContractInResult)
+{
+    // Futures kline frame: symbol is INSIDE result as "n".
+    // The outer frame does NOT have "contract" or "currency_pair".
+    const nlohmann::json frame = nlohmann::json::parse(R"({
+        "time": 1542162490,
+        "channel": "futures.candlesticks",
+        "event": "update",
+        "result": { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": 120, "n": "BTC_USDT" }
+    })");
+
+    const auto &result = frame["result"];
+
+    // Futures: outer frame has NO contract field.
+    EXPECT_FALSE(frame.contains("currency_pair"));
+    EXPECT_FALSE(frame.contains("contract"));
+
+    // Symbol is in result["n"].
+    EXPECT_TRUE(result.contains("n"));
+    EXPECT_EQ("BTC_USDT", result["n"].get<std::string>());
+}
+
+TEST(MarketFeedStats, FuturesKlineSubscriptionPayloadOrder)
+{
+    // Gate.io requires payload = ["1m", "BTC_USDT"] (interval first).
+    // This test documents the expected payload structure.
+    const std::vector<std::string> symbols = { "BTC_USDT", "ETH_USDT" };
+
+    std::vector<std::string> payload;
+    payload.push_back("1m");
+    for (const auto &s : symbols)
+    {
+        payload.push_back(s);
+    }
+
+    ASSERT_EQ(3u, payload.size());
+    EXPECT_EQ("1m",      payload[0]); // Interval first.
+    EXPECT_EQ("BTC_USDT", payload[1]);
+    EXPECT_EQ("ETH_USDT", payload[2]);
 }
