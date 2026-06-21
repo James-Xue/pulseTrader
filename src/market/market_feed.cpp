@@ -379,7 +379,12 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
         kline.high   = high.value();
         kline.low    = low.value();
         kline.close  = close.value();
-        kline.volume = vol.value();
+
+        // Futures volume is in contracts — convert to base currency (e.g., BTC)
+        // via quanto_multiplier (1 contract = quanto_multiplier BTC).
+        // Spot volume is already in base currency (multiplier defaults to 1.0).
+        auto info = symbol_registry_.get(symbol);
+        kline.volume = vol.value() * (info ? info->quanto_multiplier : 1.0);
         kline.closed = true;
 
         auto &buffer = get_kline_buffer(symbol);
