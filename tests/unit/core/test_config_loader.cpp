@@ -711,5 +711,91 @@ apiSecret = "s"
     EXPECT_FALSE(value(result).exchange.testnet);
 }
 
+// ---------------------------------------------------------------------------
+// Testnet URL auto-switching tests
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, TestnetAutoSwitch_AllUrlsSwitchToTestnet)
+{
+    // testnet=true with NO explicit URLs → all URLs should be testnet defaults.
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+testnet = true
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &ex = value(result).exchange;
+    EXPECT_TRUE(ex.testnet);
+    EXPECT_EQ(url::kTestnetRest, ex.restBaseUrl);
+    EXPECT_EQ(url::kTestnetSpotWs, ex.wsUrl);
+    EXPECT_EQ(url::kTestnetFuturesWs, ex.futuresWsUrl);
+}
+
+TEST(ConfigLoader, TestnetExplicitOverride_KeepsUserUrl)
+{
+    // testnet=true WITH explicit futuresWsUrl → user's URL is preserved.
+    // (e.g. China user falling back to mainnet WS for market data)
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+testnet = true
+futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &ex = value(result).exchange;
+    EXPECT_TRUE(ex.testnet);
+    // REST and spot WS auto-switched to testnet.
+    EXPECT_EQ(url::kTestnetRest, ex.restBaseUrl);
+    EXPECT_EQ(url::kTestnetSpotWs, ex.wsUrl);
+    // But futuresWsUrl was explicitly set to mainnet → preserved.
+    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", ex.futuresWsUrl);
+}
+
+TEST(ConfigLoader, MainnetDefault_AllUrlsAreMainnet)
+{
+    // testnet=false (default) with NO explicit URLs → all URLs are mainnet.
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &ex = value(result).exchange;
+    EXPECT_FALSE(ex.testnet);
+    EXPECT_EQ(url::kMainnetRest, ex.restBaseUrl);
+    EXPECT_EQ(url::kMainnetSpotWs, ex.wsUrl);
+    EXPECT_EQ(url::kMainnetFuturesWs, ex.futuresWsUrl);
+}
+
+TEST(ConfigLoader, MainnetExplicit_UsesUserUrls)
+{
+    // testnet=false WITH explicit URLs → user's URLs are used.
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+testnet = false
+restBaseUrl = "https://custom-rest.example.com"
+wsUrl = "wss://custom-ws.example.com/ws/"
+futuresWsUrl = "wss://custom-fx.example.com/ws/usdt"
+)");
+
+    auto result = load_config_file(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &ex = value(result).exchange;
+    EXPECT_FALSE(ex.testnet);
+    EXPECT_EQ("https://custom-rest.example.com", ex.restBaseUrl);
+    EXPECT_EQ("wss://custom-ws.example.com/ws/", ex.wsUrl);
+    EXPECT_EQ("wss://custom-fx.example.com/ws/usdt", ex.futuresWsUrl);
+}
+
 } // namespace
 } // namespace pulse

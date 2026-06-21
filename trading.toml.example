@@ -20,12 +20,15 @@ symbols = ["BTC_USDT", "ETH_USDT"]
 [exchange]
 # testnet = true 使用 Gate.io 合约测试网（虚拟资金），默认 false = 主网（真金白银）
 # 测试网仅支持合约，不支持现货。API Key 需要在 https://fx-testnet.gateio.ws 单独创建。
+# 开启 testnet 后，REST/WS URL 自动切换为测试网地址，通常不需要手动设置。
 testnet             = false
+# 以下 URL 通常不需要手动设置 — testnet=true 时自动切换。
+# 如需覆盖（例如中国用户测试网 WS 不可达时回退主网行情 WS），取消注释并修改：
+# restBaseUrl       = "https://api.gateio.ws"
+# wsUrl             = "wss://api.gateio.ws/ws/v4/"
+# futuresWsUrl      = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 apiKey              = "from_env:GATE_MAINNET_API_KEY"
 apiSecret           = "from_env:GATE_MAINNET_API_SECRET"
-restBaseUrl         = "https://api.gateio.ws"
-wsUrl               = "wss://api.gateio.ws/ws/v4/"
-futuresWsUrl        = "wss://fx-ws.gateio.ws/v4/ws/usdt"  # 合约 WS 地址（USDT 结算，EndpointRouter 按 MarketType 选择）
 proxyUrl            = "from_env:HTTPS_PROXY"
 restTimeoutMs       = 10000        # HTTP 超时（毫秒）
 maxRetries          = 3            # 网络失败重试次数
