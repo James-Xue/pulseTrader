@@ -241,22 +241,24 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
 
 void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // Gate.io order book format:
-    // Snapshot: {"lastUpdateId": 123, "bids": [[price, qty], ...], "asks": [[price, qty], ...]}
-    // Delta: same format with incrementing lastUpdateId
+    const std::string event = full_frame.value("event", "");
+
+    // Gate.io futures.order_book_update format (compact):
+    //   {"U": first_id, "u": last_id, "a": [{"p":"price","s":size},...],
+    //    "b": [...], "l":"20", "s":"BTC_USDT", "t": timestamp_ms}
     //
-    // Symbol field:
-    //   Spot:    result["s"] = "BTC_USDT"
-    //   Futures: result["c"] = "BTC_USDT" (contract name)
+    // Convert to OrderBookManager's expected format:
+    //   {"lastUpdateId": N, "bids": [[price,qty],...], "asks": [[price,qty],...]}
 
     if (!result.is_object())
     {
         return;
     }
 
-    // Extract symbol — try spot "s" first, then futures "c".
+    // Extract symbol — try spot "s", legacy futures "c", then order_book_update "contract".
+    // Note: order_book_update uses "s" for symbol (same as spot).
     std::string symbol;
-    if (result.contains("s"))
+    if (result.contains("s") && result["s"].is_string())
     {
         symbol = result["s"].get<std::string>();
     }
@@ -264,28 +266,75 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
     {
         symbol = result["c"].get<std::string>();
     }
+    else if (result.contains("contract"))
+    {
+        symbol = result["contract"].get<std::string>();
+    }
 
     if (symbol.empty())
     {
         return;
     }
 
-    // Gate.io: event "all" = full snapshot, event "update" = incremental delta.
-    const std::string event = full_frame.value("event", "");
+    // Convert compact format to OrderBookManager format.
+    nlohmann::json converted;
 
+    // Update ID: "u" (lowercase) → "lastUpdateId"
+    if (result.contains("u"))
+    {
+        converted["lastUpdateId"] = result["u"];
+    }
+    else if (result.contains("lastUpdateId"))
+    {
+        converted["lastUpdateId"] = result["lastUpdateId"];
+    }
+
+    // Convert bids: "b" array of {"p":..., "s":...} → [[price, qty], ...]
+    auto convert_levels = [](const nlohmann::json &src) -> nlohmann::json
+    {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto &level : src)
+        {
+            if (level.contains("p") && level.contains("s"))
+            {
+                arr.push_back({ level["p"], level["s"] });
+            }
+            else if (level.is_array() && level.size() >= 2)
+            {
+                arr.push_back(level);
+            }
+        }
+        return arr;
+    };
+
+    if (result.contains("b"))
+    {
+        converted["bids"] = convert_levels(result["b"]);
+    }
+    else if (result.contains("bids"))
+    {
+        converted["bids"] = result["bids"];
+    }
+
+    if (result.contains("a"))
+    {
+        converted["asks"] = convert_levels(result["a"]);
+    }
+    else if (result.contains("asks"))
+    {
+        converted["asks"] = result["asks"];
+    }
+
+    converted["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
+
+    // Gate.io: event "all" = full snapshot, event "update" = incremental delta.
     if ("all" == event || !orderbook_manager_.contains(symbol))
     {
-        // Snapshot — replace the entire book.
-        nlohmann::json snapshot = result;
-        snapshot["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
-        orderbook_manager_.apply_snapshot(symbol, snapshot);
+        orderbook_manager_.apply_snapshot(symbol, converted);
     }
     else
     {
-        // Incremental delta update.
-        nlohmann::json delta = result;
-        delta["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
-        orderbook_manager_.apply_delta(symbol, delta);
+        orderbook_manager_.apply_delta(symbol, converted);
     }
 
     orderbook_count_.fetch_add(1, std::memory_order_relaxed);
