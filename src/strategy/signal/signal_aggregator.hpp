@@ -94,6 +94,7 @@ class SignalAggregator
         double weight_sum = 0.0;         ///< Sum of all weights (for normalization).
         std::int64_t last_signal_ms = 0; ///< Timestamp of last emitted signal (ms).
         Price last_price = 0.0;          ///< Latest reference price.
+        MarketType market_type = MarketType::Spot; ///< Market type from input signals.
     };
 
     StrategyConfig config_;

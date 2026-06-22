@@ -887,6 +887,17 @@ int main(int argc, char* argv[])
             auto* track_ptr = (MarketType::Futures == req.market_type && futures_tracker)
                 ? futures_tracker.get() : spot_tracker.get();
 
+            if (!exec_ptr)
+            {
+                log_app->error("No executor for market_type={} — order aborted",
+                               static_cast<int>(req.market_type));
+                if (eval.reservation_id > 0)
+                {
+                    risk_mgr.position_manager().cancel_reservation(eval.reservation_id);
+                }
+                return;
+            }
+
             auto result = exec_ptr->place_order(req);
             if (!ok(result))
             {
