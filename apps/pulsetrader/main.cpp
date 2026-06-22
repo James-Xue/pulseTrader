@@ -581,6 +581,15 @@ int main(int argc, char* argv[])
         log->info("[L1] Spot exchange clients created");
     }
 
+    // Spot REST client for balance queries (always created when credentials
+    // exist, even without spot strategies — needed for WebUI balance display).
+    if (!has_spot)
+    {
+        spot_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Spot);
+        log->info("[L1] Spot REST client created (balance queries only)");
+    }
+
     if (has_futures)
     {
         futures_rest = std::make_unique<pulse::exchange::GateRestClient>(
