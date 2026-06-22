@@ -70,6 +70,17 @@ target_link_libraries(test_ai_pipeline
         pulse::logging
 )
 
+add_executable(test_balance_diag
+    test_balance_diag.cpp
+)
+
+target_link_libraries(test_balance_diag
+    PRIVATE
+        pulse::exchange
+        pulse::core
+        pulse::logging
+)
+
 if(PULSE_ENABLE_WEBUI)
     add_executable(test_webui_server
         test_webui.cpp
