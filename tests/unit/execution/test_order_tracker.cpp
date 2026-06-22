@@ -221,7 +221,7 @@ TEST_F(OrderTrackerCallbackTest, CompletionCallbackInvokedOutsideLock)
     std::atomic<bool> lock_acquired_in_callback{ false };
 
     tracker_->set_completion_callback(
-        [this, &callback_invoked, &lock_acquired_in_callback](const ExecutionReport &report)
+        [this, &callback_invoked, &lock_acquired_in_callback]([[maybe_unused]] const ExecutionReport &report)
         {
             callback_invoked = true;
 

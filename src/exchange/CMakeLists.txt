@@ -27,17 +27,30 @@ target_link_libraries(pulse_exchange
         OpenSSL::Crypto
 )
 
-# websocketpp + asio: header-only, add include paths
+# websocketpp: prefer system / vcpkg-installed package; fall back to vendored copy
+# in third_party/websocketpp (required on Windows where vcpkg websocketpp is unavailable).
+# asio: header-only, installed via vcpkg.
 # ASIO_STANDALONE is defined in gate_ws_client.cpp before including websocketpp headers.
-# System-installed headers are at /usr/include (apt: libwebsocketpp-dev, libasio-dev).
-find_path(WEBSOCKETPP_INCLUDE_DIR websocketpp/client.hpp)
-find_path(ASIO_INCLUDE_DIR asio.hpp)
-
-if(WEBSOCKETPP_INCLUDE_DIR)
+if(websocketpp_FOUND)
+    # vcpkg or system package found (typical on Linux / macOS)
+    target_link_libraries(pulse_exchange PRIVATE websocketpp::websocketpp)
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/websocketpp/websocketpp/client.hpp")
+    set(WEBSOCKETPP_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/third_party/websocketpp")
     target_include_directories(pulse_exchange PRIVATE ${WEBSOCKETPP_INCLUDE_DIR})
+else()
+    message(FATAL_ERROR
+        "websocketpp not found. Install via vcpkg or place headers in third_party/websocketpp/")
 endif()
+
+find_path(ASIO_INCLUDE_DIR asio.hpp)
 if(ASIO_INCLUDE_DIR)
     target_include_directories(pulse_exchange PRIVATE ${ASIO_INCLUDE_DIR})
+endif()
+
+# Suppress warnings from websocketpp third-party headers (C4127: constant conditional,
+# C4267: size_t narrowing, C4702: unreachable code)
+if(MSVC)
+    target_compile_options(pulse_exchange PRIVATE /wd4127 /wd4267 /wd4702)
 endif()
 
 target_compile_features(pulse_exchange PUBLIC cxx_std_20)

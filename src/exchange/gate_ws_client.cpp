@@ -419,7 +419,10 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
 
             // 3. Initialise the asio transport
             client.init_asio();
-            internal_->io_ctx_ptr = &client.get_io_context();
+            // Note: get_io_service() is websocketpp 0.8.x API; it returns io_service&
+            // which is a deprecated typedef for io_context in standalone asio.
+            // Do NOT define ASIO_NO_DEPRECATED — websocketpp 0.8.x requires it.
+            internal_->io_ctx_ptr = &client.get_io_service();
 
             // 4. Set TLS handler for wss:// connections
             //    When using a proxy tunnel, we connect via wss:// to 127.0.0.1
@@ -653,7 +656,7 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
             }
 
             // Brief pause to let close handshake complete
-            client.get_io_context().run_for(std::chrono::milliseconds(500));
+            client.get_io_service().run_for(std::chrono::milliseconds(500));
 
             if (stop_token.stop_requested())
             {

@@ -15,6 +15,19 @@
 #include <fstream>
 #include <string>
 
+// Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
+// Windows uses _putenv_s / _dupenv_s).
+#ifdef _WIN32
+static void setenv(const char *name, const char *value, int /*overwrite*/)
+{
+    _putenv_s(name, value);
+}
+static void unsetenv(const char *name)
+{
+    _putenv_s(name, "");
+}
+#endif
+
 namespace pulse
 {
 namespace

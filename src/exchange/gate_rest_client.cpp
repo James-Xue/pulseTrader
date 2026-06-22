@@ -164,9 +164,9 @@ HttpResponse GateRestClient::do_request(
         curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
         curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
     }
-    else if (const char *proxy = std::getenv("HTTP_PROXY"); proxy)
+    else if (const char *http_proxy = std::getenv("HTTP_PROXY"); http_proxy)
     {
-        curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXY, http_proxy);
         curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
     }
 
