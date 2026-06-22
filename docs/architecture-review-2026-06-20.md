@@ -283,6 +283,6 @@ Strategy thread
 - [x] #1 PnL 计算方案 — `close_position` 返回 `std::optional<double>`（已实现 PnL），main.cpp 累加后传给 `drawdown_guard.record_pnl()` ✅
 - [x] #2 AI 反馈回路 — `StrategyManager.all_params()` 收集每个策略的真实 params 指针，`HeartbeatScheduler` + `AiPipeline::run()` 改为 `vector<StrategyParams*>`，ParamAdvisor 写入所有策略 ✅
 - [x] #3 `std::stod` → `safe_parse_double()` — 34 处替换 + 10 个新测试，WS 事件线程不再因异常字符串崩溃 ✅
-- [ ] #4 TOCTOU: 考虑在 `evaluate_order()` 中引入 atomic reserve + rollback 机制
-- [ ] #5 回调从锁下移出：先收集结果，释放锁后再执行回调
-- [ ] #6 ProxyTunnel 提取为独立 `proxy_tunnel.hpp/.cpp`
+- [x] #4 TOCTOU: `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock，`pending_reservations_` 防双花，`open_position()` 自动消耗预留 ✅
+- [x] #5 回调从锁下移出："锁内收集，锁外执行"模式，`completion_callback_` 在 unique_lock 释放后调用，`set_completion_callback()` 加锁保护 ✅
+- [x] #6 ProxyTunnel 提取为独立 `proxy_tunnel.hpp/.cpp`，修复 detached 线程 use-after-free + relay 注册竞态，删除 58 行死代码 ✅
