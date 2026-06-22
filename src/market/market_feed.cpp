@@ -49,13 +49,14 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { on_ticker_update(result, full_frame); });
 
-    // Order book: incremental updates, 100ms interval, 10 levels.
+    // Order book: incremental updates, 100ms interval, 20 levels.
     // Gate.io requires per-symbol subscription with channel "order_book_update".
-    // Payload format: [contract, interval, limit] — e.g. ["BTC_USDT", "100ms", "10"]
+    // Supported levels: 20, 50, 100 (level 10 removed 2024-11-18).
+    // Payload format: [contract, interval, limit] — e.g. ["BTC_USDT", "100ms", "20"]
     const std::string orderbook_update_ch = EndpointRouter::ws_channel(market_type_, "order_book_update");
     for (const auto &symbol : symbols)
     {
-        std::vector<std::string> ob_payload = { symbol, "100ms", "10" };
+        std::vector<std::string> ob_payload = { symbol, "100ms", "20" };
         ws_client_.subscribe(orderbook_update_ch,
             ob_payload,
             [this](const nlohmann::json &result, const nlohmann::json &full_frame)
