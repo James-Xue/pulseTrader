@@ -36,6 +36,7 @@
 #include "strategy/scalping/momentum_scalper.hpp"
 #include "strategy/scalping/orderbook_scalper.hpp"
 #include "strategy/scalping/mean_reversion_scalper.hpp"
+#include "strategy/scalping/supertrend_scalper.hpp"
 #include "ai/ai_pipeline.hpp"
 #include "heartbeat/heartbeat_scheduler.hpp"
 
@@ -222,6 +223,10 @@ create_strategy(const std::string& name,
     if ("mean_reversion_scalper" == name)
     {
         return std::make_unique<MeanReversionScalper>(ctx);
+    }
+    if ("supertrend_scalper" == name)
+    {
+        return std::make_unique<SuperTrendScalper>(ctx);
     }
     return nullptr;
 }

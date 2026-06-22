@@ -34,6 +34,8 @@ namespace pulse::strategy
 //   9. cooldown_seconds         — minimum seconds between signals per symbol
 //   10. stop_loss_pct           — stop-loss distance as fraction of entry price
 //   11. take_profit_pct         — first take-profit target as fraction of entry
+//   12. supertrend_period       — ATR period for SuperTrend bands
+//   13. supertrend_multiplier   — ATR multiplier for SuperTrend bands
 // ---------------------------------------------------------------------------
 struct StrategyParams
 {
@@ -52,6 +54,10 @@ struct StrategyParams
     // --- Order book scalping ---
     std::atomic<double> ob_imbalance_threshold{ 0.3 }; ///< Imbalance threshold (0.0–1.0).
     std::atomic<double> ob_depth{ 5.0 };               ///< Order book depth to analyze.
+
+    // --- SuperTrend (ATR-based trend following) ---
+    std::atomic<double> supertrend_period{ 10.0 };     ///< ATR period for SuperTrend.
+    std::atomic<double> supertrend_multiplier{ 3.0 };  ///< ATR multiplier for SuperTrend bands.
 
     // --- Timing ---
     std::atomic<double> cooldown_seconds{ 30.0 };      ///< Seconds between signals per symbol.
