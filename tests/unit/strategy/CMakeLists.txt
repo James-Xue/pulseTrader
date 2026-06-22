@@ -6,6 +6,7 @@ add_executable(test_strategy_unit
     test_momentum_scalper.cpp
     test_orderbook_scalper.cpp
     test_mean_reversion_scalper.cpp
+    test_supertrend_scalper.cpp
     test_signal_aggregator.cpp
 )
 

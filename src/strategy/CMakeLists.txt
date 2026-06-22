@@ -2,7 +2,7 @@
 #
 # Contains:
 #   - strategy_manager: multi-strategy orchestration
-#   - scalping/: concrete strategy implementations (momentum, orderbook, mean reversion)
+#   - scalping/: concrete strategy implementations (momentum, orderbook, mean reversion, supertrend)
 #   - signal/: signal aggregation (weighted voting)
 
 add_library(pulse_strategy STATIC
@@ -10,6 +10,7 @@ add_library(pulse_strategy STATIC
     scalping/momentum_scalper.cpp
     scalping/orderbook_scalper.cpp
     scalping/mean_reversion_scalper.cpp
+    scalping/supertrend_scalper.cpp
     signal/signal_aggregator.cpp
 )
 
