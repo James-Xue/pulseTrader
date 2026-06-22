@@ -41,7 +41,6 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     subscribed_symbols_ = symbols;
 
     const std::string tickers_ch = EndpointRouter::ws_channel(market_type_, "tickers");
-    const std::string orderbook_ch = EndpointRouter::ws_channel(market_type_, "order_book");
     const std::string candlesticks_ch = EndpointRouter::ws_channel(market_type_, "candlesticks");
 
     // Tickers: real-time price updates.
@@ -50,20 +49,18 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { on_ticker_update(result, full_frame); });
 
-    // Order book: 10 levels, 100ms update interval.
-    // Gate.io format: payload = ["BTC_USDT", "10", "100ms"]
-    std::vector<std::string> orderbook_payload;
+    // Order book: incremental updates, 100ms interval, 10 levels.
+    // Gate.io requires per-symbol subscription with channel "order_book_update".
+    // Payload format: [contract, interval, limit] — e.g. ["BTC_USDT", "100ms", "10"]
+    const std::string orderbook_update_ch = EndpointRouter::ws_channel(market_type_, "order_book_update");
     for (const auto &symbol : symbols)
     {
-        orderbook_payload.push_back(symbol);
+        std::vector<std::string> ob_payload = { symbol, "100ms", "10" };
+        ws_client_.subscribe(orderbook_update_ch,
+            ob_payload,
+            [this](const nlohmann::json &result, const nlohmann::json &full_frame)
+            { on_orderbook_update(result, full_frame); });
     }
-    orderbook_payload.push_back("10");
-    orderbook_payload.push_back("100ms");
-
-    ws_client_.subscribe(orderbook_ch,
-        orderbook_payload,
-        [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-        { on_orderbook_update(result, full_frame); });
 
     // K-lines: 1-minute interval.
     // Gate.io format: payload = ["1m", "BTC_USDT"] (interval first, then symbols).
@@ -87,7 +84,7 @@ void MarketFeed::stop()
 {
     PULSE_LOG_INFO("market", "Stopping MarketFeed");
     ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "tickers"));
-    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "order_book"));
+    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "order_book_update"));
     ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "candlesticks"));
     subscribed_symbols_.clear();
 }
