@@ -29,15 +29,7 @@
             localStorage.setItem('pulseToken', urlToken);
             return urlToken;
         }
-        const cached = localStorage.getItem('pulseToken');
-        if (cached) {
-            return cached;
-        }
-        const token = prompt('Enter auth token:', '') || '';
-        if (token) {
-            localStorage.setItem('pulseToken', token);
-        }
-        return token;
+        return localStorage.getItem('pulseToken') || '';
     }
 
     /**
