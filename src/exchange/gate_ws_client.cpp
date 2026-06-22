@@ -538,11 +538,20 @@ void GateWsClient::run_io_loop(std::stop_token stop_token)
                         const auto &ch = frame["channel"];
                         const auto &ev = frame["event"];
 
-                        // Skip subscription confirmations (already logged by send_queued)
-                        if ("subscribe" != ev.get<std::string>()
-                            && "unsubscribe" != ev.get<std::string>())
+                        // Log subscription confirmations and errors
+                        if ("subscribe" == ev.get<std::string>()
+                            || "unsubscribe" == ev.get<std::string>())
                         {
-                            // Extract key fields for a compact one-line summary
+                            std::string sub_result = "OK";
+                            if (frame.contains("error") && !frame["error"].is_null())
+                            {
+                                sub_result = "ERROR: " + frame["error"].dump();
+                            }
+                            PULSE_LOG_INFO("exchange", "WS {} confirmation: channel={} result={}",
+                                ev.get<std::string>(), ch.get<std::string>(), sub_result);
+                        }
+                        else
+                        {
                             std::string summary;
                             if (frame.contains("result"))
                             {
