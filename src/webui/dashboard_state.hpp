@@ -68,14 +68,16 @@ class DashboardState
     ///   4. risk_mgr      — L7 risk manager (risk snapshot, positions)
     ///   5. order_tracker — L8 order tracker (active orders, execution reports)
     ///   6. ai_pipeline   — L4 AI pipeline (analysis result)
-    ///   7. rest_client   — L1 REST client (account balance, optional — may be null)
+    ///   7. rest_client   — L1 REST client (futures account balance, optional — may be null)
+    ///   8. spot_rest     — L1 REST client (spot account balance, optional — may be null)
     DashboardState(const WebUiConfig &config,
                    market::MarketFeed &market_feed,
                    strategy::StrategyManager &strategy_mgr,
                    risk::RiskManager &risk_mgr,
                    execution::OrderTracker &order_tracker,
                    ai::AiPipeline &ai_pipeline,
-                   exchange::GateRestClient *rest_client = nullptr);
+                   exchange::GateRestClient *rest_client = nullptr,
+                   exchange::GateRestClient *spot_rest_client = nullptr);
 
     /// Destructor — stops polling if still running.
     ~DashboardState();
@@ -182,7 +184,8 @@ class DashboardState
     risk::RiskManager &risk_mgr_;
     execution::OrderTracker &order_tracker_;
     ai::AiPipeline &ai_pipeline_;
-    exchange::GateRestClient *rest_client_; ///< Optional — may be null.
+    exchange::GateRestClient *rest_client_; ///< Optional — futures REST client, may be null.
+    exchange::GateRestClient *spot_rest_client_; ///< Optional — spot REST client, may be null.
 
     // --- Polling thread ---
     std::jthread poll_thread_;

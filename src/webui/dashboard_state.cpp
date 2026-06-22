@@ -29,7 +29,8 @@ DashboardState::DashboardState(const WebUiConfig &config,
                                risk::RiskManager &risk_mgr,
                                execution::OrderTracker &order_tracker,
                                ai::AiPipeline &ai_pipeline,
-                               exchange::GateRestClient *rest_client)
+                               exchange::GateRestClient *rest_client,
+                               exchange::GateRestClient *spot_rest_client)
     : config_{ config }
     , market_feed_{ market_feed }
     , strategy_mgr_{ strategy_mgr }
@@ -37,6 +38,7 @@ DashboardState::DashboardState(const WebUiConfig &config,
     , order_tracker_{ order_tracker }
     , ai_pipeline_{ ai_pipeline }
     , rest_client_{ rest_client }
+    , spot_rest_client_{ spot_rest_client }
 {
 }
 
@@ -346,28 +348,59 @@ void DashboardState::poll_ai(DashboardSnapshot &snap)
 
 void DashboardState::poll_account(DashboardSnapshot &snap)
 {
-    if (nullptr == rest_client_)
+    // --- Futures account ---
+    if (nullptr != rest_client_)
     {
-        snap.account.available = false;
-        return;
-    }
-
-    auto result = rest_client_->get_futures_account_balance();
-    if (ok(result))
-    {
-        const auto &bal = value(result);
-        snap.account.available         = true;
-        snap.account.total             = bal.total;
-        snap.account.available_balance = bal.available;
-        snap.account.unrealised_pnl    = bal.unrealised_pnl;
-        snap.account.position_margin   = bal.position_margin;
-        snap.account.order_margin      = bal.order_margin;
-        snap.account.currency          = bal.currency;
+        auto result = rest_client_->get_futures_account_balance();
+        if (ok(result))
+        {
+            const auto &bal = value(result);
+            snap.account.available         = true;
+            snap.account.total             = bal.total;
+            snap.account.available_balance = bal.available;
+            snap.account.unrealised_pnl    = bal.unrealised_pnl;
+            snap.account.position_margin   = bal.position_margin;
+            snap.account.order_margin      = bal.order_margin;
+            snap.account.currency          = bal.currency;
+        }
+        else
+        {
+            snap.account.available = false;
+        }
     }
     else
     {
-        // REST failure — keep previous data, mark as stale.
         snap.account.available = false;
+    }
+
+    // --- Spot account ---
+    if (nullptr != spot_rest_client_)
+    {
+        auto spot_result = spot_rest_client_->get_spot_accounts();
+        if (ok(spot_result))
+        {
+            const auto &arr = value(spot_result);
+            for (const auto &item : arr)
+            {
+                if ("USDT" == item.value("currency", ""))
+                {
+                    snap.account.spot_available         = true;
+                    snap.account.spot_available_balance = safe_parse_double(item.value("available", "0")).value_or(0.0);
+                    double locked                       = safe_parse_double(item.value("locked", "0")).value_or(0.0);
+                    snap.account.spot_total             = snap.account.spot_available_balance + locked;
+                    snap.account.spot_currency          = "USDT";
+                    break;
+                }
+            }
+        }
+        else
+        {
+            snap.account.spot_available = false;
+        }
+    }
+    else
+    {
+        snap.account.spot_available = false;
     }
 }
 
