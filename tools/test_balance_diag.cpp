@@ -1,18 +1,11 @@
-// test_balance_diag.cpp — Diagnostic tool for futures account balance verification
+// test_balance_diag.cpp — Diagnostic tool for account balance verification
 //
-// Purpose: Verify that the program's parsed account balance matches the raw
-//          Gate.io API response, and provide data for comparison with the
-//          Gate.io web backend.
+// Purpose: Query BOTH spot and futures accounts to verify the API key
+//          points to the correct account, and compare with Gate.io web backend.
 //
 // Usage:
 //   ./build/tools/test_balance_diag                    # auto-loads trading.toml
 //   ./build/tools/test_balance_diag --config trading.toml
-//
-// Output:
-//   1. Config info (network, URL, masked API key)
-//   2. Raw JSON from Gate.io futures account endpoint
-//   3. Parsed AccountBalance values
-//   4. Field-by-field match verification
 
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
@@ -53,7 +46,6 @@ int main(int argc, char *argv[])
     }
     else
     {
-        // Fallback: build from env vars
         std::string network = "mainnet";
         if (const char *n = std::getenv("PULSE_NETWORK"); n)
             network = n;
@@ -81,7 +73,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Proxy: explicit config → env var fallback
+    // Proxy
     if (cfg.exchange.proxyUrl.empty())
     {
         if (const char *p = std::getenv("HTTPS_PROXY"); p)
@@ -95,98 +87,124 @@ int main(int argc, char *argv[])
                                  ? cfg.exchange.apiKey.substr(0, 4) + "****" + cfg.exchange.apiKey.substr(cfg.exchange.apiKey.size() - 4)
                                  : "(empty)";
 
-    std::string full_url = cfg.exchange.restBaseUrl + "/api/v4/futures/usdt/accounts";
-
     std::cout << "=== pulseTrader Balance Diagnostic ===\n\n";
     std::cout << "Config source : " << (config_loaded ? config_path : "env vars (no TOML)") << "\n";
     std::cout << "Network       : " << (cfg.exchange.testnet ? "TESTNET" : "MAINNET") << "\n";
     std::cout << "REST base URL : " << cfg.exchange.restBaseUrl << "\n";
-    std::cout << "Full endpoint : " << full_url << "\n";
     std::cout << "API Key       : " << masked_key << "\n";
     std::cout << "Proxy         : " << (cfg.exchange.proxyUrl.empty() ? "(none)" : cfg.exchange.proxyUrl) << "\n";
     std::cout << "\n";
 
-    // --- Create REST client ---
-    GateRestClient client(cfg.exchange, MarketType::Futures);
+    // =====================================================================
+    // Futures Account
+    // =====================================================================
+    std::cout << "========== FUTURES ACCOUNT ==========\n\n";
 
-    // --- Test 1: Raw JSON from Gate.io ---
-    std::cout << "--- [Test 1] Raw API Response ---\n\n";
-    auto raw_result = client.get_futures_accounts();
+    GateRestClient futures_client(cfg.exchange, MarketType::Futures);
 
-    nlohmann::json raw_json;
+    std::cout << "Endpoint: " << cfg.exchange.restBaseUrl << "/api/v4/futures/usdt/accounts\n\n";
 
-    if (ok(raw_result))
+    auto futures_raw = futures_client.get_futures_accounts();
+    if (ok(futures_raw))
     {
-        raw_json = value(raw_result);
-        std::cout << raw_json.dump(2) << "\n\n";
+        const auto &j = value(futures_raw);
+        std::cout << "--- Raw JSON ---\n";
+        std::cout << j.dump(2) << "\n\n";
+
+        if (j.contains("user"))
+        {
+            std::cout << ">>> User ID: " << j["user"] << "\n";
+            std::cout << "    (verify this matches your Gate.io testnet account)\n\n";
+        }
+
+        // Parsed values
+        auto bal_result = futures_client.get_futures_account_balance();
+        if (ok(bal_result))
+        {
+            const auto &bal = value(bal_result);
+            std::cout << std::fixed << std::setprecision(4);
+            std::cout << "--- Parsed ---\n";
+            std::cout << "Total           : " << bal.total << " " << bal.currency << "\n";
+            std::cout << "Available       : " << bal.available << " " << bal.currency << "\n";
+            std::cout << "Unrealised PnL  : " << bal.unrealised_pnl << " " << bal.currency << "\n";
+            std::cout << "Position Margin : " << bal.position_margin << " " << bal.currency << "\n";
+            std::cout << "Order Margin    : " << bal.order_margin << " " << bal.currency << "\n";
+
+            // Equity calculation
+            double total = safe_parse_double(j.value("total", "0")).value_or(0.0);
+            double upnl = safe_parse_double(j.value("unrealised_pnl", "0")).value_or(0.0);
+            std::cout << "\nEquity (total + unrealised_pnl) = " << (total + upnl) << " " << bal.currency << "\n";
+        }
     }
     else
     {
-        std::cout << "[FAIL] " << error(raw_result).message << "\n\n";
-        std::cout << "Check: API key/secret, network mode, proxy, firewall.\n";
-        logging::Logger::shutdown();
-        return 1;
+        std::cout << "[FAIL] " << error(futures_raw).message << "\n";
     }
 
-    // --- Test 2: Parsed AccountBalance ---
-    std::cout << "--- [Test 2] Parsed AccountBalance ---\n\n";
-    auto bal_result = client.get_futures_account_balance();
+    // =====================================================================
+    // Spot Account
+    // =====================================================================
+    std::cout << "\n========== SPOT ACCOUNT ==========\n\n";
 
-    if (!ok(bal_result))
+    GateRestClient spot_client(cfg.exchange, MarketType::Spot);
+
+    std::cout << "Endpoint: " << cfg.exchange.restBaseUrl << "/api/v4/spot/accounts\n\n";
+
+    auto spot_raw = spot_client.get_spot_accounts();
+    if (ok(spot_raw))
     {
-        std::cout << "[FAIL] " << error(bal_result).message << "\n";
-        logging::Logger::shutdown();
-        return 1;
-    }
+        const auto &j = value(spot_raw);
 
-    const auto &bal = value(bal_result);
-    std::cout << std::fixed << std::setprecision(4);
-    std::cout << "Total           : " << bal.total << " " << bal.currency << "\n";
-    std::cout << "Available       : " << bal.available << " " << bal.currency << "\n";
-    std::cout << "Unrealised PnL  : " << bal.unrealised_pnl << " " << bal.currency << "\n";
-    std::cout << "Position Margin : " << bal.position_margin << " " << bal.currency << "\n";
-    std::cout << "Order Margin    : " << bal.order_margin << " " << bal.currency << "\n";
-    std::cout << "\n";
+        // Spot accounts return an array — show USDT-related entries
+        std::cout << "--- Raw JSON (array of " << j.size() << " items) ---\n";
 
-    // --- Test 3: Verify parsing correctness ---
-    std::cout << "--- [Test 3] Parsing Verification ---\n\n";
-
-    auto check_field = [](const std::string &name, double parsed, const nlohmann::json &j, const std::string &key)
-    {
-        std::string raw_str = j.value(key, "MISSING");
-        double raw_val = 0.0;
-        if ("MISSING" != raw_str)
+        // Find and highlight USDT
+        bool found_usdt = false;
+        for (const auto &item : j)
         {
-            auto r = safe_parse_double(raw_str);
-            raw_val = r.value_or(-999.0);
+            std::string currency = item.value("currency", "");
+            if ("USDT" == currency)
+            {
+                found_usdt = true;
+                std::cout << "\n>>> USDT Spot Account:\n";
+                std::cout << item.dump(2) << "\n";
+
+                std::string avail_str = item.value("available", "0");
+                std::string locked_str = item.value("locked", "0");
+                double avail = safe_parse_double(avail_str).value_or(0.0);
+                double locked = safe_parse_double(locked_str).value_or(0.0);
+
+                std::cout << std::fixed << std::setprecision(4);
+                std::cout << "\n  Available : " << avail << " USDT\n";
+                std::cout << "  Locked    : " << locked << " USDT\n";
+                std::cout << "  Total     : " << (avail + locked) << " USDT\n";
+            }
         }
-        bool match = ("MISSING" == raw_str) ? false : (std::abs(parsed - raw_val) < 0.0001);
-        std::cout << "  " << std::left << std::setw(20) << name
-                  << "  raw=\"" << raw_str << "\""
-                  << "  parsed=" << std::fixed << std::setprecision(4) << parsed
-                  << "  " << (match ? "OK" : "MISMATCH") << "\n";
-    };
 
-    check_field("total", bal.total, raw_json, "total");
-    check_field("available", bal.available, raw_json, "available");
-    check_field("unrealised_pnl", bal.unrealised_pnl, raw_json, "unrealised_pnl");
-    check_field("position_margin", bal.position_margin, raw_json, "position_margin");
-    check_field("order_margin", bal.order_margin, raw_json, "order_margin");
-
-    std::cout << "\n";
-
-    // --- Gate.io API field notes ---
-    std::cout << "--- Notes ---\n";
-    std::cout << "Gate.io 'total' = deposits - withdrawals + realized PnL - fees";
-    if (raw_json.contains("unrealised_pnl"))
-    {
-        double total = safe_parse_double(raw_json.value("total", "0")).value_or(0.0);
-        double upnl = safe_parse_double(raw_json.value("unrealised_pnl", "0")).value_or(0.0);
-        std::cout << "\nGate.io 'total' does NOT include unrealised_pnl.";
-        std::cout << "\nActual equity = total + unrealised_pnl = "
-                  << std::fixed << std::setprecision(4) << (total + upnl) << " USDT";
+        if (!found_usdt)
+        {
+            std::cout << "(No USDT spot account found)\n";
+            std::cout << "All currencies: ";
+            for (const auto &item : j)
+            {
+                std::cout << item.value("currency", "?") << " ";
+            }
+            std::cout << "\n";
+        }
     }
-    std::cout << "\n\nCompare above values with Gate.io web backend.\n";
+    else
+    {
+        std::cout << "[FAIL] " << error(spot_raw).message << "\n";
+    }
+
+    // =====================================================================
+    // Summary
+    // =====================================================================
+    std::cout << "\n========== SUMMARY ==========\n\n";
+    std::cout << "Compare the User ID and balance values above with what you see\n";
+    std::cout << "in the Gate.io testnet web backend (fx-testnet.gate.com).\n\n";
+    std::cout << "If User ID does not match → API key is for a different account.\n";
+    std::cout << "If User ID matches but balance differs → possible API caching issue.\n";
 
     logging::Logger::shutdown();
     return 0;
