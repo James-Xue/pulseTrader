@@ -248,7 +248,8 @@ static void log_system_heartbeat(
     const pulse::exchange::GateWsClient* futures_ws,
     const pulse::strategy::StrategyManager& strategy_mgr,
     const pulse::risk::PositionManager& position_mgr,
-    pulse::exchange::GateRestClient* rest_client)
+    pulse::exchange::GateRestClient* rest_client,
+    pulse::exchange::GateRestClient* spot_rest_client = nullptr)
 {
     // --- Uptime formatting ---
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
@@ -371,11 +372,33 @@ static void log_system_heartbeat(
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
-            msg << " | account " << std::fixed << std::setprecision(2)
+            msg << " | futures " << std::fixed << std::setprecision(2)
                 << bal.total << " " << bal.currency
                 << " (avail " << bal.available
                 << ", pnl " << (bal.unrealised_pnl >= 0 ? "+" : "")
                 << bal.unrealised_pnl << ")";
+        }
+    }
+
+    // Spot account balance.
+    if (nullptr != spot_rest_client)
+    {
+        auto spot_result = spot_rest_client->get_spot_accounts();
+        if (ok(spot_result))
+        {
+            const auto &arr = value(spot_result);
+            for (const auto &item : arr)
+            {
+                if ("USDT" == item.value("currency", ""))
+                {
+                    double avail = pulse::safe_parse_double(item.value("available", "0")).value_or(0.0);
+                    double locked = pulse::safe_parse_double(item.value("locked", "0")).value_or(0.0);
+                    msg << " | spot " << std::fixed << std::setprecision(2)
+                        << (avail + locked) << " USDT"
+                        << " (avail " << avail << ")";
+                    break;
+                }
+            }
         }
     }
 
@@ -749,10 +772,11 @@ int main(int argc, char* argv[])
         auto& ui_feed    = spot_feed    ? *spot_feed    : *futures_feed;
         auto& ui_tracker = spot_tracker ? *spot_tracker : *futures_tracker;
         auto* ui_rest    = futures_rest ? futures_rest.get() : spot_rest.get();
+        auto* ui_spot_rest = spot_rest ? spot_rest.get() : nullptr;
 
         dashboard_state = std::make_unique<pulse::webui::DashboardState>(
             cfg.webui, ui_feed, strategy_mgr, risk_mgr,
-            ui_tracker, ai_pipeline, ui_rest);
+            ui_tracker, ai_pipeline, ui_rest, ui_spot_rest);
 
         web_server = std::make_unique<pulse::webui::WebServer>(
             cfg.webui, *dashboard_state, "frontend");
@@ -1092,7 +1116,8 @@ int main(int argc, char* argv[])
                 futures_ws.get(),
                 strategy_mgr,
                 position_mgr,
-                futures_rest ? futures_rest.get() : spot_rest.get());
+                futures_rest ? futures_rest.get() : spot_rest.get(),
+                spot_rest ? spot_rest.get() : nullptr);
         }
     }
 

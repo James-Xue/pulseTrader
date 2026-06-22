@@ -339,13 +339,20 @@ struct StrategiesSnapshot
 // ---------------------------------------------------------------------------
 struct AccountSnapshot
 {
-    bool available;             ///< Whether account data was successfully fetched.
-    double total;               ///< Total equity.
-    double available_balance;   ///< Available for new orders.
-    double unrealised_pnl;      ///< Unrealized PnL.
-    double position_margin;     ///< Margin locked in positions.
-    double order_margin;        ///< Margin reserved for open orders.
+    // Futures account
+    bool available;             ///< Whether futures account data was successfully fetched.
+    double total;               ///< Futures total equity.
+    double available_balance;   ///< Futures available for new orders.
+    double unrealised_pnl;      ///< Futures unrealized PnL.
+    double position_margin;     ///< Futures margin locked in positions.
+    double order_margin;        ///< Futures margin reserved for open orders.
     std::string currency;       ///< Settlement currency (e.g. "USDT").
+
+    // Spot account
+    bool spot_available;        ///< Whether spot account data was successfully fetched.
+    double spot_total;          ///< Spot total balance.
+    double spot_available_balance; ///< Spot available for trading.
+    std::string spot_currency;  ///< Spot currency (e.g. "USDT").
 
     AccountSnapshot()
         : available{ false }
@@ -355,6 +362,10 @@ struct AccountSnapshot
         , position_margin{ 0.0 }
         , order_margin{ 0.0 }
         , currency{}
+        , spot_available{ false }
+        , spot_total{ 0.0 }
+        , spot_available_balance{ 0.0 }
+        , spot_currency{}
     {
     }
 };
@@ -476,6 +487,10 @@ inline void to_json(nlohmann::json &j, const AccountSnapshot &snap)
     j["position_margin"]   = snap.position_margin;
     j["order_margin"]      = snap.order_margin;
     j["currency"]          = snap.currency;
+    j["spot_available"]         = snap.spot_available;
+    j["spot_total"]             = snap.spot_total;
+    j["spot_available_balance"] = snap.spot_available_balance;
+    j["spot_currency"]          = snap.spot_currency;
 }
 
 /// Serialize DashboardSnapshot to JSON.

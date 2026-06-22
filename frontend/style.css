@@ -537,3 +537,24 @@ tbody tr:hover {
 .account-value.negative {
     color: #f44336;
 }
+
+.account-group {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+}
+
+.account-group-label {
+    color: #e0e0e0;
+    font-weight: 700;
+    font-size: 0.9em;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.account-divider {
+    width: 1px;
+    background: #0f3460;
+    margin: 0 8px;
+    align-self: stretch;
+}
