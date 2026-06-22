@@ -56,6 +56,7 @@ void SignalAggregator::add_signal(const TradingSignal &signal)
     }
     state.weight_sum += weight;
     state.last_price = signal.price;
+    state.market_type = signal.market_type;
 
     // 4. Evaluate whether we should emit a consolidated signal.
     evaluate_and_emit(signal.symbol);
@@ -129,6 +130,7 @@ void SignalAggregator::evaluate_and_emit(const Symbol &symbol)
     consolidated.symbol = symbol;
     consolidated.confidence = std::clamp(normalized_confidence, 0.0, 1.0);
     consolidated.price = state.last_price;
+    consolidated.market_type = state.market_type;
     consolidated.strategy_id = "signal_aggregator";
     consolidated.timestamp = now();
     consolidated.reason = "Aggregated signal: "
