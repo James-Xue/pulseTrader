@@ -153,6 +153,12 @@
         return d.toLocaleTimeString();
     }
 
+    function msToHHMM(ms) {
+        if (!ms) { return '—'; }
+        var d = new Date(ms);
+        return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    }
+
     // =========================================================================
     // Account Balance Bar
     // =========================================================================
@@ -290,7 +296,7 @@
             var arrow = up ? '▲' : '▼';
 
             html += '<tr>'
-                + '<td class="mono">' + msToTime(c.open_time) + '</td>'
+                + '<td class="mono">' + msToHHMM(c.open_time) + '</td>'
                 + '<td class="mono">' + fmt(c.open) + '</td>'
                 + '<td class="mono">' + fmt(c.high) + '</td>'
                 + '<td class="mono">' + fmt(c.low) + '</td>'
