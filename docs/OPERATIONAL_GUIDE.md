@@ -1,198 +1,198 @@
-# pulseTrader 操作指南：从零到实盘交易
+# pulseTrader Operational Guide: From Zero to Live Trading
 
-> 本文档面向操作人员，说明如何将 pulseTrader 从当前状态推进到可实盘运行的交易系统。
+> This document is intended for operators, explaining how to advance pulseTrader from its current state to a production-ready trading system.
 >
-> 最后更新：2026-06-20（Ctrl+C 优雅退出修复 + WebUI token 缓存 + 免认证模式）
+> Last updated: 2026-06-20 (Ctrl+C graceful shutdown fix + WebUI token cache + auth-free mode)
 
 ---
 
-## 目录
+## Table of Contents
 
-1. [当前状态评估](#1-当前状态评估)
-2. [缺失的关键模块](#2-缺失的关键模块)
-3. [开发路线图](#3-开发路线图)
-4. [操作流程（假设主程序就绪）](#4-操作流程假设主程序就绪)
-5. [关键参数调优指南](#5-关键参数调优指南)
-6. [风险控制体系](#6-风险控制体系)
-7. [盈利性分析](#7-盈利性分析)
-8. [风险警告](#8-风险警告)
-9. [常见问题](#9-常见问题)
+1. [Current Status Assessment](#1-current-status-assessment)
+2. [Missing Key Modules](#2-missing-key-modules)
+3. [Development Roadmap](#3-development-roadmap)
+4. [Operational Procedures (Assuming Main Program Ready)](#4-operational-procedures-assuming-main-program-ready)
+5. [Key Parameter Tuning Guide](#5-key-parameter-tuning-guide)
+6. [Risk Control System](#6-risk-control-system)
+7. [Profitability Analysis](#7-profitability-analysis)
+8. [Risk Warnings](#8-risk-warnings)
+9. [FAQ](#9-faq)
 
 ---
 
-## 1. 当前状态评估
+## 1. Current Status Assessment
 
-### 已完成的 9 层架构
+### Completed 9-Layer Architecture
 
-| 层 | 模块 | 职责 | 状态 | 测试数 |
-|----|------|------|------|--------|
+| Layer | Module | Responsibility | Status | Tests |
+|-------|--------|----------------|--------|-------|
 | L1 | Exchange | Gate.io REST + WebSocket API (spot + futures) | ✅ | 59 |
-| L2 | Logging | spdlog 异步日志 | ✅ | 8 |
-| L3 | Market Data | 行情热路径（延迟敏感，双市场） | ✅ | 38 |
-| L4 | AI Analysis | 社交/新闻 → LLM → 参数调整 | ✅ | 43 |
-| L5 | Heartbeat | 5 分钟 AI 时钟，TaskQueue | ✅ | 7 |
-| L6 | Strategy | EMA 交叉 / 订单簿失衡 / 布林带均值回归 | ✅ | 59 |
-| L7 | Risk Management | 仓位管理 / 回撤保护 / 限流 / 止损止盈 / 合约杠杆风控 | ✅ | 104 |
-| L8 | Execution | 订单生命周期管理（双市场） | ✅ | 26 |
-| L9 | WebUI | uWebSockets 暗色 SPA 监控面板 | ✅ | 57 |
+| L2 | Logging | spdlog async logging | ✅ | 8 |
+| L3 | Market Data | Market data hot path (latency-sensitive, dual market) | ✅ | 38 |
+| L4 | AI Analysis | Social/news → LLM → parameter tuning | ✅ | 43 |
+| L5 | Heartbeat | 5-minute AI clock, TaskQueue | ✅ | 7 |
+| L6 | Strategy | EMA crossover / order book imbalance / Bollinger mean reversion | ✅ | 59 |
+| L7 | Risk Management | Position management / drawdown protection / rate limiting / stop-loss/take-profit / futures leverage risk control | ✅ | 104 |
+| L8 | Execution | Order lifecycle management (dual market) | ✅ | 26 |
+| L9 | WebUI | uWebSockets dark-themed SPA monitoring dashboard | ✅ | 57 |
 
-**503 测试全部通过** | 仅 `main` 分支 | Milestone M1–M13 全部达成
+**503 tests all passing** | `main` branch only | Milestones M1–M13 all achieved
 
-### 当前可运行的命令
+### Currently Available Commands
 
 ```bash
-./run.sh trade     # 启动交易主程序（9 层串联，自动加载 trading.toml）
-./run.sh trade --config trading.toml  # 使用指定 TOML 配置文件启动
-./run.sh rest      # 测试 Gate.io REST 连接（公开 + 私有接口）
-./run.sh ws        # 测试 WebSocket 实时行情 + 私有频道
-./run.sh market    # 测试行情数据管道（WS → L3 组件）
-./run.sh strategy  # 测试策略引擎（模拟行情驱动 3 个策略）
-./run.sh ai        # 测试 AI Pipeline（--mock 模式，不调用真实 LLM）
-./run.sh webui     # 启动 WebUI 监控面板（浏览器 http://localhost:8080）
-./run.sh test      # 运行全部 503 个单元测试
+./run.sh trade     # Start trading main program (9 layers chained, auto-loads trading.toml)
+./run.sh trade --config trading.toml  # Start with specified TOML config file
+./run.sh rest      # Test Gate.io REST connection (public + private endpoints)
+./run.sh ws        # Test WebSocket real-time market data + private channels
+./run.sh market    # Test market data pipeline (WS → L3 components)
+./run.sh strategy  # Test strategy engine (simulated market data driving 3 strategies)
+./run.sh ai        # Test AI Pipeline (--mock mode, no real LLM calls)
+./run.sh webui     # Start WebUI monitoring dashboard (browser http://localhost:8080)
+./run.sh test      # Run all 503 unit tests
 ```
 
-### 交易主程序（已完成）
+### Trading Main Program (Completed)
 
-`apps/pulsetrader/main.cpp`（约 630 行）串联 9 层，构成完整交易系统：
+`apps/pulsetrader/main.cpp` (~630 lines) chains all 9 layers into a complete trading system:
 
-- **构造顺序**：L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
-- **信号流**：StrategyManager → SignalAggregator → app callback（风控检查 → OrderExecutor → OrderTracker）
-- **订单完成回调**：OrderTracker → PositionManager 开/平仓 + DrawdownGuard PnL 更新
-- **优雅退出**：SIGINT/SIGTERM → 原子 stop flag → 反序停止（WebUI → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger）
-- **策略工厂**：`create_strategy()` 根据配置名称创建具体策略类（MomentumScalper / OrderBookScalper / MeanReversionScalper）
-- **默认配置**：2 个策略运行于 BTC_USDT，AI 关闭，WebUI 监听 :8080，凭证从 `.env` 读取
+- **Construction order**: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
+- **Signal flow**: StrategyManager → SignalAggregator → app callback (risk check → OrderExecutor → OrderTracker)
+- **Order completion callback**: OrderTracker → PositionManager open/close + DrawdownGuard PnL update
+- **Graceful shutdown**: SIGINT/SIGTERM → atomic stop flag → reverse-order shutdown (WebUI → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger)
+- **Strategy factory**: `create_strategy()` creates concrete strategy classes based on configured names (MomentumScalper / OrderBookScalper / MeanReversionScalper)
+- **Default config**: 2 strategies running on BTC_USDT, AI disabled, WebUI listening on :8080, credentials read from `.env`
 
-所有现有命令均为 smoke test 工具，`./run.sh trade` 是唯一的生产级交易执行器。
+All existing commands are smoke test tools; `./run.sh trade` is the sole production-grade trade executor.
 
 ---
 
-## 2. 缺失的关键模块
+## 2. Missing Key Modules
 
-### 必须实现（P0）
+### Must Implement (P0)
 
-| 模块 | 说明 | 状态 |
-|------|------|------|
-| ~~交易记录器~~ | ~~SQLite 持久化每笔订单~~ | ✅ 已完成（Phase 2, M7） |
-| **合约交易支持** | Gate.io USDT 永续合约（双市场基础设施 + 合约 PnL/杠杆/保证金） | ✅ 已完成 (M10–M12) |
-| — 配置基础 | MarketType/MarginMode 枚举, 合约配置字段, 7xxx 错误码 | ✅ 已完成（Phase 3, M8） |
-| — 交换层路由 | EndpointRouter, WS ping/pong 泛化, 合约 REST 便捷方法 | ✅ 已完成（Phase 4, M9） |
-| — 合约行情 | futures ticker/funding_rate/mark_price, SymbolInfo 合约乘数, 双 MarketFeed | ✅ 已完成（M10） |
-| — 合约风控 | 杠杆感知 PnL (qty×price×quanto×leverage), 杠杆/保证金检查, 强平价 | ✅ 已完成（M11） |
-| — 合约执行 | futures 订单格式 (contract/signed size), OrderTracker 双市场, main.cpp 串联 | ✅ 已完成（M12） |
+| Module | Description | Status |
+|--------|-------------|--------|
+| ~~Trade Recorder~~ | ~~SQLite persistence for every order~~ | ✅ Completed (Phase 2, M7) |
+| **Futures Trading Support** | Gate.io USDT perpetual futures (dual market infrastructure + futures PnL/leverage/margin) | ✅ Completed (M10–M12) |
+| — Config Foundation | MarketType/MarginMode enums, futures config fields, 7xxx error codes | ✅ Completed (Phase 3, M8) |
+| — Exchange Layer Routing | EndpointRouter, WS ping/pong generalization, futures REST convenience methods | ✅ Completed (Phase 4, M9) |
+| — Futures Market Data | Futures ticker/funding_rate/mark_price, SymbolInfo futures multiplier, dual MarketFeed | ✅ Completed (M10) |
+| — Futures Risk Control | Leverage-aware PnL (qty×price×quanto×leverage), leverage/margin checks, liquidation price | ✅ Completed (M11) |
+| — Futures Execution | Futures order format (contract/signed size), OrderTracker dual market, main.cpp chaining | ✅ Completed (M12) |
 
-### 强烈建议（P1）
+### Strongly Recommended (P1)
 
-| 模块 | 说明 | 预估工时 |
-|------|------|----------|
-| **回测系统** | 用历史 K 线数据验证策略是否真正盈利（当前完全无回测能力） | 1–2 天 |
-| **模拟交易模式** | Gate.io testnet 或本地模拟撮合，验证端到端流程 | 4–6h |
-| **P&L 仪表盘** | WebUI 新增盈亏统计面板（日/周/月 P&L、胜率、盈亏比） | 3–4h |
+| Module | Description | Estimated Effort |
+|--------|-------------|------------------|
+| **Backtesting System** | Validate whether strategies are truly profitable using historical K-line data (currently no backtesting capability at all) | 1–2 days |
+| **Paper Trading Mode** | Gate.io testnet or local simulated matching, validate end-to-end flow | 4–6h |
+| **P&L Dashboard** | WebUI profit/loss statistics panel (daily/weekly/monthly P&L, win rate, profit/loss ratio) | 3–4h |
 
-### 锦上添花（P2）
+### Nice to Have (P2)
 
-| 模块 | 说明 | 预估工时 |
-|------|------|----------|
-| **Telegram/微信告警** | 关键事件推送（开仓/平仓/止损/回撤保护触发） | 2h |
-| **多交易所支持** | 当前仅 Gate.io，扩展到其他交易所 | 1–2 周 |
-| **策略热加载** | 运行时添加/移除策略，无需重启 | 4–6h |
+| Module | Description | Estimated Effort |
+|--------|-------------|------------------|
+| **Telegram/WeChat Alerts** | Key event notifications (open/close position, stop-loss, drawdown protection triggered) | 2h |
+| **Multi-Exchange Support** | Currently only Gate.io; extend to other exchanges | 1–2 weeks |
+| **Hot Strategy Loading** | Add/remove strategies at runtime without restart | 4–6h |
 
 ---
 
-## 3. 开发路线图
+## 3. Development Roadmap
 
 ```
-✅ Phase 0: 交易主程序                    ← 已完成（apps/pulsetrader/main.cpp, 9 层串联）
-✅ Phase 1: TOML 配置文件加载             ← 已完成（config_loader + config_validator + trading.toml.example, 46 测试）
-✅ Phase 2: SQLite 交易记录               ← 已完成（trade_recorder, 17 列表, 4 查询 API, 27 测试, M7 达成）
-✅ Phase 3: 合约配置基础 (M8)             ← 已完成（MarketType/MarginMode 枚举, 合约字段, 7xxx 错误码, 18 测试）
-✅ Phase 4: 合约交换层 (M9)                  ← 已完成（EndpointRouter + WS ping/pong 泛化, 合约 REST, 18 测试）
-✅ Phase 5: 合约行情数据 (M10)              ← 已完成（Ticker/SymbolInfo 合约字段, 双 MarketFeed, 11 测试）
-✅ Phase 6: 合约风控 & PnL (M11)            ← 已完成（杠杆感知 PnL, 保证金/杠杆检查, 强平价, 12 测试）
-✅ Phase 7: 合约执行 & 双市场串联 (M12)     ← 已完成（futures 订单, 双 Executor/Tracker, main.cpp 路由, 7 测试）
-✅ Phase 8: Testnet 支持 (M13)              ← 已完成（PULSE_NETWORK 开关, testnet REST + 主网 WS, 6 测试）
-Phase 9: Testnet 模拟交易 1 周              ← 进行中
-Phase 10: P&L 分析 + 策略调优               ← 预估 2–3 天
-Phase 11: 小资金实盘（100 USDT）           ← 持续观察
-Phase 12: 逐步加仓                         ← 根据数据决策
+✅ Phase 0: Trading Main Program                    ← Completed (apps/pulsetrader/main.cpp, 9 layers chained)
+✅ Phase 1: TOML Config File Loading                ← Completed (config_loader + config_validator + trading.toml.example, 46 tests)
+✅ Phase 2: SQLite Trade Recording                  ← Completed (trade_recorder, 17 fields, 4 query APIs, 27 tests, M7 achieved)
+✅ Phase 3: Futures Config Foundation (M8)           ← Completed (MarketType/MarginMode enums, futures fields, 7xxx error codes, 18 tests)
+✅ Phase 4: Futures Exchange Layer (M9)              ← Completed (EndpointRouter + WS ping/pong generalization, futures REST, 18 tests)
+✅ Phase 5: Futures Market Data (M10)                ← Completed (Ticker/SymbolInfo futures fields, dual MarketFeed, 11 tests)
+✅ Phase 6: Futures Risk Control & PnL (M11)         ← Completed (leverage-aware PnL, margin/leverage checks, liquidation price, 12 tests)
+✅ Phase 7: Futures Execution & Dual Market Chaining (M12) ← Completed (futures orders, dual Executor/Tracker, main.cpp routing, 7 tests)
+✅ Phase 8: Testnet Support (M13)                    ← Completed (PULSE_NETWORK switch, testnet REST + mainnet WS, 6 tests)
+Phase 9: Testnet Paper Trading for 1 Week            ← In progress
+Phase 10: P&L Analysis + Strategy Tuning             ← Estimated 2–3 days
+Phase 11: Small Capital Live Trading (100 USDT)      ← Continuous observation
+Phase 12: Gradual Position Sizing                    ← Data-driven decisions
 ```
 
-### Phase 2 详细任务（已完成）
+### Phase 2 Detailed Tasks (Completed)
 
 ```
-src/trade_recorder/（新增，已完成）:
-  ├── trade_record.hpp — TradeRecord (17 字段) + TradeSummary POD structs
+src/trade_recorder/ (new, completed):
+  ├── trade_record.hpp — TradeRecord (17 fields) + TradeSummary POD structs
   ├── trade_recorder.hpp/cpp — RAII TradeRecorder, SQLite::Database, WAL + mutex
-  ├── 建表：trades (17 列: id, order_id, client_order_id, timestamp_ns, symbol,
+  ├── Table creation: trades (17 columns: id, order_id, client_order_id, timestamp_ns, symbol,
   │   side, order_type, requested_qty, filled_qty, avg_fill_price, submit_mid_price,
   │   slippage_bps, fees, pnl, latency_ms, final_status, strategy_name)
-  ├── 4 个查询 API: get_trades / get_trades_by_strategy / get_summary / get_daily_pnl
-  ├── record_trade() — 线程安全 INSERT (mutex-guarded, UNIQUE order_id)
-  └── CMake: -DPULSE_ENABLE_SQLITE=ON 启用
+  ├── 4 query APIs: get_trades / get_trades_by_strategy / get_summary / get_daily_pnl
+  ├── record_trade() — thread-safe INSERT (mutex-guarded, UNIQUE order_id)
+  └── CMake: -DPULSE_ENABLE_SQLITE=ON to enable
 
-apps/pulsetrader/main.cpp（已改造）:
-  ├── #ifdef PULSE_ENABLE_SQLITE 初始化 TradeRecorder
-  ├── OrderTracker 完成回调中调用 recorder.record_trade()
-  ├── sig.strategy_id 通过 client_order_id 透传到 trade_recorder
-  └── 优雅退出时 checkpoint + close
+apps/pulsetrader/main.cpp (modified):
+  ├── #ifdef PULSE_ENABLE_SQLITE initializes TradeRecorder
+  ├── OrderTracker completion callback calls recorder.record_trade()
+  ├── sig.strategy_id passed through via client_order_id to trade_recorder
+  └── Checkpoint + close on graceful shutdown
 
-测试（27 个，全部通过）:
-  ├── test_trade_recorder.cpp — 15 核心测试
-  └── test_trade_queries.cpp — 12 查询测试
+Tests (27, all passing):
+  ├── test_trade_recorder.cpp — 15 core tests
+  └── test_trade_queries.cpp — 12 query tests
 ```
 
-### Phase 8 详细任务（已完成）
+### Phase 8 Detailed Tasks (Completed)
 
 ```
-Phase 8: Testnet 支持 (M13):
-  ├── config.hpp: ExchangeConfig 添加 bool testnet 字段
-  ├── config_loader.cpp: TOML [exchange] 解析 testnet 字段
-  ├── config_validator.cpp: testnet + spot 策略 → 校验拒绝（testnet 仅合约）
-  ├── main.cpp: PULSE_NETWORK 环境变量切换主网/测试网
+Phase 8: Testnet Support (M13):
+  ├── config.hpp: ExchangeConfig added bool testnet field
+  ├── config_loader.cpp: TOML [exchange] parses testnet field
+  ├── config_validator.cpp: testnet + spot strategy → validation rejected (testnet is futures-only)
+  ├── main.cpp: PULSE_NETWORK env var switches mainnet/testnet
   │   ├── testnet REST: https://api-testnet.gateapi.io
-  │   ├── testnet WS: 使用主网 fx-ws.gateio.ws（testnet WS 国内不可达，行情数据相同）
-  │   ├── 向后兼容: GATE_API_KEY/GATE_API_SECRET 仍然有效
-  │   └── 醒目日志: ⚠️ TESTNET MODE — using virtual funds
-  ├── .env 结构: PULSE_NETWORK 开关 + 主网/测试网 key 分离
-  ├── trading.toml.example: testnet 选项文档
-  ├── run.sh: 自动加载 trading.toml（无需手动 --config）
-  ├── WebUI: 修复 futures-only 模式空指针崩溃
-  ├── SQLite: 自动创建 data/ 目录
-  └── 6 个新测试（3 loader + 3 validator），503 全绿
+  │   ├── testnet WS: uses mainnet fx-ws.gateio.ws (testnet WS unreachable from China, market data is identical)
+  │   ├── backward compatible: GATE_API_KEY/GATE_API_SECRET still work
+  │   └── prominent log: ⚠️ TESTNET MODE — using virtual funds
+  ├── .env structure: PULSE_NETWORK switch + mainnet/testnet key separation
+  ├── trading.toml.example: testnet option documentation
+  ├── run.sh: auto-loads trading.toml (no manual --config needed)
+  ├── WebUI: fixed futures-only mode null pointer crash
+  ├── SQLite: auto-creates data/ directory
+  └── 6 new tests (3 loader + 3 validator), 503 all green
 ```
 
 ---
 
-## 4. 操作流程（假设主程序就绪）
+## 4. Operational Procedures (Assuming Main Program Ready)
 
-### 4.1 环境准备
+### 4.1 Environment Setup
 
 ```bash
-# 1. Gate.io 创建子账户
-#    - 目的：隔离风险，一个子账户跑一个策略组合
-#    - 最多 10 个子账户（VIP 0–4）或 30 个（VIP 5–9）
-#    - 子账户继承主账户 VIP 等级
-#    - ⚠️ 子账户创建后不可删除
+# 1. Create a Gate.io sub-account
+#    - Purpose: isolate risk, one sub-account per strategy combination
+#    - Up to 10 sub-accounts (VIP 0–4) or 30 (VIP 5–9)
+#    - Sub-accounts inherit the main account's VIP tier
+#    - ⚠️ Sub-accounts cannot be deleted once created
 
-# 2. 子账户充值启动资金
-#    - 建议先用 100–500 USDT 试水
-#    - 确认子账户有足够 USDT 用于交易
+# 2. Fund the sub-account with starting capital
+#    - Recommended to start with 100–500 USDT for testing
+#    - Confirm the sub-account has sufficient USDT for trading
 
-# 3. 创建 API Key
-#    - ⚠️ 只开"现货交易"权限，不开"提币"权限！
-#    - ⚠️ IP 白名单：填入服务器公网 IP
-#    - 记录 API Key 和 Secret
+# 3. Create API Key
+#    - ⚠️ Only enable "Spot Trading" permission, do NOT enable "Withdrawal" permission!
+#    - ⚠️ IP whitelist: enter the server's public IP
+#    - Record the API Key and Secret
 
-# 4. 配置 .env 文件
+# 4. Configure .env file
 cat > .env << 'EOF'
-# 网络模式: "mainnet"（真金白银）或 "testnet"（虚拟资金）
+# Network mode: "mainnet" (real money) or "testnet" (virtual funds)
 PULSE_NETWORK=testnet
 
-# 主网 API Key
+# Mainnet API Key
 GATE_MAINNET_API_KEY=your_mainnet_key
 GATE_MAINNET_API_SECRET=your_mainnet_secret
 
-# 测试网 API Key (https://fx-testnet.gateio.ws)
+# Testnet API Key (https://fx-testnet.gateio.ws)
 GATE_TESTNET_API_KEY=your_testnet_key
 GATE_TESTNET_API_SECRET=your_testnet_secret
 
@@ -201,17 +201,17 @@ HTTP_PROXY=http://127.0.0.1:7897
 PULSE_WEBUI_TOKEN=your_webui_token
 EOF
 
-# 5. 确认 .env 已被 gitignore（已有）
-grep ".env" .gitignore  # 应该有输出
+# 5. Confirm .env is gitignored (already is)
+grep ".env" .gitignore  # should produce output
 ```
 
-### 4.2 编写配置文件
+### 4.2 Write Configuration File
 
 ```toml
-# trading.toml — pulseTrader 交易配置
-# 完整模板见 trading.toml.example
+# trading.toml — pulseTrader trading configuration
+# Full template available at trading.toml.example
 
-# 顶级键必须在所有 [section] 之前
+# Top-level keys must precede all [section]s
 symbols = ["BTC_USDT", "ETH_USDT"]
 
 [exchange]
@@ -229,82 +229,82 @@ logDir = "logs"
 toConsole = true
 toFile = true
 
-# --- 策略配置 ---
+# --- Strategy Configuration ---
 [strategy]
-signal_aggregator_threshold = 0.6   # 聚合信号置信度 ≥ 0.6 才执行（单策略时匹配 min_confidence）
-signal_cooldown_sec = 30             # 同一币种信号冷却 30 秒
+signal_aggregator_threshold = 0.6   # Aggregated signal confidence ≥ 0.6 to execute (matches min_confidence for single strategy)
+signal_cooldown_sec = 30             # Signal cooldown per symbol: 30 seconds
 
 [[strategy.instances]]
 name = "momentum_scalper"
 symbol = "BTC_USDT"
-order_quantity = 0.001               # 每笔 0.001 BTC（约 $65）
+order_quantity = 0.001               # 0.001 BTC per order (~$65)
 min_confidence = 0.6
-poll_interval_ms = 200               # 200ms 轮询一次行情
+poll_interval_ms = 200               # 200ms market data polling interval
 
 [[strategy.instances]]
 name = "orderbook_scalper"
 symbol = "BTC_USDT"
 order_quantity = 0.001
 min_confidence = 0.65
-poll_interval_ms = 100               # 订单簿策略需要更频繁
+poll_interval_ms = 100               # Order book strategy needs more frequent polling
 
 [[strategy.instances]]
 name = "mean_reversion_scalper"
 symbol = "ETH_USDT"
-order_quantity = 0.01                # 每笔 0.01 ETH（约 $35）
+order_quantity = 0.01                # 0.01 ETH per order (~$35)
 min_confidence = 0.6
 poll_interval_ms = 500
 
-# --- 风控配置 ---
+# --- Risk Control Configuration ---
 [risk]
-maxPositionNotional = 500            # 最大持仓 500 USDT
-maxOpenPositions = 3                 # 最多同时 3 个仓位
-maxDailyDrawdown = 0.02              # 日亏 ≥ 2% 停机
-maxDrawdown = 0.05                   # 总回撤 ≥ 5% 全部停止
-maxOrdersPerSec = 5                  # 每秒最多 5 笔订单
-maxSymbolNotional = 300              # 单币种最大持仓 300 USDT
+maxPositionNotional = 500            # Max position size 500 USDT
+maxOpenPositions = 3                 # Max 3 simultaneous open positions
+maxDailyDrawdown = 0.02              # Daily loss ≥ 2% triggers halt
+maxDrawdown = 0.05                   # Total drawdown ≥ 5% stops everything
+maxOrdersPerSec = 5                  # Max 5 orders per second
+maxSymbolNotional = 300              # Max position per symbol 300 USDT
 
 [risk.stop_loss]
-mode = "Trailing"                    # 追踪止损
-trailing_pct = 0.005                 # 0.5% 追踪偏移
-max_hold_seconds = 300               # 最长持仓 5 分钟
+mode = "Trailing"                    # Trailing stop-loss
+trailing_pct = 0.005                 # 0.5% trailing offset
+max_hold_seconds = 300               # Max hold time 5 minutes
 
 [risk.take_profit]
 enabled = true
-targets_pct = [0.005, 0.01, 0.02]   # 0.5% / 1% / 2% 三档止盈
-fractions = [0.33, 0.33, 0.34]       # 每档平仓 33% / 33% / 34%
+targets_pct = [0.005, 0.01, 0.02]   # 0.5% / 1% / 2% three-tier take-profit
+fractions = [0.33, 0.33, 0.34]       # Close 33% / 33% / 34% at each tier
 
-# --- AI 配置 ---
+# --- AI Configuration ---
 [ai]
-backend = "openai"                   # 或 "claude"
+backend = "openai"                   # or "claude"
 model = "gpt-4o"
 apiKey = "from_env:OPENAI_API_KEY"
-heartbeatIntervalSec = 300           # 每 5 分钟 AI 分析一次
+heartbeatIntervalSec = 300           # AI analysis every 5 minutes
 requestTimeoutMs = 30000
 
-# --- WebUI 配置 ---
+# --- WebUI Configuration ---
 [webui]
 enabled = true
 bindAddress = "127.0.0.1"
 port = 8080
-authToken = ""                         # 空字符串 = 免认证（开发/testnet 推荐）
-                                       # 生产环境建议设置 token 或从 .env 读取：
+authToken = ""                         # Empty string = no authentication (recommended for dev/testnet)
+                                       # For production, set a token or read from .env:
                                        # authToken = "from_env:PULSE_WEBUI_TOKEN"
 maxClients = 4
 ```
 
-> **WebUI 认证说明**：
-> - `authToken = ""` → 免认证，打开浏览器直接使用（适合 testnet 开发）
-> - `authToken = "xxx"` → 首次访问弹出输入框，输入后缓存到 localStorage，刷新不再重复输入
-> - 也可通过 URL 传参免弹窗：`http://localhost:8080/?token=xxx`
+> **WebUI Authentication Notes**:
+> - `authToken = ""` → no authentication, browser access works directly (suitable for testnet development)
+> - `authToken = "xxx"` → first visit shows an input dialog; after entering, cached in localStorage, no re-entry on refresh
+> - Can also bypass the dialog via URL parameter: `http://localhost:8080/?token=xxx`
 
-### 4.3 启动交易
+### 4.3 Start Trading
 
 ```bash
-# 终端 1：启动交易主程序
+# Terminal 1: Start trading main program
 ./run.sh trade --config trading.toml
 
-# 预期输出：
+# Expected output:
 # [INFO] pulseTrader v0.1.0 starting...
 # [INFO] Exchange: Gate.io (REST + WS connected)
 # [INFO] Market Data: subscribed to BTC_USDT, ETH_USDT
@@ -317,402 +317,403 @@ maxClients = 4
 # [INFO] WebUI: http://127.0.0.1:8080
 # [INFO] Trading engine started. Press Ctrl+C to stop.
 #
-# 启动后约 60 秒，系统会开始每 60 秒打印一行心跳日志：
+# Approximately 60 seconds after startup, the system begins printing a heartbeat log line every 60 seconds:
 # [INFO] [heartbeat] uptime 1m00s | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)
 ```
 
-### 4.4 监控运行
+### 4.4 Monitor Operation
 
 ```bash
-# 终端 2：打开 WebUI
-# 浏览器访问 http://127.0.0.1:8080（trading.toml 已配好 WebUI）
+# Terminal 2: Open WebUI
+# Browse to http://127.0.0.1:8080 (WebUI already configured in trading.toml)
 
-# 或直接查看日志
-tail -f logs/system.log      # 系统心跳（每 60 秒：行情速率、WS 状态、策略、持仓）
-tail -f logs/strategy.log    # 策略信号 + 预热进度
-tail -f logs/exchange.log    # WS 连接状态
-tail -f logs/app.log         # 下单、风控决策
-tail -f logs/risk.log        # 风控事件
-tail -f logs/ai.log          # AI 分析结果
+# Or view logs directly
+tail -f logs/system.log      # System heartbeat (every 60s: market data rates, WS status, strategies, positions)
+tail -f logs/strategy.log    # Strategy signals + warm-up progress
+tail -f logs/exchange.log    # WS connection status
+tail -f logs/app.log         # Order placement, risk control decisions
+tail -f logs/risk.log        # Risk control events
+tail -f logs/ai.log          # AI analysis results
 ```
 
-> **⏱️ 策略预热期**
+> **⏱️ Strategy Warm-up Period**
 >
-> K 线驱动的策略（momentum_scalper、mean_reversion_scalper）启动后需要积累 20–22 根
-> 1 分钟 K 线才能开始工作。预热期间 `logs/strategy.log` 会每 30 秒报告进度：
+> K-line-driven strategies (momentum_scalper, mean_reversion_scalper) need to accumulate 20–22
+> 1-minute K-lines after startup before they begin working. During warm-up, `logs/strategy.log`
+> reports progress every 30 seconds:
 >
 > ```
 > [MomentumScalper] Warming up: 8/21 candles accumulated (need ~21 min of kline data)
 > ```
 >
-> 如果 WS 未连接，会看到：
+> If WS is not connected, you will see:
 > ```
 > [MomentumScalper] Waiting for kline data (WS may not be connected yet)
 > ```
 >
-> 请耐心等待至少 **25 分钟**，让策略完成预热。
+> Please wait patiently for at least **25 minutes** to allow strategies to complete warm-up.
 
-### 4.5 停止交易
+### 4.5 Stop Trading
 
 ```bash
-# 优雅退出：Ctrl+C 或发送 SIGTERM
-# 主程序会反序停止各层：
-#   1. L9: 停止 WebUI 服务器
-#   2. L6: 停止策略引擎（不再产生新信号）
-#   3. L3: 停止行情订阅（WS 取消订阅 channels）
-#   4. L1: 停止 WS 事件循环（io_context::stop）
-#          → 关闭 ProxyTunnel（poll 超时退出 accept 线程，
-#            关闭 relay socket，join relay 线程）
-#   5. L8+: 关闭 SQLite trade recorder
-#   6. L2: 刷新日志
-#   7. 退出
+# Graceful shutdown: Ctrl+C or send SIGTERM
+# Main program stops each layer in reverse order:
+#   1. L9: Stop WebUI server
+#   2. L6: Stop strategy engine (no new signals generated)
+#   3. L3: Stop market data subscriptions (WS unsubscribes channels)
+#   4. L1: Stop WS event loop (io_context::stop)
+#          → Shut down ProxyTunnel (poll timeout exits accept thread,
+#            close relay socket, join relay thread)
+#   5. L8+: Close SQLite trade recorder
+#   6. L2: Flush logs
+#   7. Exit
 #
-# 整个退出流程通常在 1 秒内完成
+# The entire shutdown process typically completes within 1 second
 ```
 
 ---
 
-## 5. 关键参数调优指南
+## 5. Key Parameter Tuning Guide
 
-### 5.1 策略参数
+### 5.1 Strategy Parameters
 
-| 参数 | 含义 | 调优方向 |
-|------|------|----------|
-| `order_quantity` | 每笔下单量 | 从小开始（0.001 BTC），验证盈利后逐步加大 |
-| `min_confidence` | 信号置信度门槛 | 越高越保守（少交易但精准），越低越激进（多交易但噪音多） |
-| `poll_interval_ms` | 行情轮询频率 | 越低延迟越好，但 CPU 占用更高。建议 100–500ms |
-| `signal_aggregator_threshold` | 聚合信号执行门槛 | 0.6 = 单策略即可触发下单；多策略共识时可提高到 0.7+ |
-| `signal_cooldown_sec` | 同币种信号冷却 | 防止连续下单。剥头皮建议 15–60 秒 |
+| Parameter | Meaning | Tuning Direction |
+|-----------|---------|------------------|
+| `order_quantity` | Order size per trade | Start small (0.001 BTC), increase gradually after confirming profitability |
+| `min_confidence` | Signal confidence threshold | Higher = more conservative (fewer trades but more precise); lower = more aggressive (more trades but more noise) |
+| `poll_interval_ms` | Market data polling frequency | Lower = better latency but higher CPU usage. Recommended 100–500ms |
+| `signal_aggregator_threshold` | Aggregated signal execution threshold | 0.6 = single strategy can trigger an order; with multi-strategy consensus, raise to 0.7+ |
+| `signal_cooldown_sec` | Per-symbol signal cooldown | Prevents consecutive order placement. For scalping, recommended 15–60 seconds |
 
-### 5.2 EMA 交叉策略 (momentum_scalper)
-
-```cpp
-// strategy_params.hpp 中的可调参数
-ema_fast_period     = 9       // 快线周期（越小越灵敏）
-ema_slow_period     = 21      // 慢线周期（越大越平滑）
-ema_crossover_thresh = 0.001  // 交叉阈值（0.1%）
-```
-
-**调优建议**：
-- 震荡行情：加大 `ema_slow_period`（如 50），减少假信号
-- 趋势行情：减小 `ema_fast_period`（如 5），更快捕捉趋势
-
-### 5.3 订单簿失衡策略 (orderbook_scalper)
+### 5.2 EMA Crossover Strategy (momentum_scalper)
 
 ```cpp
-ob_imbalance_window  = 5       // 深度层数
-ob_imbalance_thresh  = 0.6     // 买卖比阈值（0.6 = 买方量占 60%）
-ob_refresh_ms        = 100     // 订单簿刷新间隔
+// Tunable parameters in strategy_params.hpp
+ema_fast_period     = 9       // Fast line period (smaller = more responsive)
+ema_slow_period     = 21      // Slow line period (larger = smoother)
+ema_crossover_thresh = 0.001  // Crossover threshold (0.1%)
 ```
 
-**调优建议**：
-- 高波动市场：降低阈值到 0.55，更容易触发信号
-- 低流动性币种：减少深度层数到 3，只看近盘
+**Tuning recommendations**:
+- Ranging market: increase `ema_slow_period` (e.g., 50) to reduce false signals
+- Trending market: decrease `ema_fast_period` (e.g., 5) to capture trends faster
 
-### 5.4 布林带均值回归策略 (mean_reversion_scalper)
+### 5.3 Order Book Imbalance Strategy (orderbook_scalper)
 
 ```cpp
-bb_period            = 20      // 布林带周期
-bb_std_dev           = 2.0     // 标准差倍数
-bb_entry_thresh      = 0.001   // 触碰带边后入场阈值
+ob_imbalance_window  = 5       // Depth levels
+ob_imbalance_thresh  = 0.6     // Bid/ask ratio threshold (0.6 = bid volume accounts for 60%)
+ob_refresh_ms        = 100     // Order book refresh interval
 ```
 
-**调优建议**：
-- 适合震荡行情（BTC 横盘时）
-- 趋势行情中应禁用此策略（会逆势开仓）
+**Tuning recommendations**:
+- High-volatility market: lower threshold to 0.55 for easier signal triggering
+- Low-liquidity symbols: reduce depth levels to 3, focusing on near-book only
 
-### 5.5 AI 调参
+### 5.4 Bollinger Band Mean Reversion Strategy (mean_reversion_scalper)
 
-AI 每 5 分钟分析一次社交/新闻情绪，输出 `ParamDeltas` 调整策略参数：
+```cpp
+bb_period            = 20      // Bollinger Band period
+bb_std_dev           = 2.0     // Standard deviation multiplier
+bb_entry_thresh      = 0.001   // Entry threshold after touching band edge
+```
+
+**Tuning recommendations**:
+- Suitable for ranging markets (when BTC is consolidating)
+- Should be disabled during trending markets (will open positions against the trend)
+
+### 5.5 AI Parameter Tuning
+
+AI analyzes social/news sentiment every 5 minutes and outputs `ParamDeltas` to adjust strategy parameters:
 
 ```json
 {
-  "ema_fast_delta": -1,       // 加快 EMA 快线
+  "ema_fast_delta": -1,       // Speed up EMA fast line
   "ema_slow_delta": 0,
-  "ob_thresh_delta": 0.05,    // 提高订单簿阈值
-  "bb_std_delta": -0.2,       // 收窄布林带
-  "confidence_delta": 0.05,   // 提高置信度门槛
+  "ob_thresh_delta": 0.05,    // Raise order book threshold
+  "bb_std_delta": -0.2,       // Narrow Bollinger Bands
+  "confidence_delta": 0.05,   // Raise confidence threshold
   ...
 }
 ```
 
-**注意**：AI 调参效果高度依赖 prompt 设计。初期建议**关闭 AI 调参**，先验证基础策略的盈利能力。
+**Note**: AI parameter tuning effectiveness is highly dependent on prompt design. Initially, it is recommended to **disable AI parameter tuning** and first validate the base strategy's profitability.
 
 ---
 
-## 6. 风险控制体系
+## 6. Risk Control System
 
-### 6.1 多层风控
-
-```
-信号产生 → 信号聚合 → 风控检查 → 下单 → 持仓监控 → 止损/止盈
-                                    ↓
-                              以下任一条件不满足则拒绝：
-                              - 总持仓 < maxPositionNotional
-                              - 单币种 < maxSymbolNotional
-                              - 仓位数 < maxOpenPositions
-                              - 下单频率 < maxOrdersPerSec
-                              - 日亏损 < maxDailyDrawdown
-                              - 总回撤 < maxDrawdown
-```
-
-### 6.2 止损策略
-
-| 模式 | 说明 | 适用场景 |
-|------|------|----------|
-| **Fixed** | 入场价 ±1% 固定止损 | 简单明了，适合新手 |
-| **Trailing** | 追踪最优价，回撤 0.5% 触发 | **推荐**，适合趋势行情 |
-| **TimeBased** | 持仓超过 5 分钟强制平仓 | 超短线剥头皮 |
-
-### 6.3 止盈阶梯
+### 6.1 Multi-Layer Risk Control
 
 ```
-入场价 → +0.5% 平 33% → +1.0% 平 33% → +2.0% 平 34%
+Signal generation → Signal aggregation → Risk check → Order placement → Position monitoring → Stop-loss/Take-profit
+                                                          ↓
+                                                    Rejected if any condition is not met:
+                                                    - Total position < maxPositionNotional
+                                                    - Per-symbol < maxSymbolNotional
+                                                    - Position count < maxOpenPositions
+                                                    - Order rate < maxOrdersPerSec
+                                                    - Daily loss < maxDailyDrawdown
+                                                    - Total drawdown < maxDrawdown
 ```
 
-分批止盈可以：
-- 锁定部分利润，避免利润回吐
-- 让剩余仓位享受更大涨幅
-- 降低单次决策的风险
+### 6.2 Stop-Loss Strategies
 
-### 6.4 熔断机制
+| Mode | Description | Suitable Scenario |
+|------|-------------|-------------------|
+| **Fixed** | Fixed stop-loss at entry price ±1% | Simple and straightforward, suitable for beginners |
+| **Trailing** | Tracks best price, triggers on 0.5% drawdown | **Recommended**, suitable for trending markets |
+| **TimeBased** | Force-close position after 5 minutes | Ultra-short-term scalping |
 
-| 条件 | 动作 |
-|------|------|
-| 日亏损 ≥ 2% | 停止开新仓，已有仓位继续管理 |
-| 总回撤 ≥ 5% | 全部平仓，系统停机，需手动重启 |
-| 下单频率超限 | 丢弃多余信号，记录告警 |
+### 6.3 Take-Profit Ladder
 
-### 6.5 操作安全
+```
+Entry price → +0.5% close 33% → +1.0% close 33% → +2.0% close 34%
+```
 
-- ✅ API Key 只开交易权限，**不开提币权限**
-- ✅ 使用子账户隔离风险
-- ✅ IP 白名单限制 API 访问
-- ✅ `.env` 文件已 gitignore
-- ⚠️ 当前配置使用**主网**（非 testnet），真金白银
+Tiered take-profit allows you to:
+- Lock in partial profits, avoiding profit giveback
+- Let remaining positions benefit from larger price moves
+- Reduce risk per individual decision
+
+### 6.4 Circuit Breaker Mechanism
+
+| Condition | Action |
+|-----------|--------|
+| Daily loss ≥ 2% | Stop opening new positions; existing positions continue to be managed |
+| Total drawdown ≥ 5% | Close all positions, system halts, manual restart required |
+| Order rate exceeds limit | Discard excess signals, log warning |
+
+### 6.5 Operational Security
+
+- ✅ API Key only has trading permission, **NOT withdrawal permission**
+- ✅ Use sub-accounts to isolate risk
+- ✅ IP whitelist restricts API access
+- ✅ `.env` file is gitignored
+- ⚠️ Current configuration uses **mainnet** (not testnet) — real money
 
 ---
 
-## 7. 盈利性分析
+## 7. Profitability Analysis
 
-### 7.1 手续费是最大敌人
+### 7.1 Fees Are the Biggest Enemy
 
-| 项目 | 费率 | 说明 |
-|------|------|------|
-| Gate.io 现货 Taker | 0.2% | 吃单方（market order） |
-| Gate.io 现货 Maker | 0.2% | 挂单方（limit order） |
-| 一个来回 | **0.4%** | 买入 + 卖出 |
-| VIP 1（≥100万/月） | 0.15% | 一个来回 0.3% |
-| 点卡支付 | 8折 | 用 GT 代币支付手续费 |
+| Item | Rate | Description |
+|------|------|-------------|
+| Gate.io Spot Taker | 0.2% | Taker side (market order) |
+| Gate.io Spot Maker | 0.2% | Maker side (limit order) |
+| Round trip | **0.4%** | Buy + sell |
+| VIP 1 (≥1M/month) | 0.15% | Round trip 0.3% |
+| Point card payment | 20% discount | Pay fees with GT tokens |
 
-### 7.2 盈亏平衡计算
-
-```
-假设：
-  - 每笔交易 0.001 BTC ≈ $65
-  - 手续费一个来回 0.4% = $0.26
-  - 滑点估算 0.1% = $0.065
-
-盈亏平衡：
-  - 每笔利润必须 > $0.325（0.5%）才能覆盖成本
-  - 如果胜率 55%，盈亏比需要 > 0.82:1
-  - 如果胜率 50%，盈亏比需要 > 1.0:1（即平均盈利 = 平均亏损）
-
-结论：
-  - 剥头皮利润空间极窄（0.5%–2%）
-  - 手续费 + 滑点吃掉 20%–60% 的利润
-  - 需要胜率 > 55% 或盈亏比 > 1.5:1 才能稳定盈利
-```
-
-### 7.3 延迟的影响
+### 7.2 Break-Even Calculation
 
 ```
-你的设置（国内 + 代理）：
-  - 网络延迟：~100–200ms（到 Gate.io 服务器）
-  - 代理额外延迟：~20–50ms
-  - 总往返延迟：~250–500ms
+Assumptions:
+  - Each trade: 0.001 BTC ≈ $65
+  - Fees round trip: 0.4% = $0.26
+  - Estimated slippage: 0.1% = $0.065
 
-真正的 HFT：
-  - Co-location：~1ms
-  - 同机房：~0.1ms
+Break-even:
+  - Each trade profit must be > $0.325 (0.5%) to cover costs
+  - If win rate is 55%, profit/loss ratio needs to be > 0.82:1
+  - If win rate is 50%, profit/loss ratio needs to be > 1.0:1 (i.e., avg win = avg loss)
 
-结论：
-  - 你不可能是最快的，不要和机构拼速度
-  - 适合做 1–5 分钟级别的中频策略
-  - 避免做秒级剥头皮（会被更快的对手方吃掉）
+Conclusion:
+  - Scalping profit margin is extremely narrow (0.5%–2%)
+  - Fees + slippage consume 20%–60% of profits
+  - Need win rate > 55% or profit/loss ratio > 1.5:1 for consistent profitability
 ```
 
-### 7.4 合理的盈利预期
+### 7.3 Impact of Latency
 
-| 场景 | 月收益率 | 条件 |
-|------|----------|------|
-| 保守 | 2–5% | 低频率、严格风控、震荡行情 |
-| 中性 | 5–10% | 中频率、策略有效、市场配合 |
-| 激进 | 10–20% | 高频率、大仓位、承担高风险 |
-| 亏损 | -5% ~ -100% | 策略无效、黑天鹅、风控失效 |
+```
+Your setup (China + proxy):
+  - Network latency: ~100–200ms (to Gate.io servers)
+  - Proxy additional latency: ~20–50ms
+  - Total round-trip latency: ~250–500ms
 
-**现实**：大部分个人量化交易者最终是亏损的。机构有速度优势、数据优势、资金优势。个人量化的核心竞争力在于：灵活性（可以快速切换策略）和零管理费。
+Real HFT:
+  - Co-location: ~1ms
+  - Same data center: ~0.1ms
+
+Conclusion:
+  - You cannot be the fastest; do not compete on speed with institutions
+  - Suitable for 1–5 minute mid-frequency strategies
+  - Avoid second-level scalping (will be eaten by faster counterparties)
+```
+
+### 7.4 Reasonable Profit Expectations
+
+| Scenario | Monthly Return | Conditions |
+|----------|----------------|------------|
+| Conservative | 2–5% | Low frequency, strict risk control, ranging market |
+| Moderate | 5–10% | Mid frequency, effective strategies, favorable market |
+| Aggressive | 10–20% | High frequency, large positions, higher risk |
+| Loss | -5% ~ -100% | Ineffective strategies, black swan events, risk control failure |
+
+**Reality**: Most individual quantitative traders end up losing money. Institutions have speed advantages, data advantages, and capital advantages. The core competitive edge for individual quant traders lies in: flexibility (ability to quickly switch strategies) and zero management fees.
 
 ---
 
-## 8. 风险警告
+## 8. Risk Warnings
 
-### 8.1 技术风险
+### 8.1 Technical Risks
 
-| 风险 | 影响 | 缓解措施 |
-|------|------|----------|
-| 网络断连 | 无法平仓 | 止损单 + 手动平仓备用通道 |
-| 代理故障 | 行情延迟 | 健康检查 + 自动重连 |
-| 程序 Bug | 错误下单 | 风控层拦截 + 小资金试跑 |
-| API 变更 | 接口失效 | 版本锁定 + 错误处理 |
-| 服务器宕机 | 无人值守 | 云服务商 + 监控告警 |
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Network disconnection | Unable to close positions | Stop-loss orders + manual close fallback channel |
+| Proxy failure | Market data delay | Health checks + automatic reconnection |
+| Program bugs | Incorrect order placement | Risk control layer interception + small capital trial runs |
+| API changes | Interface failures | Version pinning + error handling |
+| Server downtime | Unattended operation | Cloud provider + monitoring alerts |
 
-### 8.2 市场风险
+### 8.2 Market Risks
 
-| 风险 | 影响 | 缓解措施 |
-|------|------|----------|
-| 闪崩 | 瞬间巨亏 | 日亏损熔断（2%） |
-| 流动性枯竭 | 滑点巨大 | 限仓（单币种 300 USDT） |
-| 交易所故障 | 无法交易 | 分散到多交易所 |
-| 策略失效 | 连续亏损 | 回撤熔断（5%） |
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Flash crash | Instant large losses | Daily loss circuit breaker (2%) |
+| Liquidity drought | Huge slippage | Position limits (300 USDT per symbol) |
+| Exchange malfunction | Unable to trade | Diversify across multiple exchanges |
+| Strategy failure | Consecutive losses | Drawdown circuit breaker (5%) |
 
-### 8.3 操作风险
+### 8.3 Operational Risks
 
-| 风险 | 影响 | 缓解措施 |
-|------|------|----------|
-| API Key 泄露 | 资产被盗 | 不开提币权限 + IP 白名单 |
-| 误操作 | 意外下单 | testnet 先行 + 确认流程 |
-| 配置错误 | 参数异常 | 配置文件校验 + 合理默认值 |
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| API Key leakage | Asset theft | No withdrawal permission + IP whitelist |
+| Misoperation | Unintended order placement | Testnet first + confirmation procedures |
+| Configuration errors | Abnormal parameters | Config file validation + reasonable defaults |
 
 ---
 
-## 9. 常见问题
+## 9. FAQ
 
-### Q1: 如何使用 testnet？
+### Q1: How to use testnet?
 
-已支持（M13）。设置方式：
+Already supported (M13). Setup:
 
 ```bash
-# .env 中设置
+# Set in .env
 PULSE_NETWORK=testnet
 
-# trading.toml 中设置
+# Set in trading.toml
 [exchange]
 testnet = true
 apiKey = "from_env:GATE_TESTNET_API_KEY"
 apiSecret = "from_env:GATE_TESTNET_API_SECRET"
 ```
 
-注意事项：
-- Testnet REST 地址：`https://api-testnet.gateapi.io`（虚拟资金，代码根据 `testnet=true` 自动设置）
-- 行情 WS 使用主网（testnet WS 国内不可达，行情数据主网/测试网完全相同）
-- Testnet 仅支持合约（futures），不支持现货 — 策略必须设 `market_type = "futures"`
-- Testnet API Key 需在 https://fx-testnet.gateio.ws 单独创建
-- 启动时会显示醒目 `⚠️ TESTNET MODE` 提示
+Notes:
+- Testnet REST endpoint: `https://api-testnet.gateapi.io` (virtual funds, code auto-configures based on `testnet=true`)
+- Market data WS uses mainnet (testnet WS is unreachable from China; market data is identical between mainnet/testnet)
+- Testnet only supports futures, not spot — strategies must set `market_type = "futures"`
+- Testnet API Keys must be created separately at https://fx-testnet.gateio.ws
+- A prominent `⚠️ TESTNET MODE` notice is displayed at startup
 
-### Q2: 可以同时跑多少个策略？
+### Q2: How many strategies can run simultaneously?
 
-当前架构支持多策略并行（每个策略一个 `std::jthread`），实际受限于：
-- CPU 核心数（每个策略一个线程 + 行情线程）
-- 风控限制（`maxOpenPositions = 5`）
-- 建议：初期 2–3 个策略，观察效果后再增加
+The current architecture supports multiple strategies running in parallel (one `std::jthread` per strategy), practically limited by:
+- CPU core count (one thread per strategy + market data thread)
+- Risk control limits (`maxOpenPositions = 5`)
+- Recommendation: start with 2–3 strategies, observe results before adding more
 
-### Q3: AI 调参真的有用吗？
+### Q3: Is AI parameter tuning actually useful?
 
-**不确定**。这是一个实验性功能：
-- LLM 分析社交/新闻情绪 → 输出参数调整建议
-- 有效性完全取决于 prompt 设计和市场状态
-- 建议初期**关闭 AI 调参**（`heartbeatIntervalSec = 0`），先验证基础策略
-- 确认基础策略盈利后，再开启 AI 观察效果
+**Uncertain**. This is an experimental feature:
+- LLM analyzes social/news sentiment → outputs parameter adjustment suggestions
+- Effectiveness is entirely dependent on prompt design and market conditions
+- Recommended to **disable AI parameter tuning** initially (`heartbeatIntervalSec = 0`), validate the base strategy first
+- After confirming base strategy profitability, enable AI and observe results
 
-### Q4: 为什么选择 Gate.io？
+### Q4: Why choose Gate.io?
 
-- REST + WebSocket API 文档完善
-- 支持子账户（风险隔离）
-- 手续费相对合理（0.2%）
-- 流动性可接受（BTC/ETH 主流币对）
-- 缺点：延迟不如 Binance，国内需要代理
+- REST + WebSocket API documentation is comprehensive
+- Supports sub-accounts (risk isolation)
+- Fees are relatively reasonable (0.2%)
+- Liquidity is acceptable (BTC/ETH major pairs)
+- Drawback: latency is not as good as Binance; requires a proxy from China
 
-### Q5: 如何判断策略是否有效？
+### Q5: How to determine if a strategy is effective?
 
-运行 1 周后统计：
+After running for 1 week, check statistics:
 
-| 指标 | 合格线 | 优秀线 |
-|------|--------|--------|
-| 胜率 | > 50% | > 60% |
-| 盈亏比 | > 1.0 | > 1.5 |
-| 夏普比率 | > 1.0 | > 2.0 |
-| 最大回撤 | < 10% | < 5% |
-| 日交易次数 | 5–20 | 10–30 |
-| 净利润（扣费后） | > 0 | 月化 > 5% |
+| Metric | Passing Grade | Excellent Grade |
+|--------|---------------|-----------------|
+| Win rate | > 50% | > 60% |
+| Profit/loss ratio | > 1.0 | > 1.5 |
+| Sharpe ratio | > 1.0 | > 2.0 |
+| Max drawdown | < 10% | < 5% |
+| Daily trade count | 5–20 | 10–30 |
+| Net profit (after fees) | > 0 | Monthly > 5% |
 
-### Q6: 遇到问题怎么排查？
+### Q6: How to troubleshoot issues?
 
 ```bash
-# 1. 检查连接
-./run.sh rest    # REST 是否通？
-./run.sh ws      # WS 是否收到实时行情？
+# 1. Check connectivity
+./run.sh rest    # Does REST work?
+./run.sh ws      # Is WS receiving real-time market data?
 
-# 2. 检查行情
-./run.sh market  # L3 组件是否正常更新？
+# 2. Check market data
+./run.sh market  # Are L3 components updating normally?
 
-# 3. 检查策略
-./run.sh strategy  # 策略是否产生信号？
+# 3. Check strategies
+./run.sh strategy  # Are strategies generating signals?
 
-# 4. 检查 AI
-./run.sh ai      # AI 是否正常返回分析结果？
+# 4. Check AI
+./run.sh ai      # Is AI returning analysis results normally?
 
-# 5. 查看日志
+# 5. Check logs
 ls logs/
-cat logs/exchange.log   # 连接错误？
-cat logs/strategy.log   # 信号异常？
-cat logs/risk.log       # 风控触发？
-cat logs/execution.log  # 下单失败？
+cat logs/exchange.log   # Connection errors?
+cat logs/strategy.log   # Abnormal signals?
+cat logs/risk.log       # Risk control triggered?
+cat logs/execution.log  # Order placement failures?
 
 # 6. WebUI
-# 浏览器打开 http://127.0.0.1:8080 查看实时状态
+# Open browser to http://127.0.0.1:8080 to view real-time status
 ```
 
-### Q7: 启动后一直没有下单？
+### Q7: No orders placed after startup?
 
-按以下清单逐项排查：
+Check the following checklist item by item:
 
-1. **系统是否存活？** — `tail -f logs/system.log`
-   - 每 60 秒看到 `[heartbeat] uptime ...` → 系统正常运行中，只是尚未触发交易信号
-   - 如果 60 秒后仍无任何输出 → 进程可能已挂起，检查 `logs/exchange.log` 排查 WS 连接
-2. **WS 是否连上了？** — `grep "WS connected" logs/exchange.log`
-   - 如果看到反复 `WS connection failed` → 检查代理 (`HTTPS_PROXY`) 是否正常
-3. **策略是否在预热？** — `tail -f logs/strategy.log`
-   - 看到 `Warming up: X/N candles` → 正常，需要等 ~22 分钟积累 K 线数据
-   - 看到 `Waiting for kline data` → WS 未连接，无行情数据流入
-4. **聚合器阈值是否太高？** — 单策略时 `signal_aggregator_threshold` 应 ≤ 策略的 `min_confidence`
-   - 默认 momentum_scalper 的 min_confidence=0.6，threshold 应设为 0.6
-5. **风控是否拒绝？** — `grep "REJECTED\|halted" logs/app.log`
-   - 可能触发：日回撤超限、仓位数量上限、频率限制
+1. **Is the system alive?** — `tail -f logs/system.log`
+   - Seeing `[heartbeat] uptime ...` every 60 seconds → system is running normally, just hasn't triggered a trading signal yet
+   - If no output at all after 60 seconds → process may be hung, check `logs/exchange.log` to troubleshoot WS connection
+2. **Is WS connected?** — `grep "WS connected" logs/exchange.log`
+   - If you see repeated `WS connection failed` → check if proxy (`HTTPS_PROXY`) is working
+3. **Are strategies warming up?** — `tail -f logs/strategy.log`
+   - Seeing `Warming up: X/N candles` → normal, need to wait ~22 minutes to accumulate K-line data
+   - Seeing `Waiting for kline data` → WS not connected, no market data flowing in
+4. **Is the aggregator threshold too high?** — For single strategy, `signal_aggregator_threshold` should be ≤ the strategy's `min_confidence`
+   - Default momentum_scalper has min_confidence=0.6, threshold should be set to 0.6
+5. **Is risk control rejecting?** — `grep "REJECTED\|halted" logs/app.log`
+   - Possible triggers: daily drawdown exceeded, position count limit, rate limit
 
 ---
 
-## 附录：快速参考卡
+## Appendix: Quick Reference Card
 
 ```
-┌─────────────────────────────────────────────────┐
-│              pulseTrader 操作速查                 │
-├─────────────────────────────────────────────────┤
-│  启动:  ./run.sh trade（自动加载 trading.toml）   │
-│  监控:  ./run.sh webui → http://localhost:8080   │
-│  停止:  Ctrl+C（~1秒优雅退出）                     │
-│  测试:  ./run.sh test（537 个单元测试）            │
-│  日志:  tail -f logs/*.log                       │
-├─────────────────────────────────────────────────┤
-│  .env:         PULSE_NETWORK / API Key / Proxy   │
-│  trading.toml: 策略参数 / 风控 / AI / testnet    │
-│  子账户:       隔离风险，不开提币权限              │
-│  熔断:         日亏 2% 停 / 总回撤 5% 全停        │
-├─────────────────────────────────────────────────┤
-│  ✅ Testnet: PULSE_NETWORK=testnet 虚拟资金测试   │
-│  ⚠️  Mainnet: PULSE_NETWORK=mainnet 真金白银     │
-│  ⚠️  手续费一个来回 0.4%                         │
-│  ⚠️  延迟 ~250-500ms，不要和机构拼速度           │
-│  ⚠️  先 testnet 验证，再小资金实盘               │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│              pulseTrader Operations Quick Reference      │
+├─────────────────────────────────────────────────────────┤
+│  Start:   ./run.sh trade (auto-loads trading.toml)      │
+│  Monitor: ./run.sh webui → http://localhost:8080        │
+│  Stop:    Ctrl+C (~1s graceful shutdown)                │
+│  Test:    ./run.sh test (537 unit tests)                │
+│  Logs:    tail -f logs/*.log                            │
+├─────────────────────────────────────────────────────────┤
+│  .env:         PULSE_NETWORK / API Key / Proxy          │
+│  trading.toml: Strategy params / Risk / AI / testnet    │
+│  Sub-accounts: Isolate risk, no withdrawal permission   │
+│  Circuit breakers: Daily loss 2% halt / Total DD 5% stop│
+├─────────────────────────────────────────────────────────┤
+│  ✅ Testnet:  PULSE_NETWORK=testnet virtual funds test  │
+│  ⚠️  Mainnet: PULSE_NETWORK=mainnet real money          │
+│  ⚠️  Round-trip fees: 0.4%                              │
+│  ⚠️  Latency ~250-500ms, don't compete on speed        │
+│  ⚠️  Testnet first, then small capital live trading     │
+└─────────────────────────────────────────────────────────┘
 ```
