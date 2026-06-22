@@ -55,6 +55,9 @@ logs/
 # Environment variables (API keys)
 .env
 
+# vcpkg installed packages (build artifacts, platform-specific)
+vcpkg_installed/
+
 # CTest temporary files
 Testing/
 

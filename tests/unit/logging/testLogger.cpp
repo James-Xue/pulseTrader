@@ -18,6 +18,11 @@
 #include <fstream>
 #include <string>
 
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#define getpid _getpid
+#endif
+
 namespace pulse::logging
 {
 namespace

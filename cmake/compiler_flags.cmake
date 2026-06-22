@@ -10,6 +10,10 @@ if(MSVC)
         /permissive- # Strict standard conformance
         /Zc:__cplusplus  # Report correct __cplusplus value
     )
+    add_compile_definitions(
+        _CRT_SECURE_NO_WARNINGS  # Suppress MSVC deprecation warnings for getenv, etc.
+        _WIN32_WINNT=0x0A00      # Target Windows 10 (required by asio / websocketpp)
+    )
 else()
     # GCC and Clang
     add_compile_options(

@@ -28,6 +28,8 @@
 #include "risk/drawdown_guard.hpp"
 #include "risk/order_rate_limiter.hpp"
 #include "risk/position_manager.hpp"
+
+#include <fmt/ranges.h>
 #include "risk/risk_manager.hpp"
 #include "execution/order_executor.hpp"
 #include "execution/order_tracker.hpp"

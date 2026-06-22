@@ -13,7 +13,12 @@
 #include <asio/streambuf.hpp>
 #include <asio/write.hpp>
 
-#include <poll.h>
+// Cross-platform select(): available on both POSIX and Windows (winsock2).
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <sys/select.h>
+#endif
 
 #include <cstdlib>
 #include <istream>
@@ -124,13 +129,26 @@ std::string ProxyTunnel::start()
         {
             try
             {
-                // Use poll() with timeout so we can check running_ periodically
-                struct pollfd pfd;
-                pfd.fd = acceptor_->native_handle();
-                pfd.events = POLLIN;
-                pfd.revents = 0;
+                // Use select() with timeout so we can check running_ periodically.
+                // select() is portable across POSIX and Windows (winsock2).
+                fd_set read_fds;
+                FD_ZERO(&read_fds);
+                auto native_fd = acceptor_->native_handle();
 
-                const int ret = ::poll(&pfd, 1, 200); // 200ms timeout
+#ifndef _WIN32
+                // POSIX: FD_SET overflows if fd >= FD_SETSIZE (typically 1024)
+                if (static_cast<int>(native_fd) >= FD_SETSIZE)
+                {
+                    break; // fd too large for select — should not happen for a single acceptor
+                }
+#endif
+
+                FD_SET(native_fd, &read_fds);
+                struct timeval tv;
+                tv.tv_sec = 0;
+                tv.tv_usec = 200000; // 200ms
+
+                const int ret = ::select(static_cast<int>(native_fd) + 1, &read_fds, nullptr, nullptr, &tv);
                 if (ret <= 0)
                 {
                     continue; // timeout or error — check running_ again
