@@ -838,7 +838,10 @@ int main(int argc, char* argv[])
             req.market_type = sig.market_type;
 
             // Find strategy config for leverage/quantity settings.
+            // Signal aggregator uses strategy_id "signal_aggregator" which won't
+            // match any instance name — fall back to first strategy on the same symbol.
             req.quantity = 0.001;
+            bool matched = false;
             for (const auto& inst : cfg.strategy.strategies)
             {
                 if (inst.name == sig.strategy_id)
@@ -846,8 +849,29 @@ int main(int argc, char* argv[])
                     req.quantity = inst.order_quantity;
                     req.market_type = inst.market_type;
                     req.leverage = inst.leverage;
+                    matched = true;
                     break;
                 }
+            }
+            if (!matched)
+            {
+                // Fallback: use first enabled strategy for this symbol.
+                for (const auto& inst : cfg.strategy.strategies)
+                {
+                    if (inst.enabled && inst.symbol == sig.symbol)
+                    {
+                        req.quantity = inst.order_quantity;
+                        req.market_type = inst.market_type;
+                        req.leverage = inst.leverage;
+                        break;
+                    }
+                }
+            }
+
+            // For futures: convert quantity to contract_size (integer contracts).
+            if (MarketType::Futures == req.market_type && req.contract_size == 0)
+            {
+                req.contract_size = static_cast<int>(std::max(1.0, std::round(req.quantity)));
             }
 
             // Risk evaluation.
