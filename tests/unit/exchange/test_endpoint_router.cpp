@@ -4,7 +4,7 @@
 // WebSocket channel prefixes, and ping/pong channel names.
 // No network connections required — pure logic tests.
 
-#include "exchange/endpoint_router.hpp"
+#include "exchange/EndpointRouter.hpp"
 
 #include <gtest/gtest.h>
 

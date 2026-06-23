@@ -14,12 +14,12 @@
 //   5. End-to-end signal flow: Strategy → SignalAggregator → output callback
 
 #include "core/config.hpp"
-#include "logging/logger.hpp"
-#include "strategy/scalping/mean_reversion_scalper.hpp"
-#include "strategy/scalping/momentum_scalper.hpp"
-#include "strategy/scalping/orderbook_scalper.hpp"
-#include "strategy/signal/signal_aggregator.hpp"
-#include "strategy/strategy_manager.hpp"
+#include "logging/Logger.hpp"
+#include "strategy/scalping/MeanReversionScalper.hpp"
+#include "strategy/scalping/MomentumScalper.hpp"
+#include "strategy/scalping/OrderBookScalper.hpp"
+#include "strategy/signal/SignalAggregator.hpp"
+#include "strategy/StrategyManager.hpp"
 
 #include <chrono>
 #include <cmath>

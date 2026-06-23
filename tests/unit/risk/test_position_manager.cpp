@@ -1,6 +1,6 @@
 // test_position_manager.cpp — Unit tests for PositionManager (Layer 7 Risk Management)
 
-#include "risk/position_manager.hpp"
+#include "risk/PositionManager.hpp"
 
 #include <gtest/gtest.h>
 

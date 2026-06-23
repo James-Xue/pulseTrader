@@ -1,6 +1,6 @@
 // test_drawdown_guard.cpp — Unit tests for DrawdownGuard (Layer 7 Risk Management)
 
-#include "risk/drawdown_guard.hpp"
+#include "risk/DrawdownGuard.hpp"
 
 #include <gtest/gtest.h>
 

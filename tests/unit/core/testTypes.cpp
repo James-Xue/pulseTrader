@@ -9,7 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "core/config.hpp"
-#include "core/error.hpp"
+#include "core/PulseError.hpp"
 #include "core/types.hpp"
 
 using namespace pulse;

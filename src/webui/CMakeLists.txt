@@ -1,9 +1,9 @@
 # pulse_webui — Layer 9 WebUI Dashboard
 
 add_library(pulse_webui STATIC
-    dashboard_state.cpp
-    web_server.cpp
-    ws_server.cpp
+    DashboardState.cpp
+    WebServer.cpp
+    WsServer.cpp
 )
 
 add_library(pulse::webui ALIAS pulse_webui)

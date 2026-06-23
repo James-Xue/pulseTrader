@@ -1,6 +1,6 @@
 // test_ticker_cache.cpp — Unit tests for TickerCache (Layer 3 Market Data)
 
-#include "market/ticker_cache.hpp"
+#include "market/TickerCache.hpp"
 
 #include <gtest/gtest.h>
 

@@ -1,7 +1,7 @@
 # pulse_logging — async per-module logger wrapping spdlog.
 
 add_library(pulse_logging STATIC
-    logger.cpp
+    Logger.cpp
 )
 
 add_library(pulse::logging ALIAS pulse_logging)

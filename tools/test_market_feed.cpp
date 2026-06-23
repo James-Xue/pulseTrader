@@ -9,10 +9,10 @@
 // NOT part of CTest — this is a manual verification tool.
 
 #include "core/config.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
-#include "market/market_feed.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
+#include "market/MarketFeed.hpp"
 
 #include <chrono>
 #include <iostream>

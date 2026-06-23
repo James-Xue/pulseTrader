@@ -1,6 +1,6 @@
 // test_risk_manager.cpp — Unit tests for RiskManager (Layer 7 Risk Management)
 
-#include "risk/risk_manager.hpp"
+#include "risk/RiskManager.hpp"
 
 #include <gtest/gtest.h>
 

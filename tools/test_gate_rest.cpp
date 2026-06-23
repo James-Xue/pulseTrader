@@ -16,9 +16,9 @@
 //   4. GET /api/v4/spot/accounts          — private, requires API key + secret
 
 #include "core/config.hpp"
-#include "core/error.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "logging/logger.hpp"
+#include "core/PulseError.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "logging/Logger.hpp"
 
 #include <cstdlib>
 #include <iostream>

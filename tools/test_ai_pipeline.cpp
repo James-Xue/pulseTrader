@@ -15,10 +15,10 @@
 //   AI_MODEL       — model identifier (e.g. "claude-sonnet-4-6")
 //   AI_API_KEY     — API key for the chosen backend
 
-#include "ai/ai_pipeline.hpp"
+#include "ai/AiPipeline.hpp"
 #include "core/config.hpp"
-#include "logging/logger.hpp"
-#include "strategy/strategy_params.hpp"
+#include "logging/Logger.hpp"
+#include "strategy/StrategyParams.hpp"
 
 #include <cstdlib>
 #include <iostream>

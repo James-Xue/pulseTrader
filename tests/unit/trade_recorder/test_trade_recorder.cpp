@@ -1,8 +1,8 @@
 // test_trade_recorder.cpp — Core tests for TradeRecorder (Phase 2)
 
-#include "trade_recorder/trade_recorder.hpp"
+#include "trade_recorder/TradeRecorder.hpp"
 
-#include "execution/execution_report.hpp"
+#include "execution/ExecutionReport.hpp"
 
 #include <gtest/gtest.h>
 

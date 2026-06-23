@@ -1,6 +1,6 @@
 // test_market_feed_stats.cpp — Unit tests for MarketFeed event counters (Layer 3)
 
-#include "market/market_feed.hpp"
+#include "market/MarketFeed.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

@@ -3,7 +3,7 @@
 // Tests the channel subscription registry, frame dispatch, and message builders.
 // No WebSocket connection required — pure logic tests.
 
-#include "exchange/gate_ws_channels.hpp"
+#include "exchange/GateWsChannels.hpp"
 
 #include "core/types.hpp"
 

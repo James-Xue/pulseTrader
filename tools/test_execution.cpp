@@ -13,13 +13,13 @@
 // NOT part of CTest — this is a manual verification tool.
 
 #include "core/config.hpp"
-#include "execution/execution_report.hpp"
-#include "execution/order_executor.hpp"
-#include "execution/order_tracker.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
-#include "market/market_feed.hpp"
+#include "execution/ExecutionReport.hpp"
+#include "execution/OrderExecutor.hpp"
+#include "execution/OrderTracker.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
+#include "market/MarketFeed.hpp"
 
 #include <atomic>
 #include <chrono>

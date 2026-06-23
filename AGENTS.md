@@ -53,7 +53,7 @@ Dependencies are managed by **vcpkg** — never add system packages; always add 
 | **Language** | C++20. Use `std::jthread`, `std::stop_token`, `std::ranges`, concepts, `std::atomic<double>`. |
 | **Namespace** | All code in `pulse::` or sub-namespaces (`pulse::exchange`, `pulse::market`, etc.). |
 | **Headers** | `#pragma once` (not `#ifndef` guards). |
-| **File naming** | `snake_case.hpp` / `snake_case.cpp`. |
+| **File naming** | **Filename must match the primary class name**: `OrderExecutor.hpp` / `OrderExecutor.cpp` for `class OrderExecutor`. Multi-type modules (e.g., `config.hpp`, `types.hpp`, `risk_types.hpp`) keep descriptive `snake_case` names. |
 | **Include style** | `"pulse/layer/module.hpp"` for project headers, `<nlohmann/json.hpp>` for third-party. |
 | **Error handling** | Use `pulse::PulseError` exception hierarchy for fatal errors; return `std::expected<T, PulseError>` (C++23) or `std::optional` + log for non-fatal. Never swallow errors silently. |
 | **Logging** | Use `PULSE_LOG_INFO/WARN/ERROR(module, fmt, ...)` macros — never `std::cout`. |

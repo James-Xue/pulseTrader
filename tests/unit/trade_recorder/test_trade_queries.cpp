@@ -1,8 +1,8 @@
 // test_trade_queries.cpp — Query tests for TradeRecorder (Phase 2)
 
-#include "trade_recorder/trade_recorder.hpp"
+#include "trade_recorder/TradeRecorder.hpp"
 
-#include "execution/execution_report.hpp"
+#include "execution/ExecutionReport.hpp"
 
 #include <gtest/gtest.h>
 

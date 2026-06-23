@@ -21,32 +21,32 @@
 #include "core/config_loader.hpp"
 #include "core/config_validator.hpp"
 #include "core/types.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
-#include "market/market_feed.hpp"
-#include "risk/drawdown_guard.hpp"
-#include "risk/order_rate_limiter.hpp"
-#include "risk/position_manager.hpp"
-#include "risk/risk_manager.hpp"
-#include "execution/order_executor.hpp"
-#include "execution/order_tracker.hpp"
-#include "strategy/strategy_manager.hpp"
-#include "strategy/signal/signal_aggregator.hpp"
-#include "strategy/scalping/momentum_scalper.hpp"
-#include "strategy/scalping/orderbook_scalper.hpp"
-#include "strategy/scalping/mean_reversion_scalper.hpp"
-#include "strategy/scalping/supertrend_scalper.hpp"
-#include "ai/ai_pipeline.hpp"
-#include "heartbeat/heartbeat_scheduler.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
+#include "market/MarketFeed.hpp"
+#include "risk/DrawdownGuard.hpp"
+#include "risk/OrderRateLimiter.hpp"
+#include "risk/PositionManager.hpp"
+#include "risk/RiskManager.hpp"
+#include "execution/OrderExecutor.hpp"
+#include "execution/OrderTracker.hpp"
+#include "strategy/StrategyManager.hpp"
+#include "strategy/signal/SignalAggregator.hpp"
+#include "strategy/scalping/MomentumScalper.hpp"
+#include "strategy/scalping/OrderBookScalper.hpp"
+#include "strategy/scalping/MeanReversionScalper.hpp"
+#include "strategy/scalping/SuperTrendScalper.hpp"
+#include "ai/AiPipeline.hpp"
+#include "heartbeat/HeartbeatScheduler.hpp"
 
 #ifdef PULSE_ENABLE_WEBUI
-#include "webui/dashboard_state.hpp"
-#include "webui/web_server.hpp"
+#include "webui/DashboardState.hpp"
+#include "webui/WebServer.hpp"
 #endif
 
 #ifdef PULSE_ENABLE_SQLITE
-#include "trade_recorder/trade_recorder.hpp"
+#include "trade_recorder/TradeRecorder.hpp"
 #endif
 
 #include <atomic>
@@ -550,9 +550,9 @@ int main(int argc, char* argv[])
     bool has_futures = false;
     for (const auto& inst : cfg.strategy.strategies)
     {
-        if (!inst.enabled) continue;
+        if (!inst.enabled) { continue; }
         if (MarketType::Futures == inst.market_type) has_futures = true;
-        else has_spot = true;
+        else { has_spot = true; }
     }
     // Default to spot if no strategies configured (backward compatibility).
     if (!has_spot && !has_futures) has_spot = true;
@@ -874,7 +874,7 @@ int main(int argc, char* argv[])
             }
 
             // For futures: convert quantity to contract_size (integer contracts).
-            if (MarketType::Futures == req.market_type && req.contract_size == 0)
+            if (MarketType::Futures == req.market_type && 0 == req.contract_size)
             {
                 req.contract_size = static_cast<int>(std::max(1.0, std::round(req.quantity)));
             }
@@ -1202,13 +1202,13 @@ int main(int argc, char* argv[])
     log->info("[L6] Strategy threads stopped");
 
     // L3: Market feeds
-    if (futures_feed) futures_feed->stop();
-    if (spot_feed) spot_feed->stop();
+    if (futures_feed) { futures_feed->stop(); }
+    if (spot_feed) { spot_feed->stop(); }
     log->info("[L3] Market feed(s) stopped");
 
     // L1: WebSockets
-    if (futures_ws) futures_ws->stop();
-    if (spot_ws) spot_ws->stop();
+    if (futures_ws) { futures_ws->stop(); }
+    if (spot_ws) { spot_ws->stop(); }
     log->info("[L1] WebSocket(s) disconnected");
 
     // Summary

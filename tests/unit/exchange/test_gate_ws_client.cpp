@@ -4,7 +4,7 @@
 // No real WebSocket connection required — all tests exercise detail:: free functions
 // and the GateWsClient's observable state.
 
-#include "exchange/gate_ws_client.hpp"
+#include "exchange/GateWsClient.hpp"
 
 #include "core/config.hpp"
 
