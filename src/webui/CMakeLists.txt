@@ -1,9 +1,5 @@
 # pulse_webui — Layer 9 WebUI Dashboard
 
-find_package(ZLIB REQUIRED)
-find_package(unofficial-usockets CONFIG REQUIRED)
-find_package(unofficial-uwebsockets CONFIG REQUIRED)
-
 add_library(pulse_webui STATIC
     DashboardState.cpp
     WebServer.cpp
@@ -15,6 +11,11 @@ add_library(pulse::webui ALIAS pulse_webui)
 target_include_directories(pulse_webui
     PUBLIC
         ${PROJECT_SOURCE_DIR}/src
+    PRIVATE
+        # uWebSockets (header-only C++ wrapper)
+        ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
+        # uSockets (C library headers for us_listen_socket_close, etc.)
+        ${PROJECT_SOURCE_DIR}/third_party/uSockets
 )
 
 target_link_libraries(pulse_webui
@@ -28,14 +29,15 @@ target_link_libraries(pulse_webui
         pulse::ai
     PRIVATE
         nlohmann_json::nlohmann_json
-        unofficial::uwebsockets::uwebsockets
-        unofficial::usockets::usockets
-        ZLIB::ZLIB
+        # uSockets static library (C event loop layer behind uWebSockets)
+        ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
+        # zlib for per-message deflate compression support
+        z
 )
 
 target_compile_features(pulse_webui PUBLIC cxx_std_20)
 
 # Suppress warnings from uWebSockets/uSockets third-party headers
 if(MSVC)
-    target_compile_options(pulse_webui PRIVATE /wd4005 /wd4456 /wd4458 /WX-)
+    target_compile_options(pulse_webui PRIVATE /wd4005 /wd4452 /wd4458 /WX-)
 endif()
