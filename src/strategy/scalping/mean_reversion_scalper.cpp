@@ -14,7 +14,7 @@ namespace pulse::strategy
 
 MeanReversionScalper::MeanReversionScalper(const StrategyContext &context)
 {
-    context_ = context;
+    m_context = context;
 }
 
 std::string MeanReversionScalper::name() const
@@ -24,72 +24,72 @@ std::string MeanReversionScalper::name() const
 
 std::string MeanReversionScalper::id() const
 {
-    return "mean_reversion_scalper_" + context_.config.symbol;
+    return "mean_reversion_scalper_" + m_context.config.symbol;
 }
 
 StrategyParams &MeanReversionScalper::params()
 {
-    return params_;
+    return m_params;
 }
 
-void MeanReversionScalper::on_tick(const market::Ticker & /*ticker*/)
+void MeanReversionScalper::onTick(const market::Ticker & /*ticker*/)
 {
     // This strategy is kline-driven; tick updates are ignored for trading.
-    // However, we use on_tick() to detect "no kline data at all" (e.g. WS not connected).
-    auto *feed = context_.market_feed;
+    // However, we use onTick() to detect "no kline data at all" (e.g. WS not connected).
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(1);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(1);
     if (candles.empty())
     {
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_no_data_log_ms_ >= 30'000)
+        if (nowMs - m_lastNoDataLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Waiting for kline data (WS may not be connected yet)", id());
-            last_no_data_log_ms_ = now_ms;
+            m_lastNoDataLogMs = nowMs;
         }
     }
 }
 
-void MeanReversionScalper::on_orderbook(const market::OrderBook & /*book*/)
+void MeanReversionScalper::onOrderbook(const market::OrderBook & /*book*/)
 {
     // This strategy is kline-driven; orderbook updates are ignored.
 }
 
-void MeanReversionScalper::on_kline(const market::Kline & /*kline*/)
+void MeanReversionScalper::onKline(const market::Kline & /*kline*/)
 {
     // 1. Read hot-reloadable parameters.
     const auto bb_period = static_cast<std::size_t>(
-        params_.bb_period.load(std::memory_order_acquire));
-    const double bb_std_dev = params_.bb_std_dev.load(std::memory_order_acquire);
-    const double cooldown_sec = params_.cooldown_seconds.load(std::memory_order_acquire);
+        m_params.bb_period.load(std::memory_order_acquire));
+    const double bb_std_dev = m_params.bb_std_dev.load(std::memory_order_acquire);
+    const double cooldown_sec = m_params.cooldown_seconds.load(std::memory_order_acquire);
 
     // 2. Fetch enough candles to compute Bollinger Bands.
-    auto *feed = context_.market_feed;
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(bb_period);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(bb_period);
     if (candles.size() < bb_period)
     {
         // Not enough data yet — log warmup progress every 30 seconds.
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_warmup_log_ms_ >= 30'000)
+        if (nowMs - m_lastWarmupLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Warming up: {}/{} candles accumulated (need ~{} min of kline data)",
                 id(), candles.size(), bb_period, bb_period);
-            last_warmup_log_ms_ = now_ms;
+            m_lastWarmupLogMs = nowMs;
         }
         return;
     }
@@ -133,11 +133,11 @@ void MeanReversionScalper::on_kline(const market::Kline & /*kline*/)
     }
 
     // 9. Enforce cooldown between signals.
-    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())
                             .count();
     const auto cooldown_ms = static_cast<std::int64_t>(cooldown_sec * 1000.0);
-    if (now_ms - last_signal_time_ms_ < cooldown_ms)
+    if (nowMs - m_lastSignalTimeMs < cooldown_ms)
     {
         return;
     }
@@ -160,7 +160,7 @@ void MeanReversionScalper::on_kline(const market::Kline & /*kline*/)
     // 11. Build and emit signal.
     TradingSignal signal;
     signal.type = oversold ? SignalType::Buy : SignalType::Sell;
-    signal.symbol = context_.config.symbol;
+    signal.symbol = m_context.config.symbol;
     signal.confidence = confidence;
     signal.price = current_price;
     signal.strategy_id = id();
@@ -172,8 +172,8 @@ void MeanReversionScalper::on_kline(const market::Kline & /*kline*/)
     PULSE_LOG_INFO("strategy", "[{}] {} signal: price={:.2f}, upper={:.2f}, lower={:.2f}, sma={:.2f}",
         id(), signal.reason, current_price, upper_band, lower_band, sma);
 
-    emit_signal(signal);
-    last_signal_time_ms_ = now_ms;
+    emitSignal(signal);
+    m_lastSignalTimeMs = nowMs;
 }
 
 } // namespace pulse::strategy

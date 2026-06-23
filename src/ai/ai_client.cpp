@@ -49,7 +49,7 @@ namespace
 
 std::once_flag g_ai_curl_init_flag;
 
-void ensure_curl_init()
+void ensureCurlInit()
 {
     std::call_once(g_ai_curl_init_flag, []()
             {
@@ -59,7 +59,7 @@ void ensure_curl_init()
 
 // libcurl write callback: appends received data chunks to a string buffer.
 // Must return size * nmemb to signal success; any other value aborts the transfer.
-size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::string *output)
+size_t curlWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
 {
     const size_t total = size * nmemb;
     output->append(static_cast<char *>(contents), total);
@@ -70,7 +70,7 @@ size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::strin
 // 1. AiTimeout     — the LLM took too long; a retry with fresh connection may succeed
 // 2. AiBackendError — server-side error (5xx) or transport failure; retry with backoff
 // Non-retryable: AiResponseInvalid, AiSchemaMismatch (client-side data issues)
-bool is_retryable_error(ErrorCode code)
+bool isRetryableError(ErrorCode code)
 {
     return ErrorCode::AiTimeout == code || ErrorCode::AiBackendError == code;
 }
@@ -82,17 +82,17 @@ bool is_retryable_error(ErrorCode code)
 // ---------------------------------------------------------------------------
 
 AIClient::AIClient(const AiConfig &config)
-    : config_(config)
-    , transport_(nullptr)
+    : m_config(config)
+    , m_transport(nullptr)
 {
-    ensure_curl_init();
+    ensureCurlInit();
 }
 
 AIClient::AIClient(const AiConfig &config, HttpTransport transport)
-    : config_(config)
-    , transport_(std::move(transport))
+    : m_config(config)
+    , m_transport(std::move(transport))
 {
-    ensure_curl_init();
+    ensureCurlInit();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,28 +106,28 @@ AIClient::AIClient(const AiConfig &config, HttpTransport transport)
 //   5. Return AnalysisResult or PulseError
 // ---------------------------------------------------------------------------
 Result<AnalysisResult> AIClient::analyze(
-        const std::string &system_prompt,
-        const std::string &user_prompt)
+        const std::string &systemPrompt,
+        const std::string &userPrompt)
 {
     // 1. Build backend-specific request components
-    const bool is_claude = ("claude" == config_.backend);
+    const bool is_claude = ("claude" == m_config.backend);
     RequestParts req = is_claude
-                               ? build_claude_request(system_prompt, user_prompt)
-                               : build_openai_request(system_prompt, user_prompt);
+                               ? buildClaudeRequest(systemPrompt, userPrompt)
+                               : buildOpenaiRequest(systemPrompt, userPrompt);
 
     PULSE_LOG_INFO("ai", "LLM request: backend={}, model={}, url={}",
-            config_.backend, config_.model, req.url);
+            m_config.backend, m_config.model, req.url);
 
     // 2. Retry loop — first attempt plus up to maxRetries retries
-    const std::uint32_t max_attempts = config_.maxRetries + 1;
+    const std::uint32_t max_attempts = m_config.maxRetries + 1;
 
     for (std::uint32_t attempt = 1; attempt <= max_attempts; ++attempt)
     {
         // 2a. Send the request via injected transport or default curl transport
         Result<nlohmann::json> http_result =
-                (nullptr != transport_)
-                        ? transport_(req.url, req.body, req.headers)
-                        : curl_transport(req.url, req.body, req.headers);
+                (nullptr != m_transport)
+                        ? m_transport(req.url, req.body, req.headers)
+                        : curlTransport(req.url, req.body, req.headers);
 
         // 2b. Transport-level failure (network error, timeout, HTTP error)
         if (!ok(http_result))
@@ -135,7 +135,7 @@ Result<AnalysisResult> AIClient::analyze(
             const auto &err = error(http_result);
 
             // Non-retryable error — return immediately
-            if (!is_retryable_error(err.code))
+            if (!isRetryableError(err.code))
             {
                 PULSE_LOG_ERROR("ai", "LLM request failed (non-retryable): {} — {}",
                         static_cast<int>(err.code), err.message);
@@ -163,8 +163,8 @@ Result<AnalysisResult> AIClient::analyze(
         // 3. Parse the backend-specific response
         Result<AnalysisResult> parse_result =
                 is_claude
-                        ? parse_claude_response(value(http_result))
-                        : parse_openai_response(value(http_result));
+                        ? parseClaudeResponse(value(http_result))
+                        : parseOpenaiResponse(value(http_result));
 
         // 4. Parse failure — schema errors are non-retryable
         if (!ok(parse_result))
@@ -176,9 +176,9 @@ Result<AnalysisResult> AIClient::analyze(
         }
 
         PULSE_LOG_INFO("ai", "LLM analysis complete: sentiment={}, confidence={:.2f}, volatility={}",
-                to_string(value(parse_result).sentiment),
+                toString(value(parse_result).sentiment),
                 value(parse_result).confidence,
-                to_string(value(parse_result).volatility));
+                toString(value(parse_result).volatility));
 
         return parse_result;
     }
@@ -188,7 +188,7 @@ Result<AnalysisResult> AIClient::analyze(
 }
 
 // ---------------------------------------------------------------------------
-// build_openai_request — OpenAI Chat Completions API request
+// buildOpenaiRequest — OpenAI Chat Completions API request
 //
 // Endpoint: POST {baseUrl}/v1/chat/completions
 // Body: {
@@ -201,17 +201,17 @@ Result<AnalysisResult> AIClient::analyze(
 // }
 // Headers: Authorization: Bearer {apiKey}, Content-Type: application/json
 // ---------------------------------------------------------------------------
-AIClient::RequestParts AIClient::build_openai_request(
-        const std::string &system_prompt,
-        const std::string &user_prompt) const
+AIClient::RequestParts AIClient::buildOpenaiRequest(
+        const std::string &systemPrompt,
+        const std::string &userPrompt) const
 {
-    const std::string base = resolve_base_url();
+    const std::string base = resolveBaseUrl();
 
     nlohmann::json body = {
-            {"model",           config_.model},
+            {"model",           m_config.model},
             {"messages",        {
-                    {{"role", "system"}, {"content", system_prompt}},
-                    {{"role", "user"},   {"content", user_prompt}},
+                    {{"role", "system"}, {"content", systemPrompt}},
+                    {{"role", "user"},   {"content", userPrompt}},
             }},
             {"response_format", {{"type", "json_object"}}},
     };
@@ -219,13 +219,13 @@ AIClient::RequestParts AIClient::build_openai_request(
     return RequestParts{
             base + "/v1/chat/completions",
             body.dump(),
-            {"Authorization: Bearer " + config_.apiKey,
+            {"Authorization: Bearer " + m_config.apiKey,
              "Content-Type: application/json"},
     };
 }
 
 // ---------------------------------------------------------------------------
-// build_claude_request — Claude Messages API request
+// buildClaudeRequest — Claude Messages API request
 //
 // Endpoint: POST {baseUrl}/v1/messages
 // Body: {
@@ -236,30 +236,30 @@ AIClient::RequestParts AIClient::build_openai_request(
 // }
 // Headers: x-api-key: {apiKey}, anthropic-version: 2023-06-01, Content-Type: application/json
 // ---------------------------------------------------------------------------
-AIClient::RequestParts AIClient::build_claude_request(
-        const std::string &system_prompt,
-        const std::string &user_prompt) const
+AIClient::RequestParts AIClient::buildClaudeRequest(
+        const std::string &systemPrompt,
+        const std::string &userPrompt) const
 {
-    const std::string base = resolve_base_url();
+    const std::string base = resolveBaseUrl();
 
     nlohmann::json body = {
-            {"model",      config_.model},
-            {"system",     system_prompt},
-            {"messages",   {{{"role", "user"}, {"content", user_prompt}}}},
+            {"model",      m_config.model},
+            {"system",     systemPrompt},
+            {"messages",   {{{"role", "user"}, {"content", userPrompt}}}},
             {"max_tokens", 1024},
     };
 
     return RequestParts{
             base + "/v1/messages",
             body.dump(),
-            {"x-api-key: " + config_.apiKey,
+            {"x-api-key: " + m_config.apiKey,
              "anthropic-version: 2023-06-01",
              "Content-Type: application/json"},
     };
 }
 
 // ---------------------------------------------------------------------------
-// parse_openai_response — extract AnalysisResult from OpenAI Chat Completions
+// parseOpenaiResponse — extract AnalysisResult from OpenAI Chat Completions
 //
 // Response structure:
 //   { "choices": [{ "message": { "content": "{...json...}" } }] }
@@ -269,7 +269,7 @@ AIClient::RequestParts AIClient::build_claude_request(
 //   2. Parse the content string as JSON (non-throwing)
 //   3. Deserialize the inner JSON into AnalysisResult (catches schema errors)
 // ---------------------------------------------------------------------------
-Result<AnalysisResult> AIClient::parse_openai_response(const nlohmann::json &j) const
+Result<AnalysisResult> AIClient::parseOpenaiResponse(const nlohmann::json &j) const
 {
     // 1. Validate the response structure
     if (!j.contains("choices") || !j["choices"].is_array() || j["choices"].empty())
@@ -316,7 +316,7 @@ Result<AnalysisResult> AIClient::parse_openai_response(const nlohmann::json &j) 
 }
 
 // ---------------------------------------------------------------------------
-// parse_claude_response — extract AnalysisResult from Claude Messages API
+// parseClaudeResponse — extract AnalysisResult from Claude Messages API
 //
 // Response structure:
 //   { "content": [{ "type": "text", "text": "{...json...}" }] }
@@ -326,7 +326,7 @@ Result<AnalysisResult> AIClient::parse_openai_response(const nlohmann::json &j) 
 //   2. Parse the text string as JSON (non-throwing)
 //   3. Deserialize the inner JSON into AnalysisResult (catches schema errors)
 // ---------------------------------------------------------------------------
-Result<AnalysisResult> AIClient::parse_claude_response(const nlohmann::json &j) const
+Result<AnalysisResult> AIClient::parseClaudeResponse(const nlohmann::json &j) const
 {
     // 1. Validate the response structure
     if (!j.contains("content") || !j["content"].is_array() || j["content"].empty())
@@ -373,7 +373,7 @@ Result<AnalysisResult> AIClient::parse_claude_response(const nlohmann::json &j) 
 }
 
 // ---------------------------------------------------------------------------
-// curl_transport — default HTTP transport using libcurl
+// curlTransport — default HTTP transport using libcurl
 //
 // Creates a per-request curl easy handle, configures it for a JSON POST,
 // sends the request, and returns the parsed JSON response.
@@ -387,7 +387,7 @@ Result<AnalysisResult> AIClient::parse_claude_response(const nlohmann::json &j) 
 //   6. Parse response body as JSON (non-throwing)
 //   7. Clean up handle and header list
 // ---------------------------------------------------------------------------
-Result<nlohmann::json> AIClient::curl_transport(
+Result<nlohmann::json> AIClient::curlTransport(
         const std::string &url,
         const std::string &body,
         const std::vector<std::string> &headers) const
@@ -413,9 +413,9 @@ Result<nlohmann::json> AIClient::curl_transport(
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(config_.requestTimeoutMs));
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(m_config.requestTimeoutMs));
 
     // 4. Execute the request
     CURLcode res = curl_easy_perform(curl);
@@ -464,7 +464,7 @@ Result<nlohmann::json> AIClient::curl_transport(
 }
 
 // ---------------------------------------------------------------------------
-// resolve_base_url — determine the API base URL
+// resolveBaseUrl — determine the API base URL
 //
 // Priority:
 //   1. If config.baseUrl is non-empty, use it as-is (supports custom proxies)
@@ -472,26 +472,26 @@ Result<nlohmann::json> AIClient::curl_transport(
 //      - "claude" → "https://api.anthropic.com"
 //      - "openai" → "https://api.openai.com"
 // ---------------------------------------------------------------------------
-std::string AIClient::resolve_base_url() const
+std::string AIClient::resolveBaseUrl() const
 {
     // 1. User-configured base URL takes priority (supports proxies, Azure, etc.)
-    if (!config_.baseUrl.empty())
+    if (!m_config.baseUrl.empty())
     {
-        return config_.baseUrl;
+        return m_config.baseUrl;
     }
 
     // 2. Default base URLs per backend
-    if ("claude" == config_.backend)
+    if ("claude" == m_config.backend)
     {
         return "https://api.anthropic.com";
     }
-    if ("openai" == config_.backend)
+    if ("openai" == m_config.backend)
     {
         return "https://api.openai.com";
     }
 
     // 3. Unknown backend — log a warning and fall back to empty (will fail at request time)
-    PULSE_LOG_WARN("ai", "Unknown AI backend '{}', no default base URL", config_.backend);
+    PULSE_LOG_WARN("ai", "Unknown AI backend '{}', no default base URL", m_config.backend);
     return "";
 }
 

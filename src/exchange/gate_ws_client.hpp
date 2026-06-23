@@ -58,7 +58,7 @@ namespace detail
 ///   1. attempt — zero-based reconnect attempt number
 ///   2. base_ms — base delay in milliseconds (e.g. 1000)
 ///   3. max_ms  — maximum delay cap in milliseconds (e.g. 30000)
-[[nodiscard]] std::uint32_t compute_backoff_ms(std::uint32_t attempt, std::uint32_t base_ms, std::uint32_t max_ms);
+[[nodiscard]] std::uint32_t computeBackoffMs(std::uint32_t attempt, std::uint32_t base_ms, std::uint32_t max_ms);
 
 /// Build the Gate.io WS private-channel authentication JSON block.
 ///
@@ -70,7 +70,7 @@ namespace detail
 ///   2. api_secret — Gate.io API secret (HMAC key)
 ///   3. channel    — channel being subscribed to (e.g. "spot.orders")
 ///   4. event      — event type (typically "subscribe")
-[[nodiscard]] nlohmann::json build_ws_auth(const std::string &api_key,
+[[nodiscard]] nlohmann::json buildWsAuth(const std::string &api_key,
     const std::string &api_secret,
     const std::string &channel,
     const std::string &event);
@@ -92,7 +92,7 @@ class GateWsClient
   public:
     /// Construct a WebSocket client from exchange configuration.
     ///
-    /// Uses EndpointRouter::select_ws_url() to pick the correct WS endpoint based on
+    /// Uses EndpointRouter::selectWsUrl() to pick the correct WS endpoint based on
     /// market_type (spot: config.wsUrl, futures: config.futuresWsUrl).
     ///
     /// Ping/pong handling is market-type-aware: spot replies to spot.ping with spot.pong,
@@ -138,7 +138,7 @@ class GateWsClient
     /// Adds HMAC-SHA512 authentication to the subscribe message.
     /// Requires valid apiKey and apiSecret in the ExchangeConfig.
     void
-    subscribe_private(const std::string &channel, const std::vector<std::string> &payload, ChannelCallback callback);
+    subscribePrivate(const std::string &channel, const std::vector<std::string> &payload, ChannelCallback callback);
 
     /// Unsubscribe from a channel.
     ///
@@ -156,12 +156,12 @@ class GateWsClient
     [[nodiscard]] GateWsChannels &channels();
 
   private:
-    ExchangeConfig config_;
-    MarketType market_type_;
-    GateWsChannels channels_;
-    std::atomic<WsConnectionState> state_{ WsConnectionState::Disconnected };
-    std::jthread io_thread_;
-    std::shared_ptr<WsInternal> internal_;
+    ExchangeConfig m_config;
+    MarketType m_marketType;
+    GateWsChannels m_channels;
+    std::atomic<WsConnectionState> m_state{ WsConnectionState::Disconnected };
+    std::jthread m_ioThread;
+    std::shared_ptr<WsInternal> m_internal;
 
     /// I/O thread body — runs the WebSocket event loop.
     ///
@@ -170,7 +170,7 @@ class GateWsClient
     /// 3. Connect to the WS endpoint
     /// 4. Run the asio event loop
     /// 5. On disconnect: backoff and reconnect (unless stop requested)
-    void run_io_loop(std::stop_token stop_token);
+    void runIoLoop(std::stop_token stop_token);
 };
 
 } // namespace pulse::exchange

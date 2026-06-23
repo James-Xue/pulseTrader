@@ -20,13 +20,13 @@
 //   - PIMPL pattern hides uWebSockets headers from public interface
 //   - uWS::App is constructed and run on a dedicated background thread
 //   - WsServer is owned internally as a helper for client tracking + broadcast
-//   - DashboardState snapshot callback is wired to WsServer::push_snapshot()
+//   - DashboardState snapshot callback is wired to WsServer::pushSnapshot()
 //
 // Thread model:
 //   - start() is non-blocking; spawns a background thread for the event loop
 //   - stop() closes the listen socket and joins the background thread
 //   - API handlers run on the event loop thread
-//   - push_snapshot() runs on the DashboardState poll thread; defers to loop
+//   - pushSnapshot() runs on the DashboardState poll thread; defers to loop
 
 #include "core/config.hpp"
 #include "webui/dashboard_state.hpp"
@@ -83,7 +83,7 @@ class WebServer
     ///   2. Construct uWS::App on that thread (Loop::get() is thread-local)
     ///   3. Register API routes, WebSocket handler, and static file catch-all
     ///   4. Bind to bindAddress:port
-    ///   5. Wire DashboardState snapshot callback to WsServer::push_snapshot()
+    ///   5. Wire DashboardState snapshot callback to WsServer::pushSnapshot()
     ///   6. Run the event loop (blocks the background thread)
     ///
     /// Returns true if the listen socket was successfully bound.
@@ -113,7 +113,7 @@ class WebServer
     /// Returns a const reference to the internal WsServer helper.
     ///
     /// Primarily for testing and diagnostics.
-    [[nodiscard]] const WsServer &ws_server() const;
+    [[nodiscard]] const WsServer &wsServer() const;
 
   private:
     /// Validate the Authorization header against config.authToken.
@@ -121,7 +121,7 @@ class WebServer
     /// Rules:
     ///   1. If authToken is empty (dev mode), all requests pass
     ///   2. Otherwise, header must be "Bearer <authToken>" (case-sensitive)
-    [[nodiscard]] bool validate_auth(std::string_view auth_header) const;
+    [[nodiscard]] bool validateAuth(std::string_view auth_header) const;
 
     /// Validate the Host header to prevent DNS rebinding attacks.
     ///
@@ -131,9 +131,9 @@ class WebServer
     ///   3. "127.0.0.1:port"
     ///
     /// Returns false for empty or unrecognized host headers.
-    [[nodiscard]] bool validate_host(std::string_view host_header) const;
+    [[nodiscard]] bool validateHost(std::string_view host_header) const;
 
-    /// Serve a static file from frontend_dir_.
+    /// Serve a static file from m_frontendDir.
     ///
     /// Security:
     ///   1. Rejects paths containing ".." (directory traversal)
@@ -143,34 +143,34 @@ class WebServer
     ///
     /// The template parameter matches uWebSockets' HttpResponse<SSL> type.
     template <typename Res>
-    void serve_static(Res *res, const std::string &path);
+    void serveStatic(Res *res, const std::string &path);
 
     /// Determine the MIME type from a file path extension.
     ///
     /// Supported types: html, css, js, json, svg, png, ico.
     /// Returns "application/octet-stream" for unknown extensions.
-    [[nodiscard]] static std::string mime_type(const std::string &path);
+    [[nodiscard]] static std::string mimeType(const std::string &path);
 
     // --- Configuration ---
-    WebUiConfig config_;
+    WebUiConfig m_config;
 
     // --- Dashboard state reference ---
-    DashboardState &state_;
+    DashboardState &m_state;
 
     // --- Frontend directory path ---
-    std::string frontend_dir_;
+    std::string m_frontendDir;
 
     // --- Runtime state ---
-    bool running_{ false };
-    std::uint16_t actual_port_{ 0 };
-    std::chrono::steady_clock::time_point start_time_;
+    bool m_running{ false };
+    std::uint16_t m_actualPort{ 0 };
+    std::chrono::steady_clock::time_point m_startTime;
 
     // --- Internal WsServer helper ---
-    std::unique_ptr<WsServer> ws_server_;
+    std::unique_ptr<WsServer> m_wsServer;
 
     // --- PIMPL: hides uWS::App, listen socket, and thread ---
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace pulse::webui

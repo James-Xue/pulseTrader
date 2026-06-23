@@ -86,18 +86,18 @@ class OrderExecutor
     /// Retries up to 3 times on transient failures (5xx, timeout).
     ///
     /// Returns OrderResponse with order_id on success, or PulseError on failure.
-    [[nodiscard]] Result<OrderResponse> place_order(const OrderRequest &req);
+    [[nodiscard]] Result<OrderResponse> placeOrder(const OrderRequest &req);
 
     /// Cancel an order by order_id.
     ///
     /// Spot:    DELETE /api/v4/spot/orders/{order_id}
     /// Futures: DELETE /api/v4/futures/usdt/orders/{order_id}
     /// Returns true on success, false on failure (check logs for details).
-    [[nodiscard]] bool cancel_order(const std::string &order_id);
+    [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
   private:
-    exchange::GateRestClient &rest_client_;
-    MarketType market_type_;
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
 
     /// Build Gate.io order JSON body from OrderRequest.
     ///
@@ -119,13 +119,13 @@ class OrderExecutor
     ///   "tif": "gtc",
     ///   "reduce_only": false
     /// }
-    [[nodiscard]] nlohmann::json build_order_body(const OrderRequest &req) const;
+    [[nodiscard]] nlohmann::json buildOrderBody(const OrderRequest &req) const;
 
     /// Parse Gate.io order response JSON into OrderResponse.
     ///
     /// Spot:    "id" (string), "status" (open/closed/cancelled)
     /// Futures: "id" (integer), "status" (open/finished), "finish_as" (filled/cancelled)
-    [[nodiscard]] OrderResponse parse_order_response(const nlohmann::json &resp) const;
+    [[nodiscard]] OrderResponse parseOrderResponse(const nlohmann::json &resp) const;
 };
 
 } // namespace pulse::execution

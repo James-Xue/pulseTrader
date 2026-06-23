@@ -12,7 +12,7 @@ namespace pulse::strategy
 
 OrderBookScalper::OrderBookScalper(const StrategyContext &context)
 {
-    context_ = context;
+    m_context = context;
 }
 
 std::string OrderBookScalper::name() const
@@ -22,31 +22,31 @@ std::string OrderBookScalper::name() const
 
 std::string OrderBookScalper::id() const
 {
-    return "orderbook_scalper_" + context_.config.symbol;
+    return "orderbook_scalper_" + m_context.config.symbol;
 }
 
 StrategyParams &OrderBookScalper::params()
 {
-    return params_;
+    return m_params;
 }
 
-void OrderBookScalper::on_tick(const market::Ticker & /*ticker*/)
+void OrderBookScalper::onTick(const market::Ticker & /*ticker*/)
 {
     // This strategy is orderbook-driven; tick updates are ignored.
 }
 
-void OrderBookScalper::on_kline(const market::Kline & /*kline*/)
+void OrderBookScalper::onKline(const market::Kline & /*kline*/)
 {
     // This strategy is orderbook-driven; kline updates are ignored.
 }
 
-void OrderBookScalper::on_orderbook(const market::OrderBook &book)
+void OrderBookScalper::onOrderbook(const market::OrderBook &book)
 {
     // 1. Read hot-reloadable parameters.
     const auto depth = static_cast<std::size_t>(
-        params_.ob_depth.load(std::memory_order_acquire));
-    const double threshold = params_.ob_imbalance_threshold.load(std::memory_order_acquire);
-    const double cooldown_sec = params_.cooldown_seconds.load(std::memory_order_acquire);
+        m_params.ob_depth.load(std::memory_order_acquire));
+    const double threshold = m_params.ob_imbalance_threshold.load(std::memory_order_acquire);
+    const double cooldown_sec = m_params.cooldown_seconds.load(std::memory_order_acquire);
 
     // 2. Skip if not enough book depth.
     if (book.bids.size() < depth || book.asks.size() < depth)
@@ -100,11 +100,11 @@ void OrderBookScalper::on_orderbook(const market::OrderBook &book)
     }
 
     // 7. Enforce cooldown between signals.
-    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())
                             .count();
     const auto cooldown_ms = static_cast<std::int64_t>(cooldown_sec * 1000.0);
-    if (now_ms - last_signal_time_ms_ < cooldown_ms)
+    if (nowMs - m_lastSignalTimeMs < cooldown_ms)
     {
         return;
     }
@@ -113,7 +113,7 @@ void OrderBookScalper::on_orderbook(const market::OrderBook &book)
     const bool buy_signal = imbalance > 0.0;
     TradingSignal signal;
     signal.type = buy_signal ? SignalType::Buy : SignalType::Sell;
-    signal.symbol = context_.config.symbol;
+    signal.symbol = m_context.config.symbol;
     signal.confidence = std::clamp(std::abs(imbalance), 0.0, 1.0);
 
     // Use best bid for buy signals, best ask for sell signals.
@@ -127,8 +127,8 @@ void OrderBookScalper::on_orderbook(const market::OrderBook &book)
     PULSE_LOG_INFO("strategy", "[{}] {} signal: imbalance={:.4f}, bid_vol={:.4f}, ask_vol={:.4f}",
         id(), signal.reason, imbalance, bid_volume, ask_volume);
 
-    emit_signal(signal);
-    last_signal_time_ms_ = now_ms;
+    emitSignal(signal);
+    m_lastSignalTimeMs = nowMs;
 }
 
 } // namespace pulse::strategy

@@ -8,7 +8,7 @@
 //   5. Hard bounds — results are clamped to [hard_min, hard_max]
 //   6. All 10 fields — each delta maps to the correct StrategyParams field
 //   7. Atomic semantics — concurrent read/write is safe
-//   8. Custom bounds — set_bound() overrides defaults
+//   8. Custom bounds — setBound() overrides defaults
 
 #include "ai/param_advisor.hpp"
 
@@ -172,7 +172,7 @@ TEST(ParamAdvisor, AllFieldsApply)
 }
 
 // ---------------------------------------------------------------------------
-// 7. Custom bounds via set_bound
+// 7. Custom bounds via setBound
 // ---------------------------------------------------------------------------
 TEST(ParamAdvisor, CustomBounds)
 {
@@ -180,7 +180,7 @@ TEST(ParamAdvisor, CustomBounds)
 
     // Tighten the order_quantity bounds
     ParamBound tight{ 0.0001, 0.0005, 0.005 };
-    advisor.set_bound("order_quantity", tight);
+    advisor.setBound("order_quantity", tight);
 
     StrategyParams params;
     AnalysisResult result;

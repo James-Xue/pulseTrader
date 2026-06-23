@@ -122,41 +122,41 @@ TEST(ExecutionReport, ToJsonPostOnlyOrder)
 TEST(ExecutionReport, CalculateSlippageBuyPositive)
 {
     // Buy order: fill at 50010, mid was 50000 → +2 bps (worse fill)
-    const Price slippage = ExecutionReport::calculate_slippage_bps(50010.0, 50000.0, Side::Buy);
+    const Price slippage = ExecutionReport::calculateSlippageBps(50010.0, 50000.0, Side::Buy);
     EXPECT_NEAR(slippage, 2.0, 0.1);
 }
 
 TEST(ExecutionReport, CalculateSlippageBuyNegative)
 {
     // Buy order: fill at 49990, mid was 50000 → -2 bps (better fill)
-    const Price slippage = ExecutionReport::calculate_slippage_bps(49990.0, 50000.0, Side::Buy);
+    const Price slippage = ExecutionReport::calculateSlippageBps(49990.0, 50000.0, Side::Buy);
     EXPECT_NEAR(slippage, -2.0, 0.1);
 }
 
 TEST(ExecutionReport, CalculateSlippageSellPositive)
 {
     // Sell order: fill at 50010, mid was 50000 → +2 bps (better fill, inverted)
-    const Price slippage = ExecutionReport::calculate_slippage_bps(50010.0, 50000.0, Side::Sell);
+    const Price slippage = ExecutionReport::calculateSlippageBps(50010.0, 50000.0, Side::Sell);
     EXPECT_NEAR(slippage, -2.0, 0.1); // Inverted for sell
 }
 
 TEST(ExecutionReport, CalculateSlippageSellNegative)
 {
     // Sell order: fill at 49990, mid was 50000 → -2 bps (worse fill, inverted)
-    const Price slippage = ExecutionReport::calculate_slippage_bps(49990.0, 50000.0, Side::Sell);
+    const Price slippage = ExecutionReport::calculateSlippageBps(49990.0, 50000.0, Side::Sell);
     EXPECT_NEAR(slippage, 2.0, 0.1); // Inverted for sell
 }
 
 TEST(ExecutionReport, CalculateSlippageZeroMidPrice)
 {
     // Edge case: mid_price = 0 → slippage = 0 (avoid division by zero)
-    const Price slippage = ExecutionReport::calculate_slippage_bps(50000.0, 0.0, Side::Buy);
+    const Price slippage = ExecutionReport::calculateSlippageBps(50000.0, 0.0, Side::Buy);
     EXPECT_DOUBLE_EQ(slippage, 0.0);
 }
 
 TEST(ExecutionReport, CalculateSlippageZeroFillPrice)
 {
     // Edge case: fill_price = 0 → slippage = 0
-    const Price slippage = ExecutionReport::calculate_slippage_bps(0.0, 50000.0, Side::Buy);
+    const Price slippage = ExecutionReport::calculateSlippageBps(0.0, 50000.0, Side::Buy);
     EXPECT_DOUBLE_EQ(slippage, 0.0);
 }

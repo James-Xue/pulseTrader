@@ -93,16 +93,16 @@ int main()
     // 4. Test public endpoints
     std::cout << "=== Public Endpoints ===\n\n";
 
-    print_result("GET /spot/currencies (first 3)", client.get_currencies());
-    print_result("GET /spot/currency_pairs (first 3)", client.get_currency_pairs());
-    print_result("GET /spot/tickers?currency_pair=BTC_USDT", client.get_ticker("BTC_USDT"));
+    print_result("GET /spot/currencies (first 3)", client.getCurrencies());
+    print_result("GET /spot/currency_pairs (first 3)", client.getCurrencyPairs());
+    print_result("GET /spot/tickers?currency_pair=BTC_USDT", client.getTicker("BTC_USDT"));
 
     // 5. Test authenticated endpoints
     std::cout << "=== Authenticated Endpoints ===\n\n";
 
-    if (client.has_credentials())
+    if (client.hasCredentials())
     {
-        print_result("GET /spot/accounts", client.get_spot_accounts());
+        print_result("GET /spot/accounts", client.getSpotAccounts());
     }
     else
     {

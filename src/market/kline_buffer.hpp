@@ -109,17 +109,17 @@ class KlineBuffer
     [[nodiscard]] std::size_t capacity() const;
 
   private:
-    std::size_t capacity_;
-    std::vector<Kline> buffer_; ///< Ring buffer storage.
-    std::atomic<std::size_t> head_{ 0 }; ///< Next write position.
-    std::atomic<std::size_t> count_{ 0 }; ///< Number of valid candles.
-    std::atomic<std::uint64_t> seqlock_{ 0 }; ///< Even = no write; odd = write in progress.
+    std::size_t m_capacity;
+    std::vector<Kline> m_buffer; ///< Ring buffer storage.
+    std::atomic<std::size_t> m_head{ 0 }; ///< Next write position.
+    std::atomic<std::size_t> m_count{ 0 }; ///< Number of valid candles.
+    std::atomic<std::uint64_t> m_seqlock{ 0 }; ///< Even = no write; odd = write in progress.
 
     /// Compute the buffer index for a given logical position.
     ///
     /// Logical position 0 is the oldest candle; position (count-1) is the newest.
     /// This method maps logical positions to physical ring buffer indices.
-    [[nodiscard]] std::size_t logical_to_physical(std::size_t logical_pos) const;
+    [[nodiscard]] std::size_t logicalToPhysical(std::size_t logical_pos) const;
 };
 
 } // namespace pulse::market

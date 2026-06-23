@@ -65,7 +65,7 @@ class AiPipeline
     ///
     /// Parameters:
     ///   1. snapshot    — current market data (ticker + recent klines)
-    ///   2. all_params  — pointers to each strategy's StrategyParams;
+    ///   2. allParams  — pointers to each strategy's StrategyParams;
     ///                    the first is used for prompt building (read),
     ///                    all are updated by ParamAdvisor (write)
     ///
@@ -74,33 +74,33 @@ class AiPipeline
     ///   - PulseError on failure (params unchanged)
     [[nodiscard]] Result<AnalysisResult> run(
         const MarketSnapshot &snapshot,
-        std::vector<strategy::StrategyParams *> &all_params);
+        std::vector<strategy::StrategyParams *> &allParams);
 
     /// Access the Twitter feed component (for testing / inspection).
-    [[nodiscard]] TwitterFeed &twitter_feed();
+    [[nodiscard]] TwitterFeed &twitterFeed();
 
     /// Access the news feed component (for testing / inspection).
-    [[nodiscard]] NewsFeed &news_feed();
+    [[nodiscard]] NewsFeed &newsFeed();
 
     /// Access the parameter advisor (for bounds inspection / tuning).
-    [[nodiscard]] ParamAdvisor &param_advisor();
+    [[nodiscard]] ParamAdvisor &paramAdvisor();
 
     /// Returns the most recent AnalysisResult, or nullptr if no cycle has completed.
     ///
     /// Thread-safe: uses shared_mutex for read access.
     /// The returned shared_ptr is immutable and safe to read from any thread.
-    [[nodiscard]] std::shared_ptr<const AnalysisResult> last_result() const noexcept;
+    [[nodiscard]] std::shared_ptr<const AnalysisResult> lastResult() const noexcept;
 
   private:
-    TwitterFeed twitter_feed_;    ///< Social signal ingestion (X API v2).
-    NewsFeed news_feed_;          ///< News article ingestion (NewsAPI/CryptoPanic).
-    PromptBuilder prompt_builder_; ///< Prompt assembly.
-    AIClient ai_client_;          ///< LLM HTTP client.
-    ParamAdvisor param_advisor_;  ///< Delta validation + atomic apply.
+    TwitterFeed m_twitterFeed;    ///< Social signal ingestion (X API v2).
+    NewsFeed m_newsFeed;          ///< News article ingestion (NewsAPI/CryptoPanic).
+    PromptBuilder m_promptBuilder; ///< Prompt assembly.
+    AIClient m_aiClient;          ///< LLM HTTP client.
+    ParamAdvisor m_paramAdvisor;  ///< Delta validation + atomic apply.
 
     /// Cached last analysis result for WebUI/dashboard retrieval.
-    mutable std::shared_mutex result_mutex_;
-    std::shared_ptr<const AnalysisResult> last_result_{ nullptr };
+    mutable std::shared_mutex m_resultMutex;
+    std::shared_ptr<const AnalysisResult> m_lastResult{ nullptr };
 };
 
 } // namespace pulse::ai

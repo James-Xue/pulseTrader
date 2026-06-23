@@ -1,14 +1,14 @@
 #pragma once
-// ws_server.hpp — WebSocket push server for WebUI real-time snapshots (Layer 9 WebUI)
+// wsServer.hpp — WebSocket push server for WebUI real-time snapshots (Layer 9 WebUI)
 //
 // Provides push-based snapshot delivery to connected WebSocket clients:
 //   1. DashboardState invokes the snapshot callback after each poll cycle
-//   2. WebServer forwards the snapshot to WsServer::push_snapshot()
+//   2. WebServer forwards the snapshot to WsServer::pushSnapshot()
 //   3. WsServer serializes the snapshot to JSON (cached for reuse) and invokes
 //      a publish function (set by WebServer) that broadcasts via pub/sub
 //
 // Thread model:
-//   - push_snapshot() may be called from any thread (typically the poll thread)
+//   - pushSnapshot() may be called from any thread (typically the poll thread)
 //   - JSON serialization happens on the caller's thread (cheap, ~50 us)
 //   - The actual publish is deferred to the uWebSockets event loop thread
 //     via a publish function that calls Loop::defer() internally
@@ -60,10 +60,10 @@ struct PerSocketData
 //
 // Usage:
 //   WsServer ws(config);
-//   ws.set_publish_fn([](const std::string &json) {
+//   ws.setPublishFn([](const std::string &json) {
 //       loop->defer([&app, json]() { app->publish("snapshot", json, TEXT); });
 //   });
-//   ws.push_snapshot(snapshot);  // Called from DashboardState callback
+//   ws.pushSnapshot(snapshot);  // Called from DashboardState callback
 // ---------------------------------------------------------------------------
 class WsServer
 {
@@ -87,59 +87,59 @@ class WsServer
 
     /// Set the publish function used to broadcast JSON to connected clients.
     ///
-    /// Must be set before push_snapshot() is called. WebServer sets this
+    /// Must be set before pushSnapshot() is called. WebServer sets this
     /// during start() with a lambda that captures the uWS::App pointer and
     /// defers the publish to the event loop thread.
-    void set_publish_fn(PublishFn fn);
+    void setPublishFn(PublishFn fn);
 
     /// Push a snapshot to all connected WebSocket clients.
     ///
     /// Algorithm:
-    ///   1. Serialize the snapshot to JSON (cached in last_json_)
+    ///   1. Serialize the snapshot to JSON (cached in m_lastJson)
     ///   2. Snapshot the current client count
-    ///   3. If publish_fn_ is set and clients > 0, invoke the publish function
+    ///   3. If m_publishFn is set and clients > 0, invoke the publish function
     ///      which defers the actual broadcast to the event loop thread
     ///
     /// Thread-safe: may be called from any thread.
-    void push_snapshot(std::shared_ptr<const DashboardSnapshot> snapshot);
+    void pushSnapshot(std::shared_ptr<const DashboardSnapshot> snapshot);
 
     /// Called when a new WebSocket connection is opened.
     ///
     /// Increments the client counter. Must be called from the event loop thread.
-    void on_ws_open();
+    void onWsOpen();
 
     /// Called when a WebSocket connection is closed.
     ///
     /// Decrements the client counter. Must be called from the event loop thread.
-    void on_ws_close();
+    void onWsClose();
 
     /// Returns the current number of connected clients.
     ///
     /// Lock-free: reads an atomic counter.
-    [[nodiscard]] std::size_t client_count() const;
+    [[nodiscard]] std::size_t clientCount() const;
 
     /// Returns the maximum number of concurrent clients from config.
-    [[nodiscard]] std::size_t max_clients() const;
+    [[nodiscard]] std::size_t maxClients() const;
 
     /// Returns the most recently serialized JSON snapshot.
     ///
     /// Thread-safe: reads a mutex-protected string.
     /// Returns empty string if no snapshot has been pushed yet.
-    [[nodiscard]] std::string last_json() const;
+    [[nodiscard]] std::string lastJson() const;
 
   private:
     // --- Configuration ---
-    WebUiConfig config_;
+    WebUiConfig m_config;
 
     // --- Client tracking ---
-    std::atomic<std::size_t> client_count_{ 0 };
+    std::atomic<std::size_t> m_clientCount{ 0 };
 
     // --- Cached JSON (serialized once per push, reused for all clients) ---
-    mutable std::mutex json_mutex_;
-    std::string last_json_;
+    mutable std::mutex m_jsonMutex;
+    std::string m_lastJson;
 
     // --- Publish function (set by WebServer, thread-safe) ---
-    PublishFn publish_fn_;
+    PublishFn m_publishFn;
 };
 
 } // namespace pulse::webui

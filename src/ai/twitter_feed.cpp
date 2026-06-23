@@ -1,4 +1,4 @@
-// twitter_feed.cpp — X (Twitter) API v2 social signal ingestion (Layer 4 AI Analysis)
+// twitterFeed.cpp — X (Twitter) API v2 social signal ingestion (Layer 4 AI Analysis)
 //
 // Architecture:
 //   1. poll() builds the recent-search URL from configured keywords
@@ -35,7 +35,7 @@ namespace
 
 std::once_flag g_curl_init_flag;
 
-void ensure_curl_init()
+void ensureCurlInit()
 {
     std::call_once(g_curl_init_flag, []()
             {
@@ -44,7 +44,7 @@ void ensure_curl_init()
 }
 
 // libcurl write callback: appends received data chunks to a string buffer.
-size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::string *output)
+size_t curlWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
 {
     const size_t total = size * nmemb;
     output->append(static_cast<char *>(contents), total);
@@ -61,7 +61,7 @@ constexpr long kHttpTimeoutMs = 5'000;
 //   3. Apply timezone offset if present
 //   4. Convert to milliseconds and add fractional seconds
 // Returns 0 on parse failure.
-std::int64_t parse_iso8601(const std::string &s)
+std::int64_t parseIso8601(const std::string &s)
 {
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
     int tz_hour = 0, tz_min = 0;
@@ -127,9 +127,9 @@ std::int64_t parse_iso8601(const std::string &s)
 // TwitterFeed implementation
 // ---------------------------------------------------------------------------
 
-TwitterFeed::TwitterFeed(const TwitterConfig &config) : config_(config)
+TwitterFeed::TwitterFeed(const TwitterConfig &config) : m_config(config)
 {
-    ensure_curl_init();
+    ensureCurlInit();
 }
 
 // ---------------------------------------------------------------------------
@@ -148,13 +148,13 @@ TwitterFeed::TwitterFeed(const TwitterConfig &config) : config_(config)
 int TwitterFeed::poll()
 {
     // 1. Check if feed is enabled
-    if (!config_.enabled)
+    if (!m_config.enabled)
     {
         return 0;
     }
 
     // 2. Build search URL
-    const std::string url = build_search_url();
+    const std::string url = buildSearchUrl();
     if (url.empty())
     {
         PULSE_LOG_WARN("twitter", "no keywords configured — skipping poll");
@@ -164,13 +164,13 @@ int TwitterFeed::poll()
     PULSE_LOG_DEBUG("twitter", "polling: {}", url);
 
     // 3. HTTP GET with Bearer token
-    if (config_.bearerToken.empty())
+    if (m_config.bearerToken.empty())
     {
         PULSE_LOG_WARN("twitter", "no bearer token configured — skipping poll");
         return 0;
     }
 
-    const HttpResponse response = do_request(url);
+    const HttpResponse response = doRequest(url);
 
     // 4. Check HTTP status
     if (0 == response.status_code)
@@ -204,7 +204,7 @@ int TwitterFeed::poll()
     const auto &data_array = json_data["data"];
     int new_count = 0;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     // 7. Process each tweet
     for (const auto &item : data_array)
@@ -224,7 +224,7 @@ int TwitterFeed::poll()
         const std::string text = item["text"].get<std::string>();
 
         // Dedup by tweet ID
-        if (seen_ids_.count(id) > 0)
+        if (m_seenIds.count(id) > 0)
         {
             continue;
         }
@@ -241,7 +241,7 @@ int TwitterFeed::poll()
         if (item.contains("created_at") && item["created_at"].is_string())
         {
             const std::string created_at = item["created_at"].get<std::string>();
-            timestamp = parse_iso8601(created_at);
+            timestamp = parseIso8601(created_at);
             if (0 == timestamp)
             {
                 // Fallback to current time if parse fails
@@ -251,47 +251,47 @@ int TwitterFeed::poll()
         }
 
         // Add to rolling window
-        seen_ids_.insert(id);
-        tweets_.push_back(Tweet{id, text, author, timestamp});
+        m_seenIds.insert(id);
+        m_tweets.push_back(Tweet{id, text, author, timestamp});
         ++new_count;
     }
 
     // 8. Trim to maxTweets (evict oldest from front)
-    while (tweets_.size() > config_.maxTweets)
+    while (m_tweets.size() > m_config.maxTweets)
     {
-        seen_ids_.erase(tweets_.front().id);
-        tweets_.pop_front();
+        m_seenIds.erase(m_tweets.front().id);
+        m_tweets.pop_front();
     }
 
-    PULSE_LOG_INFO("twitter", "polled {} new tweet(s), window size: {}", new_count, tweets_.size());
+    PULSE_LOG_INFO("twitter", "polled {} new tweet(s), window size: {}", new_count, m_tweets.size());
     return new_count;
 }
 
 // ---------------------------------------------------------------------------
-// recent_text — concatenate tweet text for AI prompt inclusion
+// recentText — concatenate tweet text for AI prompt inclusion
 //
 // Format: each tweet on its own line, prefixed with [N] @author:
 // Tweets are ordered oldest-first (front of deque).
 // ---------------------------------------------------------------------------
-std::string TwitterFeed::recent_text(std::size_t max_count) const
+std::string TwitterFeed::recentText(std::size_t max_count) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (tweets_.empty())
+    if (m_tweets.empty())
     {
         return "";
     }
 
     // Take the last max_count tweets (most recent)
-    const std::size_t start = (tweets_.size() > max_count) ? (tweets_.size() - max_count) : 0;
-    const std::size_t count = tweets_.size() - start;
+    const std::size_t start = (m_tweets.size() > max_count) ? (m_tweets.size() - max_count) : 0;
+    const std::size_t count = m_tweets.size() - start;
 
     std::string result;
     result.reserve(count * 200); // Rough estimate
 
     for (std::size_t i = 0; i < count; ++i)
     {
-        const auto &tweet = tweets_[start + i];
+        const auto &tweet = m_tweets[start + i];
         if (!result.empty())
         {
             result += "\n";
@@ -310,19 +310,19 @@ std::string TwitterFeed::recent_text(std::size_t max_count) const
 
 std::size_t TwitterFeed::size() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return tweets_.size();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_tweets.size();
 }
 
 void TwitterFeed::clear()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    tweets_.clear();
-    seen_ids_.clear();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_tweets.clear();
+    m_seenIds.clear();
 }
 
 // ---------------------------------------------------------------------------
-// do_request — single HTTP GET request via libcurl
+// doRequest — single HTTP GET request via libcurl
 //
 // Steps:
 //   1. Create a curl easy handle
@@ -331,7 +331,7 @@ void TwitterFeed::clear()
 //   4. Execute and collect response
 //   5. Clean up handle and return
 // ---------------------------------------------------------------------------
-TwitterFeed::HttpResponse TwitterFeed::do_request(const std::string &url) const
+TwitterFeed::HttpResponse TwitterFeed::doRequest(const std::string &url) const
 {
     HttpResponse response;
 
@@ -344,12 +344,12 @@ TwitterFeed::HttpResponse TwitterFeed::do_request(const std::string &url) const
 
     // 1. Build HTTP headers with Bearer token authentication
     struct curl_slist *headers = nullptr;
-    headers = curl_slist_append(headers, ("Authorization: Bearer " + config_.bearerToken).c_str());
+    headers = curl_slist_append(headers, ("Authorization: Bearer " + m_config.bearerToken).c_str());
 
     // 2. Configure the request
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, kHttpTimeoutMs);
 
@@ -374,7 +374,7 @@ TwitterFeed::HttpResponse TwitterFeed::do_request(const std::string &url) const
 }
 
 // ---------------------------------------------------------------------------
-// build_search_url — construct the X API v2 recent-search URL
+// buildSearchUrl — construct the X API v2 recent-search URL
 //
 // Format: {baseUrl}/tweets/search/recent?query={keywords}&max_results=10
 //         &tweet.fields=author_id,created_at
@@ -382,22 +382,22 @@ TwitterFeed::HttpResponse TwitterFeed::do_request(const std::string &url) const
 // Keywords are joined with OR for broader matching.
 // Returns empty string if no keywords are configured.
 // ---------------------------------------------------------------------------
-std::string TwitterFeed::build_search_url() const
+std::string TwitterFeed::buildSearchUrl() const
 {
-    if (config_.keywords.empty())
+    if (m_config.keywords.empty())
     {
         return "";
     }
 
     // Join keywords with OR (X API query syntax for broader matching)
     std::string query;
-    for (std::size_t i = 0; i < config_.keywords.size(); ++i)
+    for (std::size_t i = 0; i < m_config.keywords.size(); ++i)
     {
         if (i > 0)
         {
             query += " OR ";
         }
-        query += config_.keywords[i];
+        query += m_config.keywords[i];
     }
 
     // URL-encode spaces in the query (%20)
@@ -415,7 +415,7 @@ std::string TwitterFeed::build_search_url() const
         }
     }
 
-    return config_.baseUrl + "/tweets/search/recent?query=" + encoded_query
+    return m_config.baseUrl + "/tweets/search/recent?query=" + encoded_query
            + "&max_results=10&tweet.fields=author_id,created_at";
 }
 

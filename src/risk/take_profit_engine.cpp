@@ -14,7 +14,7 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 TakeProfitEngine::TakeProfitEngine(const TakeProfitConfig &default_config)
-    : default_config_{ default_config }
+    : m_defaultConfig{ default_config }
 {
 }
 
@@ -22,7 +22,7 @@ TakeProfitEngine::TakeProfitEngine(const TakeProfitConfig &default_config)
 // Position registration
 // ---------------------------------------------------------------------------
 
-void TakeProfitEngine::register_position(const std::string &position_id, const Position &pos,
+void TakeProfitEngine::registerPosition(const std::string &position_id, const Position &pos,
     const TakeProfitConfig &config)
 {
     // Register a position for take-profit monitoring:
@@ -30,26 +30,26 @@ void TakeProfitEngine::register_position(const std::string &position_id, const P
     // 2. Use provided config or default
     // 3. Initialize TrackedTp with entry price, side, and next_target_idx = 0
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     TrackedTp tracked;
     // Use engine default when caller provides no targets (empty vector).
-    tracked.config = config.targets_pct.empty() ? default_config_ : config;
+    tracked.config = config.targets_pct.empty() ? m_defaultConfig : config;
     tracked.entry_price = pos.entry_price;
     tracked.side = pos.side;
     tracked.next_target_idx = 0;
 
-    tracked_[position_id] = tracked;
+    m_tracked[position_id] = tracked;
 
     PULSE_LOG_INFO("risk",
         "Take-profit registered: {} entry={:.2f} targets={}",
         position_id, pos.entry_price, tracked.config.targets_pct.size());
 }
 
-void TakeProfitEngine::remove_position(const std::string &position_id)
+void TakeProfitEngine::removePosition(const std::string &position_id)
 {
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    tracked_.erase(position_id);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_tracked.erase(position_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,11 +67,11 @@ std::vector<TakeProfitEngine::TpSignal> TakeProfitEngine::evaluate(
     //    c. Compute target price from entry +/- targets_pct
     //    d. If price crossed target: emit signal, advance index
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     std::vector<TpSignal> signals;
 
-    for (auto &[pos_id, tracked] : tracked_)
+    for (auto &[pos_id, tracked] : m_tracked)
     {
         // a. Look up current position.
         auto it = current_positions.find(pos_id);
@@ -139,24 +139,24 @@ std::vector<TakeProfitEngine::TpSignal> TakeProfitEngine::evaluate(
 // Queries
 // ---------------------------------------------------------------------------
 
-bool TakeProfitEngine::is_tracked(const std::string &position_id) const
+bool TakeProfitEngine::isTracked(const std::string &position_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return tracked_.count(position_id) > 0;
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_tracked.count(position_id) > 0;
 }
 
-std::size_t TakeProfitEngine::tracked_count() const
+std::size_t TakeProfitEngine::trackedCount() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return tracked_.size();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_tracked.size();
 }
 
-int TakeProfitEngine::next_target_index(const std::string &position_id) const
+int TakeProfitEngine::nextTargetIndex(const std::string &position_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    auto it = tracked_.find(position_id);
-    if (tracked_.end() == it)
+    auto it = m_tracked.find(position_id);
+    if (m_tracked.end() == it)
     {
         return -1;
     }

@@ -52,7 +52,7 @@ TEST(OrderResponse, DefaultConstruction)
 // OrderExecutor (requires REST client — tested via integration tests)
 // ---------------------------------------------------------------------------
 
-// Note: build_order_body() and parse_order_response() are private methods.
+// Note: buildOrderBody() and parseOrderResponse() are private methods.
 // Full OrderExecutor testing requires a real or mock GateRestClient.
 // These tests would be integration tests in tools/test_execution.cpp.
 

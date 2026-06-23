@@ -31,9 +31,9 @@ namespace
 constexpr std::string_view kEnvPrefix = "from_env:";
 
 // ---------------------------------------------------------------------------
-// resolve_env_vars — recursively walk TOML tree, replacing "from_env:VAR"
+// resolveEnvVars — recursively walk TOML tree, replacing "from_env:VAR"
 // ---------------------------------------------------------------------------
-PulseError resolve_env_vars(toml::value &node, const std::string &path)
+PulseError resolveEnvVars(toml::value &node, const std::string &path)
 {
     if (node.is_string())
     {
@@ -45,7 +45,7 @@ PulseError resolve_env_vars(toml::value &node, const std::string &path)
             const char *env_val = std::getenv(var_name.c_str());
 
             // Unset or empty env vars resolve to empty string.
-            // Runtime validation (validate_config) will catch missing
+            // Runtime validation (validateConfig) will catch missing
             // credentials for enabled sections.
             s = (env_val && env_val[0]) ? env_val : "";
         }
@@ -57,7 +57,7 @@ PulseError resolve_env_vars(toml::value &node, const std::string &path)
         for (auto &[key, child] : node.as_table())
         {
             std::string child_path = path.empty() ? key : path + "." + key;
-            auto err = resolve_env_vars(child, child_path);
+            auto err = resolveEnvVars(child, child_path);
 
             if (ErrorCode::Ok != err.code)
             {
@@ -75,7 +75,7 @@ PulseError resolve_env_vars(toml::value &node, const std::string &path)
         {
             std::string child_path =
                 path + "[" + std::to_string(i) + "]";
-            auto err = resolve_env_vars(arr[i], child_path);
+            auto err = resolveEnvVars(arr[i], child_path);
 
             if (ErrorCode::Ok != err.code)
             {
@@ -88,13 +88,13 @@ PulseError resolve_env_vars(toml::value &node, const std::string &path)
 }
 
 // ---------------------------------------------------------------------------
-// find_double — extract a double from TOML, accepting both integer and float
+// findDouble — extract a double from TOML, accepting both integer and float
 //
 // toml11 v4 distinguishes TOML integer (int64_t) from float (double).
 // toml::find_or<double>() fails if the TOML value is an integer (e.g. 500
 // instead of 500.0). This helper handles both cases.
 // ---------------------------------------------------------------------------
-double find_double(const toml::value &tbl, const std::string &key,
+double findDouble(const toml::value &tbl, const std::string &key,
                    double fallback)
 {
     if (!tbl.contains(key))
@@ -120,9 +120,9 @@ double find_double(const toml::value &tbl, const std::string &key,
 }
 
 // ---------------------------------------------------------------------------
-// parse_stop_mode — string to StopMode enum
+// parseStopMode — string to StopMode enum
 // ---------------------------------------------------------------------------
-PulseError parse_stop_mode(const std::string &str, StopMode &out)
+PulseError parseStopMode(const std::string &str, StopMode &out)
 {
     if ("Fixed" == str)
     {
@@ -148,9 +148,9 @@ PulseError parse_stop_mode(const std::string &str, StopMode &out)
 }
 
 // ---------------------------------------------------------------------------
-// parse_market_type — string to MarketType enum
+// parseMarketType — string to MarketType enum
 // ---------------------------------------------------------------------------
-PulseError parse_market_type(const std::string &str, MarketType &out)
+PulseError parseMarketType(const std::string &str, MarketType &out)
 {
     if ("spot" == str)
     {
@@ -169,9 +169,9 @@ PulseError parse_market_type(const std::string &str, MarketType &out)
 }
 
 // ---------------------------------------------------------------------------
-// parse_margin_mode — string to MarginMode enum
+// parseMarginMode — string to MarginMode enum
 // ---------------------------------------------------------------------------
-PulseError parse_margin_mode(const std::string &str, MarginMode &out)
+PulseError parseMarginMode(const std::string &str, MarginMode &out)
 {
     if ("cross" == str)
     {
@@ -193,7 +193,7 @@ PulseError parse_margin_mode(const std::string &str, MarginMode &out)
 // Section parsers — each reads one TOML [section] into a config struct
 // ---------------------------------------------------------------------------
 
-PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
+PulseError parseExchange(const toml::value &root, ExchangeConfig &out)
 {
     if (!root.contains("exchange"))
     {
@@ -244,7 +244,7 @@ PulseError parse_exchange(const toml::value &root, ExchangeConfig &out)
     return {};
 }
 
-PulseError parse_log(const toml::value &root, LogConfig &out)
+PulseError parseLog(const toml::value &root, LogConfig &out)
 {
     if (!root.contains("log"))
     {
@@ -261,7 +261,7 @@ PulseError parse_log(const toml::value &root, LogConfig &out)
     return {};
 }
 
-PulseError parse_symbols(const toml::value &root,
+PulseError parseSymbols(const toml::value &root,
                          std::vector<std::string> &out)
 {
     if (!root.contains("symbols"))
@@ -292,7 +292,7 @@ PulseError parse_symbols(const toml::value &root,
     return {};
 }
 
-PulseError parse_ai(const toml::value &root, AiConfig &out)
+PulseError parseAi(const toml::value &root, AiConfig &out)
 {
     if (!root.contains("ai"))
     {
@@ -321,7 +321,7 @@ PulseError parse_ai(const toml::value &root, AiConfig &out)
     return {};
 }
 
-PulseError parse_twitter(const toml::value &root, TwitterConfig &out)
+PulseError parseTwitter(const toml::value &root, TwitterConfig &out)
 {
     if (!root.contains("twitter"))
     {
@@ -369,7 +369,7 @@ PulseError parse_twitter(const toml::value &root, TwitterConfig &out)
     return {};
 }
 
-PulseError parse_news(const toml::value &root, NewsConfig &out)
+PulseError parseNews(const toml::value &root, NewsConfig &out)
 {
     if (!root.contains("news"))
     {
@@ -418,7 +418,7 @@ PulseError parse_news(const toml::value &root, NewsConfig &out)
     return {};
 }
 
-PulseError parse_stop_loss(const toml::value &sec, StopLossConfig &out)
+PulseError parseStopLoss(const toml::value &sec, StopLossConfig &out)
 {
     if (!sec.contains("stop_loss"))
     {
@@ -430,7 +430,7 @@ PulseError parse_stop_loss(const toml::value &sec, StopLossConfig &out)
     if (sub.contains("mode"))
     {
         std::string mode_str = toml::find<std::string>(sub, "mode");
-        auto err = parse_stop_mode(mode_str, out.mode);
+        auto err = parseStopMode(mode_str, out.mode);
 
         if (ErrorCode::Ok != err.code)
         {
@@ -438,8 +438,8 @@ PulseError parse_stop_loss(const toml::value &sec, StopLossConfig &out)
         }
     }
 
-    out.fixed_pct = find_double(sub, "fixed_pct", out.fixed_pct);
-    out.trailing_pct = find_double(sub, "trailing_pct", out.trailing_pct);
+    out.fixed_pct = findDouble(sub, "fixed_pct", out.fixed_pct);
+    out.trailing_pct = findDouble(sub, "trailing_pct", out.trailing_pct);
     out.max_hold_seconds =
         static_cast<std::uint32_t>(
             toml::find_or(sub, "max_hold_seconds",
@@ -448,7 +448,7 @@ PulseError parse_stop_loss(const toml::value &sec, StopLossConfig &out)
     return {};
 }
 
-PulseError parse_take_profit(const toml::value &sec, TakeProfitConfig &out)
+PulseError parseTakeProfit(const toml::value &sec, TakeProfitConfig &out)
 {
     if (!sec.contains("take_profit"))
     {
@@ -498,7 +498,7 @@ PulseError parse_take_profit(const toml::value &sec, TakeProfitConfig &out)
     return {};
 }
 
-PulseError parse_risk(const toml::value &root, RiskConfig &out)
+PulseError parseRisk(const toml::value &root, RiskConfig &out)
 {
     if (!root.contains("risk"))
     {
@@ -508,33 +508,33 @@ PulseError parse_risk(const toml::value &root, RiskConfig &out)
     const auto &sec = root.at("risk");
 
     out.maxPositionNotional =
-        find_double(sec, "maxPositionNotional", out.maxPositionNotional);
+        findDouble(sec, "maxPositionNotional", out.maxPositionNotional);
     out.maxOpenPositions =
         toml::find_or(sec, "maxOpenPositions", out.maxOpenPositions);
     out.maxDailyDrawdown =
-        find_double(sec, "maxDailyDrawdown", out.maxDailyDrawdown);
+        findDouble(sec, "maxDailyDrawdown", out.maxDailyDrawdown);
     out.maxDrawdown =
-        find_double(sec, "maxDrawdown", out.maxDrawdown);
+        findDouble(sec, "maxDrawdown", out.maxDrawdown);
     out.maxOrdersPerSec =
         static_cast<std::uint32_t>(
             toml::find_or(sec, "maxOrdersPerSec",
                           static_cast<int>(out.maxOrdersPerSec)));
     out.maxSymbolNotional =
-        find_double(sec, "maxSymbolNotional", out.maxSymbolNotional);
+        findDouble(sec, "maxSymbolNotional", out.maxSymbolNotional);
     out.max_leverage =
-        find_double(sec, "max_leverage", out.max_leverage);
+        findDouble(sec, "max_leverage", out.max_leverage);
     out.max_margin_used =
-        find_double(sec, "max_margin_used", out.max_margin_used);
+        findDouble(sec, "max_margin_used", out.max_margin_used);
 
     // Nested sub-tables.
-    auto err = parse_stop_loss(sec, out.stop_loss);
+    auto err = parseStopLoss(sec, out.stop_loss);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_take_profit(sec, out.take_profit);
+    err = parseTakeProfit(sec, out.take_profit);
 
     if (ErrorCode::Ok != err.code)
     {
@@ -544,15 +544,15 @@ PulseError parse_risk(const toml::value &root, RiskConfig &out)
     return {};
 }
 
-PulseError parse_strategy_instance(const toml::value &tbl,
+PulseError parseStrategyInstance(const toml::value &tbl,
                                    StrategyInstanceConfig &out)
 {
     out.name = toml::find_or(tbl, "name", out.name);
     out.symbol = toml::find_or(tbl, "symbol", out.symbol);
     out.order_quantity =
-        find_double(tbl, "order_quantity", out.order_quantity);
+        findDouble(tbl, "order_quantity", out.order_quantity);
     out.min_confidence =
-        find_double(tbl, "min_confidence", out.min_confidence);
+        findDouble(tbl, "min_confidence", out.min_confidence);
     out.enabled = toml::find_or(tbl, "enabled", out.enabled);
     out.poll_interval_ms =
         static_cast<std::uint32_t>(
@@ -560,12 +560,12 @@ PulseError parse_strategy_instance(const toml::value &tbl,
                           static_cast<int>(out.poll_interval_ms)));
 
     // Futures-specific fields.
-    out.leverage = find_double(tbl, "leverage", out.leverage);
+    out.leverage = findDouble(tbl, "leverage", out.leverage);
 
     if (tbl.contains("market_type"))
     {
         std::string mt_str = toml::find<std::string>(tbl, "market_type");
-        auto err = parse_market_type(mt_str, out.market_type);
+        auto err = parseMarketType(mt_str, out.market_type);
 
         if (ErrorCode::Ok != err.code)
         {
@@ -576,7 +576,7 @@ PulseError parse_strategy_instance(const toml::value &tbl,
     if (tbl.contains("margin_mode"))
     {
         std::string mm_str = toml::find<std::string>(tbl, "margin_mode");
-        auto err = parse_margin_mode(mm_str, out.margin_mode);
+        auto err = parseMarginMode(mm_str, out.margin_mode);
 
         if (ErrorCode::Ok != err.code)
         {
@@ -587,7 +587,7 @@ PulseError parse_strategy_instance(const toml::value &tbl,
     return {};
 }
 
-PulseError parse_strategy(const toml::value &root, StrategyConfig &out)
+PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
 {
     if (!root.contains("strategy"))
     {
@@ -596,7 +596,7 @@ PulseError parse_strategy(const toml::value &root, StrategyConfig &out)
 
     const auto &sec = root.at("strategy");
 
-    out.signal_aggregator_threshold = find_double(
+    out.signal_aggregator_threshold = findDouble(
         sec, "signal_aggregator_threshold",
         out.signal_aggregator_threshold);
     out.signal_cooldown_sec =
@@ -630,7 +630,7 @@ PulseError parse_strategy(const toml::value &root, StrategyConfig &out)
             }
 
             StrategyInstanceConfig inst;
-            auto err = parse_strategy_instance(elem, inst);
+            auto err = parseStrategyInstance(elem, inst);
 
             if (ErrorCode::Ok != err.code)
             {
@@ -644,7 +644,7 @@ PulseError parse_strategy(const toml::value &root, StrategyConfig &out)
     return {};
 }
 
-PulseError parse_webui(const toml::value &root, WebUiConfig &out)
+PulseError parseWebui(const toml::value &root, WebUiConfig &out)
 {
     if (!root.contains("webui"))
     {
@@ -666,7 +666,7 @@ PulseError parse_webui(const toml::value &root, WebUiConfig &out)
     return {};
 }
 
-PulseError parse_sqlite(const toml::value &root, SqliteConfig &out)
+PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
 {
     if (!root.contains("sqlite"))
     {
@@ -687,7 +687,7 @@ PulseError parse_sqlite(const toml::value &root, SqliteConfig &out)
 // Public API
 // ---------------------------------------------------------------------------
 
-Result<PulseConfig> load_config_file(const std::filesystem::path &path)
+Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
 {
     // Stage 1: Check file existence.
     if (!std::filesystem::exists(path))
@@ -713,7 +713,7 @@ Result<PulseConfig> load_config_file(const std::filesystem::path &path)
     }
 
     // Stage 3: Resolve from_env: values.
-    auto env_err = resolve_env_vars(root, "");
+    auto env_err = resolveEnvVars(root, "");
 
     if (ErrorCode::Ok != env_err.code)
     {
@@ -724,70 +724,70 @@ Result<PulseConfig> load_config_file(const std::filesystem::path &path)
     PulseConfig cfg; // All fields start with config.hpp defaults.
 
     // Each parser returns early if its section is absent.
-    auto err = parse_exchange(root, cfg.exchange);
+    auto err = parseExchange(root, cfg.exchange);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_log(root, cfg.log);
+    err = parseLog(root, cfg.log);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_symbols(root, cfg.symbols);
+    err = parseSymbols(root, cfg.symbols);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_ai(root, cfg.ai);
+    err = parseAi(root, cfg.ai);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_twitter(root, cfg.twitter);
+    err = parseTwitter(root, cfg.twitter);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_news(root, cfg.news);
+    err = parseNews(root, cfg.news);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_risk(root, cfg.risk);
+    err = parseRisk(root, cfg.risk);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_strategy(root, cfg.strategy);
+    err = parseStrategy(root, cfg.strategy);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_webui(root, cfg.webui);
+    err = parseWebui(root, cfg.webui);
 
     if (ErrorCode::Ok != err.code)
     {
         return err;
     }
 
-    err = parse_sqlite(root, cfg.sqlite);
+    err = parseSqlite(root, cfg.sqlite);
 
     if (ErrorCode::Ok != err.code)
     {
@@ -798,7 +798,7 @@ Result<PulseConfig> load_config_file(const std::filesystem::path &path)
     if (root.contains("default_market_type"))
     {
         std::string mt_str = toml::find<std::string>(root, "default_market_type");
-        err = parse_market_type(mt_str, cfg.default_market_type);
+        err = parseMarketType(mt_str, cfg.default_market_type);
 
         if (ErrorCode::Ok != err.code)
         {

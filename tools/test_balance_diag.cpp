@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
 
     PulseConfig cfg;
     bool config_loaded = false;
-    auto load_result = load_config_file(config_path);
+    auto load_result = loadConfigFile(config_path);
     if (ok(load_result))
     {
         cfg = value(load_result);
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Endpoint: " << cfg.exchange.restBaseUrl << "/api/v4/futures/usdt/accounts\n\n";
 
-    auto futures_raw = futures_client.get_futures_accounts();
+    auto futures_raw = futures_client.getFuturesAccounts();
     if (ok(futures_raw))
     {
         const auto &j = value(futures_raw);
@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
         }
 
         // Parsed values
-        auto bal_result = futures_client.get_futures_account_balance();
+        auto bal_result = futures_client.getFuturesAccountBalance();
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
@@ -131,8 +131,8 @@ int main(int argc, char *argv[])
             std::cout << "Order Margin    : " << bal.order_margin << " " << bal.currency << "\n";
 
             // Equity calculation
-            double total = safe_parse_double(j.value("total", "0")).value_or(0.0);
-            double upnl = safe_parse_double(j.value("unrealised_pnl", "0")).value_or(0.0);
+            double total = safeParseDouble(j.value("total", "0")).value_or(0.0);
+            double upnl = safeParseDouble(j.value("unrealised_pnl", "0")).value_or(0.0);
             std::cout << "\nEquity (total + unrealised_pnl) = " << (total + upnl) << " " << bal.currency << "\n";
         }
     }
@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Endpoint: " << cfg.exchange.restBaseUrl << "/api/v4/spot/accounts\n\n";
 
-    auto spot_raw = spot_client.get_spot_accounts();
+    auto spot_raw = spot_client.getSpotAccounts();
     if (ok(spot_raw))
     {
         const auto &j = value(spot_raw);
@@ -171,8 +171,8 @@ int main(int argc, char *argv[])
 
                 std::string avail_str = item.value("available", "0");
                 std::string locked_str = item.value("locked", "0");
-                double avail = safe_parse_double(avail_str).value_or(0.0);
-                double locked = safe_parse_double(locked_str).value_or(0.0);
+                double avail = safeParseDouble(avail_str).value_or(0.0);
+                double locked = safeParseDouble(locked_str).value_or(0.0);
 
                 std::cout << std::fixed << std::setprecision(4);
                 std::cout << "\n  Available : " << avail << " USDT\n";

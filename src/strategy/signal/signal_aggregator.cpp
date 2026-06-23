@@ -11,25 +11,25 @@ namespace pulse::strategy
 {
 
 SignalAggregator::SignalAggregator(const StrategyConfig &config)
-    : config_{ config }
+    : m_config{ config }
 {
 }
 
-void SignalAggregator::set_output_callback(OutputCallback cb)
+void SignalAggregator::setOutputCallback(OutputCallback cb)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    output_callback_ = std::move(cb);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_outputCallback = std::move(cb);
 }
 
-void SignalAggregator::set_weight(const std::string &strategy_id, double weight)
+void SignalAggregator::setWeight(const std::string &strategy_id, double weight)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    weights_[strategy_id] = weight;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_weights[strategy_id] = weight;
 }
 
-void SignalAggregator::add_signal(const TradingSignal &signal)
+void SignalAggregator::addSignal(const TradingSignal &signal)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     // 1. Ignore Flat signals — they carry no directional conviction.
     if (SignalType::Flat == signal.type)
@@ -37,13 +37,13 @@ void SignalAggregator::add_signal(const TradingSignal &signal)
         return;
     }
 
-    ++signal_count_;
+    ++m_signalCount;
 
     // 2. Look up the weight for this strategy.
-    const double weight = get_weight(signal.strategy_id);
+    const double weight = getWeight(signal.strategy_id);
 
     // 3. Accumulate into the per-symbol state.
-    auto &state = symbol_states_[signal.symbol];
+    auto &state = m_symbolStates[signal.symbol];
     const double weighted_confidence = signal.confidence * weight;
 
     if (SignalType::Buy == signal.type)
@@ -59,15 +59,15 @@ void SignalAggregator::add_signal(const TradingSignal &signal)
     state.market_type = signal.market_type;
 
     // 4. Evaluate whether we should emit a consolidated signal.
-    evaluate_and_emit(signal.symbol);
+    evaluateAndEmit(signal.symbol);
 }
 
-double SignalAggregator::aggregated_confidence(const Symbol &symbol) const
+double SignalAggregator::aggregatedConfidence(const Symbol &symbol) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = symbol_states_.find(symbol);
-    if (symbol_states_.end() == it)
+    auto it = m_symbolStates.find(symbol);
+    if (m_symbolStates.end() == it)
     {
         return 0.0;
     }
@@ -76,28 +76,28 @@ double SignalAggregator::aggregated_confidence(const Symbol &symbol) const
     return std::max(state.buy_weighted_sum, state.sell_weighted_sum);
 }
 
-std::uint64_t SignalAggregator::signal_count() const
+std::uint64_t SignalAggregator::signalCount() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return signal_count_;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_signalCount;
 }
 
 void SignalAggregator::reset()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    symbol_states_.clear();
-    signal_count_ = 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_symbolStates.clear();
+    m_signalCount = 0;
 }
 
 // ---------------------------------------------------------------------------
 // Private methods
 // ---------------------------------------------------------------------------
 
-void SignalAggregator::evaluate_and_emit(const Symbol &symbol)
+void SignalAggregator::evaluateAndEmit(const Symbol &symbol)
 {
-    // Note: caller must already hold mutex_.
+    // Note: caller must already hold m_mutex.
 
-    auto &state = symbol_states_[symbol];
+    auto &state = m_symbolStates[symbol];
 
     // 1. Determine dominant direction.
     const bool buy_dominant = state.buy_weighted_sum >= state.sell_weighted_sum;
@@ -111,14 +111,14 @@ void SignalAggregator::evaluate_and_emit(const Symbol &symbol)
     }
 
     // 3. Check threshold.
-    if (normalized_confidence < config_.signal_aggregator_threshold)
+    if (normalized_confidence < m_config.signal_aggregator_threshold)
     {
         return;
     }
 
     // 4. Check cooldown.
-    const auto current_ms = now_ms();
-    const auto cooldown_ms = static_cast<std::int64_t>(config_.signal_cooldown_sec) * 1000;
+    const auto current_ms = nowMs();
+    const auto cooldown_ms = static_cast<std::int64_t>(m_config.signal_cooldown_sec) * 1000;
     if (current_ms - state.last_signal_ms < cooldown_ms)
     {
         return;
@@ -136,15 +136,15 @@ void SignalAggregator::evaluate_and_emit(const Symbol &symbol)
     consolidated.reason = "Aggregated signal: "
         + std::to_string(state.buy_weighted_sum) + " buy vs "
         + std::to_string(state.sell_weighted_sum) + " sell (threshold="
-        + std::to_string(config_.signal_aggregator_threshold) + ")";
+        + std::to_string(m_config.signal_aggregator_threshold) + ")";
 
     PULSE_LOG_INFO("strategy", "[aggregator] {} {} confidence={:.4f} for {}",
         symbol, buy_dominant ? "BUY" : "SELL", normalized_confidence, symbol);
 
     // 6. Emit via callback.
-    if (nullptr != output_callback_)
+    if (nullptr != m_outputCallback)
     {
-        output_callback_(consolidated);
+        m_outputCallback(consolidated);
     }
 
     // 7. Reset per-symbol accumulation and record emission time.
@@ -154,18 +154,18 @@ void SignalAggregator::evaluate_and_emit(const Symbol &symbol)
     state.last_signal_ms = current_ms;
 }
 
-double SignalAggregator::get_weight(const std::string &strategy_id) const
+double SignalAggregator::getWeight(const std::string &strategy_id) const
 {
-    // Note: caller must already hold mutex_.
-    auto it = weights_.find(strategy_id);
-    if (weights_.end() != it)
+    // Note: caller must already hold m_mutex.
+    auto it = m_weights.find(strategy_id);
+    if (m_weights.end() != it)
     {
         return it->second;
     }
     return 1.0; // Default weight.
 }
 
-std::int64_t SignalAggregator::now_ms()
+std::int64_t SignalAggregator::nowMs()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())

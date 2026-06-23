@@ -30,7 +30,7 @@ namespace pulse::trade_recorder
 //   auto result = TradeRecorder::open("data/trades.db");
 //   if (ok(result)) {
 //       auto &recorder = value(result);
-//       recorder.record_trade(report, pnl, "momentum_scalper");
+//       recorder.recordTrade(report, pnl, "momentum_scalper");
 //   }
 // ---------------------------------------------------------------------------
 class TradeRecorder
@@ -51,33 +51,33 @@ class TradeRecorder
 
     /// Record a completed trade. Thread-safe (mutex-guarded).
     /// Returns true on success, PulseError on failure.
-    [[nodiscard]] Result<bool> record_trade(
+    [[nodiscard]] Result<bool> recordTrade(
         const execution::ExecutionReport &report,
         double pnl,
         const std::string &strategy_name);
 
     /// Query trades filtered by symbol and/or time range.
     /// Empty symbol + zero timestamps returns all trades.
-    [[nodiscard]] Result<std::vector<TradeRecord>> get_trades(
+    [[nodiscard]] Result<std::vector<TradeRecord>> getTrades(
         const std::string &symbol = "",
         std::int64_t from_ns = 0,
         std::int64_t to_ns = 0) const;
 
     /// Query trades by strategy name.
-    [[nodiscard]] Result<std::vector<TradeRecord>> get_trades_by_strategy(
+    [[nodiscard]] Result<std::vector<TradeRecord>> getTradesByStrategy(
         const std::string &strategy_name) const;
 
     /// Aggregate summary (count, pnl, win_rate, fees) over a time range.
-    [[nodiscard]] Result<TradeSummary> get_summary(
+    [[nodiscard]] Result<TradeSummary> getSummary(
         std::int64_t from_ns = 0,
         std::int64_t to_ns = 0) const;
 
     /// Daily PnL for a given date (UTC midnight boundaries).
-    [[nodiscard]] Result<double> get_daily_pnl(
+    [[nodiscard]] Result<double> getDailyPnl(
         std::int64_t date_ns) const;
 
     /// Total number of recorded trades.
-    [[nodiscard]] std::int64_t trade_count() const;
+    [[nodiscard]] std::int64_t tradeCount() const;
 
     /// Flush WAL frames to main DB file (call before shutdown).
     void checkpoint();
@@ -88,10 +88,10 @@ class TradeRecorder
   private:
     explicit TradeRecorder(std::unique_ptr<SQLite::Database> db);
 
-    [[nodiscard]] Result<bool> create_schema();
+    [[nodiscard]] Result<bool> createSchema();
 
-    mutable std::mutex mutex_;
-    std::unique_ptr<SQLite::Database> db_;
+    mutable std::mutex m_mutex;
+    std::unique_ptr<SQLite::Database> m_db;
 };
 
 } // namespace pulse::trade_recorder

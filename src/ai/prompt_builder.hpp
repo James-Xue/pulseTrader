@@ -58,7 +58,7 @@ class PromptBuilder
     ///   3. news_text  — concatenated recent news (empty = no news data)
     ///   4. params     — current strategy parameter values
     ///
-    /// Returns: {system_prompt, user_prompt} ready for AIClient::analyze().
+    /// Returns: {systemPrompt, userPrompt} ready for AIClient::analyze().
     [[nodiscard]] std::pair<std::string, std::string> build(
             const MarketSnapshot &snapshot,
             const std::string &tweet_text,
@@ -70,7 +70,7 @@ class PromptBuilder
     ///
     /// The schema includes all required fields (sentiment, direction_bias,
     /// volatility, confidence, param_deltas) and formatting rules.
-    [[nodiscard]] static std::string system_prompt();
+    [[nodiscard]] static std::string systemPrompt();
 
     /// Build the dynamic user prompt with current market data.
     ///
@@ -80,7 +80,7 @@ class PromptBuilder
     ///   3. Recent tweets (if available)
     ///   4. Recent news headlines (if available)
     ///   5. Current strategy parameter values
-    [[nodiscard]] std::string user_prompt(
+    [[nodiscard]] std::string userPrompt(
             const MarketSnapshot &snapshot,
             const std::string &tweet_text,
             const std::string &news_text,

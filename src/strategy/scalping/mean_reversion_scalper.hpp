@@ -13,12 +13,12 @@
 //   confidence = clamp(|price - band| / (upper - lower), 0.0, 1.0)
 //
 // Data source:
-//   - on_kline() reads closed candles from KlineBuffer
+//   - onKline() reads closed candles from KlineBuffer
 //   - Requires at least bb_period candles to produce a signal
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
-//   - last_signal_time_ms_ is only written from the strategy thread
+//   - m_lastSignalTimeMs is only written from the strategy thread
 
 #include "strategy/strategy_base.hpp"
 
@@ -46,20 +46,20 @@ class MeanReversionScalper : public StrategyBase
     ///
     /// Computes Bollinger Bands from the last N candles and emits Buy/Sell
     /// signals when price touches or breaches the bands.
-    void on_kline(const market::Kline &kline) override;
+    void onKline(const market::Kline &kline) override;
 
     /// Called on ticker updates — not used by this strategy.
-    void on_tick(const market::Ticker &ticker) override;
+    void onTick(const market::Ticker &ticker) override;
 
     /// Called on orderbook updates — not used by this strategy.
-    void on_orderbook(const market::OrderBook &book) override;
+    void onOrderbook(const market::OrderBook &book) override;
 
   private:
-    StrategyParams params_;
+    StrategyParams m_params;
 
-    std::int64_t last_signal_time_ms_{ 0 }; ///< Last signal timestamp (ms) for cooldown.
-    std::int64_t last_warmup_log_ms_{ 0 };  ///< Throttle warmup log to every 30 s.
-    std::int64_t last_no_data_log_ms_{ 0 }; ///< Throttle "no data" log to every 30 s.
+    std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last signal timestamp (ms) for cooldown.
+    std::int64_t m_lastWarmupLogMs{ 0 };  ///< Throttle warmup log to every 30 s.
+    std::int64_t m_lastNoDataLogMs{ 0 }; ///< Throttle "no data" log to every 30 s.
 };
 
 } // namespace pulse::strategy

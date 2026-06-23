@@ -26,7 +26,7 @@ TEST(OrderBookManager, ApplySnapshot)
                 { nlohmann::json::array({ 50001.0, 1.0 }), nlohmann::json::array({ 50002.0, 0.5 }) }) }
     };
 
-    manager.apply_snapshot("BTC_USDT", snapshot);
+    manager.applySnapshot("BTC_USDT", snapshot);
 
     const auto book = manager.get("BTC_USDT");
     ASSERT_TRUE(book.has_value());
@@ -48,9 +48,9 @@ TEST(OrderBookManager, SnapshotBidsSortedDescending)
         { "asks", nlohmann::json::array() }
     };
 
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
-    const auto top = manager.top_bids("TEST_USDT", 3);
+    const auto top = manager.topBids("TEST_USDT", 3);
     ASSERT_EQ(top.size(), 3u);
     EXPECT_DOUBLE_EQ(top[0].price, 102.0);
     EXPECT_DOUBLE_EQ(top[1].price, 101.0);
@@ -70,9 +70,9 @@ TEST(OrderBookManager, SnapshotAsksSortedAscending)
                 nlohmann::json::array({ 101.0, 1.0 }) }) }
     };
 
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
-    const auto top = manager.top_asks("TEST_USDT", 3);
+    const auto top = manager.topAsks("TEST_USDT", 3);
     ASSERT_EQ(top.size(), 3u);
     EXPECT_DOUBLE_EQ(top[0].price, 100.0);
     EXPECT_DOUBLE_EQ(top[1].price, 101.0);
@@ -92,14 +92,14 @@ TEST(OrderBookManager, ApplyDeltaUpdatesLevels)
         { "bids", nlohmann::json::array({ nlohmann::json::array({ 100.0, 1.0 }) }) },
         { "asks", nlohmann::json::array({ nlohmann::json::array({ 101.0, 1.0 }) }) }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
     const nlohmann::json delta = {
         { "lastUpdateId", 101 },
         { "bids", nlohmann::json::array({ nlohmann::json::array({ 100.0, 2.0 }) }) }, // Update qty.
         { "asks", nlohmann::json::array({ nlohmann::json::array({ 102.0, 1.5 }) }) }  // Add new level.
     };
-    manager.apply_delta("TEST_USDT", delta);
+    manager.applyDelta("TEST_USDT", delta);
 
     const auto book = manager.get("TEST_USDT");
     ASSERT_TRUE(book.has_value());
@@ -117,14 +117,14 @@ TEST(OrderBookManager, ApplyDeltaRemovesZeroQuantityLevels)
         { "bids", nlohmann::json::array({ nlohmann::json::array({ 100.0, 1.0 }) }) },
         { "asks", nlohmann::json::array({ nlohmann::json::array({ 101.0, 1.0 }) }) }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
     const nlohmann::json delta = {
         { "lastUpdateId", 101 },
         { "bids", nlohmann::json::array({ nlohmann::json::array({ 100.0, 0.0 }) }) }, // Remove.
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_delta("TEST_USDT", delta);
+    manager.applyDelta("TEST_USDT", delta);
 
     const auto book = manager.get("TEST_USDT");
     ASSERT_TRUE(book.has_value());
@@ -141,14 +141,14 @@ TEST(OrderBookManager, SequenceGapIsAccepted)
     // so gaps between consecutive deltas for the same symbol are normal.
     OrderBookManager manager;
     std::string resubscribed_symbol;
-    manager.set_resubscribe_callback([&resubscribed_symbol](const Symbol &s) { resubscribed_symbol = s; });
+    manager.setResubscribeCallback([&resubscribed_symbol](const Symbol &s) { resubscribed_symbol = s; });
 
     const nlohmann::json snapshot = {
         { "lastUpdateId", 100 },
         { "bids", nlohmann::json::array() },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
     // Delta with gap: 100 → 105 (normal for Gate.io global sequence).
     const nlohmann::json delta = {
@@ -156,7 +156,7 @@ TEST(OrderBookManager, SequenceGapIsAccepted)
         { "bids", nlohmann::json::array() },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_delta("TEST_USDT", delta);
+    manager.applyDelta("TEST_USDT", delta);
 
     // Should NOT trigger re-subscribe — gaps are expected.
     EXPECT_TRUE(resubscribed_symbol.empty());
@@ -172,7 +172,7 @@ TEST(OrderBookManager, StaleDeltaIsRejected)
         { "bids", nlohmann::json::array() },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
     // Stale delta: seq 95 <= last 100 — should be ignored.
     const nlohmann::json stale_delta = {
@@ -180,7 +180,7 @@ TEST(OrderBookManager, StaleDeltaIsRejected)
         { "bids", nlohmann::json::array() },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_delta("TEST_USDT", stale_delta);
+    manager.applyDelta("TEST_USDT", stale_delta);
 
     // Book should still have the snapshot's sequence.
     auto book = manager.get("TEST_USDT");
@@ -197,7 +197,7 @@ TEST(OrderBookManager, DeltaBeforeSnapshotIsIgnored)
         { "bids", nlohmann::json::array() },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_delta("TEST_USDT", delta);
+    manager.applyDelta("TEST_USDT", delta);
 
     EXPECT_FALSE(manager.contains("TEST_USDT"));
 }
@@ -219,9 +219,9 @@ TEST(OrderBookManager, TopNBids)
                 nlohmann::json::array({ 97.0, 4.0 }) }) },
         { "asks", nlohmann::json::array() }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
-    const auto top2 = manager.top_bids("TEST_USDT", 2);
+    const auto top2 = manager.topBids("TEST_USDT", 2);
     ASSERT_EQ(top2.size(), 2u);
     EXPECT_DOUBLE_EQ(top2[0].price, 100.0);
     EXPECT_DOUBLE_EQ(top2[1].price, 99.0);
@@ -239,9 +239,9 @@ TEST(OrderBookManager, TopNAsks)
                 nlohmann::json::array({ 101.0, 2.0 }),
                 nlohmann::json::array({ 102.0, 3.0 }) }) }
     };
-    manager.apply_snapshot("TEST_USDT", snapshot);
+    manager.applySnapshot("TEST_USDT", snapshot);
 
-    const auto top5 = manager.top_asks("TEST_USDT", 5);
+    const auto top5 = manager.topAsks("TEST_USDT", 5);
     ASSERT_EQ(top5.size(), 3u); // Only 3 available.
 }
 

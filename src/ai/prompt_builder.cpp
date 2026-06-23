@@ -80,11 +80,11 @@ std::pair<std::string, std::string> PromptBuilder::build(
             tweet_text.empty() ? "none" : "yes",
             news_text.empty() ? "none" : "yes");
 
-    return {system_prompt(), user_prompt(snapshot, tweet_text, news_text, params)};
+    return {systemPrompt(), userPrompt(snapshot, tweet_text, news_text, params)};
 }
 
 // ---------------------------------------------------------------------------
-// system_prompt — fixed JSON schema enforcement instructions
+// systemPrompt — fixed JSON schema enforcement instructions
 //
 // This prompt is identical for every analysis cycle. It tells the LLM:
 //   1. Its role (quantitative trading analyst)
@@ -92,7 +92,7 @@ std::pair<std::string, std::string> PromptBuilder::build(
 //   3. Rules for param_deltas (signed adjustments, keep them small)
 //   4. Output constraint (JSON only, no surrounding text)
 // ---------------------------------------------------------------------------
-std::string PromptBuilder::system_prompt()
+std::string PromptBuilder::systemPrompt()
 {
     return R"(You are a quantitative trading analyst. Analyze the market data and social signals provided, then output your analysis as a JSON object matching this exact schema:
 
@@ -123,7 +123,7 @@ Rules:
 }
 
 // ---------------------------------------------------------------------------
-// user_prompt — dynamic content assembled from live market data
+// userPrompt — dynamic content assembled from live market data
 //
 // Sections:
 //   A. Market Overview — ticker summary (symbol, price, bid/ask, change, volume)
@@ -132,7 +132,7 @@ Rules:
 //   D. News Headlines — concatenated news (omitted if empty)
 //   E. Current Strategy Parameters — all 11 atomic parameter values
 // ---------------------------------------------------------------------------
-std::string PromptBuilder::user_prompt(
+std::string PromptBuilder::userPrompt(
         const MarketSnapshot &snapshot,
         const std::string &tweet_text,
         const std::string &news_text,

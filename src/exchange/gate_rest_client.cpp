@@ -44,7 +44,7 @@ namespace
 
 std::once_flag g_curl_init_flag;
 
-void ensure_curl_init()
+void ensureCurlInit()
 {
     std::call_once(g_curl_init_flag, []()
             {
@@ -59,7 +59,7 @@ void ensure_curl_init()
 // 1. Cast the user-data pointer to our response body string
 // 2. Append the received chunk
 // 3. Return the number of bytes consumed (must equal size * nmemb or curl aborts)
-size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::string *output)
+size_t curlWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
 {
     const size_t total = size * nmemb;
     output->append(static_cast<char *>(contents), total);
@@ -70,7 +70,7 @@ size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::strin
 // 1. 429 → RateLimitExceeded (exchange is throttling us)
 // 2. 4xx → HttpError (client-side issue, retrying won't help)
 // 3. 5xx → HttpError (server-side issue, retry may help — caller decides)
-ErrorCode classify_http_error(long status_code)
+ErrorCode classifyHttpError(long status_code)
 {
     if (429 == status_code)
     {
@@ -80,7 +80,7 @@ ErrorCode classify_http_error(long status_code)
 }
 
 // Determine if an HTTP error is retryable (only 5xx server errors).
-bool is_retryable(long status_code)
+bool isRetryable(long status_code)
 {
     return status_code >= 500 && status_code < 600;
 }
@@ -92,22 +92,22 @@ bool is_retryable(long status_code)
 // ---------------------------------------------------------------------------
 
 GateRestClient::GateRestClient(const ExchangeConfig &config, MarketType market_type)
-    : config_(config), market_type_(market_type)
+    : m_config(config), m_marketType(market_type)
 {
-    ensure_curl_init();
+    ensureCurlInit();
 }
 
 GateRestClient::~GateRestClient() = default;
 GateRestClient::GateRestClient(GateRestClient &&) noexcept = default;
 GateRestClient &GateRestClient::operator=(GateRestClient &&) noexcept = default;
 
-bool GateRestClient::has_credentials() const
+bool GateRestClient::hasCredentials() const
 {
-    return !config_.apiKey.empty() && !config_.apiSecret.empty();
+    return !m_config.apiKey.empty() && !m_config.apiSecret.empty();
 }
 
 // ---------------------------------------------------------------------------
-// do_request — single HTTP request, no retry
+// doRequest — single HTTP request, no retry
 //
 // Steps:
 //   1. Create a curl easy handle
@@ -117,7 +117,7 @@ bool GateRestClient::has_credentials() const
 //   5. Execute and collect response
 //   6. Clean up handle and return
 // ---------------------------------------------------------------------------
-HttpResponse GateRestClient::do_request(
+HttpResponse GateRestClient::doRequest(
         const std::string &method,
         const std::string &url,
         const std::string &sign_header_key,
@@ -149,14 +149,14 @@ HttpResponse GateRestClient::do_request(
     // 3. Configure the request
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(config_.restTimeoutMs));
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(m_config.restTimeoutMs));
 
     // Proxy support — read from environment (HTTPS_PROXY / HTTP_PROXY)
-    if (!config_.proxyUrl.empty())
+    if (!m_config.proxyUrl.empty())
     {
-        curl_easy_setopt(curl, CURLOPT_PROXY, config_.proxyUrl.c_str());
+        curl_easy_setopt(curl, CURLOPT_PROXY, m_config.proxyUrl.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1L);
     }
     else if (const char *proxy = std::getenv("HTTPS_PROXY"); proxy)
@@ -227,29 +227,29 @@ Result<nlohmann::json> GateRestClient::request(
         const std::string &body)
 {
     // 1. Sign the request
-    const std::string timestamp = unix_seconds();
+    const std::string timestamp = unixSeconds();
     std::string sign;
-    if (has_credentials())
+    if (hasCredentials())
     {
-        sign = sign_request(config_.apiSecret, method, path, query, body, timestamp);
+        sign = signRequest(m_config.apiSecret, method, path, query, body, timestamp);
     }
 
     // 2. Build full URL
-    std::string url = config_.restBaseUrl + path;
+    std::string url = m_config.restBaseUrl + path;
     if (!query.empty())
     {
         url += "?" + query;
     }
 
-    PULSE_LOG_DEBUG("exchange", "{} {} (timeout={}ms, retries={})", method, url, config_.restTimeoutMs, config_.maxRetries);
+    PULSE_LOG_DEBUG("exchange", "{} {} (timeout={}ms, retries={})", method, url, m_config.restTimeoutMs, m_config.maxRetries);
 
     // 3. Retry loop
-    const std::uint32_t max_attempts = config_.maxRetries + 1;
+    const std::uint32_t max_attempts = m_config.maxRetries + 1;
     HttpResponse response;
 
     for (std::uint32_t attempt = 1; attempt <= max_attempts; ++attempt)
     {
-        response = do_request(method, url, config_.apiKey, sign, timestamp, body);
+        response = doRequest(method, url, m_config.apiKey, sign, timestamp, body);
 
         // Success — break out of retry loop
         if (response.status_code >= 200 && response.status_code < 300)
@@ -258,7 +258,7 @@ Result<nlohmann::json> GateRestClient::request(
         }
 
         // Retryable failure — exponential backoff (100ms, 200ms, 400ms, ...)
-        if (0 == response.status_code || is_retryable(response.status_code))
+        if (0 == response.status_code || isRetryable(response.status_code))
         {
             if (attempt < max_attempts)
             {
@@ -288,7 +288,7 @@ Result<nlohmann::json> GateRestClient::request(
     // 5. Check HTTP error status
     if (response.status_code < 200 || response.status_code >= 300)
     {
-        const ErrorCode code = classify_http_error(response.status_code);
+        const ErrorCode code = classifyHttpError(response.status_code);
         std::string msg = "HTTP " + std::to_string(response.status_code) + ": " + response.body;
         PULSE_LOG_WARN("exchange", "{} {} → {}", method, path, msg);
         return PulseError{code, std::move(msg)};
@@ -309,24 +309,24 @@ Result<nlohmann::json> GateRestClient::request(
 // Public endpoint wrappers
 // ---------------------------------------------------------------------------
 
-Result<nlohmann::json> GateRestClient::get_currencies()
+Result<nlohmann::json> GateRestClient::getCurrencies()
 {
     return request("GET", "/api/v4/spot/currencies");
 }
 
-Result<nlohmann::json> GateRestClient::get_currency_pairs()
+Result<nlohmann::json> GateRestClient::getCurrencyPairs()
 {
     return request("GET", "/api/v4/spot/currency_pairs");
 }
 
-Result<nlohmann::json> GateRestClient::get_ticker(const std::string &currency_pair)
+Result<nlohmann::json> GateRestClient::getTicker(const std::string &currency_pair)
 {
     return request("GET", "/api/v4/spot/tickers", "currency_pair=" + currency_pair);
 }
 
-Result<nlohmann::json> GateRestClient::get_spot_accounts()
+Result<nlohmann::json> GateRestClient::getSpotAccounts()
 {
-    if (!has_credentials())
+    if (!hasCredentials())
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
     }
@@ -337,28 +337,28 @@ Result<nlohmann::json> GateRestClient::get_spot_accounts()
 // Futures endpoint wrappers
 // ---------------------------------------------------------------------------
 
-Result<nlohmann::json> GateRestClient::get_futures_contracts()
+Result<nlohmann::json> GateRestClient::getFuturesContracts()
 {
-    return request("GET", EndpointRouter::contracts_path(MarketType::Futures));
+    return request("GET", EndpointRouter::contractsPath(MarketType::Futures));
 }
 
-Result<nlohmann::json> GateRestClient::get_futures_ticker(const std::string &contract)
+Result<nlohmann::json> GateRestClient::getFuturesTicker(const std::string &contract)
 {
-    return request("GET", EndpointRouter::tickers_path(MarketType::Futures), "contract=" + contract);
+    return request("GET", EndpointRouter::tickersPath(MarketType::Futures), "contract=" + contract);
 }
 
-Result<nlohmann::json> GateRestClient::get_futures_accounts()
+Result<nlohmann::json> GateRestClient::getFuturesAccounts()
 {
-    if (!has_credentials())
+    if (!hasCredentials())
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
     }
-    return request("GET", EndpointRouter::accounts_path(MarketType::Futures));
+    return request("GET", EndpointRouter::accountsPath(MarketType::Futures));
 }
 
-Result<AccountBalance> GateRestClient::get_futures_account_balance()
+Result<AccountBalance> GateRestClient::getFuturesAccountBalance()
 {
-    auto result = get_futures_accounts();
+    auto result = getFuturesAccounts();
     if (!ok(result))
     {
         return error(result);
@@ -366,40 +366,40 @@ Result<AccountBalance> GateRestClient::get_futures_account_balance()
 
     const auto &j = value(result);
     AccountBalance bal;
-    bal.total           = safe_parse_double(j.value("total", "0")).value_or(0.0);
-    bal.available       = safe_parse_double(j.value("available", "0")).value_or(0.0);
-    bal.unrealised_pnl  = safe_parse_double(j.value("unrealised_pnl", "0")).value_or(0.0);
-    bal.position_margin = safe_parse_double(j.value("position_margin", "0")).value_or(0.0);
-    bal.order_margin    = safe_parse_double(j.value("order_margin", "0")).value_or(0.0);
+    bal.total           = safeParseDouble(j.value("total", "0")).value_or(0.0);
+    bal.available       = safeParseDouble(j.value("available", "0")).value_or(0.0);
+    bal.unrealised_pnl  = safeParseDouble(j.value("unrealised_pnl", "0")).value_or(0.0);
+    bal.position_margin = safeParseDouble(j.value("position_margin", "0")).value_or(0.0);
+    bal.order_margin    = safeParseDouble(j.value("order_margin", "0")).value_or(0.0);
     bal.currency        = j.value("currency", "USDT");
     return bal;
 }
 
-Result<nlohmann::json> GateRestClient::post_futures_order(const nlohmann::json &body)
+Result<nlohmann::json> GateRestClient::postFuturesOrder(const nlohmann::json &body)
 {
-    if (!has_credentials())
+    if (!hasCredentials())
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures order"};
     }
-    return request("POST", EndpointRouter::orders_path(MarketType::Futures), "", body.dump());
+    return request("POST", EndpointRouter::ordersPath(MarketType::Futures), "", body.dump());
 }
 
-Result<nlohmann::json> GateRestClient::cancel_futures_order(const std::string &order_id)
+Result<nlohmann::json> GateRestClient::cancelFuturesOrder(const std::string &order_id)
 {
-    if (!has_credentials())
+    if (!hasCredentials())
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel futures order"};
     }
-    return request("DELETE", EndpointRouter::order_path(MarketType::Futures, order_id));
+    return request("DELETE", EndpointRouter::orderPath(MarketType::Futures, order_id));
 }
 
-Result<nlohmann::json> GateRestClient::get_futures_order(const std::string &order_id)
+Result<nlohmann::json> GateRestClient::getFuturesOrder(const std::string &order_id)
 {
-    if (!has_credentials())
+    if (!hasCredentials())
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query futures order"};
     }
-    return request("GET", EndpointRouter::order_path(MarketType::Futures, order_id));
+    return request("GET", EndpointRouter::orderPath(MarketType::Futures, order_id));
 }
 
 } // namespace pulse::exchange

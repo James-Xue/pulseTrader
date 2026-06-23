@@ -35,7 +35,7 @@ nlohmann::json ExecutionReport::to_json() const
     };
 }
 
-Price ExecutionReport::calculate_slippage_bps(Price fill_price, Price mid_price, Side side)
+Price ExecutionReport::calculateSlippageBps(Price fill_price, Price mid_price, Side side)
 {
     if (0.0 == mid_price || 0.0 == fill_price)
     {

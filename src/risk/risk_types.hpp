@@ -22,7 +22,7 @@ namespace pulse::risk
 {
 
 // ---------------------------------------------------------------------------
-// RiskDecision — outcome of RiskManager::evaluate_order()
+// RiskDecision — outcome of RiskManager::evaluateOrder()
 //
 //   1. Approved  — order passes all checks, proceed as-is
 //   2. Modified  — order is approved but with reduced quantity
@@ -38,7 +38,7 @@ enum class RiskDecision : std::uint8_t
 // ---------------------------------------------------------------------------
 // RiskEvalResult — detailed evaluation result
 //
-// Returned by RiskManager::evaluate_order() to communicate the outcome of
+// Returned by RiskManager::evaluateOrder() to communicate the outcome of
 // all risk checks applied to a proposed order.
 //
 // Fields:
@@ -124,15 +124,15 @@ struct Position
 // ---------------------------------------------------------------------------
 // PortfolioSummary — aggregated snapshot of all open positions
 //
-// Computed on demand by PositionManager::portfolio_summary():
-//   1. open_position_count  — total number of open positions
+// Computed on demand by PositionManager::portfolioSummary():
+//   1. openPositionCount  — total number of open positions
 //   2. total_notional       — sum of notional values across all positions
 //   3. total_unrealized_pnl — sum of unrealized PnL
 //   4. net_exposure         — net directional exposure (long notional - short notional)
 // ---------------------------------------------------------------------------
 struct PortfolioSummary
 {
-    int open_position_count;      ///< Total number of open positions.
+    int openPositionCount;      ///< Total number of open positions.
     double total_notional;        ///< Sum of notional values across all positions.
     double total_unrealized_pnl;  ///< Sum of unrealized PnL.
     double net_exposure;          ///< Net directional exposure (long - short notional).
@@ -140,7 +140,7 @@ struct PortfolioSummary
     int futures_position_count;   ///< Number of open futures positions.
 
     PortfolioSummary()
-        : open_position_count{ 0 }
+        : openPositionCount{ 0 }
         , total_notional{ 0.0 }
         , total_unrealized_pnl{ 0.0 }
         , net_exposure{ 0.0 }
@@ -159,23 +159,23 @@ struct PortfolioSummary
 struct RiskSnapshot
 {
     bool trading_halted;           ///< Whether DrawdownGuard has halted trading.
-    ErrorCode halt_reason;         ///< Reason for halt, or ErrorCode::Ok.
-    double daily_drawdown;         ///< Current daily drawdown fraction.
-    double max_drawdown;           ///< Current peak-to-valley drawdown fraction.
+    ErrorCode haltReason;         ///< Reason for halt, or ErrorCode::Ok.
+    double dailyDrawdown;         ///< Current daily drawdown fraction.
+    double maxDrawdown;           ///< Current peak-to-valley drawdown fraction.
     double rate_limiter_tokens;    ///< Available tokens in OrderRateLimiter.
     bool rate_limiter_exhausted;   ///< Whether the token bucket is empty.
     PortfolioSummary portfolio;    ///< Aggregated position summary.
-    int open_position_count;       ///< Number of open positions.
+    int openPositionCount;       ///< Number of open positions.
 
     RiskSnapshot()
         : trading_halted{ false }
-        , halt_reason{ ErrorCode::Ok }
-        , daily_drawdown{ 0.0 }
-        , max_drawdown{ 0.0 }
+        , haltReason{ ErrorCode::Ok }
+        , dailyDrawdown{ 0.0 }
+        , maxDrawdown{ 0.0 }
         , rate_limiter_tokens{ 0.0 }
         , rate_limiter_exhausted{ false }
         , portfolio{}
-        , open_position_count{ 0 }
+        , openPositionCount{ 0 }
     {
     }
 };

@@ -16,28 +16,28 @@ namespace pulse::strategy
 
 const StrategyContext &StrategyBase::context() const
 {
-    return context_;
+    return m_context;
 }
 
 StrategyContext &StrategyBase::context()
 {
-    return context_;
+    return m_context;
 }
 
-void StrategyBase::set_signal_callback(SignalCallback cb)
+void StrategyBase::setSignalCallback(SignalCallback cb)
 {
-    signal_callback_ = std::move(cb);
+    m_signalCallback = std::move(cb);
 }
 
 std::atomic<bool> &StrategyBase::active()
 {
-    return active_;
+    return m_active;
 }
 
-void StrategyBase::emit_signal(const TradingSignal &signal)
+void StrategyBase::emitSignal(const TradingSignal &signal)
 {
     // 1. Drop if no callback is registered.
-    if (nullptr == signal_callback_)
+    if (nullptr == m_signalCallback)
     {
         return;
     }
@@ -51,10 +51,10 @@ void StrategyBase::emit_signal(const TradingSignal &signal)
 
     // 3. Ensure market_type is set from strategy config (allows downstream routing).
     TradingSignal enriched = signal;
-    enriched.market_type = context_.config.market_type;
+    enriched.market_type = m_context.config.market_type;
 
     // 4. Forward to the callback (typically StrategyManager → SignalAggregator).
-    signal_callback_(enriched);
+    m_signalCallback(enriched);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,20 +67,20 @@ StrategyManager::~StrategyManager()
     stop();
 }
 
-void StrategyManager::register_strategy(std::unique_ptr<StrategyBase> strategy)
+void StrategyManager::registerStrategy(std::unique_ptr<StrategyBase> strategy)
 {
-    strategies_.push_back(std::move(strategy));
+    m_strategies.push_back(std::move(strategy));
 }
 
-void StrategyManager::set_signal_callback(SignalCallback cb)
+void StrategyManager::setSignalCallback(SignalCallback cb)
 {
-    signal_callback_ = std::move(cb);
+    m_signalCallback = std::move(cb);
 }
 
 void StrategyManager::start()
 {
     // 1. Wire the signal callback into each registered strategy.
-    for (auto &strategy : strategies_)
+    for (auto &strategy : m_strategies)
     {
         if (!strategy->context().config.enabled)
         {
@@ -88,14 +88,14 @@ void StrategyManager::start()
             continue;
         }
 
-        strategy->set_signal_callback(signal_callback_);
+        strategy->setSignalCallback(m_signalCallback);
         strategy->active().store(true, std::memory_order_release);
 
         // 2. Spawn a std::jthread for this strategy.
         //    std::jthread automatically joins on destruction.
-        threads_.emplace_back([this, &s = *strategy](std::stop_token stoken)
+        m_threads.emplace_back([this, &s = *strategy](std::stop_token stoken)
             {
-                strategy_loop(s, stoken);
+                strategyLoop(s, stoken);
             });
 
         PULSE_LOG_INFO("strategy", "Started strategy: {} on {}",
@@ -106,32 +106,32 @@ void StrategyManager::start()
 void StrategyManager::stop()
 {
     // 1. Signal all strategies to stop.
-    for (auto &strategy : strategies_)
+    for (auto &strategy : m_strategies)
     {
         strategy->active().store(false, std::memory_order_release);
     }
 
     // 2. Request stop on all jthreads (triggers stop_token).
-    for (auto &t : threads_)
+    for (auto &t : m_threads)
     {
         t.request_stop();
     }
 
     // 3. jthreads auto-join on destruction, but we clear the vector explicitly.
-    threads_.clear();
+    m_threads.clear();
 
-    PULSE_LOG_INFO("strategy", "All strategy threads stopped ({} strategies)", strategies_.size());
+    PULSE_LOG_INFO("strategy", "All strategy threads stopped ({} strategies)", m_strategies.size());
 }
 
-std::size_t StrategyManager::strategy_count() const
+std::size_t StrategyManager::strategyCount() const
 {
-    return strategies_.size();
+    return m_strategies.size();
 }
 
-std::size_t StrategyManager::running_count() const
+std::size_t StrategyManager::runningCount() const
 {
     std::size_t count = 0;
-    for (const auto &strategy : strategies_)
+    for (const auto &strategy : m_strategies)
     {
         if (strategy->active().load(std::memory_order_acquire))
         {
@@ -144,8 +144,8 @@ std::size_t StrategyManager::running_count() const
 std::vector<StrategySnapshot> StrategyManager::snapshot() const
 {
     std::vector<StrategySnapshot> result;
-    result.reserve(strategies_.size());
-    for (const auto &s : strategies_)
+    result.reserve(m_strategies.size());
+    for (const auto &s : m_strategies)
     {
         StrategySnapshot snap;
         snap.name = s->name();
@@ -159,11 +159,11 @@ std::vector<StrategySnapshot> StrategyManager::snapshot() const
     return result;
 }
 
-std::vector<StrategyParams *> StrategyManager::all_params()
+std::vector<StrategyParams *> StrategyManager::allParams()
 {
     std::vector<StrategyParams *> result;
-    result.reserve(strategies_.size());
-    for (const auto &s : strategies_)
+    result.reserve(m_strategies.size());
+    for (const auto &s : m_strategies)
     {
         result.push_back(&s->params());
     }
@@ -171,9 +171,9 @@ std::vector<StrategyParams *> StrategyManager::all_params()
 }
 
 // ---------------------------------------------------------------------------
-// strategy_loop — the main loop for a single strategy thread
+// strategyLoop — the main loop for a single strategy thread
 // ---------------------------------------------------------------------------
-void StrategyManager::strategy_loop(StrategyBase &strategy, std::stop_token stoken)
+void StrategyManager::strategyLoop(StrategyBase &strategy, std::stop_token stoken)
 {
     const auto &cfg = strategy.context().config;
     const auto poll_interval = std::chrono::milliseconds(cfg.poll_interval_ms);
@@ -193,28 +193,28 @@ void StrategyManager::strategy_loop(StrategyBase &strategy, std::stop_token stok
             break;
         }
 
-        // 1. Poll ticker for on_tick().
-        auto ticker_opt = feed->ticker_cache().get(cfg.symbol);
+        // 1. Poll ticker for onTick().
+        auto ticker_opt = feed->tickerCache().get(cfg.symbol);
         if (ticker_opt.has_value())
         {
-            strategy.on_tick(ticker_opt.value());
+            strategy.onTick(ticker_opt.value());
         }
 
-        // 2. Check for new closed kline → on_kline().
-        auto &kline_buf = feed->get_kline_buffer(cfg.symbol);
+        // 2. Check for new closed kline → onKline().
+        auto &kline_buf = feed->getKlineBuffer(cfg.symbol);
         auto latest_kline = kline_buf.latest();
         if (latest_kline.has_value() && latest_kline->closed
             && latest_kline->open_time != last_kline_time)
         {
             last_kline_time = latest_kline->open_time;
-            strategy.on_kline(latest_kline.value());
+            strategy.onKline(latest_kline.value());
         }
 
-        // 3. Poll order book for on_orderbook().
-        auto book_opt = feed->orderbook_manager().get(cfg.symbol);
+        // 3. Poll order book for onOrderbook().
+        auto book_opt = feed->orderbookManager().get(cfg.symbol);
         if (book_opt.has_value())
         {
-            strategy.on_orderbook(book_opt.value());
+            strategy.onOrderbook(book_opt.value());
         }
 
         // 4. Sleep until next poll, but wake early if stop is requested.

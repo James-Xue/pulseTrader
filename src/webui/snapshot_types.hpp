@@ -99,7 +99,7 @@ inline void to_json(nlohmann::json &j, const Position &p)
 inline void to_json(nlohmann::json &j, const PortfolioSummary &ps)
 {
     j = nlohmann::json{
-        {"open_position_count",  ps.open_position_count},
+        {"openPositionCount",  ps.openPositionCount},
         {"total_notional",       ps.total_notional},
         {"total_unrealized_pnl", ps.total_unrealized_pnl},
         {"net_exposure",         ps.net_exposure},
@@ -111,13 +111,13 @@ inline void to_json(nlohmann::json &j, const RiskSnapshot &snap)
 {
     j = nlohmann::json::object();
     j["trading_halted"] = snap.trading_halted;
-    j["halt_reason"] = static_cast<std::uint32_t>(snap.halt_reason);
-    j["daily_drawdown"] = snap.daily_drawdown;
-    j["max_drawdown"] = snap.max_drawdown;
+    j["haltReason"] = static_cast<std::uint32_t>(snap.haltReason);
+    j["dailyDrawdown"] = snap.dailyDrawdown;
+    j["maxDrawdown"] = snap.maxDrawdown;
     j["rate_limiter_tokens"] = snap.rate_limiter_tokens;
     j["rate_limiter_exhausted"] = snap.rate_limiter_exhausted;
     j["portfolio"] = snap.portfolio;
-    j["open_position_count"] = snap.open_position_count;
+    j["openPositionCount"] = snap.openPositionCount;
 }
 
 } // namespace pulse::risk
@@ -129,7 +129,7 @@ namespace pulse::execution
 {
 
 /// Convert OrderStatus to its string representation for JSON.
-[[nodiscard]] inline std::string order_status_to_string(OrderStatus status)
+[[nodiscard]] inline std::string orderStatusToString(OrderStatus status)
 {
     switch (status)
     {
@@ -162,7 +162,7 @@ inline void to_json(nlohmann::json &j, const OrderSnapshot &o)
               : "post_only";
     j["requested_qty"] = o.requested_qty;
     j["filled_qty"] = o.filled_qty;
-    j["status"] = order_status_to_string(o.status);
+    j["status"] = orderStatusToString(o.status);
     j["submit_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
         o.submit_time.time_since_epoch()).count();
     j["last_update_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -262,12 +262,12 @@ struct PositionsSnapshot
 // ---------------------------------------------------------------------------
 struct OrdersSnapshot
 {
-    std::vector<execution::OrderSnapshot> active_orders;    ///< Currently tracked orders.
-    std::vector<execution::ExecutionReport> recent_reports; ///< Recent completed orders.
+    std::vector<execution::OrderSnapshot> activeOrders;    ///< Currently tracked orders.
+    std::vector<execution::ExecutionReport> recentReports; ///< Recent completed orders.
 
     OrdersSnapshot()
-        : active_orders{}
-        , recent_reports{}
+        : activeOrders{}
+        , recentReports{}
     {
     }
 };
@@ -285,8 +285,8 @@ struct MetricsSnapshot
     double win_rate;           ///< Fraction of winning trades (0.0–1.0).
     double avg_win_loss_ratio; ///< Average win / average loss ratio.
     double sharpe_ratio;       ///< Annualized Sharpe ratio.
-    double max_drawdown;       ///< Peak-to-valley drawdown fraction.
-    int trade_count;           ///< Total number of completed trades.
+    double maxDrawdown;       ///< Peak-to-valley drawdown fraction.
+    int tradeCount;           ///< Total number of completed trades.
     bool available;            ///< True if metrics have been computed.
 
     MetricsSnapshot()
@@ -295,8 +295,8 @@ struct MetricsSnapshot
         , win_rate{ 0.0 }
         , avg_win_loss_ratio{ 0.0 }
         , sharpe_ratio{ 0.0 }
-        , max_drawdown{ 0.0 }
-        , trade_count{ 0 }
+        , maxDrawdown{ 0.0 }
+        , tradeCount{ 0 }
         , available{ false }
     {
     }
@@ -373,7 +373,7 @@ struct AccountSnapshot
 // ---------------------------------------------------------------------------
 // DashboardSnapshot — unified aggregate of all panel snapshots
 //
-// Produced by DashboardState::poll_loop() at tiered intervals.
+// Produced by DashboardState::pollLoop() at tiered intervals.
 // ---------------------------------------------------------------------------
 struct DashboardSnapshot
 {
@@ -441,8 +441,8 @@ inline void to_json(nlohmann::json &j, const PositionsSnapshot &snap)
 inline void to_json(nlohmann::json &j, const OrdersSnapshot &snap)
 {
     j = nlohmann::json::object();
-    j["active_orders"] = snap.active_orders;
-    j["recent_reports"] = snap.recent_reports;
+    j["activeOrders"] = snap.activeOrders;
+    j["recentReports"] = snap.recentReports;
 }
 
 /// Serialize MetricsSnapshot to JSON.
@@ -454,8 +454,8 @@ inline void to_json(nlohmann::json &j, const MetricsSnapshot &snap)
         {"win_rate",           snap.win_rate},
         {"avg_win_loss_ratio", snap.avg_win_loss_ratio},
         {"sharpe_ratio",       snap.sharpe_ratio},
-        {"max_drawdown",       snap.max_drawdown},
-        {"trade_count",        snap.trade_count},
+        {"maxDrawdown",       snap.maxDrawdown},
+        {"tradeCount",        snap.tradeCount},
         {"available",          snap.available},
     };
 }

@@ -1,13 +1,13 @@
 #pragma once
-// symbol_registry.hpp — Instrument metadata registry for Layer 3 Market Data
+// symbolRegistry.hpp — Instrument metadata registry for Layer 3 Market Data
 //
 // Stores trading instrument metadata (tick size, lot size, min notional) fetched
 // from Gate.io REST API. Used to validate order parameters before submission.
 // Supports both spot and futures markets via MarketType parameter.
 //
 // Thread safety:
-//   - load_from_rest() is called once at startup (exclusive write lock)
-//   - get() and validate_order() are read-only (shared read lock)
+//   - loadFromRest() is called once at startup (exclusive write lock)
+//   - get() and validateOrder() are read-only (shared read lock)
 //   - Safe for concurrent reads from strategy threads after initialization
 
 #include "core/types.hpp"
@@ -71,16 +71,16 @@ struct SymbolInfo
 //
 // Usage:
 //   SymbolRegistry registry(rest_client);
-//   registry.load_from_rest();  // fetch all currency pairs
+//   registry.loadFromRest();  // fetch all currency pairs
 //   auto info = registry.get("BTC_USDT");
-//   if (info && registry.validate_order("BTC_USDT", price, qty)) { ... }
+//   if (info && registry.validateOrder("BTC_USDT", price, qty)) { ... }
 // ---------------------------------------------------------------------------
 class SymbolRegistry
 {
   public:
     /// Construct a registry with a reference to the REST client.
     ///
-    /// Does NOT fetch data — call load_from_rest() explicitly.
+    /// Does NOT fetch data — call loadFromRest() explicitly.
     /// MarketType selects which endpoint to load from (spot or futures).
     explicit SymbolRegistry(exchange::GateRestClient &rest_client,
                             MarketType market_type = MarketType::Spot);
@@ -92,7 +92,7 @@ class SymbolRegistry
     ///
     /// Replaces any existing data (safe to call multiple times for refresh).
     /// Returns true on success, false on network/parse error.
-    bool load_from_rest();
+    bool loadFromRest();
 
     /// Retrieve metadata for a symbol (read-only, thread-safe).
     ///
@@ -110,7 +110,7 @@ class SymbolRegistry
     ///   6. Quote amount >= min_quote_amount
     ///
     /// Returns true if all checks pass, false otherwise.
-    [[nodiscard]] bool validate_order(const Symbol &symbol, Price price, Quantity qty) const;
+    [[nodiscard]] bool validateOrder(const Symbol &symbol, Price price, Quantity qty) const;
 
     /// Returns the number of symbols in the registry.
     [[nodiscard]] std::size_t size() const;
@@ -120,10 +120,10 @@ class SymbolRegistry
     [[nodiscard]] std::vector<Symbol> symbols() const;
 
   private:
-    exchange::GateRestClient &rest_client_;
-    MarketType market_type_;
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<Symbol, SymbolInfo> symbols_;
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<Symbol, SymbolInfo> m_symbols;
 
     /// Parse a single currency pair JSON object into SymbolInfo (spot).
     ///
@@ -139,7 +139,7 @@ class SymbolRegistry
     ///   "precision": 2,
     ///   "trade_status": "tradable"
     /// }
-    [[nodiscard]] static std::optional<SymbolInfo> parse_currency_pair(const nlohmann::json &obj);
+    [[nodiscard]] static std::optional<SymbolInfo> parseCurrencyPair(const nlohmann::json &obj);
 
     /// Parse a single futures contract JSON object into SymbolInfo.
     ///
@@ -157,7 +157,7 @@ class SymbolRegistry
     ///   "mark_price": "50000.5",
     ///   "funding_rate": "0.0001"
     /// }
-    [[nodiscard]] static std::optional<SymbolInfo> parse_futures_contract(const nlohmann::json &obj);
+    [[nodiscard]] static std::optional<SymbolInfo> parseFuturesContract(const nlohmann::json &obj);
 };
 
 } // namespace pulse::market

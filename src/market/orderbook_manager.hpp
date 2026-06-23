@@ -1,5 +1,5 @@
 #pragma once
-// orderbook_manager.hpp — Incremental order book reconstruction (Layer 3 Market Data)
+// orderbookManager.hpp — Incremental order book reconstruction (Layer 3 Market Data)
 //
 // Maintains a full sorted order book per symbol by applying snapshot and delta updates
 // from the Gate.io WebSocket feed. Validates sequence numbers to detect gaps and
@@ -11,8 +11,8 @@
 //   - Quantity = 0 means remove the price level
 //
 // Thread safety:
-//   - apply_snapshot() and apply_delta() are called from the WebSocket I/O thread
-//   - get() and top_bids/top_asks() are called from strategy threads (shared read lock)
+//   - applySnapshot() and applyDelta() are called from the WebSocket I/O thread
+//   - get() and topBids/topAsks() are called from strategy threads (shared read lock)
 
 #include "core/types.hpp"
 
@@ -65,11 +65,11 @@ struct OrderBook
 //
 // Usage:
 //   OrderBookManager manager;
-//   manager.set_resubscribe_callback([](const Symbol& s) { ... });
-//   manager.apply_snapshot("BTC_USDT", snapshot_json);
-//   manager.apply_delta("BTC_USDT", delta_json);
+//   manager.setResubscribeCallback([](const Symbol& s) { ... });
+//   manager.applySnapshot("BTC_USDT", snapshot_json);
+//   manager.applyDelta("BTC_USDT", delta_json);
 //   auto book = manager.get("BTC_USDT");
-//   auto top5_bids = manager.top_bids("BTC_USDT", 5);
+//   auto top5_bids = manager.topBids("BTC_USDT", 5);
 // ---------------------------------------------------------------------------
 class OrderBookManager
 {
@@ -80,7 +80,7 @@ class OrderBookManager
     /// Set the callback invoked when a sequence gap is detected.
     ///
     /// The callback should re-subscribe to the order book channel for the given symbol.
-    void set_resubscribe_callback(ResubscribeCallback callback);
+    void setResubscribeCallback(ResubscribeCallback callback);
 
     /// Apply a full order book snapshot (replaces any existing data).
     ///
@@ -89,7 +89,7 @@ class OrderBookManager
     ///   2. snapshot — JSON object with "lastUpdateId", "bids", "asks" fields
     ///
     /// The snapshot replaces the entire order book for the symbol.
-    void apply_snapshot(const Symbol &symbol, const nlohmann::json &snapshot);
+    void applySnapshot(const Symbol &symbol, const nlohmann::json &snapshot);
 
     /// Apply an incremental delta update.
     ///
@@ -103,7 +103,7 @@ class OrderBookManager
     /// For each bid/ask level in the delta:
     ///   - If quantity > 0: insert or update the level
     ///   - If quantity == 0: remove the level
-    void apply_delta(const Symbol &symbol, const nlohmann::json &delta);
+    void applyDelta(const Symbol &symbol, const nlohmann::json &delta);
 
     /// Retrieve a copy of the full order book (thread-safe).
     ///
@@ -111,27 +111,27 @@ class OrderBookManager
     [[nodiscard]] std::optional<OrderBook> get(const Symbol &symbol) const;
 
     /// Retrieve the top N bid levels (highest prices first).
-    [[nodiscard]] std::vector<OrderBookLevel> top_bids(const Symbol &symbol, std::size_t n) const;
+    [[nodiscard]] std::vector<OrderBookLevel> topBids(const Symbol &symbol, std::size_t n) const;
 
     /// Retrieve the top N ask levels (lowest prices first).
-    [[nodiscard]] std::vector<OrderBookLevel> top_asks(const Symbol &symbol, std::size_t n) const;
+    [[nodiscard]] std::vector<OrderBookLevel> topAsks(const Symbol &symbol, std::size_t n) const;
 
     /// Check if a symbol has an active order book (snapshot applied).
     [[nodiscard]] bool contains(const Symbol &symbol) const;
 
   private:
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<Symbol, OrderBook> books_;
-    std::unordered_map<Symbol, std::uint64_t> last_sequence_;
-    ResubscribeCallback resubscribe_callback_;
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<Symbol, OrderBook> m_books;
+    std::unordered_map<Symbol, std::uint64_t> m_lastSequence;
+    ResubscribeCallback m_resubscribeCallback;
 
     /// Parse a JSON array of [price, quantity] pairs into a map.
     template <typename Compare>
-    static void parse_levels(std::map<Price, Quantity, Compare> &out, const nlohmann::json &levels_json);
+    static void parseLevels(std::map<Price, Quantity, Compare> &out, const nlohmann::json &levels_json);
 
     /// Apply delta updates to a map of price levels.
     template <typename Compare>
-    static void apply_delta_levels(std::map<Price, Quantity, Compare> &book, const nlohmann::json &levels_json);
+    static void applyDeltaLevels(std::map<Price, Quantity, Compare> &book, const nlohmann::json &levels_json);
 };
 
 } // namespace pulse::market

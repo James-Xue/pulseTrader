@@ -11,9 +11,9 @@
 // Confidence is the absolute imbalance value (already in [0.0, 1.0]).
 //
 // Data source:
-//   - on_orderbook() reads the current order book snapshot
-//   - Depth is configurable via params_.ob_depth
-//   - Threshold is configurable via params_.ob_imbalance_threshold
+//   - onOrderbook() reads the current order book snapshot
+//   - Depth is configurable via m_params.ob_depth
+//   - Threshold is configurable via m_params.ob_imbalance_threshold
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
@@ -45,18 +45,18 @@ class OrderBookScalper : public StrategyBase
     ///
     /// Computes bid/ask volume imbalance and emits Buy/Sell signals
     /// when the imbalance exceeds the configured threshold.
-    void on_orderbook(const market::OrderBook &book) override;
+    void onOrderbook(const market::OrderBook &book) override;
 
     /// Called on ticker updates — not used by this strategy.
-    void on_tick(const market::Ticker &ticker) override;
+    void onTick(const market::Ticker &ticker) override;
 
     /// Called on kline close — not used by this strategy.
-    void on_kline(const market::Kline &kline) override;
+    void onKline(const market::Kline &kline) override;
 
   private:
-    StrategyParams params_;
+    StrategyParams m_params;
 
-    std::int64_t last_signal_time_ms_{ 0 }; ///< Last signal timestamp (ms) for cooldown.
+    std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last signal timestamp (ms) for cooldown.
 };
 
 } // namespace pulse::strategy

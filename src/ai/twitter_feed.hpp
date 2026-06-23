@@ -1,5 +1,5 @@
 #pragma once
-// twitter_feed.hpp — X (Twitter) API v2 social signal ingestion (Layer 4 AI Analysis)
+// twitterFeed.hpp — X (Twitter) API v2 social signal ingestion (Layer 4 AI Analysis)
 //
 // Polls the X API v2 recent-search endpoint for tweets matching configured keywords.
 // Maintains a rolling window of recent tweets for inclusion in AI analysis prompts.
@@ -8,12 +8,12 @@
 //   1. poll() fetches up to 10 tweets per call from the X API v2 recent-search endpoint
 //   2. Tweets are deduplicated by ID using a hash set
 //   3. A rolling deque enforces the maxTweets window (oldest evicted first)
-//   4. recent_text() concatenates tweet text for prompt injection
+//   4. recentText() concatenates tweet text for prompt injection
 //
 // Thread safety:
 //   - All public methods are thread-safe (mutex-protected)
 //   - poll() may be called from any thread (typically the heartbeat scheduler)
-//   - recent_text() is const and safe to call concurrently with itself
+//   - recentText() is const and safe to call concurrently with itself
 
 #include "core/config.hpp"
 
@@ -49,7 +49,7 @@ struct Tweet
 // Usage:
 //   1. Construct with TwitterConfig from PulseConfig
 //   2. Call poll() periodically (every pollIntervalSec seconds)
-//   3. Call recent_text() to get concatenated tweets for the AI prompt
+//   3. Call recentText() to get concatenated tweets for the AI prompt
 // ---------------------------------------------------------------------------
 class TwitterFeed
 {
@@ -62,7 +62,7 @@ public:
     int poll();
 
     // Get concatenated text of last N tweets for prompt inclusion.
-    [[nodiscard]] std::string recent_text(std::size_t max_count = 5) const;
+    [[nodiscard]] std::string recentText(std::size_t max_count = 5) const;
 
     // Number of tweets in the rolling window.
     [[nodiscard]] std::size_t size() const;
@@ -79,15 +79,15 @@ private:
         long status_code = 0;
     };
 
-    HttpResponse do_request(const std::string &url) const;
+    HttpResponse doRequest(const std::string &url) const;
 
     // Build the full recent-search URL from config (base URL + query + fields).
-    std::string build_search_url() const;
+    std::string buildSearchUrl() const;
 
-    TwitterConfig config_;
-    std::deque<Tweet> tweets_;
-    std::unordered_set<std::string> seen_ids_; ///< For dedup.
-    mutable std::mutex mutex_;
+    TwitterConfig m_config;
+    std::deque<Tweet> m_tweets;
+    std::unordered_set<std::string> m_seenIds; ///< For dedup.
+    mutable std::mutex m_mutex;
 };
 
 } // namespace pulse::ai

@@ -1,5 +1,5 @@
 #pragma once
-// position_manager.hpp — Thread-safe position tracking (Layer 7 Risk Management)
+// positionManager.hpp — Thread-safe position tracking (Layer 7 Risk Management)
 //
 // Tracks open positions across all strategies in real time. Aggregates net
 // exposure per symbol and enforces portfolio-level limits:
@@ -31,15 +31,15 @@ namespace pulse::risk
 // ---------------------------------------------------------------------------
 // NotionalReservation — atomic reservation of notional budget
 //
-// Created by reserve_notional() when an order is approved. The reservation
+// Created by reserveNotional() when an order is approved. The reservation
 // ensures subsequent limit checks see the reserved amount, preventing
-// double-spend between concurrent evaluate_order() calls.
+// double-spend between concurrent evaluateOrder() calls.
 //
 // Lifecycle:
-//   1. reserve_notional() creates a reservation (approved=true)
-//   2. On order fill: consume_reservation() frees the reservation
-//      (open_position() no longer re-validates the reserved budget)
-//   3. On order failure: cancel_reservation() releases the budget
+//   1. reserveNotional() creates a reservation (approved=true)
+//   2. On order fill: consumeReservation() frees the reservation
+//      (openPosition() no longer re-validates the reserved budget)
+//   3. On order failure: cancelReservation() releases the budget
 // ---------------------------------------------------------------------------
 struct NotionalReservation
 {
@@ -82,7 +82,7 @@ class PositionManager
     ///   3. Check per-symbol notional + proposed <= maxSymbolNotional
     ///
     /// Returns position_id on success, PulseError if any limit is exceeded.
-    [[nodiscard]] Result<std::string> open_position(
+    [[nodiscard]] Result<std::string> openPosition(
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         const std::string &strategy_id);
 
@@ -94,7 +94,7 @@ class PositionManager
     ///   - liquidation_price (estimated)
     ///
     /// Returns position_id on success, PulseError if any limit is exceeded.
-    [[nodiscard]] Result<std::string> open_position(
+    [[nodiscard]] Result<std::string> openPosition(
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         const std::string &strategy_id,
         MarketType market_type, double leverage, MarginMode margin_mode,
@@ -111,7 +111,7 @@ class PositionManager
     /// Realized PnL formula (closed portion):
     ///   long:  (exit_price - entry_price) * closed_qty * quanto * leverage
     ///   short: (entry_price - exit_price) * closed_qty * quanto * leverage
-    [[nodiscard]] std::optional<double> close_position(
+    [[nodiscard]] std::optional<double> closePosition(
         const std::string &position_id, Quantity close_qty, Price exit_price);
 
     /// Update mark price for a position (called on each tick for PnL recalculation).
@@ -120,29 +120,29 @@ class PositionManager
     ///   1. current_price = new price
     ///   2. unrealized_pnl = (current - entry) * qty * direction
     ///   3. notional_value = abs(qty * current_price)
-    void update_price(const std::string &position_id, Price current_price);
+    void updatePrice(const std::string &position_id, Price current_price);
 
     // --- Queries ---
 
     /// Get a single position by ID. Returns nullopt if not found.
-    [[nodiscard]] std::optional<Position> get_position(const std::string &position_id) const;
+    [[nodiscard]] std::optional<Position> getPosition(const std::string &position_id) const;
 
     /// Get all open positions.
-    [[nodiscard]] std::vector<Position> get_all_positions() const;
+    [[nodiscard]] std::vector<Position> getAllPositions() const;
 
     /// Get all open positions for a specific symbol.
-    [[nodiscard]] std::vector<Position> get_positions_by_symbol(const Symbol &symbol) const;
+    [[nodiscard]] std::vector<Position> getPositionsBySymbol(const Symbol &symbol) const;
 
     /// Get all open positions for a specific strategy.
-    [[nodiscard]] std::vector<Position> get_positions_by_strategy(const std::string &strategy_id) const;
+    [[nodiscard]] std::vector<Position> getPositionsByStrategy(const std::string &strategy_id) const;
 
     // --- Aggregation ---
 
     /// Compute aggregated portfolio summary from all open positions.
-    [[nodiscard]] PortfolioSummary portfolio_summary() const;
+    [[nodiscard]] PortfolioSummary portfolioSummary() const;
 
     /// Compute total notional exposure for a specific symbol.
-    [[nodiscard]] double symbol_notional(const Symbol &symbol) const;
+    [[nodiscard]] double symbolNotional(const Symbol &symbol) const;
 
     // --- Limit checks ---
 
@@ -152,39 +152,39 @@ class PositionManager
     ///   1. Total notional + proposed <= maxPositionNotional
     ///   2. Open count < maxOpenPositions
     ///   3. Symbol notional + proposed <= maxSymbolNotional
-    [[nodiscard]] bool can_open_position(const Symbol &symbol, Quantity qty, Price price) const;
+    [[nodiscard]] bool canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const;
 
     /// Returns the current number of open positions.
-    [[nodiscard]] int open_position_count() const;
+    [[nodiscard]] int openPositionCount() const;
 
     // --- Atomic notional reservation (TOCTOU-safe) ---
 
     /// Atomically check all limits and reserve notional budget.
     ///
-    /// Performs the same checks as can_open_position() + portfolio_summary() +
-    /// symbol_notional(), but under a SINGLE exclusive lock. The reserved
-    /// notional is visible to subsequent reserve_notional() calls, preventing
+    /// Performs the same checks as canOpenPosition() + portfolioSummary() +
+    /// symbolNotional(), but under a SINGLE exclusive lock. The reserved
+    /// notional is visible to subsequent reserveNotional() calls, preventing
     /// double-spend between concurrent strategy threads.
     ///
     /// Returns a NotionalReservation with a unique reservation_id.
-    /// The caller must later call consume_reservation() (on fill) or
-    /// cancel_reservation() (on failure) to release the budget.
-    [[nodiscard]] NotionalReservation reserve_notional(
+    /// The caller must later call consumeReservation() (on fill) or
+    /// cancelReservation() (on failure) to release the budget.
+    [[nodiscard]] NotionalReservation reserveNotional(
         const Symbol &symbol, Quantity qty, Price price);
 
     /// Consume a reservation when an order is filled.
-    /// The reserved budget is released; open_position() trusts the reservation.
-    void consume_reservation(std::uint64_t reservation_id);
+    /// The reserved budget is released; openPosition() trusts the reservation.
+    void consumeReservation(std::uint64_t reservation_id);
 
     /// Cancel a reservation when an order fails or is rejected.
     /// The reserved budget is released back to the available pool.
-    void cancel_reservation(std::uint64_t reservation_id);
+    void cancelReservation(std::uint64_t reservation_id);
 
   private:
-    RiskConfig config_;
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, Position> positions_; ///< position_id -> Position.
-    std::uint64_t next_position_id_{ 0 };                 ///< Monotonic ID counter.
+    RiskConfig m_config;
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<std::string, Position> m_positions; ///< position_id -> Position.
+    std::uint64_t m_nextPositionId{ 0 };                 ///< Monotonic ID counter.
 
     /// Pending notional reservations (prevents TOCTOU double-spend).
     struct PendingReservation
@@ -193,18 +193,18 @@ class PositionManager
         double notional;
         double qty;
     };
-    std::unordered_map<std::uint64_t, PendingReservation> pending_reservations_;
-    std::uint64_t next_reservation_id_{ 1 }; ///< Monotonic reservation counter.
+    std::unordered_map<std::uint64_t, PendingReservation> m_pendingReservations;
+    std::uint64_t m_nextReservationId{ 1 }; ///< Monotonic reservation counter.
 
     /// Generate a unique position ID from symbol, side, and counter.
-    [[nodiscard]] std::string generate_position_id(const Symbol &symbol, Side side);
+    [[nodiscard]] std::string generatePositionId(const Symbol &symbol, Side side);
 
     /// Calculate unrealized PnL for a position.
     /// Buy: (current - entry) * qty * quanto * leverage
     /// Sell: (entry - current) * qty * quanto * leverage
     /// Default leverage=1.0 and quanto_multiplier=1.0 make spot PnL identical
     /// to the original formula.
-    [[nodiscard]] static double calculate_unrealized_pnl(
+    [[nodiscard]] static double calculateUnrealizedPnl(
         Side side, Price entry, Price current, Quantity qty,
         double leverage = 1.0, double quanto_multiplier = 1.0);
 };

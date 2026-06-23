@@ -16,7 +16,7 @@
 // Thread safety:
 //   - enqueue() is thread-safe (protected by mutex + condition_variable)
 //   - Worker thread executes tasks sequentially (no concurrent execution)
-//   - pending_count() is thread-safe (mutex-protected read)
+//   - pendingCount() is thread-safe (mutex-protected read)
 
 #include "heartbeat/heartbeat_events.hpp"
 
@@ -60,7 +60,7 @@ class TaskQueue
     void enqueue(TaskFn fn, TaskPriority priority = TaskPriority::Normal);
 
     /// Number of pending tasks in the queue.
-    [[nodiscard]] std::size_t pending_count() const;
+    [[nodiscard]] std::size_t pendingCount() const;
 
     /// Whether the worker thread is running.
     [[nodiscard]] bool running() const;
@@ -83,13 +83,13 @@ class TaskQueue
     ///
     /// Parameters:
     ///   1. stoken — stop_token for cooperative cancellation
-    void worker_loop(std::stop_token stoken);
+    void workerLoop(std::stop_token stoken);
 
-    std::jthread worker_;                        ///< Dedicated worker thread.
-    std::deque<Task> queue_;                     ///< Pending tasks.
-    mutable std::mutex mutex_;                   ///< Protects queue_.
-    std::condition_variable cv_;                 ///< Wakes worker on enqueue.
-    std::atomic<bool> running_{ false };         ///< Worker running state.
+    std::jthread m_worker;                        ///< Dedicated worker thread.
+    std::deque<Task> m_queue;                     ///< Pending tasks.
+    mutable std::mutex m_mutex;                   ///< Protects m_queue.
+    std::condition_variable m_cv;                 ///< Wakes worker on enqueue.
+    std::atomic<bool> m_running{ false };         ///< Worker running state.
 };
 
 } // namespace pulse::heartbeat

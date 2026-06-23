@@ -170,15 +170,15 @@ TEST(AnalysisResult, FromJsonInvalidConfidenceType)
 // ---------------------------------------------------------------------------
 TEST(AnalysisResult, InvalidSentimentDefaultsToNeutral)
 {
-    EXPECT_EQ(sentiment_from_string("unknown"), Sentiment::Neutral);
-    EXPECT_EQ(sentiment_from_string(""), Sentiment::Neutral);
-    EXPECT_EQ(sentiment_from_string("BULLISH"), Sentiment::Neutral); // Case sensitive
+    EXPECT_EQ(sentimentFromString("unknown"), Sentiment::Neutral);
+    EXPECT_EQ(sentimentFromString(""), Sentiment::Neutral);
+    EXPECT_EQ(sentimentFromString("BULLISH"), Sentiment::Neutral); // Case sensitive
 }
 
 TEST(AnalysisResult, InvalidVolatilityDefaultsToMedium)
 {
-    EXPECT_EQ(volatility_from_string("extreme"), VolatilityForecast::Medium);
-    EXPECT_EQ(volatility_from_string(""), VolatilityForecast::Medium);
+    EXPECT_EQ(volatilityFromString("extreme"), VolatilityForecast::Medium);
+    EXPECT_EQ(volatilityFromString(""), VolatilityForecast::Medium);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,16 +222,16 @@ TEST(AnalysisResult, RoundTrip)
 // ---------------------------------------------------------------------------
 TEST(AnalysisResult, SentimentToString)
 {
-    EXPECT_EQ(to_string(Sentiment::Bullish), "bullish");
-    EXPECT_EQ(to_string(Sentiment::Bearish), "bearish");
-    EXPECT_EQ(to_string(Sentiment::Neutral), "neutral");
+    EXPECT_EQ(toString(Sentiment::Bullish), "bullish");
+    EXPECT_EQ(toString(Sentiment::Bearish), "bearish");
+    EXPECT_EQ(toString(Sentiment::Neutral), "neutral");
 }
 
 TEST(AnalysisResult, VolatilityToString)
 {
-    EXPECT_EQ(to_string(VolatilityForecast::Low), "low");
-    EXPECT_EQ(to_string(VolatilityForecast::Medium), "medium");
-    EXPECT_EQ(to_string(VolatilityForecast::High), "high");
+    EXPECT_EQ(toString(VolatilityForecast::Low), "low");
+    EXPECT_EQ(toString(VolatilityForecast::Medium), "medium");
+    EXPECT_EQ(toString(VolatilityForecast::High), "high");
 }
 
 // ---------------------------------------------------------------------------

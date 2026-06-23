@@ -74,7 +74,7 @@ min_confidence = 0.6
 
 TEST(ConfigLoader, FileNotFound)
 {
-    auto result = load_config_file("/nonexistent/path/config.toml");
+    auto result = loadConfigFile("/nonexistent/path/config.toml");
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::ConfigFileNotFound, error(result).code);
 }
@@ -82,7 +82,7 @@ TEST(ConfigLoader, FileNotFound)
 TEST(ConfigLoader, InvalidToml)
 {
     TempToml tmp("this is not valid TOML = = = [[[");
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::ConfigParseError, error(result).code);
 }
@@ -107,7 +107,7 @@ name = "test"
 symbol = "BTC_USDT"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("my_secret_value", value(result).exchange.apiKey);
 
@@ -123,7 +123,7 @@ TEST(ConfigLoader, ResolveEnvVar_UnsetVarResolvesToEmpty)
 apiKey = "from_env:PULSE_NONEXISTENT_VAR"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("", value(result).exchange.apiKey);
 }
@@ -137,7 +137,7 @@ TEST(ConfigLoader, ResolveEnvVar_EmptyVarResolvesToEmpty)
 apiKey = "from_env:PULSE_EMPTY_VAR"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("", value(result).exchange.apiKey);
 
@@ -159,7 +159,7 @@ name = "test"
 symbol = "BTC_USDT"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("plain_value", value(result).exchange.apiKey);
     EXPECT_EQ("another_plain", value(result).exchange.apiSecret);
@@ -185,7 +185,7 @@ name = "test"
 symbol = "BTC_USDT"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("nested_secret", value(result).ai.apiKey);
 
@@ -211,7 +211,7 @@ wsReconnectBaseMs = 2000
 wsReconnectMaxMs = 60000
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &ex = value(result).exchange;
@@ -233,7 +233,7 @@ TEST(ConfigLoader, ParseExchange_PartialTable)
 apiKey = "partial_key"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &ex = value(result).exchange;
@@ -254,7 +254,7 @@ toConsole = false
 toFile = true
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &lg = value(result).log;
@@ -270,7 +270,7 @@ TEST(ConfigLoader, ParseSymbols_Array)
 symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &syms = value(result).symbols;
@@ -294,7 +294,7 @@ requestTimeoutMs = 60000
 maxRetries = 3
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &ai = value(result).ai;
@@ -326,7 +326,7 @@ trailing_pct = 0.01
 max_hold_seconds = 600
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &risk = value(result).risk;
@@ -352,7 +352,7 @@ targets_pct = [0.003, 0.006, 0.015]
 fractions = [0.25, 0.25, 0.50]
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &tp = value(result).risk.take_profit;
@@ -396,7 +396,7 @@ enabled = false
 poll_interval_ms = 500
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &strat = value(result).strategy;
@@ -426,7 +426,7 @@ authToken = "mytoken"
 maxClients = 8
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &web = value(result).webui;
@@ -456,7 +456,7 @@ maxArticles = 30
 pollIntervalSec = 600
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &tw = value(result).twitter;
@@ -483,7 +483,7 @@ TEST(ConfigLoader, LoadConfig_ValidCompleteFile)
 {
     TempToml tmp(minimal_toml());
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &cfg = value(result);
@@ -505,7 +505,7 @@ apiKey = "k"
 apiSecret = "s"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
     const auto &cfg = value(result);
@@ -542,7 +542,7 @@ name = "test"
 symbol = "BTC_USDT"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("k", value(result).exchange.apiKey);
 }
@@ -564,7 +564,7 @@ name = "test"
 symbol = "BTC_USDT"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("e2e_key_value", value(result).exchange.apiKey);
     EXPECT_EQ("e2e_secret_value", value(result).exchange.apiSecret);
@@ -580,7 +580,7 @@ TEST(ConfigLoader, ParseStopMode_InvalidValue)
 mode = "InvalidMode"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
 }
@@ -596,7 +596,7 @@ TEST(ConfigLoader, ParseExchange_FuturesWsUrl)
 futuresWsUrl = "wss://custom-futures-ws.example.com/v4/ws/usdt"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("wss://custom-futures-ws.example.com/v4/ws/usdt",
               value(result).exchange.futuresWsUrl);
@@ -610,7 +610,7 @@ apiKey = "k"
 apiSecret = "s"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt",
               value(result).exchange.futuresWsUrl);
@@ -624,7 +624,7 @@ max_leverage = 20.0
 max_margin_used = 0.3
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_DOUBLE_EQ(20.0, value(result).risk.max_leverage);
     EXPECT_DOUBLE_EQ(0.3, value(result).risk.max_margin_used);
@@ -641,7 +641,7 @@ leverage = 10
 margin_mode = "isolated"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     ASSERT_EQ(1u, value(result).strategy.strategies.size());
 
@@ -660,7 +660,7 @@ symbol = "BTC_USDT"
 market_type = "options"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
 }
@@ -678,7 +678,7 @@ apiSecret = "testnet_secret"
 testnet = true
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_TRUE(value(result).exchange.testnet);
     EXPECT_EQ("testnet_key", value(result).exchange.apiKey);
@@ -693,7 +693,7 @@ apiSecret = "s"
 testnet = false
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_FALSE(value(result).exchange.testnet);
 }
@@ -706,7 +706,7 @@ apiKey = "k"
 apiSecret = "s"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_FALSE(value(result).exchange.testnet);
 }
@@ -725,7 +725,7 @@ apiSecret = "s"
 testnet = true
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     const auto &ex = value(result).exchange;
     EXPECT_TRUE(ex.testnet);
@@ -746,7 +746,7 @@ testnet = true
 futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     const auto &ex = value(result).exchange;
     EXPECT_TRUE(ex.testnet);
@@ -766,7 +766,7 @@ apiKey = "k"
 apiSecret = "s"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     const auto &ex = value(result).exchange;
     EXPECT_FALSE(ex.testnet);
@@ -788,7 +788,7 @@ wsUrl = "wss://custom-ws.example.com/ws/"
 futuresWsUrl = "wss://custom-fx.example.com/ws/usdt"
 )");
 
-    auto result = load_config_file(tmp.path());
+    auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
     const auto &ex = value(result).exchange;
     EXPECT_FALSE(ex.testnet);

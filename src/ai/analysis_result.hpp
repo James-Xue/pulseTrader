@@ -38,7 +38,7 @@ enum class Sentiment : std::uint8_t
 };
 
 /// Convert Sentiment to its JSON string representation.
-[[nodiscard]] inline std::string to_string(Sentiment s)
+[[nodiscard]] inline std::string toString(Sentiment s)
 {
     switch (s)
     {
@@ -54,7 +54,7 @@ enum class Sentiment : std::uint8_t
 
 /// Parse a Sentiment from its JSON string representation.
 /// Unknown strings default to Neutral (fail-safe).
-[[nodiscard]] inline Sentiment sentiment_from_string(const std::string &s)
+[[nodiscard]] inline Sentiment sentimentFromString(const std::string &s)
 {
     if ("bullish" == s)
     {
@@ -78,7 +78,7 @@ enum class VolatilityForecast : std::uint8_t
 };
 
 /// Convert VolatilityForecast to its JSON string representation.
-[[nodiscard]] inline std::string to_string(VolatilityForecast v)
+[[nodiscard]] inline std::string toString(VolatilityForecast v)
 {
     switch (v)
     {
@@ -94,7 +94,7 @@ enum class VolatilityForecast : std::uint8_t
 
 /// Parse a VolatilityForecast from its JSON string representation.
 /// Unknown strings default to Medium (fail-safe).
-[[nodiscard]] inline VolatilityForecast volatility_from_string(const std::string &s)
+[[nodiscard]] inline VolatilityForecast volatilityFromString(const std::string &s)
 {
     if ("low" == s)
     {
@@ -149,9 +149,9 @@ struct AnalysisResult
 inline void to_json(nlohmann::json &j, const AnalysisResult &r)
 {
     j = nlohmann::json{
-        {"sentiment",          to_string(r.sentiment)},
+        {"sentiment",          toString(r.sentiment)},
         {"direction_bias",     r.direction_bias},
-        {"volatility",         to_string(r.volatility)},
+        {"volatility",         toString(r.volatility)},
         {"confidence",         r.confidence},
         {"param_deltas",       {
             {"order_quantity_delta",          r.param_deltas.order_quantity_delta},
@@ -185,7 +185,7 @@ inline void from_json(const nlohmann::json &j, AnalysisResult &r)
     {
         throw std::invalid_argument("Field 'sentiment' must be a string");
     }
-    r.sentiment = sentiment_from_string(j["sentiment"].get<std::string>());
+    r.sentiment = sentimentFromString(j["sentiment"].get<std::string>());
 
     // 3. Parse direction_bias (optional, defaults to 0.0)
     if (j.contains("direction_bias") && j["direction_bias"].is_number())
@@ -196,7 +196,7 @@ inline void from_json(const nlohmann::json &j, AnalysisResult &r)
     // 4. Parse volatility (optional, defaults to Medium)
     if (j.contains("volatility") && j["volatility"].is_string())
     {
-        r.volatility = volatility_from_string(j["volatility"].get<std::string>());
+        r.volatility = volatilityFromString(j["volatility"].get<std::string>());
     }
 
     // 5. Parse confidence (required, [0.0, 1.0])

@@ -1,4 +1,4 @@
-// symbol_registry.cpp — SymbolRegistry implementation (Layer 3 Market Data)
+// symbolRegistry.cpp — SymbolRegistry implementation (Layer 3 Market Data)
 
 #include "market/symbol_registry.hpp"
 
@@ -12,19 +12,19 @@ namespace pulse::market
 using namespace pulse::logging;
 
 SymbolRegistry::SymbolRegistry(exchange::GateRestClient &rest_client, MarketType market_type)
-    : rest_client_{ rest_client }
-    , market_type_{ market_type }
+    : m_restClient{ rest_client }
+    , m_marketType{ market_type }
 {
 }
 
-bool SymbolRegistry::load_from_rest()
+bool SymbolRegistry::loadFromRest()
 {
     // Fetch instruments based on market type.
     nlohmann::json instruments_json;
 
-    if (MarketType::Futures == market_type_)
+    if (MarketType::Futures == m_marketType)
     {
-        auto result = rest_client_.get_futures_contracts();
+        auto result = m_restClient.getFuturesContracts();
         if (!pulse::ok(result))
         {
             PULSE_LOG_WARN("market", "Failed to fetch futures contracts: {}", pulse::error(result).message);
@@ -34,7 +34,7 @@ bool SymbolRegistry::load_from_rest()
     }
     else
     {
-        auto result = rest_client_.get_currency_pairs();
+        auto result = m_restClient.getCurrencyPairs();
         if (!pulse::ok(result))
         {
             PULSE_LOG_WARN("market", "Failed to fetch currency pairs: {}", pulse::error(result).message);
@@ -54,13 +54,13 @@ bool SymbolRegistry::load_from_rest()
     for (const auto &obj : instruments_json)
     {
         std::optional<SymbolInfo> info_opt;
-        if (MarketType::Futures == market_type_)
+        if (MarketType::Futures == m_marketType)
         {
-            info_opt = parse_futures_contract(obj);
+            info_opt = parseFuturesContract(obj);
         }
         else
         {
-            info_opt = parse_currency_pair(obj);
+            info_opt = parseCurrencyPair(obj);
         }
 
         if (info_opt.has_value())
@@ -70,27 +70,27 @@ bool SymbolRegistry::load_from_rest()
     }
 
     // Replace the registry atomically (exclusive lock).
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    symbols_ = std::move(new_symbols);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_symbols = std::move(new_symbols);
 
     PULSE_LOG_INFO("market", "Loaded {} {} instruments from REST",
-                   symbols_.size(),
-                   MarketType::Futures == market_type_ ? "futures" : "spot");
+                   m_symbols.size(),
+                   MarketType::Futures == m_marketType ? "futures" : "spot");
     return true;
 }
 
 std::optional<SymbolInfo> SymbolRegistry::get(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = symbols_.find(symbol);
-    if (it == symbols_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_symbols.find(symbol);
+    if (it == m_symbols.end())
     {
         return std::nullopt;
     }
     return it->second;
 }
 
-bool SymbolRegistry::validate_order(const Symbol &symbol, Price price, Quantity qty) const
+bool SymbolRegistry::validateOrder(const Symbol &symbol, Price price, Quantity qty) const
 {
     const auto info_opt = get(symbol);
     if (!info_opt.has_value())
@@ -189,23 +189,23 @@ bool SymbolRegistry::validate_order(const Symbol &symbol, Price price, Quantity 
 
 std::size_t SymbolRegistry::size() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return symbols_.size();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_symbols.size();
 }
 
 std::vector<Symbol> SymbolRegistry::symbols() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
     std::vector<Symbol> result;
-    result.reserve(symbols_.size());
-    for (const auto &[sym, _] : symbols_)
+    result.reserve(m_symbols.size());
+    for (const auto &[sym, _] : m_symbols)
     {
         result.push_back(sym);
     }
     return result;
 }
 
-std::optional<SymbolInfo> SymbolRegistry::parse_currency_pair(const nlohmann::json &obj)
+std::optional<SymbolInfo> SymbolRegistry::parseCurrencyPair(const nlohmann::json &obj)
 {
     // Gate.io format: see header comment.
     // Required fields: id, precision, amount_precision, trade_status.
@@ -230,13 +230,13 @@ std::optional<SymbolInfo> SymbolRegistry::parse_currency_pair(const nlohmann::js
     // Parse min_base_amount (optional, default 0).
     if (obj.contains("min_base_amount") && !obj["min_base_amount"].is_null())
     {
-        info.min_base_amount = safe_parse_double(obj["min_base_amount"].get<std::string>()).value_or(0.0);
+        info.min_base_amount = safeParseDouble(obj["min_base_amount"].get<std::string>()).value_or(0.0);
     }
 
     // Parse min_quote_amount (optional, default 0).
     if (obj.contains("min_quote_amount") && !obj["min_quote_amount"].is_null())
     {
-        info.min_quote_amount = safe_parse_double(obj["min_quote_amount"].get<std::string>()).value_or(0.0);
+        info.min_quote_amount = safeParseDouble(obj["min_quote_amount"].get<std::string>()).value_or(0.0);
     }
 
     // min_notional = max(min_quote_amount, price * min_base_amount)
@@ -254,7 +254,7 @@ std::optional<SymbolInfo> SymbolRegistry::parse_currency_pair(const nlohmann::js
     return info;
 }
 
-std::optional<SymbolInfo> SymbolRegistry::parse_futures_contract(const nlohmann::json &obj)
+std::optional<SymbolInfo> SymbolRegistry::parseFuturesContract(const nlohmann::json &obj)
 {
     // Gate.io futures contract format:
     // Required fields: name, quanto_multiplier, leverage_max.
@@ -274,24 +274,24 @@ std::optional<SymbolInfo> SymbolRegistry::parse_futures_contract(const nlohmann:
     // Contract multiplier (how much base asset one contract represents).
     if (obj.contains("quanto_multiplier") && !obj["quanto_multiplier"].is_null())
     {
-        info.quanto_multiplier = safe_parse_double(obj["quanto_multiplier"].get<std::string>()).value_or(1.0);
+        info.quanto_multiplier = safeParseDouble(obj["quanto_multiplier"].get<std::string>()).value_or(1.0);
     }
 
     // Leverage bounds.
     if (obj.contains("leverage_max") && !obj["leverage_max"].is_null())
     {
-        info.leverage_max = safe_parse_double(obj["leverage_max"].get<std::string>()).value_or(1.0);
+        info.leverage_max = safeParseDouble(obj["leverage_max"].get<std::string>()).value_or(1.0);
     }
 
     if (obj.contains("leverage_min") && !obj["leverage_min"].is_null())
     {
-        info.leverage_min = safe_parse_double(obj["leverage_min"].get<std::string>()).value_or(1.0);
+        info.leverage_min = safeParseDouble(obj["leverage_min"].get<std::string>()).value_or(1.0);
     }
 
     // Maintenance margin rate.
     if (obj.contains("maintenance_rate") && !obj["maintenance_rate"].is_null())
     {
-        info.maintenance_rate = safe_parse_double(obj["maintenance_rate"].get<std::string>()).value_or(0.0);
+        info.maintenance_rate = safeParseDouble(obj["maintenance_rate"].get<std::string>()).value_or(0.0);
     }
 
     // Funding interval in seconds.
@@ -314,14 +314,14 @@ std::optional<SymbolInfo> SymbolRegistry::parse_futures_contract(const nlohmann:
     // Price precision — order_price_round is the minimum price increment.
     if (obj.contains("order_price_round") && !obj["order_price_round"].is_null())
     {
-        info.tick_size = safe_parse_double(obj["order_price_round"].get<std::string>()).value_or(0.0);
+        info.tick_size = safeParseDouble(obj["order_price_round"].get<std::string>()).value_or(0.0);
     }
 
     // Contracts trade in whole units.
     info.lot_size = 1.0;
 
     // Futures min_notional is derived from order_size_min * quanto_multiplier * price.
-    // Set to 0 here; validate_order() handles size checks directly.
+    // Set to 0 here; validateOrder() handles size checks directly.
     info.min_notional = 0.0;
     info.min_quote_amount = 0.0;
     info.min_base_amount = 0.0;

@@ -64,7 +64,7 @@ class GateRestClient
     GateRestClient &operator=(GateRestClient &&) noexcept;
 
     /// Returns true if API key and secret are both non-empty.
-    [[nodiscard]] bool has_credentials() const;
+    [[nodiscard]] bool hasCredentials() const;
 
     // -----------------------------------------------------------------------
     // Public endpoints (no authentication required)
@@ -74,17 +74,17 @@ class GateRestClient
     ///
     /// This is the "hello world" of Gate.io API — no auth needed, returns
     /// an array of currency metadata (name, precision, deposit/withdraw status).
-    [[nodiscard]] Result<nlohmann::json> get_currencies();
+    [[nodiscard]] Result<nlohmann::json> getCurrencies();
 
     /// GET /api/v4/spot/currency_pairs — list all spot trading pairs.
     ///
     /// Returns pair metadata: base/quote currency, tick size, lot size, min amount.
-    [[nodiscard]] Result<nlohmann::json> get_currency_pairs();
+    [[nodiscard]] Result<nlohmann::json> getCurrencyPairs();
 
     /// GET /api/v4/spot/tickers?currency_pair={pair} — fetch ticker for one pair.
     ///
     /// Returns the latest price, volume, bid/ask for the given trading pair.
-    [[nodiscard]] Result<nlohmann::json> get_ticker(const std::string &currency_pair);
+    [[nodiscard]] Result<nlohmann::json> getTicker(const std::string &currency_pair);
 
     // -----------------------------------------------------------------------
     // Authenticated endpoints (require API key + secret)
@@ -94,7 +94,7 @@ class GateRestClient
     ///
     /// Returns an array of {currency, available, locked} objects.
     /// Requires valid API key and secret.
-    [[nodiscard]] Result<nlohmann::json> get_spot_accounts();
+    [[nodiscard]] Result<nlohmann::json> getSpotAccounts();
 
     // -----------------------------------------------------------------------
     // Futures endpoints
@@ -103,40 +103,40 @@ class GateRestClient
     /// GET /api/v4/futures/usdt/contracts — list all USDT-settled perpetual contracts.
     ///
     /// Returns contract metadata: name, mark price, funding rate, multiplier, etc.
-    [[nodiscard]] Result<nlohmann::json> get_futures_contracts();
+    [[nodiscard]] Result<nlohmann::json> getFuturesContracts();
 
     /// GET /api/v4/futures/usdt/tickers?contract={contract} — fetch futures ticker.
     ///
     /// Returns the latest mark price, index price, funding rate, volume.
-    [[nodiscard]] Result<nlohmann::json> get_futures_ticker(const std::string &contract);
+    [[nodiscard]] Result<nlohmann::json> getFuturesTicker(const std::string &contract);
 
     /// GET /api/v4/futures/usdt/accounts — fetch futures account balance.
     ///
     /// Returns {total, available, unrealised_pnl, currency, etc.}.
     /// Requires valid API key and secret.
-    [[nodiscard]] Result<nlohmann::json> get_futures_accounts();
+    [[nodiscard]] Result<nlohmann::json> getFuturesAccounts();
 
     /// GET /api/v4/futures/usdt/accounts — fetch and parse futures account balance.
     ///
-    /// Convenience wrapper around get_futures_accounts() that returns a parsed
+    /// Convenience wrapper around getFuturesAccounts() that returns a parsed
     /// AccountBalance struct with total equity, available balance, unrealized PnL, etc.
-    [[nodiscard]] Result<AccountBalance> get_futures_account_balance();
+    [[nodiscard]] Result<AccountBalance> getFuturesAccountBalance();
 
     /// POST /api/v4/futures/usdt/orders — place a futures order.
     ///
     /// body should contain: contract, size, price, tif, text, reduce_only, etc.
     /// Returns the order object on success.
-    [[nodiscard]] Result<nlohmann::json> post_futures_order(const nlohmann::json &body);
+    [[nodiscard]] Result<nlohmann::json> postFuturesOrder(const nlohmann::json &body);
 
     /// DELETE /api/v4/futures/usdt/orders/{order_id} — cancel a futures order.
     ///
     /// Returns the cancelled order object on success.
-    [[nodiscard]] Result<nlohmann::json> cancel_futures_order(const std::string &order_id);
+    [[nodiscard]] Result<nlohmann::json> cancelFuturesOrder(const std::string &order_id);
 
     /// GET /api/v4/futures/usdt/orders/{order_id} — query a futures order.
     ///
     /// Returns the order object with current status.
-    [[nodiscard]] Result<nlohmann::json> get_futures_order(const std::string &order_id);
+    [[nodiscard]] Result<nlohmann::json> getFuturesOrder(const std::string &order_id);
 
     // -----------------------------------------------------------------------
     // Generic request (for future expansion)
@@ -159,11 +159,11 @@ class GateRestClient
             const std::string &body = "");
 
   private:
-    ExchangeConfig config_;
-    MarketType market_type_;
+    ExchangeConfig m_config;
+    MarketType m_marketType;
 
     /// Perform a single HTTP request (no retry). Returns raw HttpResponse.
-    [[nodiscard]] HttpResponse do_request(
+    [[nodiscard]] HttpResponse doRequest(
             const std::string &method,
             const std::string &url,
             const std::string &sign_header_key,

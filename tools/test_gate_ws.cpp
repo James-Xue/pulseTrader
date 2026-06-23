@@ -82,7 +82,7 @@ int main()
     const bool has_auth = !exchange_cfg.apiKey.empty();
     if (has_auth)
     {
-        client.subscribe_private("spot.orders",
+        client.subscribePrivate("spot.orders",
             {},
             [](const nlohmann::json &result, const nlohmann::json & /*frame*/)
             { std::cout << "[order] " << result.dump() << std::endl; });

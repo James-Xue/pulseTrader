@@ -39,7 +39,7 @@ struct TradeRecord
 // ---------------------------------------------------------------------------
 struct TradeSummary
 {
-    std::int64_t trade_count;
+    std::int64_t tradeCount;
     double total_pnl;
     double total_fees;
     double win_rate;             ///< Fraction of trades with pnl > 0.

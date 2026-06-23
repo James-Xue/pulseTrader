@@ -159,7 +159,7 @@ TEST(GateWsChannelsTest, BuildSubscribeMsgFormat)
     const GateWsChannels channels;
     const std::vector<std::string> payload = { "BTC_USDT", "ETH_USDT" };
 
-    const auto msg = channels.build_subscribe_msg("spot.tickers", payload);
+    const auto msg = channels.buildSubscribeMsg("spot.tickers", payload);
 
     // 1. Verify required fields exist
     EXPECT_TRUE(msg.contains("time"));
@@ -186,7 +186,7 @@ TEST(GateWsChannelsTest, BuildUnsubscribeMsgFormat)
     const GateWsChannels channels;
     const std::vector<std::string> payload = { "BTC_USDT" };
 
-    const auto msg = channels.build_unsubscribe_msg("spot.tickers", payload);
+    const auto msg = channels.buildUnsubscribeMsg("spot.tickers", payload);
 
     EXPECT_EQ("spot.tickers", msg["channel"].get<std::string>());
     EXPECT_EQ("unsubscribe", msg["event"].get<std::string>());
@@ -203,7 +203,7 @@ TEST(GateWsChannelsTest, BuildPongFromSpotPing)
     const auto ping = nlohmann::json{ { "time", 1700000000 }, { "channel", "spot.ping" } };
 
     // 2. Build the pong reply (default MarketType::Spot)
-    const auto pong = GateWsChannels::build_pong(ping);
+    const auto pong = GateWsChannels::buildPong(ping);
 
     // 3. Verify pong has the same timestamp and spot.pong channel
     EXPECT_EQ(1700000000, pong["time"].get<std::int64_t>());
@@ -219,7 +219,7 @@ TEST(GateWsChannelsTest, BuildPongFromFuturesPing)
     const auto ping = nlohmann::json{ { "time", 1700000500 }, { "channel", "futures.ping" } };
 
     // 2. Build the pong reply with Futures market type
-    const auto pong = GateWsChannels::build_pong(ping, MarketType::Futures);
+    const auto pong = GateWsChannels::buildPong(ping, MarketType::Futures);
 
     // 3. Verify pong has futures.pong channel (dynamically derived from futures.ping)
     EXPECT_EQ(1700000500, pong["time"].get<std::int64_t>());
@@ -235,7 +235,7 @@ TEST(GateWsChannelsTest, BuildPong_PreservesTime)
     for (const auto ts : { 0, 1, 1577836800, 1700000000, 2147483647 })
     {
         const auto ping = nlohmann::json{ { "time", ts }, { "channel", "spot.ping" } };
-        const auto pong = GateWsChannels::build_pong(ping);
+        const auto pong = GateWsChannels::buildPong(ping);
         EXPECT_EQ(ts, pong["time"].get<std::int64_t>()) << "time mismatch for ts=" << ts;
     }
 }
@@ -248,12 +248,12 @@ TEST(GateWsChannelsTest, BuildPong_DynamicChannel)
     // Even if we pass Spot as market type, a futures.ping channel should produce futures.pong
     // because the channel is derived from the input ping frame's channel field.
     const auto ping = nlohmann::json{ { "time", 42 }, { "channel", "futures.ping" } };
-    const auto pong = GateWsChannels::build_pong(ping, MarketType::Spot);
+    const auto pong = GateWsChannels::buildPong(ping, MarketType::Spot);
     EXPECT_EQ("futures.pong", pong["channel"].get<std::string>());
 
     // Conversely, spot.ping with Futures market type should still produce spot.pong
     const auto ping2 = nlohmann::json{ { "time", 43 }, { "channel", "spot.ping" } };
-    const auto pong2 = GateWsChannels::build_pong(ping2, MarketType::Futures);
+    const auto pong2 = GateWsChannels::buildPong(ping2, MarketType::Futures);
     EXPECT_EQ("spot.pong", pong2["channel"].get<std::string>());
 }
 
@@ -265,14 +265,14 @@ TEST(GateWsChannelsTest, ActiveChannels)
     GateWsChannels channels;
 
     // 1. Initially empty
-    EXPECT_TRUE(channels.active_channels().empty());
+    EXPECT_TRUE(channels.activeChannels().empty());
 
     // 2. Subscribe to two channels
     channels.subscribe("spot.tickers", { "BTC_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
     channels.subscribe("spot.trades", { "BTC_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
 
     // 3. Verify both appear in active list
-    const auto active = channels.active_channels();
+    const auto active = channels.activeChannels();
     EXPECT_EQ(2u, active.size());
 
     // 4. Both channel names should be present (order not guaranteed with unordered_map)
@@ -292,14 +292,14 @@ TEST(GateWsChannelsTest, GetPayload)
     GateWsChannels channels;
 
     // 1. Unknown channel returns empty
-    EXPECT_TRUE(channels.get_payload("spot.tickers").empty());
+    EXPECT_TRUE(channels.getPayload("spot.tickers").empty());
 
     // 2. Subscribe with specific payload
     const std::vector<std::string> payload = { "BTC_USDT", "ETH_USDT" };
     channels.subscribe("spot.tickers", payload, [](const nlohmann::json &, const nlohmann::json &) {});
 
     // 3. Verify payload is returned correctly
-    const auto retrieved = channels.get_payload("spot.tickers");
+    const auto retrieved = channels.getPayload("spot.tickers");
     EXPECT_EQ(2u, retrieved.size());
     EXPECT_EQ("BTC_USDT", retrieved[0]);
     EXPECT_EQ("ETH_USDT", retrieved[1]);
@@ -359,7 +359,7 @@ TEST(GateWsChannelsTest, SubscribeReplacesExisting)
     EXPECT_EQ(1, second_count.load());
 
     // 4. Payload should be the new one
-    const auto payload = channels.get_payload("spot.tickers");
+    const auto payload = channels.getPayload("spot.tickers");
     EXPECT_EQ(1u, payload.size());
     EXPECT_EQ("ETH_USDT", payload[0]);
 }

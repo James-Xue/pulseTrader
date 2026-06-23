@@ -10,9 +10,9 @@ namespace pulse::exchange
 {
 
 // ---------------------------------------------------------------------------
-// rest_prefix
+// restPrefix
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::rest_prefix(MarketType mt)
+std::string EndpointRouter::restPrefix(MarketType mt)
 {
     switch (mt)
     {
@@ -25,9 +25,9 @@ std::string EndpointRouter::rest_prefix(MarketType mt)
 }
 
 // ---------------------------------------------------------------------------
-// ws_prefix
+// wsPrefix
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::ws_prefix(MarketType mt)
+std::string EndpointRouter::wsPrefix(MarketType mt)
 {
     switch (mt)
     {
@@ -40,36 +40,36 @@ std::string EndpointRouter::ws_prefix(MarketType mt)
 }
 
 // ---------------------------------------------------------------------------
-// ws_channel — build full channel name from prefix + suffix
+// wsChannel — build full channel name from prefix + suffix
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::ws_channel(MarketType mt, std::string_view suffix)
+std::string EndpointRouter::wsChannel(MarketType mt, std::string_view suffix)
 {
-    std::string result = ws_prefix(mt);
+    std::string result = wsPrefix(mt);
     result += '.';
     result += suffix;
     return result;
 }
 
 // ---------------------------------------------------------------------------
-// ping_channel
+// pingChannel
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::ping_channel(MarketType mt)
+std::string EndpointRouter::pingChannel(MarketType mt)
 {
-    return ws_channel(mt, "ping");
+    return wsChannel(mt, "ping");
 }
 
 // ---------------------------------------------------------------------------
-// pong_channel
+// pongChannel
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::pong_channel(MarketType mt)
+std::string EndpointRouter::pongChannel(MarketType mt)
 {
-    return ws_channel(mt, "pong");
+    return wsChannel(mt, "pong");
 }
 
 // ---------------------------------------------------------------------------
-// select_ws_url
+// selectWsUrl
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::select_ws_url(const ExchangeConfig &cfg, MarketType mt)
+std::string EndpointRouter::selectWsUrl(const ExchangeConfig &cfg, MarketType mt)
 {
     switch (mt)
     {
@@ -82,9 +82,9 @@ std::string EndpointRouter::select_ws_url(const ExchangeConfig &cfg, MarketType 
 }
 
 // ---------------------------------------------------------------------------
-// needs_json_ping
+// needsJsonPing
 // ---------------------------------------------------------------------------
-bool EndpointRouter::needs_json_ping(MarketType mt)
+bool EndpointRouter::needsJsonPing(MarketType mt)
 {
     // Spot: server sends JSON {"channel": "spot.ping"} — we must reply with spot.pong.
     // Futures: server uses RFC 6455 protocol-layer ping — websocketpp auto-responds.
@@ -95,7 +95,7 @@ bool EndpointRouter::needs_json_ping(MarketType mt)
 // ---------------------------------------------------------------------------
 // REST endpoint builders
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::contracts_path(MarketType mt)
+std::string EndpointRouter::contractsPath(MarketType mt)
 {
     switch (mt)
     {
@@ -107,36 +107,36 @@ std::string EndpointRouter::contracts_path(MarketType mt)
     return "/api/v4/spot/currency_pairs";
 }
 
-std::string EndpointRouter::tickers_path(MarketType mt)
+std::string EndpointRouter::tickersPath(MarketType mt)
 {
-    return rest_prefix(mt) + "/tickers";
+    return restPrefix(mt) + "/tickers";
 }
 
-std::string EndpointRouter::accounts_path(MarketType mt)
+std::string EndpointRouter::accountsPath(MarketType mt)
 {
-    return rest_prefix(mt) + "/accounts";
-}
-
-// ---------------------------------------------------------------------------
-// orders_path
-// ---------------------------------------------------------------------------
-std::string EndpointRouter::orders_path(MarketType mt)
-{
-    return rest_prefix(mt) + "/orders";
+    return restPrefix(mt) + "/accounts";
 }
 
 // ---------------------------------------------------------------------------
-// order_path — specific order by ID
+// ordersPath
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::order_path(MarketType mt, const std::string &order_id)
+std::string EndpointRouter::ordersPath(MarketType mt)
 {
-    return rest_prefix(mt) + "/orders/" + order_id;
+    return restPrefix(mt) + "/orders";
 }
 
 // ---------------------------------------------------------------------------
-// leverage_path — futures only
+// orderPath — specific order by ID
 // ---------------------------------------------------------------------------
-std::string EndpointRouter::leverage_path(MarketType mt, const std::string &contract)
+std::string EndpointRouter::orderPath(MarketType mt, const std::string &order_id)
+{
+    return restPrefix(mt) + "/orders/" + order_id;
+}
+
+// ---------------------------------------------------------------------------
+// leveragePath — futures only
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contract)
 {
     switch (mt)
     {

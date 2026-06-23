@@ -16,13 +16,13 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 RiskManager::RiskManager(const RiskConfig &config,
-    PositionManager &position_manager,
-    DrawdownGuard &drawdown_guard,
-    OrderRateLimiter &rate_limiter)
-    : config_{ config }
-    , position_manager_{ position_manager }
-    , drawdown_guard_{ drawdown_guard }
-    , rate_limiter_{ rate_limiter }
+    PositionManager &positionManager,
+    DrawdownGuard &drawdownGuard,
+    OrderRateLimiter &rateLimiter)
+    : m_config{ config }
+    , m_positionManager{ positionManager }
+    , m_drawdownGuard{ drawdownGuard }
+    , m_rateLimiter{ rateLimiter }
 {
 }
 
@@ -30,7 +30,7 @@ RiskManager::RiskManager(const RiskConfig &config,
 // Order evaluation
 // ---------------------------------------------------------------------------
 
-RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
+RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
 {
     // Evaluate a proposed order against all risk rules sequentially:
     // 1. Check DrawdownGuard: is trading halted?
@@ -40,28 +40,28 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
     //    - If partial order fits: Modified with reduced qty
     //    - If nothing fits: Rejected
     //
-    // The atomic reserve_notional() call replaces the old 3-separate-lock
-    // pattern (can_open_position + portfolio_summary + symbol_notional)
+    // The atomic reserveNotional() call replaces the old 3-separate-lock
+    // pattern (canOpenPosition + portfolioSummary + symbolNotional)
     // that was vulnerable to TOCTOU races under concurrent strategy threads.
 
     RiskEvalResult result;
 
     // 1. Check drawdown guard (atomic load — safe outside the reserve).
-    if (drawdown_guard_.is_halted())
+    if (m_drawdownGuard.isHalted())
     {
         PULSE_LOG_WARN("risk",
             "Order rejected: trading halted (reason: {})",
-            static_cast<int>(drawdown_guard_.halt_reason()));
+            static_cast<int>(m_drawdownGuard.haltReason()));
 
         result.decision = RiskDecision::Rejected;
         result.approved_qty = 0.0;
-        result.reason_code = drawdown_guard_.halt_reason();
+        result.reason_code = m_drawdownGuard.haltReason();
         result.reason_message = "Trading halted: drawdown limit breached";
         return result;
     }
 
     // 2. Check rate limiter (atomic CAS — safe outside the reserve).
-    if (!rate_limiter_.try_acquire())
+    if (!m_rateLimiter.tryAcquire())
     {
         PULSE_LOG_WARN("risk",
             "Order rejected: rate limit exceeded for {}", order.symbol);
@@ -74,7 +74,7 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
     }
 
     // 3. Atomic check + reserve — single lock, no TOCTOU gaps.
-    const auto reservation = position_manager_.reserve_notional(
+    const auto reservation = m_positionManager.reserveNotional(
         order.symbol, order.quantity, order.price);
 
     result.decision = reservation.decision;
@@ -90,17 +90,17 @@ RiskEvalResult RiskManager::evaluate_order(const execution::OrderRequest &order)
 // Futures order evaluation
 // ---------------------------------------------------------------------------
 
-RiskEvalResult RiskManager::evaluate_futures_order(
+RiskEvalResult RiskManager::evaluateFuturesOrder(
     const execution::OrderRequest &order, double leverage, double equity)
 {
     RiskEvalResult result;
 
     // 1. Check leverage limit.
-    if (leverage > config_.max_leverage)
+    if (leverage > m_config.max_leverage)
     {
         PULSE_LOG_WARN("risk",
             "Futures order rejected: leverage {:.1f}x exceeds max {:.1f}x",
-            leverage, config_.max_leverage);
+            leverage, m_config.max_leverage);
 
         result.decision = RiskDecision::Rejected;
         result.approved_qty = 0.0;
@@ -112,9 +112,9 @@ RiskEvalResult RiskManager::evaluate_futures_order(
     // 2. Check margin sufficiency.
     // proposed_margin = qty * price / leverage (simplified; quanto handled by caller)
     const double proposed_margin = order.quantity * order.price / leverage;
-    const auto summary = position_manager_.portfolio_summary();
+    const auto summary = m_positionManager.portfolioSummary();
     const double total_margin_after = summary.total_margin_used + proposed_margin;
-    const double max_margin = equity * config_.max_margin_used;
+    const double max_margin = equity * m_config.max_margin_used;
 
     if (total_margin_after > max_margin)
     {
@@ -122,7 +122,7 @@ RiskEvalResult RiskManager::evaluate_futures_order(
             "Futures order rejected: margin {:.2f} + proposed {:.2f} exceeds {:.2f} "
             "({:.1f}% of equity {:.2f})",
             summary.total_margin_used, proposed_margin, max_margin,
-            config_.max_margin_used * 100, equity);
+            m_config.max_margin_used * 100, equity);
 
         result.decision = RiskDecision::Rejected;
         result.approved_qty = 0.0;
@@ -131,45 +131,45 @@ RiskEvalResult RiskManager::evaluate_futures_order(
         return result;
     }
 
-    // 3. Delegate to standard evaluate_order() for drawdown/rate/position limits.
-    return evaluate_order(order);
+    // 3. Delegate to standard evaluateOrder() for drawdown/rate/position limits.
+    return evaluateOrder(order);
 }
 
 // ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
 
-PositionManager &RiskManager::position_manager()
+PositionManager &RiskManager::positionManager()
 {
-    return position_manager_;
+    return m_positionManager;
 }
 
-DrawdownGuard &RiskManager::drawdown_guard()
+DrawdownGuard &RiskManager::drawdownGuard()
 {
-    return drawdown_guard_;
+    return m_drawdownGuard;
 }
 
-OrderRateLimiter &RiskManager::rate_limiter()
+OrderRateLimiter &RiskManager::rateLimiter()
 {
-    return rate_limiter_;
+    return m_rateLimiter;
 }
 
-bool RiskManager::is_trading_halted() const
+bool RiskManager::isTradingHalted() const
 {
-    return drawdown_guard_.is_halted();
+    return m_drawdownGuard.isHalted();
 }
 
-RiskSnapshot RiskManager::risk_snapshot() const
+RiskSnapshot RiskManager::riskSnapshot() const
 {
     RiskSnapshot snap;
-    snap.trading_halted = drawdown_guard_.is_halted();
-    snap.halt_reason = drawdown_guard_.halt_reason();
-    snap.daily_drawdown = drawdown_guard_.daily_drawdown();
-    snap.max_drawdown = drawdown_guard_.max_drawdown();
-    snap.rate_limiter_tokens = rate_limiter_.available_tokens();
-    snap.rate_limiter_exhausted = rate_limiter_.is_exhausted();
-    snap.portfolio = position_manager_.portfolio_summary();
-    snap.open_position_count = position_manager_.open_position_count();
+    snap.trading_halted = m_drawdownGuard.isHalted();
+    snap.haltReason = m_drawdownGuard.haltReason();
+    snap.dailyDrawdown = m_drawdownGuard.dailyDrawdown();
+    snap.maxDrawdown = m_drawdownGuard.maxDrawdown();
+    snap.rate_limiter_tokens = m_rateLimiter.availableTokens();
+    snap.rate_limiter_exhausted = m_rateLimiter.isExhausted();
+    snap.portfolio = m_positionManager.portfolioSummary();
+    snap.openPositionCount = m_positionManager.openPositionCount();
     return snap;
 }
 

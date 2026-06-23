@@ -1,4 +1,4 @@
-// orderbook_manager.cpp — OrderBookManager implementation (Layer 3 Market Data)
+// orderbookManager.cpp — OrderBookManager implementation (Layer 3 Market Data)
 
 #include "market/orderbook_manager.hpp"
 
@@ -9,12 +9,12 @@ namespace pulse::market
 
 using namespace pulse::logging;
 
-void OrderBookManager::set_resubscribe_callback(ResubscribeCallback callback)
+void OrderBookManager::setResubscribeCallback(ResubscribeCallback callback)
 {
-    resubscribe_callback_ = std::move(callback);
+    m_resubscribeCallback = std::move(callback);
 }
 
-void OrderBookManager::apply_snapshot(const Symbol &symbol, const nlohmann::json &snapshot)
+void OrderBookManager::applySnapshot(const Symbol &symbol, const nlohmann::json &snapshot)
 {
     // Validate JSON structure.
     if (!snapshot.contains("lastUpdateId") || !snapshot.contains("bids") || !snapshot.contains("asks"))
@@ -31,23 +31,23 @@ void OrderBookManager::apply_snapshot(const Symbol &symbol, const nlohmann::json
     book.timestamp = snapshot.value("time", static_cast<std::int64_t>(0));
 
     // Parse bids and asks.
-    parse_levels(book.bids, snapshot["bids"]);
-    parse_levels(book.asks, snapshot["asks"]);
+    parseLevels(book.bids, snapshot["bids"]);
+    parseLevels(book.asks, snapshot["asks"]);
 
     // Store the book and update sequence tracker.
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    books_[symbol] = std::move(book);
-    last_sequence_[symbol] = books_[symbol].sequence_id;
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_books[symbol] = std::move(book);
+    m_lastSequence[symbol] = m_books[symbol].sequence_id;
 
     PULSE_LOG_DEBUG("market",
         "Snapshot applied for {}: {} bids, {} asks, seq={}",
         symbol,
-        books_[symbol].bids.size(),
-        books_[symbol].asks.size(),
-        books_[symbol].sequence_id);
+        m_books[symbol].bids.size(),
+        m_books[symbol].asks.size(),
+        m_books[symbol].sequence_id);
 }
 
-void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &delta)
+void OrderBookManager::applyDelta(const Symbol &symbol, const nlohmann::json &delta)
 {
     // Validate JSON structure.
     if (!delta.contains("lastUpdateId") || !delta.contains("bids") || !delta.contains("asks"))
@@ -60,11 +60,11 @@ void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &d
         ? std::stoull(delta["lastUpdateId"].get<std::string>())
         : delta["lastUpdateId"].get<std::uint64_t>();
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     // Check if we have a snapshot for this symbol.
-    const auto book_it = books_.find(symbol);
-    if (book_it == books_.end())
+    const auto book_it = m_books.find(symbol);
+    if (book_it == m_books.end())
     {
         PULSE_LOG_WARN("market", "Delta received for {} before snapshot — ignoring", symbol);
         return;
@@ -76,8 +76,8 @@ void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &d
     // consecutive deltas for the same symbol are normal (other symbols'
     // updates increment the global counter in between).  We only reject
     // stale or duplicate deltas (delta_seq <= last_seq).
-    const auto seq_it = last_sequence_.find(symbol);
-    const std::uint64_t last_seq = (seq_it != last_sequence_.end()) ? seq_it->second : 0;
+    const auto seq_it = m_lastSequence.find(symbol);
+    const std::uint64_t last_seq = (seq_it != m_lastSequence.end()) ? seq_it->second : 0;
 
     if (delta_seq <= last_seq && 0 != last_seq)
     {
@@ -88,31 +88,31 @@ void OrderBookManager::apply_delta(const Symbol &symbol, const nlohmann::json &d
     }
 
     // Apply delta updates.
-    apply_delta_levels(book_it->second.bids, delta["bids"]);
-    apply_delta_levels(book_it->second.asks, delta["asks"]);
+    applyDeltaLevels(book_it->second.bids, delta["bids"]);
+    applyDeltaLevels(book_it->second.asks, delta["asks"]);
 
     // Update sequence ID and timestamp.
     book_it->second.sequence_id = delta_seq;
     book_it->second.timestamp = delta.value("time", book_it->second.timestamp);
-    last_sequence_[symbol] = delta_seq;
+    m_lastSequence[symbol] = delta_seq;
 }
 
 std::optional<OrderBook> OrderBookManager::get(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = books_.find(symbol);
-    if (it == books_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_books.find(symbol);
+    if (it == m_books.end())
     {
         return std::nullopt;
     }
     return it->second;
 }
 
-std::vector<OrderBookLevel> OrderBookManager::top_bids(const Symbol &symbol, std::size_t n) const
+std::vector<OrderBookLevel> OrderBookManager::topBids(const Symbol &symbol, std::size_t n) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = books_.find(symbol);
-    if (it == books_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_books.find(symbol);
+    if (it == m_books.end())
     {
         return {};
     }
@@ -134,11 +134,11 @@ std::vector<OrderBookLevel> OrderBookManager::top_bids(const Symbol &symbol, std
     return result;
 }
 
-std::vector<OrderBookLevel> OrderBookManager::top_asks(const Symbol &symbol, std::size_t n) const
+std::vector<OrderBookLevel> OrderBookManager::topAsks(const Symbol &symbol, std::size_t n) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = books_.find(symbol);
-    if (it == books_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_books.find(symbol);
+    if (it == m_books.end())
     {
         return {};
     }
@@ -162,12 +162,12 @@ std::vector<OrderBookLevel> OrderBookManager::top_asks(const Symbol &symbol, std
 
 bool OrderBookManager::contains(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return books_.find(symbol) != books_.end();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_books.find(symbol) != m_books.end();
 }
 
 template <typename Compare>
-void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, const nlohmann::json &levels_json)
+void OrderBookManager::parseLevels(std::map<Price, Quantity, Compare> &out, const nlohmann::json &levels_json)
 {
     if (!levels_json.is_array())
     {
@@ -186,7 +186,7 @@ void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, con
 
         if (level[0].is_string())
         {
-            auto opt = safe_parse_double(level[0].get<std::string>());
+            auto opt = safeParseDouble(level[0].get<std::string>());
             if (!opt.has_value()) continue;
             price = opt.value();
         }
@@ -197,7 +197,7 @@ void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, con
 
         if (level[1].is_string())
         {
-            auto opt = safe_parse_double(level[1].get<std::string>());
+            auto opt = safeParseDouble(level[1].get<std::string>());
             if (!opt.has_value()) continue;
             qty = opt.value();
         }
@@ -214,7 +214,7 @@ void OrderBookManager::parse_levels(std::map<Price, Quantity, Compare> &out, con
 }
 
 template <typename Compare>
-void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &book, const nlohmann::json &levels_json)
+void OrderBookManager::applyDeltaLevels(std::map<Price, Quantity, Compare> &book, const nlohmann::json &levels_json)
 {
     if (!levels_json.is_array())
     {
@@ -233,7 +233,7 @@ void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &bo
 
         if (level[0].is_string())
         {
-            auto opt = safe_parse_double(level[0].get<std::string>());
+            auto opt = safeParseDouble(level[0].get<std::string>());
             if (!opt.has_value()) continue;
             price = opt.value();
         }
@@ -244,7 +244,7 @@ void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &bo
 
         if (level[1].is_string())
         {
-            auto opt = safe_parse_double(level[1].get<std::string>());
+            auto opt = safeParseDouble(level[1].get<std::string>());
             if (!opt.has_value()) continue;
             qty = opt.value();
         }
@@ -267,13 +267,13 @@ void OrderBookManager::apply_delta_levels(std::map<Price, Quantity, Compare> &bo
 }
 
 // Explicit template instantiations.
-template void OrderBookManager::parse_levels<std::greater<Price>>(
+template void OrderBookManager::parseLevels<std::greater<Price>>(
     std::map<Price, Quantity, std::greater<Price>> &, const nlohmann::json &);
-template void OrderBookManager::parse_levels<std::less<Price>>(
+template void OrderBookManager::parseLevels<std::less<Price>>(
     std::map<Price, Quantity, std::less<Price>> &, const nlohmann::json &);
-template void OrderBookManager::apply_delta_levels<std::greater<Price>>(
+template void OrderBookManager::applyDeltaLevels<std::greater<Price>>(
     std::map<Price, Quantity, std::greater<Price>> &, const nlohmann::json &);
-template void OrderBookManager::apply_delta_levels<std::less<Price>>(
+template void OrderBookManager::applyDeltaLevels<std::less<Price>>(
     std::map<Price, Quantity, std::less<Price>> &, const nlohmann::json &);
 
 } // namespace pulse::market

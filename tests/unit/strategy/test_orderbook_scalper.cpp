@@ -70,14 +70,14 @@ TEST(OrderBookScalper, OnTickIgnored)
 {
     auto scalper = make_scalper();
     market::Ticker ticker;
-    scalper->on_tick(ticker);
+    scalper->onTick(ticker);
 }
 
 TEST(OrderBookScalper, OnKlineIgnored)
 {
     auto scalper = make_scalper();
     market::Kline kline;
-    scalper->on_kline(kline);
+    scalper->onKline(kline);
 }
 
 TEST(OrderBookScalper, BuySignalOnBidDominance)
@@ -85,14 +85,14 @@ TEST(OrderBookScalper, BuySignalOnBidDominance)
     auto scalper = make_scalper(0.3, 0.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
     // Bid volume = 10, Ask volume = 2 → imbalance = (10-2)/(10+2) = 0.667 > 0.3
     auto book = make_book(10.0, 2.0);
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 
     ASSERT_EQ(1u, received.size());
     EXPECT_EQ(SignalType::Buy, received[0].type);
@@ -105,14 +105,14 @@ TEST(OrderBookScalper, SellSignalOnAskDominance)
     auto scalper = make_scalper(0.3, 0.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
     // Bid volume = 2, Ask volume = 10 → imbalance = (2-10)/(2+10) = -0.667 < -0.3
     auto book = make_book(2.0, 10.0);
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 
     ASSERT_EQ(1u, received.size());
     EXPECT_EQ(SignalType::Sell, received[0].type);
@@ -124,14 +124,14 @@ TEST(OrderBookScalper, NoSignalOnBalancedBook)
     auto scalper = make_scalper(0.3, 0.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
     // Balanced: imbalance = 0 → no signal.
     auto book = make_book(5.0, 5.0);
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 
     EXPECT_TRUE(received.empty());
 }
@@ -141,14 +141,14 @@ TEST(OrderBookScalper, InsufficientDepth)
     auto scalper = make_scalper(0.3, 0.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
     // Only 2 levels but ob_depth = 5 → skip.
     auto book = make_book(10.0, 2.0, 2);
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 
     EXPECT_TRUE(received.empty());
 }
@@ -158,7 +158,7 @@ TEST(OrderBookScalper, CooldownPreventsDuplicate)
     auto scalper = make_scalper(0.3, 60.0); // 60 second cooldown.
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
@@ -166,11 +166,11 @@ TEST(OrderBookScalper, CooldownPreventsDuplicate)
     auto book = make_book(10.0, 2.0);
 
     // First call — should emit.
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
     EXPECT_EQ(1u, received.size());
 
     // Second call immediately after — should be blocked by cooldown.
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
     EXPECT_EQ(1u, received.size()); // Still 1.
 }
 
@@ -179,14 +179,14 @@ TEST(OrderBookScalper, ConfidenceClamped)
     auto scalper = make_scalper(0.01, 0.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
     // Extreme imbalance: bid=100, ask=0.01 → imbalance ≈ 0.9999
     auto book = make_book(100.0, 0.01);
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 
     ASSERT_EQ(1u, received.size());
     EXPECT_GE(received[0].confidence, 0.0);

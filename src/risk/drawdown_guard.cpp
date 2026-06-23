@@ -1,4 +1,4 @@
-// drawdown_guard.cpp — Rolling PnL monitor + circuit breaker (Layer 7 Risk Management)
+// drawdownGuard.cpp — Rolling PnL monitor + circuit breaker (Layer 7 Risk Management)
 
 #include "risk/drawdown_guard.hpp"
 
@@ -14,7 +14,7 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 DrawdownGuard::DrawdownGuard(const RiskConfig &config)
-    : config_{ config }
+    : m_config{ config }
 {
 }
 
@@ -22,83 +22,83 @@ DrawdownGuard::DrawdownGuard(const RiskConfig &config)
 // PnL reporting
 // ---------------------------------------------------------------------------
 
-void DrawdownGuard::record_pnl(double pnl, const std::string &strategy_id)
+void DrawdownGuard::recordPnl(double pnl, const std::string &strategy_id)
 {
     // Record a realized PnL event:
     // 1. Acquire exclusive lock (modifying shared state)
-    // 2. Accumulate daily_pnl_
+    // 2. Accumulate m_dailyPnl
     // 3. If strategy_id is non-empty, accumulate per-strategy PnL
     // 4. Log the event
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
-    daily_pnl_ += pnl;
+    m_dailyPnl += pnl;
 
     if (!strategy_id.empty())
     {
-        strategy_pnl_[strategy_id] += pnl;
+        m_strategyPnl[strategy_id] += pnl;
     }
 
     PULSE_LOG_DEBUG("risk",
         "Recorded PnL: {:.4f} (strategy: {}), daily total: {:.4f}",
-        pnl, strategy_id.empty() ? "aggregate" : strategy_id, daily_pnl_);
+        pnl, strategy_id.empty() ? "aggregate" : strategy_id, m_dailyPnl);
 }
 
-void DrawdownGuard::update_equity(double equity)
+void DrawdownGuard::updateEquity(double equity)
 {
     // Update equity and check drawdown thresholds:
     // 1. Acquire exclusive lock
-    // 2. Update current_equity_
-    // 3. If current > peak: update peak_equity_
+    // 2. Update m_currentEquity
+    // 3. If current > peak: update m_peakEquity
     // 4. If daily_start is zero, initialize it to current equity
     // 5. Compute daily drawdown: (daily_start - current) / daily_start
     // 6. If daily drawdown > threshold: set halt flag
     // 7. Compute peak-to-valley: (peak - current) / peak
     // 8. If peak-to-valley drawdown > threshold: set halt flag
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
-    current_equity_ = equity;
+    m_currentEquity = equity;
 
     // 3. Update peak if new high.
-    if (current_equity_ > peak_equity_)
+    if (m_currentEquity > m_peakEquity)
     {
-        peak_equity_ = current_equity_;
+        m_peakEquity = m_currentEquity;
     }
 
     // 4. Initialize daily start if first call.
-    if (0.0 == daily_start_equity_)
+    if (0.0 == m_dailyStartEquity)
     {
-        daily_start_equity_ = current_equity_;
+        m_dailyStartEquity = m_currentEquity;
     }
 
     // 5. Check daily drawdown.
-    if (daily_start_equity_ > 0.0)
+    if (m_dailyStartEquity > 0.0)
     {
-        const double daily_dd = (daily_start_equity_ - current_equity_) / daily_start_equity_;
+        const double daily_dd = (m_dailyStartEquity - m_currentEquity) / m_dailyStartEquity;
 
-        if (daily_dd > config_.maxDailyDrawdown)
+        if (daily_dd > m_config.maxDailyDrawdown)
         {
             PULSE_LOG_WARN("risk",
                 "Daily drawdown {:.4f} exceeds threshold {:.4f} - halting trading",
-                daily_dd, config_.maxDailyDrawdown);
-            halted_.store(true, std::memory_order_release);
-            halt_reason_.store(ErrorCode::DrawdownLimitHit, std::memory_order_release);
+                daily_dd, m_config.maxDailyDrawdown);
+            m_halted.store(true, std::memory_order_release);
+            m_haltReason.store(ErrorCode::DrawdownLimitHit, std::memory_order_release);
         }
     }
 
     // 7. Check peak-to-valley drawdown.
-    if (peak_equity_ > 0.0)
+    if (m_peakEquity > 0.0)
     {
-        const double peak_dd = (peak_equity_ - current_equity_) / peak_equity_;
+        const double peak_dd = (m_peakEquity - m_currentEquity) / m_peakEquity;
 
-        if (peak_dd > config_.maxDrawdown)
+        if (peak_dd > m_config.maxDrawdown)
         {
             PULSE_LOG_WARN("risk",
                 "Peak-to-valley drawdown {:.4f} exceeds threshold {:.4f} - halting trading",
-                peak_dd, config_.maxDrawdown);
-            halted_.store(true, std::memory_order_release);
-            halt_reason_.store(ErrorCode::DrawdownLimitHit, std::memory_order_release);
+                peak_dd, m_config.maxDrawdown);
+            m_halted.store(true, std::memory_order_release);
+            m_haltReason.store(ErrorCode::DrawdownLimitHit, std::memory_order_release);
         }
     }
 }
@@ -107,39 +107,39 @@ void DrawdownGuard::update_equity(double equity)
 // Circuit breaker queries
 // ---------------------------------------------------------------------------
 
-bool DrawdownGuard::is_halted() const noexcept
+bool DrawdownGuard::isHalted() const noexcept
 {
-    return halted_.load(std::memory_order_acquire);
+    return m_halted.load(std::memory_order_acquire);
 }
 
-ErrorCode DrawdownGuard::halt_reason() const noexcept
+ErrorCode DrawdownGuard::haltReason() const noexcept
 {
-    return halt_reason_.load(std::memory_order_acquire);
+    return m_haltReason.load(std::memory_order_acquire);
 }
 
-double DrawdownGuard::daily_drawdown() const
+double DrawdownGuard::dailyDrawdown() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    if (daily_start_equity_ <= 0.0)
+    if (m_dailyStartEquity <= 0.0)
     {
         return 0.0;
     }
 
-    const double dd = (daily_start_equity_ - current_equity_) / daily_start_equity_;
+    const double dd = (m_dailyStartEquity - m_currentEquity) / m_dailyStartEquity;
     return (dd > 0.0) ? dd : 0.0;
 }
 
-double DrawdownGuard::max_drawdown() const
+double DrawdownGuard::maxDrawdown() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    if (peak_equity_ <= 0.0)
+    if (m_peakEquity <= 0.0)
     {
         return 0.0;
     }
 
-    const double dd = (peak_equity_ - current_equity_) / peak_equity_;
+    const double dd = (m_peakEquity - m_currentEquity) / m_peakEquity;
     return (dd > 0.0) ? dd : 0.0;
 }
 
@@ -147,28 +147,28 @@ double DrawdownGuard::max_drawdown() const
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-void DrawdownGuard::reset_daily()
+void DrawdownGuard::resetDaily()
 {
     // Reset daily counters for a new trading day:
     // 1. Acquire exclusive lock
-    // 2. Set daily_start_equity_ to current_equity_
-    // 3. Reset daily_pnl_ to zero
+    // 2. Set m_dailyStartEquity to m_currentEquity
+    // 3. Reset m_dailyPnl to zero
     // 4. Clear per-strategy PnL map
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
-    daily_start_equity_ = current_equity_;
-    daily_pnl_ = 0.0;
-    strategy_pnl_.clear();
+    m_dailyStartEquity = m_currentEquity;
+    m_dailyPnl = 0.0;
+    m_strategyPnl.clear();
 
     PULSE_LOG_INFO("risk",
-        "Daily counters reset — start equity: {:.2f}", daily_start_equity_);
+        "Daily counters reset — start equity: {:.2f}", m_dailyStartEquity);
 }
 
-void DrawdownGuard::clear_halt()
+void DrawdownGuard::clearHalt()
 {
-    halted_.store(false, std::memory_order_release);
-    halt_reason_.store(ErrorCode::Ok, std::memory_order_release);
+    m_halted.store(false, std::memory_order_release);
+    m_haltReason.store(ErrorCode::Ok, std::memory_order_release);
 
     PULSE_LOG_INFO("risk", "Trading halt cleared manually");
 }

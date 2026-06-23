@@ -1,6 +1,6 @@
 // dashboard_state.cpp — Tiered polling aggregator implementation (Layer 9 WebUI)
 //
-// Implements the poll_loop that dispatches to tiered poll methods at different
+// Implements the pollLoop that dispatches to tiered poll methods at different
 // intervals:
 //   - Fast   (200 ms): order books + ticker prices
 //   - Medium (500 ms): open positions + active orders
@@ -31,14 +31,14 @@ DashboardState::DashboardState(const WebUiConfig &config,
                                ai::AiPipeline &ai_pipeline,
                                exchange::GateRestClient *rest_client,
                                exchange::GateRestClient *spot_rest_client)
-    : config_{ config }
-    , market_feed_{ market_feed }
-    , strategy_mgr_{ strategy_mgr }
-    , risk_mgr_{ risk_mgr }
-    , order_tracker_{ order_tracker }
-    , ai_pipeline_{ ai_pipeline }
-    , rest_client_{ rest_client }
-    , spot_rest_client_{ spot_rest_client }
+    : m_config{ config }
+    , m_marketFeed{ market_feed }
+    , m_strategyMgr{ strategy_mgr }
+    , m_riskMgr{ risk_mgr }
+    , m_orderTracker{ order_tracker }
+    , m_aiPipeline{ ai_pipeline }
+    , m_restClient{ rest_client }
+    , m_spotRestClient{ spot_rest_client }
 {
 }
 
@@ -51,59 +51,59 @@ DashboardState::~DashboardState()
 // Public API
 // ---------------------------------------------------------------------------
 
-void DashboardState::set_snapshot_callback(SnapshotCallback cb)
+void DashboardState::setSnapshotCallback(SnapshotCallback cb)
 {
-    snapshot_callback_ = std::move(cb);
+    m_snapshotCallback = std::move(cb);
 }
 
 void DashboardState::start()
 {
     // Guard: do not start if already running.
-    if (running_.load(std::memory_order_acquire))
+    if (m_running.load(std::memory_order_acquire))
     {
         return;
     }
 
-    poll_thread_ = std::jthread([this](std::stop_token stoken)
+    m_pollThread = std::jthread([this](std::stop_token stoken)
     {
-        poll_loop(stoken);
+        pollLoop(stoken);
     });
 }
 
 void DashboardState::stop()
 {
     // Request cooperative cancellation.
-    poll_thread_.request_stop();
+    m_pollThread.request_stop();
 
     // Wait for the thread to finish (jthread joins on destruction, but we
     // want stop() to block until the thread has exited).
-    if (poll_thread_.joinable())
+    if (m_pollThread.joinable())
     {
-        poll_thread_.join();
+        m_pollThread.join();
     }
 }
 
 [[nodiscard]] std::shared_ptr<const DashboardSnapshot> DashboardState::latest() const
 {
-    std::shared_lock lock{ snapshot_mutex_ };
-    return latest_snapshot_;
+    std::shared_lock lock{ m_snapshotMutex };
+    return m_latestSnapshot;
 }
 
 [[nodiscard]] bool DashboardState::running() const
 {
-    return running_.load(std::memory_order_acquire);
+    return m_running.load(std::memory_order_acquire);
 }
 
 // ---------------------------------------------------------------------------
 // Poll loop
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_loop(std::stop_token stoken)
+void DashboardState::pollLoop(std::stop_token stoken)
 {
     using Clock = std::chrono::steady_clock;
 
     // Mark the thread as running.
-    running_.store(true, std::memory_order_release);
+    m_running.store(true, std::memory_order_release);
 
     // Track last-poll times for each tier.
     auto last_fast    = Clock::now();
@@ -134,8 +134,8 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // 2. Fast tier: 200 ms — order books + tickers.
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_fast).count() >= 200)
         {
-            poll_fast(snap);
-            poll_klines(snap);
+            pollFast(snap);
+            pollKlines(snap);
             last_fast = now;
             updated = true;
         }
@@ -143,7 +143,7 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // 3. Medium tier: 500 ms — positions + orders.
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_medium).count() >= 500)
         {
-            poll_medium(snap);
+            pollMedium(snap);
             last_medium = now;
             updated = true;
         }
@@ -151,7 +151,7 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // 4. Slow tier: 1 s — strategies, risk, metrics.
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_slow).count() >= 1000)
         {
-            poll_slow(snap);
+            pollSlow(snap);
             last_slow = now;
             updated = true;
         }
@@ -159,7 +159,7 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // 5. AI tier: 60 s — AI analysis change detection.
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ai).count() >= 60000)
         {
-            poll_ai(snap);
+            pollAi(snap);
             last_ai = now;
             updated = true;
         }
@@ -167,7 +167,7 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // 6. Account tier: 10 s — exchange-reported account balance.
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_account).count() >= 10000)
         {
-            poll_account(snap);
+            pollAccount(snap);
             last_account = now;
             updated = true;
         }
@@ -176,7 +176,7 @@ void DashboardState::poll_loop(std::stop_token stoken)
         // an initial AI snapshot even before the 60 s interval fires.
         if (0 == snap.timestamp_ms)
         {
-            poll_ai(snap);
+            pollAi(snap);
         }
 
         // 6. If any tier updated, stamp the snapshot and publish it.
@@ -189,41 +189,41 @@ void DashboardState::poll_loop(std::stop_token stoken)
             auto published = std::make_shared<const DashboardSnapshot>(snap);
 
             {
-                std::unique_lock lock{ snapshot_mutex_ };
-                latest_snapshot_ = published;
+                std::unique_lock lock{ m_snapshotMutex };
+                m_latestSnapshot = published;
             }
 
             // Invoke the callback (if set) outside the lock.
-            if (snapshot_callback_)
+            if (m_snapshotCallback)
             {
-                snapshot_callback_(published);
+                m_snapshotCallback(published);
             }
         }
     }
 
     // Mark the thread as no longer running.
-    running_.store(false, std::memory_order_release);
+    m_running.store(false, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
-// poll_fast — 200 ms: order books + ticker prices
+// pollFast — 200 ms: order books + ticker prices
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_fast(DashboardSnapshot &snap)
+void DashboardState::pollFast(DashboardSnapshot &snap)
 {
     // 1. Get all tracked symbols from the ticker cache.
-    const auto symbols = market_feed_.ticker_cache().symbols();
+    const auto symbols = m_marketFeed.tickerCache().symbols();
 
     // 2. For the first symbol (primary), retrieve top 20 bids/asks.
     //    The dashboard currently shows one symbol's order book at a time.
     if (!symbols.empty())
     {
         const auto &symbol = symbols[0];
-        auto &ob_mgr = market_feed_.orderbook_manager();
+        auto &ob_mgr = m_marketFeed.orderbookManager();
 
         snap.order_book.symbol = symbol;
-        snap.order_book.bids = ob_mgr.top_bids(symbol, 20);
-        snap.order_book.asks = ob_mgr.top_asks(symbol, 20);
+        snap.order_book.bids = ob_mgr.topBids(symbol, 20);
+        snap.order_book.asks = ob_mgr.topAsks(symbol, 20);
 
         // Retrieve sequence_id and timestamp from the full book if available.
         const auto book_opt = ob_mgr.get(symbol);
@@ -236,13 +236,13 @@ void DashboardState::poll_fast(DashboardSnapshot &snap)
 }
 
 // ---------------------------------------------------------------------------
-// poll_klines — per candle change detection
+// pollKlines — per candle change detection
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_klines(DashboardSnapshot &snap)
+void DashboardState::pollKlines(DashboardSnapshot &snap)
 {
     // 1. Get all tracked symbols.
-    const auto symbols = market_feed_.ticker_cache().symbols();
+    const auto symbols = m_marketFeed.tickerCache().symbols();
 
     if (symbols.empty())
     {
@@ -252,7 +252,7 @@ void DashboardState::poll_klines(DashboardSnapshot &snap)
     // 2. For the primary symbol, check if a new candle has formed.
     const auto &symbol = symbols[0];
 
-    auto &kline_buf = market_feed_.get_kline_buffer(symbol);
+    auto &kline_buf = m_marketFeed.getKlineBuffer(symbol);
     const auto latest_kline = kline_buf.latest();
 
     if (!latest_kline.has_value())
@@ -263,70 +263,70 @@ void DashboardState::poll_klines(DashboardSnapshot &snap)
     // 3. Compare open_time and close price to detect new candles or within-candle updates.
     //    Gate.io pushes OHLCV changes every ~2s for the current candle, but open_time
     //    only changes when a new candle forms (~60s). We track both to keep the chart live.
-    const auto it = last_kline_open_times_.find(symbol);
-    const bool is_new_candle = (last_kline_open_times_.end() == it)
+    const auto it = m_lastKlineOpenTimes.find(symbol);
+    const bool is_new_candle = (m_lastKlineOpenTimes.end() == it)
                             || (it->second != latest_kline->open_time);
 
-    const auto close_it = last_kline_close_.find(symbol);
-    const bool price_changed = (last_kline_close_.end() == close_it)
+    const auto close_it = m_lastKlineClose.find(symbol);
+    const bool price_changed = (m_lastKlineClose.end() == close_it)
                             || (close_it->second != latest_kline->close);
 
     if (is_new_candle || price_changed)
     {
         // New candle or within-candle update — push the full snapshot.
-        last_kline_open_times_[symbol] = latest_kline->open_time;
-        last_kline_close_[symbol] = latest_kline->close;
+        m_lastKlineOpenTimes[symbol] = latest_kline->open_time;
+        m_lastKlineClose[symbol] = latest_kline->close;
         snap.kline.symbol = symbol;
         snap.kline.candles = kline_buf.snapshot(100);
     }
 }
 
 // ---------------------------------------------------------------------------
-// poll_medium — 500 ms: positions + orders
+// pollMedium — 500 ms: positions + orders
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_medium(DashboardSnapshot &snap)
+void DashboardState::pollMedium(DashboardSnapshot &snap)
 {
     // 1. Retrieve open positions and portfolio summary from the position manager.
-    auto &pos_mgr = risk_mgr_.position_manager();
-    snap.positions.positions = pos_mgr.get_all_positions();
-    snap.positions.portfolio = pos_mgr.portfolio_summary();
+    auto &pos_mgr = m_riskMgr.positionManager();
+    snap.positions.positions = pos_mgr.getAllPositions();
+    snap.positions.portfolio = pos_mgr.portfolioSummary();
 
     // 2. Retrieve active orders and recent execution reports from the order tracker.
-    snap.orders.active_orders = order_tracker_.active_orders();
-    snap.orders.recent_reports = order_tracker_.recent_reports(10);
+    snap.orders.activeOrders = m_orderTracker.activeOrders();
+    snap.orders.recentReports = m_orderTracker.recentReports(10);
 }
 
 // ---------------------------------------------------------------------------
-// poll_slow — 1 s: strategies, risk, metrics
+// pollSlow — 1 s: strategies, risk, metrics
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_slow(DashboardSnapshot &snap)
+void DashboardState::pollSlow(DashboardSnapshot &snap)
 {
     // 1. Retrieve strategy snapshots from the strategy manager.
-    snap.strategies.strategies = strategy_mgr_.snapshot();
+    snap.strategies.strategies = m_strategyMgr.snapshot();
 
     // 2. Retrieve risk snapshot from the risk manager.
-    snap.risk = risk_mgr_.risk_snapshot();
+    snap.risk = m_riskMgr.riskSnapshot();
 
     // 3. Metrics are not yet implemented — mark as unavailable.
     snap.metrics.available = false;
 }
 
 // ---------------------------------------------------------------------------
-// poll_ai — 60 s check: AI analysis change detection
+// pollAi — 60 s check: AI analysis change detection
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_ai(DashboardSnapshot &snap)
+void DashboardState::pollAi(DashboardSnapshot &snap)
 {
     // 1. Retrieve the latest AI analysis result (shared_ptr, may be nullptr).
-    auto result = ai_pipeline_.last_result();
+    auto result = m_aiPipeline.lastResult();
 
     // 2. Compare the shared_ptr for change detection.
     //    The pointer changes only when a new analysis cycle completes.
-    if (result.get() != last_ai_result_.get())
+    if (result.get() != m_lastAiResult.get())
     {
-        last_ai_result_ = result;
+        m_lastAiResult = result;
 
         if (result)
         {
@@ -343,15 +343,15 @@ void DashboardState::poll_ai(DashboardSnapshot &snap)
 }
 
 // ---------------------------------------------------------------------------
-// poll_account — 10 s: exchange-reported account balance
+// pollAccount — 10 s: exchange-reported account balance
 // ---------------------------------------------------------------------------
 
-void DashboardState::poll_account(DashboardSnapshot &snap)
+void DashboardState::pollAccount(DashboardSnapshot &snap)
 {
     // --- Futures account ---
-    if (nullptr != rest_client_)
+    if (nullptr != m_restClient)
     {
-        auto result = rest_client_->get_futures_account_balance();
+        auto result = m_restClient->getFuturesAccountBalance();
         if (ok(result))
         {
             const auto &bal = value(result);
@@ -374,9 +374,9 @@ void DashboardState::poll_account(DashboardSnapshot &snap)
     }
 
     // --- Spot account ---
-    if (nullptr != spot_rest_client_)
+    if (nullptr != m_spotRestClient)
     {
-        auto spot_result = spot_rest_client_->get_spot_accounts();
+        auto spot_result = m_spotRestClient->getSpotAccounts();
         if (ok(spot_result))
         {
             const auto &arr = value(spot_result);
@@ -385,8 +385,8 @@ void DashboardState::poll_account(DashboardSnapshot &snap)
                 if ("USDT" == item.value("currency", ""))
                 {
                     snap.account.spot_available         = true;
-                    snap.account.spot_available_balance = safe_parse_double(item.value("available", "0")).value_or(0.0);
-                    double locked                       = safe_parse_double(item.value("locked", "0")).value_or(0.0);
+                    snap.account.spot_available_balance = safeParseDouble(item.value("available", "0")).value_or(0.0);
+                    double locked                       = safeParseDouble(item.value("locked", "0")).value_or(0.0);
                     snap.account.spot_total             = snap.account.spot_available_balance + locked;
                     snap.account.spot_currency          = "USDT";
                     break;

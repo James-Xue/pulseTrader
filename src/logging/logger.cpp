@@ -43,14 +43,14 @@ LogConfig g_config;
 bool g_initialised = false;
 
 // ---------------------------------------------------------------------------
-// parse_level — convert a human-readable level string to spdlog enum
+// parseLevel — convert a human-readable level string to spdlog enum
 //
 // Steps:
 //   1. Compare the input against each recognised level name
 //   2. Return the matching spdlog::level enum value
 //   3. Fall back to spdlog::level::info for any unrecognised input
 // ---------------------------------------------------------------------------
-spdlog::level::level_enum parse_level(const std::string &name)
+spdlog::level::level_enum parseLevel(const std::string &name)
 {
     if ("trace" == name)
     {
@@ -84,7 +84,7 @@ spdlog::level::level_enum parse_level(const std::string &name)
 }
 
 // ---------------------------------------------------------------------------
-// make_logger — build a new spdlog logger with console + optional file sinks
+// makeLogger — build a new spdlog logger with console + optional file sinks
 //
 // Steps:
 //   1. Create a coloured console sink if config.toConsole is true
@@ -92,7 +92,7 @@ spdlog::level::level_enum parse_level(const std::string &name)
 //   3. Combine sinks into a single multi-sink logger
 //   4. Set the logger's level and flush-on-warn policy
 // ---------------------------------------------------------------------------
-std::shared_ptr<spdlog::logger> make_logger(std::string_view module, const LogConfig &config)
+std::shared_ptr<spdlog::logger> makeLogger(std::string_view module, const LogConfig &config)
 {
     std::vector<spdlog::sink_ptr> sinks;
 
@@ -146,7 +146,7 @@ void Logger::init(const LogConfig &config)
     }
 
     g_config = config;
-    g_default_level = parse_level(config.level);
+    g_default_level = parseLevel(config.level);
 
     // Ensure the log directory tree exists before any file sink opens
     if (config.toFile)
@@ -220,7 +220,7 @@ std::shared_ptr<spdlog::logger> Logger::get(std::string_view module)
 
     // Step 3: logger does not exist yet — create with the config from init().
     // If init() was not called, a default LogConfig is used (console only).
-    auto logger = make_logger(module, g_config);
+    auto logger = makeLogger(module, g_config);
 
     // Step 4–5: re-lock and insert; another thread may have created it meanwhile
     {
@@ -231,7 +231,7 @@ std::shared_ptr<spdlog::logger> Logger::get(std::string_view module)
 }
 
 // ---------------------------------------------------------------------------
-// Logger::set_level — change the log level of a specific module at runtime
+// Logger::setLevel — change the log level of a specific module at runtime
 //
 // Steps:
 //   1. Lock the mutex and look up the logger by module name
@@ -239,7 +239,7 @@ std::shared_ptr<spdlog::logger> Logger::get(std::string_view module)
 //   3. Also update every sink's level — each sink has an independent filter,
 //      so both must be changed for the new level to take effect
 // ---------------------------------------------------------------------------
-void Logger::set_level(std::string_view module, spdlog::level::level_enum level)
+void Logger::setLevel(std::string_view module, spdlog::level::level_enum level)
 {
     std::lock_guard lock(g_mutex);
     auto it = g_loggers.find(std::string(module));
@@ -255,14 +255,14 @@ void Logger::set_level(std::string_view module, spdlog::level::level_enum level)
 }
 
 // ---------------------------------------------------------------------------
-// Logger::set_global_level — change the log level of ALL modules at runtime
+// Logger::setGlobalLevel — change the log level of ALL modules at runtime
 //
 // Steps:
 //   1. Lock the mutex
 //   2. Iterate every registered logger and update both logger + sink levels
 //   3. Update the global default so newly-created loggers inherit the new level
 // ---------------------------------------------------------------------------
-void Logger::set_global_level(spdlog::level::level_enum level)
+void Logger::setGlobalLevel(spdlog::level::level_enum level)
 {
     std::lock_guard lock(g_mutex);
     for (auto &[name, logger] : g_loggers)
@@ -277,14 +277,14 @@ void Logger::set_global_level(spdlog::level::level_enum level)
 }
 
 // ---------------------------------------------------------------------------
-// Logger::flush_all — force-flush all registered loggers immediately
+// Logger::flushAll — force-flush all registered loggers immediately
 //
 // Use cases:
 //   1. Before a controlled shutdown to ensure no messages are lost
 //   2. After a critical error to guarantee the log file is up-to-date
 //   3. Before a crash dump where the process may not exit cleanly
 // ---------------------------------------------------------------------------
-void Logger::flush_all()
+void Logger::flushAll()
 {
     std::lock_guard lock(g_mutex);
     for (auto &[name, logger] : g_loggers)

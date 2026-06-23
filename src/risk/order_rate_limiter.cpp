@@ -16,16 +16,16 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 OrderRateLimiter::OrderRateLimiter(std::uint32_t max_orders_per_sec, std::uint32_t burst_capacity)
-    : max_rate_{ max_orders_per_sec }
-    , burst_capacity_{ (0 == burst_capacity) ? max_orders_per_sec * 2 : burst_capacity }
-    , tokens_{ static_cast<double>(burst_capacity_) }
-    , last_refill_ns_{ now_ns() }
+    : m_maxRate{ max_orders_per_sec }
+    , m_burstCapacity{ (0 == burst_capacity) ? max_orders_per_sec * 2 : burst_capacity }
+    , m_tokens{ static_cast<double>(m_burstCapacity) }
+    , m_lastRefillNs{ nowNs() }
 {
     // Initialize bucket to full burst capacity.
-    if (0 == burst_capacity_)
+    if (0 == m_burstCapacity)
     {
-        burst_capacity_ = max_rate_ * 2;
-        tokens_.store(static_cast<double>(burst_capacity_), std::memory_order_release);
+        m_burstCapacity = m_maxRate * 2;
+        m_tokens.store(static_cast<double>(m_burstCapacity), std::memory_order_release);
     }
 }
 
@@ -33,7 +33,7 @@ OrderRateLimiter::OrderRateLimiter(std::uint32_t max_orders_per_sec, std::uint32
 // Public API
 // ---------------------------------------------------------------------------
 
-bool OrderRateLimiter::try_acquire()
+bool OrderRateLimiter::tryAcquire()
 {
     // Try to consume one token from the bucket:
     // 1. Refill tokens based on elapsed time
@@ -48,7 +48,7 @@ bool OrderRateLimiter::try_acquire()
     constexpr int kMaxRetries = 10;
     for (int attempt = 0; attempt < kMaxRetries; ++attempt)
     {
-        double current = tokens_.load(std::memory_order_acquire);
+        double current = m_tokens.load(std::memory_order_acquire);
 
         if (current < 1.0)
         {
@@ -57,7 +57,7 @@ bool OrderRateLimiter::try_acquire()
             return false;
         }
 
-        if (tokens_.compare_exchange_weak(current, current - 1.0,
+        if (m_tokens.compare_exchange_weak(current, current - 1.0,
             std::memory_order_acq_rel, std::memory_order_acquire))
         {
             return true;
@@ -70,20 +70,20 @@ bool OrderRateLimiter::try_acquire()
     return false;
 }
 
-double OrderRateLimiter::available_tokens() const
+double OrderRateLimiter::availableTokens() const
 {
-    return tokens_.load(std::memory_order_acquire);
+    return m_tokens.load(std::memory_order_acquire);
 }
 
-bool OrderRateLimiter::is_exhausted() const
+bool OrderRateLimiter::isExhausted() const
 {
-    return tokens_.load(std::memory_order_acquire) < 1.0;
+    return m_tokens.load(std::memory_order_acquire) < 1.0;
 }
 
 void OrderRateLimiter::reset()
 {
-    tokens_.store(static_cast<double>(burst_capacity_), std::memory_order_release);
-    last_refill_ns_.store(now_ns(), std::memory_order_release);
+    m_tokens.store(static_cast<double>(m_burstCapacity), std::memory_order_release);
+    m_lastRefillNs.store(nowNs(), std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,8 @@ void OrderRateLimiter::refill()
     // 4. CAS update tokens (capped at burst_capacity)
     // 5. CAS update last_refill_ns
 
-    const std::int64_t current_ns = now_ns();
-    const std::int64_t last_ns = last_refill_ns_.load(std::memory_order_acquire);
+    const std::int64_t current_ns = nowNs();
+    const std::int64_t last_ns = m_lastRefillNs.load(std::memory_order_acquire);
     const std::int64_t elapsed_ns = current_ns - last_ns;
 
     if (elapsed_ns <= 0)
@@ -108,7 +108,7 @@ void OrderRateLimiter::refill()
         return; // No time elapsed or clock went backwards.
     }
 
-    const double new_tokens = static_cast<double>(elapsed_ns) * max_rate_ / 1.0e9;
+    const double new_tokens = static_cast<double>(elapsed_ns) * m_maxRate / 1.0e9;
 
     if (new_tokens < 0.001)
     {
@@ -116,26 +116,26 @@ void OrderRateLimiter::refill()
     }
 
     // Update tokens: current + new_tokens, capped at burst_capacity.
-    double current = tokens_.load(std::memory_order_acquire);
+    double current = m_tokens.load(std::memory_order_acquire);
     double updated = current + new_tokens;
 
-    if (updated > static_cast<double>(burst_capacity_))
+    if (updated > static_cast<double>(m_burstCapacity))
     {
-        updated = static_cast<double>(burst_capacity_);
+        updated = static_cast<double>(m_burstCapacity);
     }
 
     // CAS to update tokens; if it fails, another thread already refilled.
-    if (tokens_.compare_exchange_weak(current, updated,
+    if (m_tokens.compare_exchange_weak(current, updated,
         std::memory_order_acq_rel, std::memory_order_acquire))
     {
         // Successfully refilled — update the timestamp.
         std::int64_t expected_ns = last_ns;
-        last_refill_ns_.compare_exchange_strong(expected_ns, current_ns,
+        m_lastRefillNs.compare_exchange_strong(expected_ns, current_ns,
             std::memory_order_acq_rel, std::memory_order_acquire);
     }
 }
 
-std::int64_t OrderRateLimiter::now_ns()
+std::int64_t OrderRateLimiter::nowNs()
 {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();

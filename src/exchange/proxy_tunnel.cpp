@@ -28,7 +28,7 @@ using namespace pulse::logging;
 // Free functions
 // ---------------------------------------------------------------------------
 
-WsUrlParts parse_ws_url(const std::string &url)
+WsUrlParts parseWsUrl(const std::string &url)
 {
     WsUrlParts result;
     result.port = 443;
@@ -54,7 +54,7 @@ WsUrlParts parse_ws_url(const std::string &url)
     return result;
 }
 
-std::string detect_proxy_url(const ExchangeConfig &config)
+std::string detectProxyUrl(const ExchangeConfig &config)
 {
     if (!config.proxyUrl.empty())
     {
@@ -79,10 +79,10 @@ ProxyTunnel::ProxyTunnel(const std::string &proxy_url,
                          const std::string &target_host,
                          std::uint16_t target_port,
                          const std::string &target_path)
-    : proxy_url_(proxy_url)
-    , target_host_(target_host)
-    , target_port_(target_port)
-    , target_path_(target_path)
+    : m_proxyUrl(proxy_url)
+    , m_targetHost(target_host)
+    , m_targetPort(target_port)
+    , m_targetPath(target_path)
 {
 }
 
@@ -96,8 +96,8 @@ std::string ProxyTunnel::start()
     // 1. Parse proxy URL → host:port
     std::string proxy_host;
     std::string proxy_port = "8080";
-    auto scheme_end = proxy_url_.find("://");
-    std::string host_part = (std::string::npos != scheme_end) ? proxy_url_.substr(scheme_end + 3) : proxy_url_;
+    auto scheme_end = m_proxyUrl.find("://");
+    std::string host_part = (std::string::npos != scheme_end) ? m_proxyUrl.substr(scheme_end + 3) : m_proxyUrl;
     auto colon_pos = host_part.find(':');
     if (std::string::npos != colon_pos)
     {
@@ -110,50 +110,50 @@ std::string ProxyTunnel::start()
     }
 
     // 2. Bind local acceptor to a random available port
-    local_port_ = 0;
-    acceptor_ = std::make_unique<asio::ip::tcp::acceptor>(
-        io_ctx_, asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 0));
-    acceptor_->listen();
-    local_port_ = acceptor_->local_endpoint().port();
+    m_localPort = 0;
+    m_acceptor = std::make_unique<asio::ip::tcp::acceptor>(
+        m_ioCtx, asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 0));
+    m_acceptor->listen();
+    m_localPort = m_acceptor->local_endpoint().port();
 
     // 3. Start accept thread (poll-based so stop() can interrupt it)
-    running_ = true;
-    accept_thread_ = std::thread([this, proxy_host, proxy_port]()
+    m_running = true;
+    m_acceptThread = std::thread([this, proxy_host, proxy_port]()
     {
-        while (running_)
+        while (m_running)
         {
             try
             {
-                // Use poll() with timeout so we can check running_ periodically
+                // Use poll() with timeout so we can check m_running periodically
                 struct pollfd pfd;
-                pfd.fd = acceptor_->native_handle();
+                pfd.fd = m_acceptor->native_handle();
                 pfd.events = POLLIN;
                 pfd.revents = 0;
 
                 const int ret = ::poll(&pfd, 1, 200); // 200ms timeout
                 if (ret <= 0)
                 {
-                    continue; // timeout or error — check running_ again
+                    continue; // timeout or error — check m_running again
                 }
 
-                asio::ip::tcp::socket local_sock(io_ctx_);
-                acceptor_->accept(local_sock);
+                asio::ip::tcp::socket local_sock(m_ioCtx);
+                m_acceptor->accept(local_sock);
 
-                // Bug fix #1: Track the handle_connection thread instead of
+                // Bug fix #1: Track the handleConnection thread instead of
                 // detaching it. This prevents use-after-free when stop() is
-                // called while handle_connection is still running.
+                // called while handleConnection is still running.
                 // Join any previous connection thread first (we only handle
                 // one connection at a time for a single WS client).
-                if (connection_thread_.joinable())
+                if (m_connectionThread.joinable())
                 {
-                    connection_thread_.join();
+                    m_connectionThread.join();
                 }
-                connection_thread_ = std::thread(
-                    &ProxyTunnel::handle_connection, this, std::move(local_sock), proxy_host, proxy_port);
+                m_connectionThread = std::thread(
+                    &ProxyTunnel::handleConnection, this, std::move(local_sock), proxy_host, proxy_port);
             }
             catch (const std::exception &)
             {
-                if (!running_)
+                if (!m_running)
                 {
                     break;
                 }
@@ -161,26 +161,26 @@ std::string ProxyTunnel::start()
         }
     });
 
-    return "wss://127.0.0.1:" + std::to_string(local_port_) + target_path_;
+    return "wss://127.0.0.1:" + std::to_string(m_localPort) + m_targetPath;
 }
 
 void ProxyTunnel::stop()
 {
-    running_ = false;
-    if (acceptor_)
+    m_running = false;
+    if (m_acceptor)
     {
         asio::error_code ec;
-        acceptor_->close(ec);
+        m_acceptor->close(ec);
     }
-    if (accept_thread_.joinable())
+    if (m_acceptThread.joinable())
     {
-        accept_thread_.join();
+        m_acceptThread.join();
     }
 
     // Close all relay sockets to unblock read_some() calls
     {
-        std::lock_guard lock(relay_mutex_);
-        for (auto &sock : relay_sockets_)
+        std::lock_guard lock(m_relayMutex);
+        for (auto &sock : m_relaySockets)
         {
             if (sock && sock->is_open())
             {
@@ -193,48 +193,48 @@ void ProxyTunnel::stop()
 
     // Join all relay threads
     {
-        std::lock_guard lock(relay_mutex_);
-        for (auto &t : relay_threads_)
+        std::lock_guard lock(m_relayMutex);
+        for (auto &t : m_relayThreads)
         {
             if (t.joinable())
             {
                 t.join();
             }
         }
-        relay_threads_.clear();
-        relay_sockets_.clear();
+        m_relayThreads.clear();
+        m_relaySockets.clear();
     }
 
-    // Bug fix #1: Join the connection thread (handle_connection)
-    if (connection_thread_.joinable())
+    // Bug fix #1: Join the connection thread (handleConnection)
+    if (m_connectionThread.joinable())
     {
-        connection_thread_.join();
+        m_connectionThread.join();
     }
 }
 
-std::uint16_t ProxyTunnel::local_port() const
+std::uint16_t ProxyTunnel::localPort() const
 {
-    return local_port_;
+    return m_localPort;
 }
 
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------
 
-void ProxyTunnel::handle_connection(asio::ip::tcp::socket local_sock,
+void ProxyTunnel::handleConnection(asio::ip::tcp::socket local_sock,
                                     const std::string &proxy_host,
                                     const std::string &proxy_port)
 {
     try
     {
         // 1. Connect to the HTTP proxy
-        asio::ip::tcp::socket remote_sock(io_ctx_);
-        asio::ip::tcp::resolver resolver(io_ctx_);
+        asio::ip::tcp::socket remote_sock(m_ioCtx);
+        asio::ip::tcp::resolver resolver(m_ioCtx);
         auto endpoints = resolver.resolve(proxy_host, proxy_port);
         asio::connect(remote_sock, endpoints);
 
         // 2. Send HTTP CONNECT request to establish tunnel
-        const std::string target = target_host_ + ":" + std::to_string(target_port_);
+        const std::string target = m_targetHost + ":" + std::to_string(m_targetPort);
         const std::string connect_req = "CONNECT " + target + " HTTP/1.1\r\n"
                                         "Host: " + target + "\r\n"
                                         "Proxy-Connection: keep-alive\r\n\r\n";
@@ -264,12 +264,12 @@ void ProxyTunnel::handle_connection(asio::ip::tcp::socket local_sock,
         // registration where stop() could close sockets but not join threads.
         std::thread t1([local_ptr, remote_ptr]()
         {
-            relay_data(*local_ptr, *remote_ptr);
+            relayData(*local_ptr, *remote_ptr);
         });
 
         std::thread t2([local_ptr, remote_ptr]()
         {
-            relay_data(*remote_ptr, *local_ptr);
+            relayData(*remote_ptr, *local_ptr);
             // When remote→local ends, close both to unblock the other direction
             asio::error_code ec;
             local_ptr->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
@@ -277,11 +277,11 @@ void ProxyTunnel::handle_connection(asio::ip::tcp::socket local_sock,
         });
 
         {
-            std::lock_guard lock(relay_mutex_);
-            relay_sockets_.push_back(local_ptr);
-            relay_sockets_.push_back(remote_ptr);
-            relay_threads_.push_back(std::move(t1));
-            relay_threads_.push_back(std::move(t2));
+            std::lock_guard lock(m_relayMutex);
+            m_relaySockets.push_back(local_ptr);
+            m_relaySockets.push_back(remote_ptr);
+            m_relayThreads.push_back(std::move(t1));
+            m_relayThreads.push_back(std::move(t2));
         }
     }
     catch (const std::exception &e)
@@ -290,7 +290,7 @@ void ProxyTunnel::handle_connection(asio::ip::tcp::socket local_sock,
     }
 }
 
-void ProxyTunnel::relay_data(asio::ip::tcp::socket &source, asio::ip::tcp::socket &sink)
+void ProxyTunnel::relayData(asio::ip::tcp::socket &source, asio::ip::tcp::socket &sink)
 {
     try
     {

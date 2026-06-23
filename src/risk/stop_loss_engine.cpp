@@ -16,7 +16,7 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 StopLossEngine::StopLossEngine(const StopLossConfig &default_config)
-    : default_config_{ default_config }
+    : m_defaultConfig{ default_config }
 {
 }
 
@@ -24,7 +24,7 @@ StopLossEngine::StopLossEngine(const StopLossConfig &default_config)
 // Position registration
 // ---------------------------------------------------------------------------
 
-void StopLossEngine::register_position(const std::string &position_id, const Position &pos,
+void StopLossEngine::registerPosition(const std::string &position_id, const Position &pos,
     const StopLossConfig &config)
 {
     // Register a position for stop-loss monitoring:
@@ -33,27 +33,27 @@ void StopLossEngine::register_position(const std::string &position_id, const Pos
     // 3. Initialize TrackedStop with entry price and open time
     // 4. For trailing stop, initialize best_price to entry price
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     TrackedStop tracked;
     tracked.config = (StopMode::Fixed == config.mode && 0.0 == config.fixed_pct)
-        ? default_config_ : config;
+        ? m_defaultConfig : config;
     tracked.entry_price = pos.entry_price;
     tracked.side = pos.side;
     tracked.open_time = pos.open_time;
     tracked.best_price = pos.entry_price; // Start tracking from entry.
 
-    tracked_[position_id] = tracked;
+    m_tracked[position_id] = tracked;
 
     PULSE_LOG_INFO("risk",
         "Stop-loss registered: {} mode={} entry={:.2f}",
         position_id, static_cast<int>(tracked.config.mode), pos.entry_price);
 }
 
-void StopLossEngine::remove_position(const std::string &position_id)
+void StopLossEngine::removePosition(const std::string &position_id)
 {
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    tracked_.erase(position_id);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_tracked.erase(position_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,11 +72,11 @@ std::vector<std::string> StopLossEngine::evaluate(
     //    c. Check stop condition by mode
     //    d. Add triggered IDs to result
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     std::vector<std::string> triggered;
 
-    for (auto &[pos_id, tracked] : tracked_)
+    for (auto &[pos_id, tracked] : m_tracked)
     {
         // a. Look up current position.
         auto it = current_positions.find(pos_id);
@@ -179,16 +179,16 @@ std::vector<std::string> StopLossEngine::evaluate(
 // Queries
 // ---------------------------------------------------------------------------
 
-bool StopLossEngine::is_tracked(const std::string &position_id) const
+bool StopLossEngine::isTracked(const std::string &position_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return tracked_.count(position_id) > 0;
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_tracked.count(position_id) > 0;
 }
 
-std::size_t StopLossEngine::tracked_count() const
+std::size_t StopLossEngine::trackedCount() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return tracked_.size();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_tracked.size();
 }
 
 } // namespace pulse::risk

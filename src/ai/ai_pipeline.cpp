@@ -25,11 +25,11 @@ AiPipeline::AiPipeline(const AiConfig &ai_config,
                        const TwitterConfig &twitter_config,
                        const NewsConfig &news_config,
                        AIClient::HttpTransport transport)
-    : twitter_feed_{ twitter_config }
-    , news_feed_{ news_config }
-    , prompt_builder_{}
-    , ai_client_{ ai_config, std::move(transport) }
-    , param_advisor_{}
+    : m_twitterFeed{ twitter_config }
+    , m_newsFeed{ news_config }
+    , m_promptBuilder{}
+    , m_aiClient{ ai_config, std::move(transport) }
+    , m_paramAdvisor{}
 {
     PULSE_LOG_INFO("ai", "AiPipeline initialized (backend={}, model={})",
                    ai_config.backend, ai_config.model);
@@ -45,19 +45,19 @@ AiPipeline::AiPipeline(const AiConfig &ai_config,
 //   - Param apply: always succeeds (clamps out-of-range values)
 // ---------------------------------------------------------------------------
 Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
-                                       std::vector<strategy::StrategyParams *> &all_params)
+                                       std::vector<strategy::StrategyParams *> &allParams)
 {
     PULSE_LOG_INFO("ai", "AI pipeline cycle started for symbol={} ({} strategy params)",
-                   snapshot.ticker.symbol, all_params.size());
+                   snapshot.ticker.symbol, allParams.size());
 
     // 1. Poll Twitter feed (failure is non-fatal)
     std::string tweet_text;
     try
     {
-        int new_tweets = twitter_feed_.poll();
+        int new_tweets = m_twitterFeed.poll();
         PULSE_LOG_INFO("ai", "Twitter feed: {} new tweets ({} total)",
-                       new_tweets, twitter_feed_.size());
-        tweet_text = twitter_feed_.recent_text(5);
+                       new_tweets, m_twitterFeed.size());
+        tweet_text = m_twitterFeed.recentText(5);
     }
     catch (const std::exception &e)
     {
@@ -69,10 +69,10 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
     std::string news_text;
     try
     {
-        int new_articles = news_feed_.poll();
+        int new_articles = m_newsFeed.poll();
         PULSE_LOG_INFO("ai", "News feed: {} new articles ({} total)",
-                       new_articles, news_feed_.size());
-        news_text = news_feed_.recent_text(5);
+                       new_articles, m_newsFeed.size());
+        news_text = m_newsFeed.recentText(5);
     }
     catch (const std::exception &e)
     {
@@ -82,15 +82,15 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
 
     // 3. Build system + user prompt from available data.
     //    Use the first strategy's params for the prompt (current values shown to LLM).
-    //    Precondition: all_params is non-empty (guaranteed by HeartbeatScheduler).
-    auto [system_prompt, user_prompt] = prompt_builder_.build(
-        snapshot, tweet_text, news_text, *all_params[0]);
+    //    Precondition: allParams is non-empty (guaranteed by HeartbeatScheduler).
+    auto [systemPrompt, userPrompt] = m_promptBuilder.build(
+        snapshot, tweet_text, news_text, *allParams[0]);
 
     PULSE_LOG_INFO("ai", "Prompt built: system={} chars, user={} chars",
-                   system_prompt.size(), user_prompt.size());
+                   systemPrompt.size(), userPrompt.size());
 
     // 4. Call LLM backend and parse response
-    auto result = ai_client_.analyze(system_prompt, user_prompt);
+    auto result = m_aiClient.analyze(systemPrompt, userPrompt);
 
     if (!ok(result))
     {
@@ -104,9 +104,9 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
     // 5. Apply validated parameter deltas to ALL strategy params.
     const auto &analysis = value(result);
     std::vector<heartbeat::OnParamUpdate> updates;
-    for (auto *params_ptr : all_params)
+    for (auto *params_ptr : allParams)
     {
-        auto batch = param_advisor_.apply(analysis, *params_ptr);
+        auto batch = m_paramAdvisor.apply(analysis, *params_ptr);
         // Collect updates from the first strategy only (all get the same deltas).
         if (updates.empty())
         {
@@ -128,13 +128,13 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
     }
 
     PULSE_LOG_INFO("ai", "AI pipeline cycle completed: sentiment={}, confidence={:.2f}",
-                   to_string(analysis.sentiment), analysis.confidence);
+                   toString(analysis.sentiment), analysis.confidence);
 
     // Store the latest result for WebUI/dashboard retrieval.
     {
         auto ptr = std::make_shared<const AnalysisResult>(analysis);
-        std::unique_lock write_lock(result_mutex_);
-        last_result_ = std::move(ptr);
+        std::unique_lock write_lock(m_resultMutex);
+        m_lastResult = std::move(ptr);
     }
 
     return analysis;
@@ -143,25 +143,25 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
 // ---------------------------------------------------------------------------
 // Component accessors
 // ---------------------------------------------------------------------------
-TwitterFeed &AiPipeline::twitter_feed()
+TwitterFeed &AiPipeline::twitterFeed()
 {
-    return twitter_feed_;
+    return m_twitterFeed;
 }
 
-NewsFeed &AiPipeline::news_feed()
+NewsFeed &AiPipeline::newsFeed()
 {
-    return news_feed_;
+    return m_newsFeed;
 }
 
-ParamAdvisor &AiPipeline::param_advisor()
+ParamAdvisor &AiPipeline::paramAdvisor()
 {
-    return param_advisor_;
+    return m_paramAdvisor;
 }
 
-std::shared_ptr<const AnalysisResult> AiPipeline::last_result() const noexcept
+std::shared_ptr<const AnalysisResult> AiPipeline::lastResult() const noexcept
 {
-    std::shared_lock read_lock(result_mutex_);
-    return last_result_;
+    std::shared_lock read_lock(m_resultMutex);
+    return m_lastResult;
 }
 
 } // namespace pulse::ai

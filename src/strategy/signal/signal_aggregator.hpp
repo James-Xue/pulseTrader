@@ -11,16 +11,16 @@
 //   5. Per-symbol cooldown prevents duplicate signals within a time window
 //
 // Thread safety:
-//   - add_signal() is called from multiple strategy threads
+//   - addSignal() is called from multiple strategy threads
 //   - Uses std::mutex to protect the aggregation state
-//   - evaluate_and_emit() is called from a dedicated evaluation thread or
-//     inline from add_signal() when threshold is reached
+//   - evaluateAndEmit() is called from a dedicated evaluation thread or
+//     inline from addSignal() when threshold is reached
 //
 // Usage:
 //   SignalAggregator agg(config);
-//   agg.set_output_callback([](const TradingSignal& s) { ... });
-//   agg.set_weight("momentum_scalper_BTC_USDT", 1.0);
-//   agg.add_signal(signal);  // from strategy thread
+//   agg.setOutputCallback([](const TradingSignal& s) { ... });
+//   agg.setWeight("momentum_scalper_BTC_USDT", 1.0);
+//   agg.addSignal(signal);  // from strategy thread
 
 #include "core/config.hpp"
 #include "strategy/signal_types.hpp"
@@ -54,15 +54,15 @@ class SignalAggregator
     /// Set the callback that receives consolidated signals.
     ///
     /// Typically wired to the order execution pipeline:
-    ///   agg.set_output_callback([](const TradingSignal& s) { place_order(s); });
-    void set_output_callback(OutputCallback cb);
+    ///   agg.setOutputCallback([](const TradingSignal& s) { placeOrder(s); });
+    void setOutputCallback(OutputCallback cb);
 
     /// Set the voting weight for a specific strategy.
     ///
     /// Parameters:
     ///   1. strategy_id — unique ID of the strategy (from StrategyBase::id())
     ///   2. weight      — voting weight (default 1.0; AI layer can adjust)
-    void set_weight(const std::string &strategy_id, double weight);
+    void setWeight(const std::string &strategy_id, double weight);
 
     /// Add a signal from a strategy (called from strategy threads).
     ///
@@ -72,15 +72,15 @@ class SignalAggregator
     ///
     /// Parameters:
     ///   1. signal — the trading signal to aggregate
-    void add_signal(const TradingSignal &signal);
+    void addSignal(const TradingSignal &signal);
 
     /// Get the current aggregated confidence for a symbol.
     ///
     /// Returns the sum of weighted confidences for the dominant direction.
-    [[nodiscard]] double aggregated_confidence(const Symbol &symbol) const;
+    [[nodiscard]] double aggregatedConfidence(const Symbol &symbol) const;
 
     /// Get the number of signals received (for monitoring).
-    [[nodiscard]] std::uint64_t signal_count() const;
+    [[nodiscard]] std::uint64_t signalCount() const;
 
     /// Reset all aggregation state (for testing or session restart).
     void reset();
@@ -97,25 +97,25 @@ class SignalAggregator
         MarketType market_type = MarketType::Spot; ///< Market type from input signals.
     };
 
-    StrategyConfig config_;
-    OutputCallback output_callback_;
+    StrategyConfig m_config;
+    OutputCallback m_outputCallback;
 
-    mutable std::mutex mutex_;
-    std::unordered_map<std::string, double> weights_;       ///< Per-strategy weights.
-    std::unordered_map<Symbol, SymbolState> symbol_states_; ///< Per-symbol aggregation.
-    std::uint64_t signal_count_{ 0 };                       ///< Total signals received.
+    mutable std::mutex m_mutex;
+    std::unordered_map<std::string, double> m_weights;       ///< Per-strategy weights.
+    std::unordered_map<Symbol, SymbolState> m_symbolStates; ///< Per-symbol aggregation.
+    std::uint64_t m_signalCount{ 0 };                       ///< Total signals received.
 
     /// Evaluate whether a consolidated signal should be emitted for a symbol.
     ///
-    /// Called from add_signal() after accumulating a new signal.
+    /// Called from addSignal() after accumulating a new signal.
     /// Checks threshold and cooldown before emitting.
-    void evaluate_and_emit(const Symbol &symbol);
+    void evaluateAndEmit(const Symbol &symbol);
 
     /// Get the weight for a strategy (default 1.0 if not set).
-    [[nodiscard]] double get_weight(const std::string &strategy_id) const;
+    [[nodiscard]] double getWeight(const std::string &strategy_id) const;
 
     /// Get current time in milliseconds since epoch.
-    [[nodiscard]] static std::int64_t now_ms();
+    [[nodiscard]] static std::int64_t nowMs();
 };
 
 } // namespace pulse::strategy

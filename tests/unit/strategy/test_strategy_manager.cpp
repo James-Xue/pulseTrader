@@ -25,7 +25,7 @@ class MockStrategy : public StrategyBase
   public:
     explicit MockStrategy(const StrategyContext &ctx)
     {
-        context_ = ctx;
+        m_context = ctx;
     }
 
     [[nodiscard]] std::string name() const override
@@ -35,28 +35,28 @@ class MockStrategy : public StrategyBase
 
     [[nodiscard]] std::string id() const override
     {
-        return "mock_" + context_.config.symbol;
+        return "mock_" + m_context.config.symbol;
     }
 
     [[nodiscard]] StrategyParams &params() override
     {
-        return params_;
+        return m_params;
     }
 
-    void on_tick(const market::Ticker & /*ticker*/) override
+    void onTick(const market::Ticker & /*ticker*/) override
     {
         tick_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void on_kline(const market::Kline & /*kline*/) override
+    void onKline(const market::Kline & /*kline*/) override
     {
     }
 
-    void on_orderbook(const market::OrderBook & /*book*/) override
+    void onOrderbook(const market::OrderBook & /*book*/) override
     {
     }
 
-    StrategyParams params_;
+    StrategyParams m_params;
     std::atomic<int> tick_count_{ 0 };
 };
 
@@ -85,15 +85,15 @@ TEST(StrategyManager, RegisterAndCount)
 {
     StrategyManager manager;
 
-    EXPECT_EQ(0u, manager.strategy_count());
+    EXPECT_EQ(0u, manager.strategyCount());
 
     StrategyContext ctx;
     ctx.config = make_config("BTC_USDT");
 
     auto strategy = std::make_unique<MockStrategy>(ctx);
-    manager.register_strategy(std::move(strategy));
+    manager.registerStrategy(std::move(strategy));
 
-    EXPECT_EQ(1u, manager.strategy_count());
+    EXPECT_EQ(1u, manager.strategyCount());
 }
 
 TEST(StrategyManager, DisabledStrategyNotStarted)
@@ -104,13 +104,13 @@ TEST(StrategyManager, DisabledStrategyNotStarted)
     ctx.config = make_config("BTC_USDT", false); // disabled
 
     auto strategy = std::make_unique<MockStrategy>(ctx);
-    manager.register_strategy(std::move(strategy));
+    manager.registerStrategy(std::move(strategy));
 
     // Start without market feed — disabled strategy won't try to use it.
-    manager.set_signal_callback([](const TradingSignal &) {});
+    manager.setSignalCallback([](const TradingSignal &) {});
     manager.start();
 
-    EXPECT_EQ(0u, manager.running_count());
+    EXPECT_EQ(0u, manager.runningCount());
 
     manager.stop();
 }
@@ -125,9 +125,9 @@ TEST(StrategyManager, StartAndStop)
     ctx.config = make_config("BTC_USDT", true, 10);
 
     auto strategy = std::make_unique<MockStrategy>(ctx);
-    manager.register_strategy(std::move(strategy));
+    manager.registerStrategy(std::move(strategy));
 
-    manager.set_signal_callback([](const TradingSignal &) {});
+    manager.setSignalCallback([](const TradingSignal &) {});
     manager.start();
 
     // Let the thread run briefly (it will exit because no market feed).
@@ -136,7 +136,7 @@ TEST(StrategyManager, StartAndStop)
     // Stop should complete without hanging.
     manager.stop();
 
-    EXPECT_EQ(0u, manager.running_count());
+    EXPECT_EQ(0u, manager.runningCount());
 }
 
 TEST(StrategyManager, SignalCallbackForwarding)
@@ -144,7 +144,7 @@ TEST(StrategyManager, SignalCallbackForwarding)
     StrategyManager manager;
 
     std::vector<TradingSignal> received;
-    manager.set_signal_callback([&](const TradingSignal &s)
+    manager.setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
@@ -177,7 +177,7 @@ TEST(StrategyManager, SnapshotContainsRegisteredStrategies)
         StrategyContext ctx;
         ctx.config = make_config("BTC_USDT", true, 100);
         auto strategy = std::make_unique<MockStrategy>(ctx);
-        manager.register_strategy(std::move(strategy));
+        manager.registerStrategy(std::move(strategy));
     }
 
     // Register a disabled strategy.
@@ -185,7 +185,7 @@ TEST(StrategyManager, SnapshotContainsRegisteredStrategies)
         StrategyContext ctx;
         ctx.config = make_config("ETH_USDT", false, 200);
         auto strategy = std::make_unique<MockStrategy>(ctx);
-        manager.register_strategy(std::move(strategy));
+        manager.registerStrategy(std::move(strategy));
     }
 
     // Snapshot before start() — both present, neither running.
@@ -218,9 +218,9 @@ TEST(StrategyManager, SnapshotRunningStateAfterStart)
     StrategyContext ctx;
     ctx.config = make_config("BTC_USDT", true, 10);
     auto strategy = std::make_unique<MockStrategy>(ctx);
-    manager.register_strategy(std::move(strategy));
+    manager.registerStrategy(std::move(strategy));
 
-    manager.set_signal_callback([](const TradingSignal &) {});
+    manager.setSignalCallback([](const TradingSignal &) {});
     manager.start();
 
     // Snapshot while threads may be running (they exit quickly without market feed).

@@ -1,4 +1,4 @@
-// ticker_cache.cpp — TickerCache implementation (Layer 3 Market Data)
+// tickerCache.cpp — TickerCache implementation (Layer 3 Market Data)
 
 #include "market/ticker_cache.hpp"
 
@@ -9,15 +9,15 @@ namespace pulse::market
 
 void TickerCache::update(const Symbol &symbol, const Ticker &ticker)
 {
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    cache_[symbol] = ticker;
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_cache[symbol] = ticker;
 }
 
 std::optional<Ticker> TickerCache::get(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = cache_.find(symbol);
-    if (it == cache_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_cache.find(symbol);
+    if (it == m_cache.end())
     {
         return std::nullopt;
     }
@@ -26,22 +26,22 @@ std::optional<Ticker> TickerCache::get(const Symbol &symbol) const
 
 bool TickerCache::contains(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return cache_.find(symbol) != cache_.end();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_cache.find(symbol) != m_cache.end();
 }
 
 std::size_t TickerCache::size() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return cache_.size();
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return m_cache.size();
 }
 
 std::vector<Symbol> TickerCache::symbols() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
     std::vector<Symbol> result;
-    result.reserve(cache_.size());
-    for (const auto &[sym, _] : cache_)
+    result.reserve(m_cache.size());
+    for (const auto &[sym, _] : m_cache)
     {
         result.push_back(sym);
     }
