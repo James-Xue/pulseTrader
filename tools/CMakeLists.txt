@@ -82,11 +82,14 @@ target_link_libraries(test_balance_diag
 )
 
 if(PULSE_ENABLE_WEBUI)
-    find_package(unofficial-usockets CONFIG REQUIRED)
-    find_package(unofficial-uwebsockets CONFIG REQUIRED)
-
     add_executable(test_webui_server
         test_webui.cpp
+    )
+
+    target_include_directories(test_webui_server
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
+            ${PROJECT_SOURCE_DIR}/third_party/uSockets
     )
 
     target_link_libraries(test_webui_server
@@ -99,8 +102,7 @@ if(PULSE_ENABLE_WEBUI)
             pulse::ai
             pulse::exchange
             pulse::logging
-            unofficial::uwebsockets::uwebsockets
-            unofficial::usockets::usockets
-            ZLIB::ZLIB
+            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
+            z
     )
 endif()
