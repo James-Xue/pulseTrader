@@ -352,7 +352,7 @@
                 autoSize: true
             });
 
-            klineSeries = klineChart.addCandlestickSeries({
+            klineSeries = klineChart.addSeries(LightweightCharts.CandlestickSeries, {
                 upColor: '#4caf50',
                 downColor: '#f44336',
                 borderUpColor: '#4caf50',
@@ -361,7 +361,7 @@
                 wickDownColor: '#f44336'
             });
 
-            klineVolumeSeries = klineChart.addHistogramSeries({
+            klineVolumeSeries = klineChart.addSeries(LightweightCharts.HistogramSeries, {
                 color: '#555580',
                 priceFormat: { type: 'volume' },
                 priceScaleId: 'volume'
