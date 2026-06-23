@@ -51,14 +51,14 @@ TEST(MeanReversionScalper, OnTickIgnored)
 {
     auto scalper = make_scalper();
     market::Ticker ticker;
-    scalper->on_tick(ticker);
+    scalper->onTick(ticker);
 }
 
 TEST(MeanReversionScalper, OnOrderbookIgnored)
 {
     auto scalper = make_scalper();
     market::OrderBook book;
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 }
 
 TEST(MeanReversionScalper, InsufficientDataNoSignal)
@@ -66,15 +66,15 @@ TEST(MeanReversionScalper, InsufficientDataNoSignal)
     auto scalper = make_scalper(20.0, 2.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
-    // on_kline without market feed — should return early.
+    // onKline without market feed — should return early.
     market::Kline kline;
     kline.closed = true;
-    scalper->on_kline(kline);
+    scalper->onKline(kline);
 
     EXPECT_TRUE(received.empty());
 }

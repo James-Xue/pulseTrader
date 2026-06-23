@@ -1,13 +1,13 @@
-// ws_server.cpp — WebSocket push server implementation (Layer 9 WebUI)
+// wsServer.cpp — WebSocket push server implementation (Layer 9 WebUI)
 //
 // Implements client tracking and snapshot broadcasting for the WebUI dashboard:
-//   1. push_snapshot() serializes DashboardSnapshot to JSON (cached for reuse)
+//   1. pushSnapshot() serializes DashboardSnapshot to JSON (cached for reuse)
 //   2. Client count is tracked atomically for the max-clients limit
 //   3. Broadcasting uses a pluggable publish function (set by WebServer) that
 //      defers to the uWebSockets event loop thread via Loop::defer()
 //
 // The actual WebSocket route registration (open/close handlers) is done by
-// WebServer, which calls on_ws_open() and on_ws_close() from the handlers.
+// WebServer, which calls onWsOpen() and onWsClose() from the handlers.
 
 #include "webui/ws_server.hpp"
 
@@ -23,27 +23,27 @@ namespace pulse::webui
 // ---------------------------------------------------------------------------
 
 WsServer::WsServer(const WebUiConfig &config)
-    : config_{ config }
+    : m_config{ config }
 {
 }
 
 WsServer::~WsServer() = default;
 
 // ---------------------------------------------------------------------------
-// set_publish_fn — store the publish function for deferred broadcast
+// setPublishFn — store the publish function for deferred broadcast
 // ---------------------------------------------------------------------------
 
-void WsServer::set_publish_fn(PublishFn fn)
+void WsServer::setPublishFn(PublishFn fn)
 {
-    publish_fn_ = std::move(fn);
+    m_publishFn = std::move(fn);
 }
 
 // ---------------------------------------------------------------------------
-// push_snapshot — serialize and broadcast to all connected clients
+// pushSnapshot — serialize and broadcast to all connected clients
 //
 // Algorithm:
 //   1. Serialize the DashboardSnapshot to JSON via nlohmann ADL
-//   2. Cache the JSON string in last_json_ (for new client on-connect delivery)
+//   2. Cache the JSON string in m_lastJson (for new client on-connect delivery)
 //   3. Snapshot the current client count
 //   4. If the publish function is set and clients are connected, invoke it
 //
@@ -51,51 +51,51 @@ void WsServer::set_publish_fn(PublishFn fn)
 //   - JSON serialization is on the caller's thread (DashboardState poll thread)
 //   - The publish function wraps Loop::defer() + app->publish(), which is
 //     thread-safe (defer enqueues under a mutex and wakes the loop)
-//   - last_json_ is protected by json_mutex_ for concurrent reads
+//   - m_lastJson is protected by m_jsonMutex for concurrent reads
 // ---------------------------------------------------------------------------
 
-void WsServer::push_snapshot(std::shared_ptr<const DashboardSnapshot> snapshot)
+void WsServer::pushSnapshot(std::shared_ptr<const DashboardSnapshot> snapshot)
 {
     // 1. Serialize to JSON and cache.
     nlohmann::json j = *snapshot;
     std::string json_str = j.dump();
 
     {
-        std::lock_guard lock{ json_mutex_ };
-        last_json_ = json_str;
+        std::lock_guard lock{ m_jsonMutex };
+        m_lastJson = json_str;
     }
 
     // 2. Check if we have clients and a valid publish function.
-    const std::size_t count = client_count_.load(std::memory_order_acquire);
-    if (0 == count || !publish_fn_)
+    const std::size_t count = m_clientCount.load(std::memory_order_acquire);
+    if (0 == count || !m_publishFn)
     {
         return;
     }
 
     // 3. Invoke the publish function (defers to event loop thread).
-    publish_fn_(json_str);
+    m_publishFn(json_str);
 }
 
 // ---------------------------------------------------------------------------
-// on_ws_open — track a new WebSocket client
+// onWsOpen — track a new WebSocket client
 // ---------------------------------------------------------------------------
 
-void WsServer::on_ws_open()
+void WsServer::onWsOpen()
 {
-    client_count_.fetch_add(1, std::memory_order_acq_rel);
+    m_clientCount.fetch_add(1, std::memory_order_acq_rel);
 }
 
 // ---------------------------------------------------------------------------
-// on_ws_close — untrack a closing WebSocket client
+// onWsClose — untrack a closing WebSocket client
 // ---------------------------------------------------------------------------
 
-void WsServer::on_ws_close()
+void WsServer::onWsClose()
 {
     // Guard against underflow (should not happen, but defensive).
-    const std::size_t prev = client_count_.load(std::memory_order_acquire);
+    const std::size_t prev = m_clientCount.load(std::memory_order_acquire);
     if (0 < prev)
     {
-        client_count_.fetch_sub(1, std::memory_order_acq_rel);
+        m_clientCount.fetch_sub(1, std::memory_order_acq_rel);
     }
 }
 
@@ -103,20 +103,20 @@ void WsServer::on_ws_close()
 // Getters
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] std::size_t WsServer::client_count() const
+[[nodiscard]] std::size_t WsServer::clientCount() const
 {
-    return client_count_.load(std::memory_order_acquire);
+    return m_clientCount.load(std::memory_order_acquire);
 }
 
-[[nodiscard]] std::size_t WsServer::max_clients() const
+[[nodiscard]] std::size_t WsServer::maxClients() const
 {
-    return static_cast<std::size_t>(config_.maxClients);
+    return static_cast<std::size_t>(m_config.maxClients);
 }
 
-[[nodiscard]] std::string WsServer::last_json() const
+[[nodiscard]] std::string WsServer::lastJson() const
 {
-    std::lock_guard lock{ json_mutex_ };
-    return last_json_;
+    std::lock_guard lock{ m_jsonMutex };
+    return m_lastJson;
 }
 
 } // namespace pulse::webui

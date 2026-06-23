@@ -173,26 +173,26 @@ TEST(AiPipeline, ComponentAccessors)
     auto pipeline = make_test_pipeline(make_success_transport());
 
     // Should be able to access components
-    EXPECT_EQ(pipeline.twitter_feed().size(), 0u);
-    EXPECT_EQ(pipeline.news_feed().size(), 0u);
-    EXPECT_EQ(pipeline.param_advisor().bounds().size(), 10u);
+    EXPECT_EQ(pipeline.twitterFeed().size(), 0u);
+    EXPECT_EQ(pipeline.newsFeed().size(), 0u);
+    EXPECT_EQ(pipeline.paramAdvisor().bounds().size(), 10u);
 }
 
 // ---------------------------------------------------------------------------
-// last_result() — interface gap bridge for dashboard
+// lastResult() — interface gap bridge for dashboard
 // ---------------------------------------------------------------------------
 
 TEST(AiPipeline, LastResultNullptrBeforeAnyRun)
 {
-    // Before any run() call, last_result() must return nullptr.
+    // Before any run() call, lastResult() must return nullptr.
     auto pipeline = make_test_pipeline(make_success_transport());
-    const auto result = pipeline.last_result();
+    const auto result = pipeline.lastResult();
     EXPECT_EQ(nullptr, result);
 }
 
 TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
 {
-    // After a successful run(), last_result() must return a non-null pointer
+    // After a successful run(), lastResult() must return a non-null pointer
     // with the correct analysis data.
     auto pipeline = make_test_pipeline(make_success_transport(0.0005));
     MarketSnapshot snapshot;
@@ -204,8 +204,8 @@ TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
     auto run_result = pipeline.run(snapshot, params_vec);
     ASSERT_TRUE(ok(run_result));
 
-    // last_result() should now be populated.
-    const auto last = pipeline.last_result();
+    // lastResult() should now be populated.
+    const auto last = pipeline.lastResult();
     ASSERT_NE(nullptr, last);
     EXPECT_EQ(last->sentiment, Sentiment::Bullish);
     EXPECT_DOUBLE_EQ(last->confidence, 0.8);
@@ -214,7 +214,7 @@ TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
 
 TEST(AiPipeline, LastResultRemainsNullAfterFailedRun)
 {
-    // After a failed run(), last_result() must remain nullptr.
+    // After a failed run(), lastResult() must remain nullptr.
     auto pipeline = make_test_pipeline(make_error_transport());
     MarketSnapshot snapshot;
     snapshot.ticker.symbol = "BTC_USDT";
@@ -224,7 +224,7 @@ TEST(AiPipeline, LastResultRemainsNullAfterFailedRun)
     auto run_result = pipeline.run(snapshot, params_vec);
     ASSERT_FALSE(ok(run_result));
 
-    // last_result() should still be nullptr.
-    const auto last = pipeline.last_result();
+    // lastResult() should still be nullptr.
+    const auto last = pipeline.lastResult();
     EXPECT_EQ(nullptr, last);
 }

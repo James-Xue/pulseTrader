@@ -22,8 +22,8 @@ void GateWsChannels::subscribe(const std::string &channel,
 {
     // 1. Acquire exclusive write lock
     // 2. Insert or replace the channel entry
-    std::unique_lock lock(mutex_);
-    channels_[channel] = ChannelEntry{ payload, std::move(callback) };
+    std::unique_lock lock(m_mutex);
+    m_channels[channel] = ChannelEntry{ payload, std::move(callback) };
     PULSE_LOG_DEBUG("exchange", "Channel subscribed: {}", channel);
 }
 
@@ -34,8 +34,8 @@ void GateWsChannels::unsubscribe(const std::string &channel)
 {
     // 1. Acquire exclusive write lock
     // 2. Erase the channel if it exists
-    std::unique_lock lock(mutex_);
-    const auto erased = channels_.erase(channel);
+    std::unique_lock lock(m_mutex);
+    const auto erased = m_channels.erase(channel);
     if (0 != erased)
     {
         PULSE_LOG_DEBUG("exchange", "Channel unsubscribed: {}", channel);
@@ -58,9 +58,9 @@ bool GateWsChannels::dispatch(const nlohmann::json &frame)
 
     const auto channel_name = frame["channel"].get<std::string>();
 
-    std::shared_lock lock(mutex_);
-    const auto it = channels_.find(channel_name);
-    if (channels_.end() == it)
+    std::shared_lock lock(m_mutex);
+    const auto it = m_channels.find(channel_name);
+    if (m_channels.end() == it)
     {
         return false;
     }
@@ -72,41 +72,41 @@ bool GateWsChannels::dispatch(const nlohmann::json &frame)
 }
 
 // ---------------------------------------------------------------------------
-// build_subscribe_msg
+// buildSubscribeMsg
 // ---------------------------------------------------------------------------
-nlohmann::json GateWsChannels::build_subscribe_msg(const std::string &channel,
+nlohmann::json GateWsChannels::buildSubscribeMsg(const std::string &channel,
     const std::vector<std::string> &payload) const
 {
     // Gate.io v4 subscribe format:
-    //   {"time": <unix_seconds>, "channel": "<name>", "event": "subscribe", "payload": [...]}
+    //   {"time": <unixSeconds>, "channel": "<name>", "event": "subscribe", "payload": [...]}
     const auto ts =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     return nlohmann::json{ { "time", ts }, { "channel", channel }, { "event", "subscribe" }, { "payload", payload } };
 }
 
 // ---------------------------------------------------------------------------
-// build_unsubscribe_msg
+// buildUnsubscribeMsg
 // ---------------------------------------------------------------------------
-nlohmann::json GateWsChannels::build_unsubscribe_msg(const std::string &channel,
+nlohmann::json GateWsChannels::buildUnsubscribeMsg(const std::string &channel,
     const std::vector<std::string> &payload) const
 {
     // Gate.io v4 unsubscribe format:
-    //   {"time": <unix_seconds>, "channel": "<name>", "event": "unsubscribe", "payload": [...]}
+    //   {"time": <unixSeconds>, "channel": "<name>", "event": "unsubscribe", "payload": [...]}
     const auto ts =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     return nlohmann::json{ { "time", ts }, { "channel", channel }, { "event", "unsubscribe" }, { "payload", payload } };
 }
 
 // ---------------------------------------------------------------------------
-// build_pong — derive pong channel from incoming ping frame
+// buildPong — derive pong channel from incoming ping frame
 // ---------------------------------------------------------------------------
-nlohmann::json GateWsChannels::build_pong(const nlohmann::json &ping_frame, MarketType mt)
+nlohmann::json GateWsChannels::buildPong(const nlohmann::json &ping_frame, MarketType mt)
 {
     // Gate.io sends: {"time": <int>, "channel": "<prefix>.ping"}
     // Client replies: {"time": <same_int>, "channel": "<prefix>.pong"}
     //
     // Strategy: replace ".ping" with ".pong" in the incoming channel name.
-    // Fallback: use EndpointRouter::pong_channel(mt) if channel is missing.
+    // Fallback: use EndpointRouter::pongChannel(mt) if channel is missing.
     const auto time_val = ping_frame.value("time", 0);
 
     std::string pong_ch;
@@ -121,28 +121,28 @@ nlohmann::json GateWsChannels::build_pong(const nlohmann::json &ping_frame, Mark
         }
         else
         {
-            pong_ch = EndpointRouter::pong_channel(mt);
+            pong_ch = EndpointRouter::pongChannel(mt);
         }
     }
     else
     {
-        pong_ch = EndpointRouter::pong_channel(mt);
+        pong_ch = EndpointRouter::pongChannel(mt);
     }
 
     return nlohmann::json{ { "time", time_val }, { "channel", std::move(pong_ch) } };
 }
 
 // ---------------------------------------------------------------------------
-// active_channels
+// activeChannels
 // ---------------------------------------------------------------------------
-std::vector<std::string> GateWsChannels::active_channels() const
+std::vector<std::string> GateWsChannels::activeChannels() const
 {
     // 1. Acquire shared read lock
     // 2. Collect all channel names into a vector
-    std::shared_lock lock(mutex_);
+    std::shared_lock lock(m_mutex);
     std::vector<std::string> result;
-    result.reserve(channels_.size());
-    for (const auto &[name, entry] : channels_)
+    result.reserve(m_channels.size());
+    for (const auto &[name, entry] : m_channels)
     {
         result.push_back(name);
     }
@@ -150,15 +150,15 @@ std::vector<std::string> GateWsChannels::active_channels() const
 }
 
 // ---------------------------------------------------------------------------
-// get_payload
+// getPayload
 // ---------------------------------------------------------------------------
-std::vector<std::string> GateWsChannels::get_payload(const std::string &channel) const
+std::vector<std::string> GateWsChannels::getPayload(const std::string &channel) const
 {
     // 1. Acquire shared read lock
     // 2. Return the payload if the channel exists, empty vector otherwise
-    std::shared_lock lock(mutex_);
-    const auto it = channels_.find(channel);
-    if (channels_.end() == it)
+    std::shared_lock lock(m_mutex);
+    const auto it = m_channels.find(channel);
+    if (m_channels.end() == it)
     {
         return {};
     }

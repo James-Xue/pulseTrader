@@ -2,8 +2,8 @@
 //
 // Timer lifecycle:
 //   1. start() creates io_context thread and arms the first timer
-//   2. Timer fires → on_timer() → enqueues pipeline task → schedule_next()
-//   3. stop() cancels timer (on_timer gets error::operation_aborted)
+//   2. Timer fires → onTimer() → enqueues pipeline task → scheduleNext()
+//   3. stop() cancels timer (onTimer gets error::operation_aborted)
 //   4. io_context thread exits when it has no more work
 
 #include "heartbeat/heartbeat_scheduler.hpp"
@@ -20,14 +20,14 @@ namespace pulse::heartbeat
 // ---------------------------------------------------------------------------
 HeartbeatScheduler::HeartbeatScheduler(const AiConfig &config,
                                        ai::AiPipeline &pipeline,
-                                       std::vector<strategy::StrategyParams *> all_params)
-    : config_{ config }
-    , pipeline_{ pipeline }
-    , all_params_{ std::move(all_params) }
-    , timer_{ io_ctx_ }
+                                       std::vector<strategy::StrategyParams *> allParams)
+    : m_config{ config }
+    , m_pipeline{ pipeline }
+    , m_allParams{ std::move(allParams) }
+    , m_timer{ m_ioCtx }
 {
     PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler created (interval={}s, {} strategy params)",
-                   config_.heartbeatIntervalSec, all_params_.size());
+                   m_config.heartbeatIntervalSec, m_allParams.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ HeartbeatScheduler::HeartbeatScheduler(const AiConfig &config,
 // ---------------------------------------------------------------------------
 HeartbeatScheduler::~HeartbeatScheduler()
 {
-    if (running_.load(std::memory_order_acquire))
+    if (m_running.load(std::memory_order_acquire))
     {
         stop();
     }
@@ -46,30 +46,30 @@ HeartbeatScheduler::~HeartbeatScheduler()
 // ---------------------------------------------------------------------------
 void HeartbeatScheduler::start()
 {
-    if (running_.load(std::memory_order_acquire))
+    if (m_running.load(std::memory_order_acquire))
     {
         PULSE_LOG_WARN("heartbeat", "HeartbeatScheduler already running");
         return;
     }
 
-    running_.store(true, std::memory_order_release);
-    beat_count_.store(0, std::memory_order_release);
+    m_running.store(true, std::memory_order_release);
+    m_beatCount.store(0, std::memory_order_release);
 
     // 1. Arm the first timer before starting the io_context thread
-    schedule_next();
+    scheduleNext();
 
     // 2. Spawn the io_context thread
-    io_thread_ = std::jthread([this](std::stop_token stoken)
+    m_ioThread = std::jthread([this](std::stop_token stoken)
     {
         // Run io_context until stopped or no more work
         while (!stoken.stop_requested())
         {
             // run_for returns when all work is done or timeout
             // This allows checking stop_token periodically
-            io_ctx_.run_for(std::chrono::milliseconds(100));
+            m_ioCtx.run_for(std::chrono::milliseconds(100));
 
             // If io_context has no more work and timer is not armed, exit
-            if (io_ctx_.stopped())
+            if (m_ioCtx.stopped())
             {
                 break;
             }
@@ -91,47 +91,47 @@ void HeartbeatScheduler::start()
 // ---------------------------------------------------------------------------
 void HeartbeatScheduler::stop()
 {
-    if (!running_.load(std::memory_order_acquire))
+    if (!m_running.load(std::memory_order_acquire))
     {
         return;
     }
 
-    running_.store(false, std::memory_order_release);
+    m_running.store(false, std::memory_order_release);
 
-    // 1. Cancel the timer (on_timer will get operation_aborted)
+    // 1. Cancel the timer (onTimer will get operation_aborted)
     asio::error_code ec;
-    timer_.cancel(ec);
+    m_timer.cancel(ec);
 
     // 2. Stop the io_context
-    io_ctx_.stop();
+    m_ioCtx.stop();
 
     // 3. Request stop on io_thread and let jthread join
-    io_thread_.request_stop();
+    m_ioThread.request_stop();
 
     // 4. TaskQueue destructor (called when this object is destroyed)
     //    will join its worker thread
 
     PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler stopped (beats={})",
-                   beat_count_.load(std::memory_order_acquire));
+                   m_beatCount.load(std::memory_order_acquire));
 }
 
 // ---------------------------------------------------------------------------
-// trigger_now — manually enqueue a pipeline task
+// triggerNow — manually enqueue a pipeline task
 // ---------------------------------------------------------------------------
-void HeartbeatScheduler::trigger_now()
+void HeartbeatScheduler::triggerNow()
 {
-    auto beat_num = beat_count_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    auto beat_num = m_beatCount.fetch_add(1, std::memory_order_acq_rel) + 1;
     PULSE_LOG_INFO("heartbeat", "Manual trigger: beat #{}", beat_num);
 
-    task_queue_.enqueue([this]() { this->run_pipeline(); }, TaskPriority::High);
+    m_taskQueue.enqueue([this]() { this->runPipeline(); }, TaskPriority::High);
 }
 
 // ---------------------------------------------------------------------------
-// beat_count — monotonic counter of beats fired
+// beatCount — monotonic counter of beats fired
 // ---------------------------------------------------------------------------
-std::uint64_t HeartbeatScheduler::beat_count() const
+std::uint64_t HeartbeatScheduler::beatCount() const
 {
-    return beat_count_.load(std::memory_order_acquire);
+    return m_beatCount.load(std::memory_order_acquire);
 }
 
 // ---------------------------------------------------------------------------
@@ -139,24 +139,24 @@ std::uint64_t HeartbeatScheduler::beat_count() const
 // ---------------------------------------------------------------------------
 bool HeartbeatScheduler::running() const
 {
-    return running_.load(std::memory_order_acquire);
+    return m_running.load(std::memory_order_acquire);
 }
 
 // ---------------------------------------------------------------------------
-// schedule_next — arm the steady_timer for the next beat
+// scheduleNext — arm the steady_timer for the next beat
 //
 // Uses expires_after() (not expires_at()) for drift-free scheduling:
 // the interval starts from when this function is called, not from
 // when the previous timer was armed. This prevents accumulated drift.
 // ---------------------------------------------------------------------------
-void HeartbeatScheduler::schedule_next()
+void HeartbeatScheduler::scheduleNext()
 {
-    timer_.expires_after(std::chrono::seconds(config_.heartbeatIntervalSec));
-    timer_.async_wait([this](const asio::error_code &ec) { this->on_timer(ec); });
+    m_timer.expires_after(std::chrono::seconds(m_config.heartbeatIntervalSec));
+    m_timer.async_wait([this](const asio::error_code &ec) { this->onTimer(ec); });
 }
 
 // ---------------------------------------------------------------------------
-// on_timer — callback when the steady_timer fires
+// onTimer — callback when the steady_timer fires
 //
 // Behavior:
 //   1. If cancelled (operation_aborted) → do nothing (shutdown in progress)
@@ -164,7 +164,7 @@ void HeartbeatScheduler::schedule_next()
 //   3. Enqueue pipeline task to TaskQueue
 //   4. Re-arm timer for next beat
 // ---------------------------------------------------------------------------
-void HeartbeatScheduler::on_timer(const asio::error_code &ec)
+void HeartbeatScheduler::onTimer(const asio::error_code &ec)
 {
     // 1. Timer was cancelled — likely due to stop()
     if (ec)
@@ -174,24 +174,24 @@ void HeartbeatScheduler::on_timer(const asio::error_code &ec)
     }
 
     // 2. Check if we should still be running
-    if (!running_.load(std::memory_order_acquire))
+    if (!m_running.load(std::memory_order_acquire))
     {
         return;
     }
 
     // 3. Increment beat counter
-    auto beat_num = beat_count_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    auto beat_num = m_beatCount.fetch_add(1, std::memory_order_acq_rel) + 1;
     PULSE_LOG_INFO("heartbeat", "Beat #{} — enqueueing AI pipeline", beat_num);
 
     // 4. Enqueue the pipeline task (executed on TaskQueue worker thread)
-    task_queue_.enqueue([this]() { this->run_pipeline(); }, TaskPriority::Normal);
+    m_taskQueue.enqueue([this]() { this->runPipeline(); }, TaskPriority::Normal);
 
     // 5. Re-arm the timer for the next beat
-    schedule_next();
+    scheduleNext();
 }
 
 // ---------------------------------------------------------------------------
-// run_pipeline — execute the AI pipeline (called on TaskQueue worker thread)
+// runPipeline — execute the AI pipeline (called on TaskQueue worker thread)
 //
 // This is the blocking function that performs the full AI cycle:
 //   1. Poll social feeds (HTTP I/O)
@@ -202,7 +202,7 @@ void HeartbeatScheduler::on_timer(const asio::error_code &ec)
 //
 // All errors are handled internally — this function never throws.
 // ---------------------------------------------------------------------------
-void HeartbeatScheduler::run_pipeline()
+void HeartbeatScheduler::runPipeline()
 {
     PULSE_LOG_INFO("heartbeat", "AI pipeline execution started");
 
@@ -212,12 +212,12 @@ void HeartbeatScheduler::run_pipeline()
     snapshot.ticker.symbol = "BTC_USDT";
 
     // Run the pipeline — errors are logged internally
-    auto result = pipeline_.run(snapshot, all_params_);
+    auto result = m_pipeline.run(snapshot, m_allParams);
 
     if (ok(result))
     {
         PULSE_LOG_INFO("heartbeat", "AI pipeline completed: sentiment={}, confidence={:.2f}",
-                       to_string(value(result).sentiment),
+                       toString(value(result).sentiment),
                        value(result).confidence);
     }
     else

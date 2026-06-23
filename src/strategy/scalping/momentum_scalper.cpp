@@ -13,7 +13,7 @@ namespace pulse::strategy
 
 MomentumScalper::MomentumScalper(const StrategyContext &context)
 {
-    context_ = context;
+    m_context = context;
 }
 
 std::string MomentumScalper::name() const
@@ -23,73 +23,73 @@ std::string MomentumScalper::name() const
 
 std::string MomentumScalper::id() const
 {
-    return "momentum_scalper_" + context_.config.symbol;
+    return "momentum_scalper_" + m_context.config.symbol;
 }
 
 StrategyParams &MomentumScalper::params()
 {
-    return params_;
+    return m_params;
 }
 
-void MomentumScalper::on_tick(const market::Ticker & /*ticker*/)
+void MomentumScalper::onTick(const market::Ticker & /*ticker*/)
 {
     // This strategy is kline-driven; tick updates are ignored for trading.
-    // However, we use on_tick() to detect "no kline data at all" (e.g. WS not connected).
-    auto *feed = context_.market_feed;
+    // However, we use onTick() to detect "no kline data at all" (e.g. WS not connected).
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(1);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(1);
     if (candles.empty())
     {
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_no_data_log_ms_ >= 30'000)
+        if (nowMs - m_lastNoDataLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Waiting for kline data (WS may not be connected yet)", id());
-            last_no_data_log_ms_ = now_ms;
+            m_lastNoDataLogMs = nowMs;
         }
     }
 }
 
-void MomentumScalper::on_orderbook(const market::OrderBook & /*book*/)
+void MomentumScalper::onOrderbook(const market::OrderBook & /*book*/)
 {
     // This strategy is kline-driven; orderbook updates are ignored.
 }
 
-void MomentumScalper::on_kline(const market::Kline & /*kline*/)
+void MomentumScalper::onKline(const market::Kline & /*kline*/)
 {
     // 1. Read hot-reloadable parameters (lock-free atomic loads).
     const auto fast_period = static_cast<std::size_t>(
-        params_.ema_fast_period.load(std::memory_order_acquire));
+        m_params.ema_fast_period.load(std::memory_order_acquire));
     const auto slow_period = static_cast<std::size_t>(
-        params_.ema_slow_period.load(std::memory_order_acquire));
+        m_params.ema_slow_period.load(std::memory_order_acquire));
 
     // 2. Fetch enough candles to compute both EMAs.
     const auto needed = slow_period + 1; // +1 for initial SMA seed
-    auto *feed = context_.market_feed;
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(needed);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(needed);
     if (candles.size() < slow_period)
     {
         // Not enough data yet — log warmup progress every 30 seconds.
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_warmup_log_ms_ >= 30'000)
+        if (nowMs - m_lastWarmupLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Warming up: {}/{} candles accumulated (need ~{} min of kline data)",
                 id(), candles.size(), slow_period, slow_period);
-            last_warmup_log_ms_ = now_ms;
+            m_lastWarmupLogMs = nowMs;
         }
         return;
     }
@@ -103,14 +103,14 @@ void MomentumScalper::on_kline(const market::Kline & /*kline*/)
     }
 
     // 4. Compute fast and slow EMA.
-    const double ema_fast = compute_ema(closes, static_cast<double>(fast_period), prev_ema_fast_);
-    const double ema_slow = compute_ema(closes, static_cast<double>(slow_period), prev_ema_slow_);
+    const double ema_fast = computeEma(closes, static_cast<double>(fast_period), m_prevEmaFast);
+    const double ema_slow = computeEma(closes, static_cast<double>(slow_period), m_prevEmaSlow);
 
     // 5. Detect crossover (requires previous EMA values).
-    if (has_prev_)
+    if (m_hasPrev)
     {
-        const bool bullish_cross = (prev_ema_fast_ <= prev_ema_slow_) && (ema_fast > ema_slow);
-        const bool bearish_cross = (prev_ema_fast_ >= prev_ema_slow_) && (ema_fast < ema_slow);
+        const bool bullish_cross = (m_prevEmaFast <= m_prevEmaSlow) && (ema_fast > ema_slow);
+        const bool bearish_cross = (m_prevEmaFast >= m_prevEmaSlow) && (ema_fast < ema_slow);
 
         if (bullish_cross || bearish_cross)
         {
@@ -125,7 +125,7 @@ void MomentumScalper::on_kline(const market::Kline & /*kline*/)
             // 7. Build and emit signal.
             TradingSignal signal;
             signal.type = bullish_cross ? SignalType::Buy : SignalType::Sell;
-            signal.symbol = context_.config.symbol;
+            signal.symbol = m_context.config.symbol;
             signal.confidence = confidence;
             signal.price = closes.back();
             signal.strategy_id = id();
@@ -137,17 +137,17 @@ void MomentumScalper::on_kline(const market::Kline & /*kline*/)
             PULSE_LOG_INFO("strategy", "[{}] {} signal: confidence={:.4f}, price={:.2f}",
                 id(), signal.reason, confidence, signal.price);
 
-            emit_signal(signal);
+            emitSignal(signal);
         }
     }
 
     // 8. Store current EMAs for next crossover detection.
-    prev_ema_fast_ = ema_fast;
-    prev_ema_slow_ = ema_slow;
-    has_prev_ = true;
+    m_prevEmaFast = ema_fast;
+    m_prevEmaSlow = ema_slow;
+    m_hasPrev = true;
 }
 
-double MomentumScalper::compute_ema(const std::vector<double> &closes,
+double MomentumScalper::computeEma(const std::vector<double> &closes,
     double period,
     double prev_ema) const
 {

@@ -71,18 +71,18 @@ class Logger
     /// Change the log level of a specific module at runtime.
     ///
     /// Both the logger's own level and each sink's independent filter are updated.
-    static void set_level(std::string_view module, spdlog::level::level_enum level);
+    static void setLevel(std::string_view module, spdlog::level::level_enum level);
 
     /// Change the log level of all registered modules at runtime.
     ///
     /// Also updates the global default so newly-created loggers inherit it.
-    static void set_global_level(spdlog::level::level_enum level);
+    static void setGlobalLevel(spdlog::level::level_enum level);
 
     /// Flush all loggers immediately.
     ///
     /// Use before a crash, controlled shutdown, or any point where you need
     /// to guarantee the log files are up-to-date.
-    static void flush_all();
+    static void flushAll();
 
   private:
     Logger() = default; // prevent instantiation

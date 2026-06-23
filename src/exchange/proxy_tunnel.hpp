@@ -44,11 +44,11 @@ struct WsUrlParts
 /// Parse a WSS URL into host, port, and path components.
 /// Default port is 443, default path is "/".
 ///   "wss://api.gateio.ws/ws/v4/" → {"api.gateio.ws", 443, "/ws/v4/"}
-[[nodiscard]] WsUrlParts parse_ws_url(const std::string &url);
+[[nodiscard]] WsUrlParts parseWsUrl(const std::string &url);
 
 /// Detect proxy URL from config or environment variables.
 /// Priority: config.proxyUrl → HTTPS_PROXY → HTTP_PROXY → empty string.
-[[nodiscard]] std::string detect_proxy_url(const ExchangeConfig &config);
+[[nodiscard]] std::string detectProxyUrl(const ExchangeConfig &config);
 
 // ---------------------------------------------------------------------------
 // ProxyTunnel — HTTP CONNECT tunneling for WebSocket through HTTP proxy
@@ -73,32 +73,32 @@ class ProxyTunnel
     void stop();
 
     /// Returns the local port assigned by the OS.
-    [[nodiscard]] std::uint16_t local_port() const;
+    [[nodiscard]] std::uint16_t localPort() const;
 
   private:
     /// Handle a single proxied connection: establish tunnel, then relay data.
-    void handle_connection(asio::ip::tcp::socket local_sock,
+    void handleConnection(asio::ip::tcp::socket local_sock,
                            const std::string &proxy_host,
                            const std::string &proxy_port);
 
     /// Relay data from source to sink until EOF or error (plain socket).
-    static void relay_data(asio::ip::tcp::socket &source,
+    static void relayData(asio::ip::tcp::socket &source,
                            asio::ip::tcp::socket &sink);
 
-    std::string proxy_url_;
-    std::string target_host_;
-    std::uint16_t target_port_;
-    std::string target_path_;
-    asio::io_context io_ctx_;
-    std::unique_ptr<asio::ip::tcp::acceptor> acceptor_;
-    std::thread accept_thread_;
-    std::thread connection_thread_; ///< Tracked handle_connection thread (Bug #1 fix).
-    std::atomic<bool> running_{ false };
-    std::uint16_t local_port_{ 0 };
+    std::string m_proxyUrl;
+    std::string m_targetHost;
+    std::uint16_t m_targetPort;
+    std::string m_targetPath;
+    asio::io_context m_ioCtx;
+    std::unique_ptr<asio::ip::tcp::acceptor> m_acceptor;
+    std::thread m_acceptThread;
+    std::thread m_connectionThread; ///< Tracked handleConnection thread (Bug #1 fix).
+    std::atomic<bool> m_running{ false };
+    std::uint16_t m_localPort{ 0 };
 
-    std::mutex relay_mutex_;
-    std::vector<std::thread> relay_threads_;
-    std::vector<std::shared_ptr<asio::ip::tcp::socket>> relay_sockets_;
+    std::mutex m_relayMutex;
+    std::vector<std::thread> m_relayThreads;
+    std::vector<std::shared_ptr<asio::ip::tcp::socket>> m_relaySockets;
 };
 
 } // namespace pulse::exchange

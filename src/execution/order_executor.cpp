@@ -14,12 +14,12 @@ using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
 
 OrderExecutor::OrderExecutor(exchange::GateRestClient &rest_client, MarketType market_type)
-    : rest_client_{ rest_client }
-    , market_type_{ market_type }
+    : m_restClient{ rest_client }
+    , m_marketType{ market_type }
 {
 }
 
-Result<OrderResponse> OrderExecutor::place_order(const OrderRequest &req)
+Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
 {
     PULSE_LOG_INFO("execution",
         "Placing {} {} order: {} {} @ {}",
@@ -33,11 +33,11 @@ Result<OrderResponse> OrderExecutor::place_order(const OrderRequest &req)
         req.price);
 
     // Build order body
-    const nlohmann::json body_json = build_order_body(req);
+    const nlohmann::json body_json = buildOrderBody(req);
     const std::string body = body_json.dump();
 
     // Submit order via REST (retry logic is in GateRestClient::request)
-    auto result = rest_client_.request("POST", EndpointRouter::orders_path(market_type_), "", body);
+    auto result = m_restClient.request("POST", EndpointRouter::ordersPath(m_marketType), "", body);
 
     if (!ok(result))
     {
@@ -47,19 +47,19 @@ Result<OrderResponse> OrderExecutor::place_order(const OrderRequest &req)
 
     // Parse response
     const auto &resp_json = value(result);
-    const OrderResponse resp = parse_order_response(resp_json);
+    const OrderResponse resp = parseOrderResponse(resp_json);
 
     PULSE_LOG_INFO("execution", "Order placed: id={}, status={}", resp.order_id, resp_json.value("status", "unknown"));
 
     return resp;
 }
 
-bool OrderExecutor::cancel_order(const std::string &order_id)
+bool OrderExecutor::cancelOrder(const std::string &order_id)
 {
     PULSE_LOG_INFO("execution", "Cancelling order: {}", order_id);
 
-    const std::string path = EndpointRouter::order_path(market_type_, order_id);
-    auto result = rest_client_.request("DELETE", path);
+    const std::string path = EndpointRouter::orderPath(m_marketType, order_id);
+    auto result = m_restClient.request("DELETE", path);
 
     if (!ok(result))
     {
@@ -71,11 +71,11 @@ bool OrderExecutor::cancel_order(const std::string &order_id)
     return true;
 }
 
-nlohmann::json OrderExecutor::build_order_body(const OrderRequest &req) const
+nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
 {
     nlohmann::json body;
 
-    if (MarketType::Futures == market_type_)
+    if (MarketType::Futures == m_marketType)
     {
         // --- Futures order format ---
         body["contract"] = req.symbol;
@@ -138,7 +138,7 @@ nlohmann::json OrderExecutor::build_order_body(const OrderRequest &req) const
     return body;
 }
 
-OrderResponse OrderExecutor::parse_order_response(const nlohmann::json &resp) const
+OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) const
 {
     OrderResponse result;
 
@@ -157,7 +157,7 @@ OrderResponse OrderExecutor::parse_order_response(const nlohmann::json &resp) co
 
     // Status — spot uses "status" (open/closed/cancelled),
     // futures uses "status" (open/finished) + "finish_as" (filled/cancelled/etc).
-    if (MarketType::Futures == market_type_ && resp.contains("finish_as"))
+    if (MarketType::Futures == m_marketType && resp.contains("finish_as"))
     {
         const std::string finish_as = resp["finish_as"].get<std::string>();
         if ("filled" == finish_as)

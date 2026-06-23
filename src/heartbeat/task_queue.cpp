@@ -1,7 +1,7 @@
 // task_queue.cpp — TaskQueue implementation (Layer 5 Heartbeat)
 //
 // Worker thread lifecycle:
-//   1. Constructor spawns worker jthread via worker_loop()
+//   1. Constructor spawns worker jthread via workerLoop()
 //   2. Worker blocks on condition_variable until a task arrives or stop is requested
 //   3. Destructor signals stop, wakes the worker, and joins the thread
 
@@ -16,9 +16,9 @@ namespace pulse::heartbeat
 // Constructor — spawn worker thread
 // ---------------------------------------------------------------------------
 TaskQueue::TaskQueue()
-    : worker_([this](std::stop_token stoken) { this->worker_loop(stoken); })
+    : m_worker([this](std::stop_token stoken) { this->workerLoop(stoken); })
 {
-    running_.store(true, std::memory_order_release);
+    m_running.store(true, std::memory_order_release);
     PULSE_LOG_INFO("heartbeat", "TaskQueue worker thread started");
 }
 
@@ -28,13 +28,13 @@ TaskQueue::TaskQueue()
 TaskQueue::~TaskQueue()
 {
     // 1. Signal the worker to stop
-    worker_.request_stop();
+    m_worker.request_stop();
 
     // 2. Wake the worker if it is blocked on the condition variable
-    cv_.notify_one();
+    m_cv.notify_one();
 
-    // 3. worker_ is a jthread — destructor auto-joins
-    running_.store(false, std::memory_order_release);
+    // 3. m_worker is a jthread — destructor auto-joins
+    m_running.store(false, std::memory_order_release);
     PULSE_LOG_INFO("heartbeat", "TaskQueue worker thread stopped");
 }
 
@@ -47,27 +47,27 @@ TaskQueue::~TaskQueue()
 void TaskQueue::enqueue(TaskFn fn, TaskPriority priority)
 {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(m_mutex);
         Task task{ std::move(fn), priority };
         if (TaskPriority::High == priority)
         {
-            queue_.push_front(std::move(task));
+            m_queue.push_front(std::move(task));
         }
         else
         {
-            queue_.push_back(std::move(task));
+            m_queue.push_back(std::move(task));
         }
     }
-    cv_.notify_one();
+    m_cv.notify_one();
 }
 
 // ---------------------------------------------------------------------------
-// pending_count — thread-safe read of queue size
+// pendingCount — thread-safe read of queue size
 // ---------------------------------------------------------------------------
-std::size_t TaskQueue::pending_count() const
+std::size_t TaskQueue::pendingCount() const
 {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(mutex_));
-    return queue_.size();
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(m_mutex));
+    return m_queue.size();
 }
 
 // ---------------------------------------------------------------------------
@@ -75,11 +75,11 @@ std::size_t TaskQueue::pending_count() const
 // ---------------------------------------------------------------------------
 bool TaskQueue::running() const
 {
-    return running_.load(std::memory_order_acquire);
+    return m_running.load(std::memory_order_acquire);
 }
 
 // ---------------------------------------------------------------------------
-// worker_loop — main loop for the dedicated worker thread
+// workerLoop — main loop for the dedicated worker thread
 //
 // Execution flow:
 //   1. Acquire mutex and wait on condition_variable
@@ -89,7 +89,7 @@ bool TaskQueue::running() const
 //   5. Execute task inside try/catch — log any exceptions
 //   6. Loop back to step 1
 // ---------------------------------------------------------------------------
-void TaskQueue::worker_loop(std::stop_token stoken)
+void TaskQueue::workerLoop(std::stop_token stoken)
 {
     while (!stoken.stop_requested())
     {
@@ -97,10 +97,10 @@ void TaskQueue::worker_loop(std::stop_token stoken)
 
         // 1. Wait for a task or stop signal
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [&stoken, this]
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cv.wait(lock, [&stoken, this]
             {
-                return stoken.stop_requested() || !queue_.empty();
+                return stoken.stop_requested() || !m_queue.empty();
             });
 
             // 2. Check stop request after waking
@@ -110,12 +110,12 @@ void TaskQueue::worker_loop(std::stop_token stoken)
             }
 
             // 3. Dequeue the front task
-            if (queue_.empty())
+            if (m_queue.empty())
             {
                 continue; // Spurious wakeup
             }
-            task = std::move(queue_.front());
-            queue_.pop_front();
+            task = std::move(m_queue.front());
+            m_queue.pop_front();
         }
         // 4. Mutex released — execute the task without holding the lock
 

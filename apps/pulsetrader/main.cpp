@@ -67,7 +67,7 @@
 // ---------------------------------------------------------------------------
 static std::atomic<bool> g_stop_requested{ false };
 
-static void signal_handler(int /*sig*/)
+static void signalHandler(int /*sig*/)
 {
     g_stop_requested.store(true, std::memory_order_release);
 }
@@ -75,13 +75,13 @@ static void signal_handler(int /*sig*/)
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-static std::string env_or(const char* name, const std::string& fallback)
+static std::string envOr(const char* name, const std::string& fallback)
 {
     const char* val = std::getenv(name);
     return (val && val[0]) ? std::string(val) : fallback;
 }
 
-static void print_usage(const char* prog)
+static void printUsage(const char* prog)
 {
     std::cout
         << "pulseTrader v0.1.0 — AI-driven scalping framework\n\n"
@@ -106,22 +106,22 @@ static void print_usage(const char* prog)
 // ---------------------------------------------------------------------------
 // Build default PulseConfig with env-var overrides
 // ---------------------------------------------------------------------------
-static pulse::PulseConfig build_default_config()
+static pulse::PulseConfig buildDefaultConfig()
 {
     using namespace pulse;
 
     PulseConfig cfg;
 
     // Detect network mode: "mainnet" (default) or "testnet".
-    std::string network = env_or("PULSE_NETWORK", "mainnet");
+    std::string network = envOr("PULSE_NETWORK", "mainnet");
     bool is_testnet = ("testnet" == network);
 
     // L1: Exchange — credentials and URLs depend on network mode.
     if (is_testnet)
     {
         cfg.exchange.testnet = true;
-        cfg.exchange.apiKey    = env_or("GATE_TESTNET_API_KEY", "");
-        cfg.exchange.apiSecret = env_or("GATE_TESTNET_API_SECRET", "");
+        cfg.exchange.apiKey    = envOr("GATE_TESTNET_API_KEY", "");
+        cfg.exchange.apiSecret = envOr("GATE_TESTNET_API_SECRET", "");
         cfg.exchange.restBaseUrl   = pulse::url::kTestnetRest;
         cfg.exchange.wsUrl         = pulse::url::kTestnetSpotWs;
         cfg.exchange.futuresWsUrl  = pulse::url::kTestnetFuturesWs;
@@ -129,19 +129,19 @@ static pulse::PulseConfig build_default_config()
     else
     {
         // Backward compatible: try GATE_MAINNET_* first, fall back to GATE_*.
-        cfg.exchange.apiKey = env_or("GATE_MAINNET_API_KEY",
-                                     env_or("GATE_API_KEY", ""));
-        cfg.exchange.apiSecret = env_or("GATE_MAINNET_API_SECRET",
-                                        env_or("GATE_API_SECRET", ""));
-        cfg.exchange.restBaseUrl = env_or("GATE_MAINNET_REST_URL",
+        cfg.exchange.apiKey = envOr("GATE_MAINNET_API_KEY",
+                                     envOr("GATE_API_KEY", ""));
+        cfg.exchange.apiSecret = envOr("GATE_MAINNET_API_SECRET",
+                                        envOr("GATE_API_SECRET", ""));
+        cfg.exchange.restBaseUrl = envOr("GATE_MAINNET_REST_URL",
                                           "https://api.gateio.ws");
-        cfg.exchange.wsUrl = env_or("GATE_MAINNET_SPOT_WS_URL",
+        cfg.exchange.wsUrl = envOr("GATE_MAINNET_SPOT_WS_URL",
                                     "wss://api.gateio.ws/ws/v4/");
-        cfg.exchange.futuresWsUrl = env_or("GATE_MAINNET_FUTURES_WS_URL",
+        cfg.exchange.futuresWsUrl = envOr("GATE_MAINNET_FUTURES_WS_URL",
                                            "wss://fx-ws.gateio.ws/v4/ws/usdt");
     }
 
-    cfg.exchange.proxyUrl   = env_or("HTTPS_PROXY", env_or("HTTP_PROXY", ""));
+    cfg.exchange.proxyUrl   = envOr("HTTPS_PROXY", envOr("HTTP_PROXY", ""));
 
     // L2: Logging
     cfg.log.level    = "info";
@@ -188,7 +188,7 @@ static pulse::PulseConfig build_default_config()
     // L4: AI — disabled by default (no API key configured)
     cfg.ai.backend              = "openai";
     cfg.ai.model                = "gpt-4o";
-    cfg.ai.apiKey               = env_or("OPENAI_API_KEY", "");
+    cfg.ai.apiKey               = envOr("OPENAI_API_KEY", "");
     cfg.ai.heartbeatIntervalSec = 0;  // Disabled until AI key is provided.
     cfg.ai.requestTimeoutMs     = 30'000;
 
@@ -196,8 +196,8 @@ static pulse::PulseConfig build_default_config()
     cfg.webui.enabled      = true;
     cfg.webui.bindAddress  = "127.0.0.1";
     cfg.webui.port         = static_cast<std::uint16_t>(
-        std::stoi(env_or("PULSE_WEBUI_PORT", "8080")));
-    cfg.webui.authToken    = env_or("PULSE_WEBUI_TOKEN", "pulsetrader");
+        std::stoi(envOr("PULSE_WEBUI_PORT", "8080")));
+    cfg.webui.authToken    = envOr("PULSE_WEBUI_TOKEN", "pulsetrader");
     cfg.webui.maxClients   = 4;
 
     return cfg;
@@ -207,7 +207,7 @@ static pulse::PulseConfig build_default_config()
 // Create a strategy instance from config
 // ---------------------------------------------------------------------------
 static std::unique_ptr<pulse::strategy::StrategyBase>
-create_strategy(const std::string& name,
+createStrategy(const std::string& name,
                 const pulse::strategy::StrategyContext& ctx)
 {
     using namespace pulse::strategy;
@@ -232,7 +232,7 @@ create_strategy(const std::string& name,
 }
 
 // ---------------------------------------------------------------------------
-// log_system_heartbeat — periodic system health summary
+// logSystemHeartbeat — periodic system health summary
 //
 // Logs a single compact line every 60 seconds showing:
 //   - Process uptime (human-readable)
@@ -245,7 +245,7 @@ create_strategy(const std::string& name,
 //   Called only from the main thread. All accessed methods are thread-safe
 //   (atomic loads, shared_mutex reads).
 // ---------------------------------------------------------------------------
-static void log_system_heartbeat(
+static void logSystemHeartbeat(
     std::chrono::steady_clock::time_point start_time,
     const pulse::market::MarketFeed* spot_feed,
     const pulse::market::MarketFeed* futures_feed,
@@ -361,19 +361,19 @@ static void log_system_heartbeat(
         << " futures=" << ws_label(futures_ws);
 
     // Strategy status.
-    msg << " | strategies " << strategy_mgr.running_count()
-        << "/" << strategy_mgr.strategy_count() << " running";
+    msg << " | strategies " << strategy_mgr.runningCount()
+        << "/" << strategy_mgr.strategyCount() << " running";
 
     // Position status.
-    const auto portfolio = position_mgr.portfolio_summary();
-    msg << " | positions " << position_mgr.open_position_count()
+    const auto portfolio = position_mgr.portfolioSummary();
+    msg << " | positions " << position_mgr.openPositionCount()
         << " (notional " << std::fixed << std::setprecision(2)
         << portfolio.total_notional << " USDT)";
 
     // Account balance (fetched via REST, cached).
     if (nullptr != rest_client)
     {
-        auto bal_result = rest_client->get_futures_account_balance();
+        auto bal_result = rest_client->getFuturesAccountBalance();
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
@@ -388,7 +388,7 @@ static void log_system_heartbeat(
     // Spot account balance.
     if (nullptr != spot_rest_client)
     {
-        auto spot_result = spot_rest_client->get_spot_accounts();
+        auto spot_result = spot_rest_client->getSpotAccounts();
         if (ok(spot_result))
         {
             const auto &arr = value(spot_result);
@@ -396,8 +396,8 @@ static void log_system_heartbeat(
             {
                 if ("USDT" == item.value("currency", ""))
                 {
-                    double avail = pulse::safe_parse_double(item.value("available", "0")).value_or(0.0);
-                    double locked = pulse::safe_parse_double(item.value("locked", "0")).value_or(0.0);
+                    double avail = pulse::safeParseDouble(item.value("available", "0")).value_or(0.0);
+                    double locked = pulse::safeParseDouble(item.value("locked", "0")).value_or(0.0);
                     msg << " | spot " << std::fixed << std::setprecision(2)
                         << (avail + locked) << " USDT"
                         << " (avail " << avail << ")";
@@ -431,7 +431,7 @@ int main(int argc, char* argv[])
 
         if ("--help" == arg || "-h" == arg)
         {
-            print_usage(argv[0]);
+            printUsage(argv[0]);
             return 0;
         }
 
@@ -454,7 +454,7 @@ int main(int argc, char* argv[])
         }
 
         std::cerr << "Unknown argument: " << arg << "\n";
-        print_usage(argv[0]);
+        printUsage(argv[0]);
         return 1;
     }
 
@@ -466,7 +466,7 @@ int main(int argc, char* argv[])
     if (!config_path.empty())
     {
         // Load from TOML file.
-        auto result = pulse::load_config_file(config_path);
+        auto result = pulse::loadConfigFile(config_path);
 
         if (!pulse::ok(result))
         {
@@ -477,16 +477,16 @@ int main(int argc, char* argv[])
 
         cfg = pulse::value(result);
 
-        // Note: testnet URL switching is handled by config_loader::parse_exchange()
+        // Note: testnet URL switching is handled by config_loader::parseExchange()
         // which reads testnet flag first and sets URL defaults accordingly.
     }
     else
     {
-        cfg = build_default_config();
+        cfg = buildDefaultConfig();
     }
 
     // Validate regardless of source.
-    auto validation_err = pulse::validate_config(cfg);
+    auto validation_err = pulse::validateConfig(cfg);
 
     if (pulse::ErrorCode::Ok != validation_err.code)
     {
@@ -620,10 +620,10 @@ int main(int argc, char* argv[])
     // 5. L7: Risk Management
     // ------------------------------------------------------------------
     pulse::risk::PositionManager   position_mgr(cfg.risk);
-    pulse::risk::DrawdownGuard     drawdown_guard(cfg.risk);
-    pulse::risk::OrderRateLimiter  rate_limiter(cfg.risk.maxOrdersPerSec);
+    pulse::risk::DrawdownGuard     drawdownGuard(cfg.risk);
+    pulse::risk::OrderRateLimiter  rateLimiter(cfg.risk.maxOrdersPerSec);
     pulse::risk::RiskManager       risk_mgr(cfg.risk, position_mgr,
-                                            drawdown_guard, rate_limiter);
+                                            drawdownGuard, rateLimiter);
 
     log->info("[L7] Risk manager created (max notional: {} USDT, "
               "daily DD limit: {:.1f}%)",
@@ -717,7 +717,7 @@ int main(int argc, char* argv[])
         pulse::strategy::StrategyContext ctx(*feed_ptr, risk_mgr,
                                              *exec_ptr, inst_cfg);
 
-        auto strat = create_strategy(inst_cfg.name, ctx);
+        auto strat = createStrategy(inst_cfg.name, ctx);
         if (!strat)
         {
             log->warn("Unknown strategy '{}', skipping", inst_cfg.name);
@@ -729,10 +729,10 @@ int main(int argc, char* argv[])
                   inst_cfg.order_quantity, inst_cfg.min_confidence,
                   MarketType::Futures == inst_cfg.market_type ? "futures" : "spot");
 
-        strategy_mgr.register_strategy(std::move(strat));
+        strategy_mgr.registerStrategy(std::move(strat));
     }
 
-    if (0 == strategy_mgr.strategy_count())
+    if (0 == strategy_mgr.strategyCount())
     {
         log->error("No strategies registered. Exiting.");
         pulse::logging::Logger::shutdown();
@@ -740,15 +740,15 @@ int main(int argc, char* argv[])
     }
 
     // Wire: strategy signals → aggregator
-    strategy_mgr.set_signal_callback(
+    strategy_mgr.setSignalCallback(
         [&aggregator](const pulse::strategy::TradingSignal& sig)
         {
-            aggregator.add_signal(sig);
+            aggregator.addSignal(sig);
         });
 
     log->info("[L6] Strategy engine ready ({} instances, threshold={:.2f}, "
               "cooldown={}s)",
-              strategy_mgr.strategy_count(),
+              strategy_mgr.strategyCount(),
               cfg.strategy.signal_aggregator_threshold,
               cfg.strategy.signal_cooldown_sec);
 
@@ -761,12 +761,12 @@ int main(int argc, char* argv[])
     if (cfg.ai.heartbeatIntervalSec > 0 && !cfg.ai.apiKey.empty())
     {
         // Wire AI to each strategy's actual params (not a disconnected copy).
-        auto all_params = strategy_mgr.all_params();
+        auto allParams = strategy_mgr.allParams();
         heartbeat = std::make_unique<pulse::heartbeat::HeartbeatScheduler>(
-            cfg.ai, ai_pipeline, std::move(all_params));
+            cfg.ai, ai_pipeline, std::move(allParams));
         log->info("[L5] Heartbeat scheduler created (interval: {}s, {} strategy params)",
                   cfg.ai.heartbeatIntervalSec,
-                  strategy_mgr.strategy_count());
+                  strategy_mgr.strategyCount());
     }
     else
     {
@@ -796,12 +796,12 @@ int main(int argc, char* argv[])
             cfg.webui, *dashboard_state, "frontend");
 
         // Wire: dashboard snapshot → WS broadcast
-        const auto& ws_ref = web_server->ws_server();
-        dashboard_state->set_snapshot_callback(
+        const auto& ws_ref = web_server->wsServer();
+        dashboard_state->setSnapshotCallback(
             [&ws_ref](std::shared_ptr<const pulse::webui::DashboardSnapshot> snap)
             {
-                // WsServer::push_snapshot is const-safe for broadcasting.
-                const_cast<pulse::webui::WsServer&>(ws_ref).push_snapshot(snap);
+                // WsServer::pushSnapshot is const-safe for broadcasting.
+                const_cast<pulse::webui::WsServer&>(ws_ref).pushSnapshot(snap);
             });
 
         log->info("[L9] WebUI: http://{}:{}", cfg.webui.bindAddress, cfg.webui.port);
@@ -818,7 +818,7 @@ int main(int argc, char* argv[])
     std::mutex reservation_mutex;
     std::unordered_map<std::string, std::uint64_t> order_reservations;
 
-    aggregator.set_output_callback(
+    aggregator.setOutputCallback(
         [&](const pulse::strategy::TradingSignal& sig)
         {
             using namespace pulse;
@@ -880,7 +880,7 @@ int main(int argc, char* argv[])
             }
 
             // Risk evaluation.
-            auto eval = risk_mgr.evaluate_order(req);
+            auto eval = risk_mgr.evaluateOrder(req);
             if (risk::RiskDecision::Rejected == eval.decision)
             {
                 log_app->warn("Signal REJECTED [{}] {} {} @ {:.2f} — {}",
@@ -922,12 +922,12 @@ int main(int argc, char* argv[])
                                static_cast<int>(req.market_type));
                 if (eval.reservation_id > 0)
                 {
-                    risk_mgr.position_manager().cancel_reservation(eval.reservation_id);
+                    risk_mgr.positionManager().cancelReservation(eval.reservation_id);
                 }
                 return;
             }
 
-            auto result = exec_ptr->place_order(req);
+            auto result = exec_ptr->placeOrder(req);
             if (!ok(result))
             {
                 auto err = error(result);
@@ -936,7 +936,7 @@ int main(int argc, char* argv[])
                 // Cancel the notional reservation since the order failed.
                 if (eval.reservation_id > 0)
                 {
-                    position_mgr.cancel_reservation(eval.reservation_id);
+                    position_mgr.cancelReservation(eval.reservation_id);
                 }
                 return;
             }
@@ -956,7 +956,7 @@ int main(int argc, char* argv[])
             // Track order lifecycle via WS + REST polling fallback.
             if (track_ptr)
             {
-                track_ptr->track_order(resp.order_id, req.symbol,
+                track_ptr->trackOrder(resp.order_id, req.symbol,
                                         req.side, req.type,
                                         req.quantity, sig.price,
                                         sig.strategy_id);
@@ -992,12 +992,12 @@ int main(int argc, char* argv[])
                     auto it = order_reservations.find(report.order_id);
                     if (it != order_reservations.end())
                     {
-                        position_mgr.consume_reservation(it->second);
+                        position_mgr.consumeReservation(it->second);
                         order_reservations.erase(it);
                     }
                 }
 
-                auto open_result = position_mgr.open_position(
+                auto open_result = position_mgr.openPosition(
                     report.symbol,
                     report.side,
                     report.filled_qty,
@@ -1017,17 +1017,17 @@ int main(int argc, char* argv[])
                     auto it = order_reservations.find(report.order_id);
                     if (it != order_reservations.end())
                     {
-                        position_mgr.consume_reservation(it->second);
+                        position_mgr.consumeReservation(it->second);
                         order_reservations.erase(it);
                     }
                 }
 
                 // For sells, try to close matching positions.
-                auto positions = position_mgr.get_positions_by_symbol(
+                auto positions = position_mgr.getPositionsBySymbol(
                     report.symbol);
                 for (const auto& pos : positions)
                 {
-                    auto close_result = position_mgr.close_position(
+                    auto close_result = position_mgr.closePosition(
                             pos.position_id, report.filled_qty,
                             report.avg_fill_price);
                     if (close_result.has_value())
@@ -1045,13 +1045,13 @@ int main(int argc, char* argv[])
             }
 
             // Update drawdown guard with realized PnL.
-            drawdown_guard.record_pnl(pnl);
+            drawdownGuard.recordPnl(pnl);
 
             // Record trade in SQLite (if enabled).
 #ifdef PULSE_ENABLE_SQLITE
             if (trade_recorder)
             {
-                auto rec_result = trade_recorder->record_trade(
+                auto rec_result = trade_recorder->recordTrade(
                     report, pnl, report.client_order_id);
 
                 if (!pulse::ok(rec_result))
@@ -1065,18 +1065,18 @@ int main(int argc, char* argv[])
 
     if (spot_tracker)
     {
-        spot_tracker->set_completion_callback(completion_handler);
+        spot_tracker->setCompletionCallback(completion_handler);
     }
     if (futures_tracker)
     {
-        futures_tracker->set_completion_callback(completion_handler);
+        futures_tracker->setCompletionCallback(completion_handler);
     }
 
     // ------------------------------------------------------------------
     // 12. Signal handler — SIGINT / SIGTERM
     // ------------------------------------------------------------------
-    std::signal(SIGINT,  signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT,  signalHandler);
+    std::signal(SIGTERM, signalHandler);
 
     // ------------------------------------------------------------------
     // 13. Start all layers
@@ -1108,7 +1108,7 @@ int main(int argc, char* argv[])
 
     // L6: Spawn strategy threads.
     strategy_mgr.start();
-    log->info("[L6] {} strategy thread(s) started", strategy_mgr.running_count());
+    log->info("[L6] {} strategy thread(s) started", strategy_mgr.runningCount());
 
     // L5: Start AI heartbeat.
     if (heartbeat)
@@ -1157,7 +1157,7 @@ int main(int argc, char* argv[])
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)
         {
             heartbeat_counter = 0;
-            log_system_heartbeat(
+            logSystemHeartbeat(
                 engine_start,
                 spot_feed.get(),
                 futures_feed.get(),
@@ -1194,7 +1194,7 @@ int main(int argc, char* argv[])
     {
         heartbeat->stop();
         log->info("[L5] Heartbeat scheduler stopped ({} beats total)",
-                  heartbeat->beat_count());
+                  heartbeat->beatCount());
     }
 
     // L6: Strategy threads
@@ -1212,15 +1212,15 @@ int main(int argc, char* argv[])
     log->info("[L1] WebSocket(s) disconnected");
 
     // Summary
-    auto portfolio = position_mgr.portfolio_summary();
+    auto portfolio = position_mgr.portfolioSummary();
     log->info("Final portfolio: {} open position(s), notional {:.2f} USDT",
-              position_mgr.open_position_count(), portfolio.total_notional);
+              position_mgr.openPositionCount(), portfolio.total_notional);
 
     // L8+: Trade recorder
 #ifdef PULSE_ENABLE_SQLITE
     if (trade_recorder)
     {
-        const auto count = trade_recorder->trade_count();
+        const auto count = trade_recorder->tradeCount();
         trade_recorder->checkpoint();
         trade_recorder->close();
         log->info("[L8+] Trade recorder closed ({} trades recorded)", count);

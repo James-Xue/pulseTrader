@@ -9,8 +9,8 @@
 //   MarketFeed feed(ws_client, rest_client);                    // spot (default)
 //   MarketFeed futures_feed(ws_client, rest_client, Futures);   // futures
 //   feed.start({"BTC_USDT", "ETH_USDT"});
-//   auto ticker = feed.ticker_cache().get("BTC_USDT");
-//   auto book = feed.orderbook_manager().top_bids("BTC_USDT", 5);
+//   auto ticker = feed.tickerCache().get("BTC_USDT");
+//   auto book = feed.orderbookManager().topBids("BTC_USDT", 5);
 //   feed.stop();
 
 #include "core/types.hpp"
@@ -73,18 +73,18 @@ class MarketFeed
     void stop();
 
     /// Access the ticker cache (read-only for strategy threads).
-    [[nodiscard]] TickerCache &ticker_cache();
+    [[nodiscard]] TickerCache &tickerCache();
 
     /// Access the symbol registry (read-only after start()).
-    [[nodiscard]] SymbolRegistry &symbol_registry();
+    [[nodiscard]] SymbolRegistry &symbolRegistry();
 
     /// Access the K-line buffer (read-only for strategy threads).
     ///
-    /// Note: KlineBuffer is per-symbol. Use get_kline_buffer(symbol) for a specific symbol.
-    [[nodiscard]] KlineBuffer &get_kline_buffer(const Symbol &symbol);
+    /// Note: KlineBuffer is per-symbol. Use getKlineBuffer(symbol) for a specific symbol.
+    [[nodiscard]] KlineBuffer &getKlineBuffer(const Symbol &symbol);
 
     /// Access the order book manager (read-only for strategy threads).
-    [[nodiscard]] OrderBookManager &orderbook_manager();
+    [[nodiscard]] OrderBookManager &orderbookManager();
 
     /// Return a snapshot of the event counters.
     ///
@@ -93,16 +93,16 @@ class MarketFeed
     [[nodiscard]] FeedStats stats() const;
 
   private:
-    exchange::GateWsClient &ws_client_;
-    exchange::GateRestClient &rest_client_;
-    MarketType market_type_;
+    exchange::GateWsClient &m_wsClient;
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
 
-    TickerCache ticker_cache_;
-    SymbolRegistry symbol_registry_;
-    OrderBookManager orderbook_manager_;
-    std::unordered_map<Symbol, KlineBuffer> kline_buffers_; ///< Per-symbol K-line buffers.
+    TickerCache m_tickerCache;
+    SymbolRegistry m_symbolRegistry;
+    OrderBookManager m_orderbookManager;
+    std::unordered_map<Symbol, KlineBuffer> m_klineBuffers; ///< Per-symbol K-line buffers.
 
-    std::vector<Symbol> subscribed_symbols_;
+    std::vector<Symbol> m_subscribedSymbols;
 
     // --- Event counters (relaxed atomics, incremented on WS I/O thread) ---
     //
@@ -111,18 +111,18 @@ class MarketFeed
     //   2. The only ordering guarantee needed is "increment happens before read"
     //      which is satisfied by the atomic itself on x86 (strongly ordered)
     //   3. On ARM, relaxed avoids expensive barrier instructions on the hot path
-    std::atomic<std::uint64_t> ticker_count_{ 0 };
-    std::atomic<std::uint64_t> orderbook_count_{ 0 };
-    std::atomic<std::uint64_t> kline_count_{ 0 };
+    std::atomic<std::uint64_t> m_tickerCount{ 0 };
+    std::atomic<std::uint64_t> m_orderbookCount{ 0 };
+    std::atomic<std::uint64_t> m_klineCount{ 0 };
 
     /// Parse a ticker update JSON and store in TickerCache.
-    void on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame);
+    void onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
 
     /// Parse an order book update JSON and apply to OrderBookManager.
-    void on_orderbook_update(const nlohmann::json &result, const nlohmann::json &full_frame);
+    void onOrderbookUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
 
     /// Parse a K-line update JSON and push to the appropriate KlineBuffer.
-    void on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame);
+    void onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
 };
 
 } // namespace pulse::market

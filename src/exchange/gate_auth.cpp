@@ -27,7 +27,7 @@ namespace
 // 1. Iterate each byte in the buffer
 // 2. Format as two-digit lowercase hex with zero-padding
 // 3. Accumulate into an ostringstream
-std::string to_hex(const unsigned char *data, std::size_t len)
+std::string toHex(const unsigned char *data, std::size_t len)
 {
     std::ostringstream oss;
     for (std::size_t i = 0; i < len; ++i)
@@ -43,17 +43,17 @@ std::string to_hex(const unsigned char *data, std::size_t len)
 // Public API
 // ---------------------------------------------------------------------------
 
-std::string sha512_hex(const std::string &data)
+std::string sha512Hex(const std::string &data)
 {
     // 1. Compute raw SHA-512 digest using the EVP API (preferred over deprecated SHA512())
     unsigned char hash[SHA512_DIGEST_LENGTH];
     SHA512(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
 
     // 2. Encode as lowercase hex
-    return to_hex(hash, sizeof(hash));
+    return toHex(hash, sizeof(hash));
 }
 
-std::string hmac_sha512_hex(const std::string &secret, const std::string &payload)
+std::string hmacSha512Hex(const std::string &secret, const std::string &payload)
 {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
@@ -68,10 +68,10 @@ std::string hmac_sha512_hex(const std::string &secret, const std::string &payloa
             &digest_len);
 
     // 2. Encode as lowercase hex
-    return to_hex(digest, digest_len);
+    return toHex(digest, digest_len);
 }
 
-std::string unix_seconds()
+std::string unixSeconds()
 {
     // Gate.io v4 API expects Unix timestamp in seconds (not milliseconds).
     auto now_s =
@@ -80,7 +80,7 @@ std::string unix_seconds()
     return std::to_string(now_s);
 }
 
-std::string build_sign_payload(
+std::string buildSignPayload(
         const std::string &method,
         const std::string &path,
         const std::string &query,
@@ -92,11 +92,11 @@ std::string build_sign_payload(
     //
     // 1. Hash the request body (empty string for GET/DELETE)
     // 2. Concatenate all components with newline separators
-    const std::string body_hash = sha512_hex(body);
+    const std::string body_hash = sha512Hex(body);
     return method + "\n" + path + "\n" + query + "\n" + body_hash + "\n" + timestamp;
 }
 
-std::string sign_request(
+std::string signRequest(
         const std::string &secret,
         const std::string &method,
         const std::string &path,
@@ -106,8 +106,8 @@ std::string sign_request(
 {
     // 1. Build the canonical sign payload
     // 2. HMAC-SHA512 it with the secret key
-    const std::string payload = build_sign_payload(method, path, query, body, timestamp);
-    return hmac_sha512_hex(secret, payload);
+    const std::string payload = buildSignPayload(method, path, query, body, timestamp);
+    return hmacSha512Hex(secret, payload);
 }
 
 } // namespace pulse::exchange

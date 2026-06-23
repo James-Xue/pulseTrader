@@ -35,34 +35,34 @@ class OrderRateLimiter
     ///
     /// Algorithm:
     ///   1. Call refill() to add tokens based on elapsed time
-    ///   2. Load tokens_ atomically
+    ///   2. Load m_tokens atomically
     ///   3. If tokens >= 1.0: CAS(tokens - 1.0); return true on success
     ///   4. If tokens < 1.0: return false (rate limited)
     ///
     /// Returns true if allowed, false if rate-limited.
-    [[nodiscard]] bool try_acquire();
+    [[nodiscard]] bool tryAcquire();
 
     /// Returns the current number of available tokens (approximate, lock-free read).
-    [[nodiscard]] double available_tokens() const;
+    [[nodiscard]] double availableTokens() const;
 
     /// Returns true if the bucket is empty (no tokens available).
-    [[nodiscard]] bool is_exhausted() const;
+    [[nodiscard]] bool isExhausted() const;
 
     /// Reset the bucket to full capacity (for testing or manual override).
     void reset();
 
   private:
-    std::uint32_t max_rate_;        ///< Tokens per second (refill rate).
-    std::uint32_t burst_capacity_;  ///< Maximum tokens in bucket.
-    std::atomic<double> tokens_;    ///< Current available tokens.
-    std::atomic<std::int64_t> last_refill_ns_; ///< Last refill timestamp (nanoseconds since epoch).
+    std::uint32_t m_maxRate;        ///< Tokens per second (refill rate).
+    std::uint32_t m_burstCapacity;  ///< Maximum tokens in bucket.
+    std::atomic<double> m_tokens;    ///< Current available tokens.
+    std::atomic<std::int64_t> m_lastRefillNs; ///< Last refill timestamp (nanoseconds since epoch).
 
     /// Add tokens based on elapsed time since last refill.
     /// Uses CAS to avoid double-refill under contention.
     void refill();
 
     /// Get current time in nanoseconds since epoch.
-    [[nodiscard]] static std::int64_t now_ns();
+    [[nodiscard]] static std::int64_t nowNs();
 };
 
 } // namespace pulse::risk

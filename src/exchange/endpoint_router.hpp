@@ -37,45 +37,45 @@ class EndpointRouter
     ///
     /// Spot:    "/api/v4/spot"
     /// Futures: "/api/v4/futures/usdt"
-    [[nodiscard]] static std::string rest_prefix(MarketType mt);
+    [[nodiscard]] static std::string restPrefix(MarketType mt);
 
     /// WebSocket channel name prefix for the given market type.
     ///
     /// Spot:    "spot"
     /// Futures: "futures"
-    [[nodiscard]] static std::string ws_prefix(MarketType mt);
+    [[nodiscard]] static std::string wsPrefix(MarketType mt);
 
-    /// Build a full WebSocket channel name: ws_prefix(mt) + "." + suffix.
+    /// Build a full WebSocket channel name: wsPrefix(mt) + "." + suffix.
     ///
     /// Examples:
-    ///   ws_channel(Spot, "tickers")    → "spot.tickers"
-    ///   ws_channel(Futures, "tickers") → "futures.tickers"
-    [[nodiscard]] static std::string ws_channel(MarketType mt, std::string_view suffix);
+    ///   wsChannel(Spot, "tickers")    → "spot.tickers"
+    ///   wsChannel(Futures, "tickers") → "futures.tickers"
+    [[nodiscard]] static std::string wsChannel(MarketType mt, std::string_view suffix);
 
     /// Server-initiated ping channel name.
     ///
     /// Spot:    "spot.ping"
     /// Futures: "futures.ping"
-    [[nodiscard]] static std::string ping_channel(MarketType mt);
+    [[nodiscard]] static std::string pingChannel(MarketType mt);
 
     /// Client reply pong channel name.
     ///
     /// Spot:    "spot.pong"
     /// Futures: "futures.pong"
-    [[nodiscard]] static std::string pong_channel(MarketType mt);
+    [[nodiscard]] static std::string pongChannel(MarketType mt);
 
     /// Select the appropriate WebSocket URL from ExchangeConfig.
     ///
     /// Spot:    config.wsUrl    (wss://api.gateio.ws/ws/v4/)
     /// Futures: config.futuresWsUrl (wss://fx-ws.gateio.ws/v4/ws/usdt)
-    [[nodiscard]] static std::string select_ws_url(const ExchangeConfig &cfg, MarketType mt);
+    [[nodiscard]] static std::string selectWsUrl(const ExchangeConfig &cfg, MarketType mt);
 
     /// Whether the given market type uses JSON application-layer ping/pong.
     ///
     /// Spot uses JSON ping/pong (spot.ping → spot.pong).
     /// Futures uses RFC 6455 protocol-layer ping/pong (handled by websocketpp automatically),
     /// but also accepts JSON ping/pong — so the handler should still respond if one arrives.
-    [[nodiscard]] static bool needs_json_ping(MarketType mt);
+    [[nodiscard]] static bool needsJsonPing(MarketType mt);
 
     // -----------------------------------------------------------------------
     // REST endpoint builders — common public/authenticated paths
@@ -85,37 +85,37 @@ class EndpointRouter
     ///
     /// Spot:    "/api/v4/spot/currency_pairs"
     /// Futures: "/api/v4/futures/usdt/contracts"
-    [[nodiscard]] static std::string contracts_path(MarketType mt);
+    [[nodiscard]] static std::string contractsPath(MarketType mt);
 
     /// Path to fetch ticker(s).
     ///
     /// Spot:    "/api/v4/spot/tickers"
     /// Futures: "/api/v4/futures/usdt/tickers"
-    [[nodiscard]] static std::string tickers_path(MarketType mt);
+    [[nodiscard]] static std::string tickersPath(MarketType mt);
 
     /// Path to fetch account balances.
     ///
     /// Spot:    "/api/v4/spot/accounts"
     /// Futures: "/api/v4/futures/usdt/accounts"
-    [[nodiscard]] static std::string accounts_path(MarketType mt);
+    [[nodiscard]] static std::string accountsPath(MarketType mt);
 
     /// Path to place or list orders.
     ///
     /// Spot:    "/api/v4/spot/orders"
     /// Futures: "/api/v4/futures/usdt/orders"
-    [[nodiscard]] static std::string orders_path(MarketType mt);
+    [[nodiscard]] static std::string ordersPath(MarketType mt);
 
     /// Path to get or cancel a specific order by ID.
     ///
     /// Spot:    "/api/v4/spot/orders/{order_id}"
     /// Futures: "/api/v4/futures/usdt/orders/{order_id}"
-    [[nodiscard]] static std::string order_path(MarketType mt, const std::string &order_id);
+    [[nodiscard]] static std::string orderPath(MarketType mt, const std::string &order_id);
 
     /// Path to set position leverage (futures only).
     ///
     /// Futures: "/api/v4/futures/usdt/positions/{contract}/leverage"
     /// Spot:    returns empty string (not applicable).
-    [[nodiscard]] static std::string leverage_path(MarketType mt, const std::string &contract = "");
+    [[nodiscard]] static std::string leveragePath(MarketType mt, const std::string &contract = "");
 };
 
 } // namespace pulse::exchange

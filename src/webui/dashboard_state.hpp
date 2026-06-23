@@ -9,16 +9,16 @@
 //   5. Kline  (per candle) — new candle detection via open_time change
 //
 // Thread model:
-//   - One std::jthread runs poll_loop() with a 50 ms sleep between checks
+//   - One std::jthread runs pollLoop() with a 50 ms sleep between checks
 //   - Latest snapshot is stored behind a shared_mutex + shared_ptr for
 //     lock-free readers (WebSocket broadcast thread)
 //   - An optional SnapshotCallback is invoked after each poll cycle so the
 //     WebSocket layer can push diffs to connected clients
 //
 // Thread safety:
-//   - poll_loop() is the sole writer (single-threaded)
+//   - pollLoop() is the sole writer (single-threaded)
 //   - latest() and the callback are readers (shared_mutex)
-//   - running_ is atomic<bool> for lock-free status checks
+//   - m_running is atomic<bool> for lock-free status checks
 
 #include "ai/ai_pipeline.hpp"
 #include "core/config.hpp"
@@ -48,7 +48,7 @@ namespace pulse::webui
 // Usage:
 //   DashboardState state(config, market_feed, strategy_mgr, risk_mgr,
 //                        order_tracker, ai_pipeline);
-//   state.set_snapshot_callback([](auto snap) { broadcast(snap); });
+//   state.setSnapshotCallback([](auto snap) { broadcast(snap); });
 //   state.start();
 //   // ... later ...
 //   auto snap = state.latest();
@@ -97,11 +97,11 @@ class DashboardState
     /// Set the callback invoked after each poll cycle.
     ///
     /// Must be called before start() to avoid missing the first snapshot.
-    void set_snapshot_callback(SnapshotCallback cb);
+    void setSnapshotCallback(SnapshotCallback cb);
 
     /// Start the polling loop on a dedicated jthread.
     ///
-    /// The thread runs poll_loop() with cooperative cancellation via stop_token.
+    /// The thread runs pollLoop() with cooperative cancellation via stop_token.
     /// Has no effect if already running.
     void start();
 
@@ -130,82 +130,82 @@ class DashboardState
     ///   3. Dispatch to the appropriate poll_*() method
     ///   4. Assemble a new DashboardSnapshot and publish it
     ///   5. Check stop_token for cooperative cancellation
-    void poll_loop(std::stop_token stoken);
+    void pollLoop(std::stop_token stoken);
 
     /// Fast tier (200 ms): order books + ticker prices.
     ///
-    /// For each symbol from ticker_cache().symbols():
-    ///   - Retrieve top 20 bids/asks from orderbook_manager()
+    /// For each symbol from tickerCache().symbols():
+    ///   - Retrieve top 20 bids/asks from orderbookManager()
     ///   - Store in snap.order_book
-    void poll_fast(DashboardSnapshot &snap);
+    void pollFast(DashboardSnapshot &snap);
 
     /// Medium tier (500 ms): open positions + active orders.
     ///
     /// Retrieves:
-    ///   - risk_mgr.position_manager().get_all_positions()
-    ///   - risk_mgr.position_manager().portfolio_summary()
-    ///   - order_tracker.active_orders()
-    ///   - order_tracker.recent_reports(10)
-    void poll_medium(DashboardSnapshot &snap);
+    ///   - risk_mgr.positionManager().getAllPositions()
+    ///   - risk_mgr.positionManager().portfolioSummary()
+    ///   - order_tracker.activeOrders()
+    ///   - order_tracker.recentReports(10)
+    void pollMedium(DashboardSnapshot &snap);
 
     /// Slow tier (1 s): strategies, risk state, metrics.
     ///
     /// Retrieves:
     ///   - strategy_mgr.snapshot()
-    ///   - risk_mgr.risk_snapshot()
+    ///   - risk_mgr.riskSnapshot()
     ///   - metrics.available = false (not implemented yet)
-    void poll_slow(DashboardSnapshot &snap);
+    void pollSlow(DashboardSnapshot &snap);
 
     /// AI tier (60 s check, actual update ~5 min).
     ///
-    /// Retrieves ai_pipeline.last_result() and compares the shared_ptr
+    /// Retrieves ai_pipeline.lastResult() and compares the shared_ptr
     /// for change detection (only updates when a new result is available).
-    void poll_ai(DashboardSnapshot &snap);
+    void pollAi(DashboardSnapshot &snap);
 
     /// Kline tier: per-candle change detection.
     ///
     /// For each symbol, retrieves the latest Kline from kline_buffer and
     /// compares open_time with the last known open_time. If changed, a new
     /// candle has formed and the kline snapshot is updated.
-    void poll_klines(DashboardSnapshot &snap);
+    void pollKlines(DashboardSnapshot &snap);
 
     /// Account tier (10 s): exchange-reported account balance.
     ///
     /// Fetches futures account balance via REST and stores in snap.account.
     /// Gracefully handles REST failures (sets available = false).
-    void poll_account(DashboardSnapshot &snap);
+    void pollAccount(DashboardSnapshot &snap);
 
     // --- Configuration ---
-    const WebUiConfig &config_;
+    const WebUiConfig &m_config;
 
     // --- Upstream component references ---
-    market::MarketFeed &market_feed_;
-    strategy::StrategyManager &strategy_mgr_;
-    risk::RiskManager &risk_mgr_;
-    execution::OrderTracker &order_tracker_;
-    ai::AiPipeline &ai_pipeline_;
-    exchange::GateRestClient *rest_client_; ///< Optional — futures REST client, may be null.
-    exchange::GateRestClient *spot_rest_client_; ///< Optional — spot REST client, may be null.
+    market::MarketFeed &m_marketFeed;
+    strategy::StrategyManager &m_strategyMgr;
+    risk::RiskManager &m_riskMgr;
+    execution::OrderTracker &m_orderTracker;
+    ai::AiPipeline &m_aiPipeline;
+    exchange::GateRestClient *m_restClient; ///< Optional — futures REST client, may be null.
+    exchange::GateRestClient *m_spotRestClient; ///< Optional — spot REST client, may be null.
 
     // --- Polling thread ---
-    std::jthread poll_thread_;
-    std::atomic<bool> running_{ false };
+    std::jthread m_pollThread;
+    std::atomic<bool> m_running{ false };
 
     // --- Latest snapshot (shared read / exclusive write) ---
-    mutable std::shared_mutex snapshot_mutex_;
-    std::shared_ptr<const DashboardSnapshot> latest_snapshot_{ nullptr };
+    mutable std::shared_mutex m_snapshotMutex;
+    std::shared_ptr<const DashboardSnapshot> m_latestSnapshot{ nullptr };
 
     // --- Callback ---
-    SnapshotCallback snapshot_callback_;
+    SnapshotCallback m_snapshotCallback;
 
     // --- Kline change detection state ---
     // Tracks open_time for new-candle detection and close price for
     // within-candle updates (Gate.io pushes OHLCV changes every ~2s).
-    std::unordered_map<Symbol, std::int64_t> last_kline_open_times_;
-    std::unordered_map<Symbol, double> last_kline_close_;
+    std::unordered_map<Symbol, std::int64_t> m_lastKlineOpenTimes;
+    std::unordered_map<Symbol, double> m_lastKlineClose;
 
     // --- AI change detection state ---
-    std::shared_ptr<const ai::AnalysisResult> last_ai_result_{ nullptr };
+    std::shared_ptr<const ai::AnalysisResult> m_lastAiResult{ nullptr };
 };
 
 } // namespace pulse::webui

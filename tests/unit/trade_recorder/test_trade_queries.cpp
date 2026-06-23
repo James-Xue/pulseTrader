@@ -52,11 +52,11 @@ TradeRecorder open_populated_db()
     auto &rec = value(result);
 
     // 5 trades: 3 BTC_USDT wins, 2 ETH_USDT losses.
-    EXPECT_TRUE(ok(rec.record_trade(make_report("Q1", "BTC_USDT", Side::Buy, 0.001, 65000), 3.0, "momentum_scalper")));
-    EXPECT_TRUE(ok(rec.record_trade(make_report("Q2", "BTC_USDT", Side::Sell, 0.001, 65500), 5.0, "momentum_scalper")));
-    EXPECT_TRUE(ok(rec.record_trade(make_report("Q3", "BTC_USDT", Side::Buy, 0.002, 64000), 2.0, "orderbook_scalper")));
-    EXPECT_TRUE(ok(rec.record_trade(make_report("Q4", "ETH_USDT", Side::Buy, 0.01, 3500), -1.5, "mean_reversion")));
-    EXPECT_TRUE(ok(rec.record_trade(make_report("Q5", "ETH_USDT", Side::Sell, 0.01, 3400), -2.5, "mean_reversion")));
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("Q1", "BTC_USDT", Side::Buy, 0.001, 65000), 3.0, "momentum_scalper")));
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("Q2", "BTC_USDT", Side::Sell, 0.001, 65500), 5.0, "momentum_scalper")));
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("Q3", "BTC_USDT", Side::Buy, 0.002, 64000), 2.0, "orderbook_scalper")));
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("Q4", "ETH_USDT", Side::Buy, 0.01, 3500), -1.5, "mean_reversion")));
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("Q5", "ETH_USDT", Side::Sell, 0.01, 3400), -2.5, "mean_reversion")));
 
     return std::move(rec);
 }
@@ -64,13 +64,13 @@ TradeRecorder open_populated_db()
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// get_trades
+// getTrades
 // ---------------------------------------------------------------------------
 
 TEST(TradeQueries, GetTradesAll)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades();
+    auto result = recorder.getTrades();
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(5u, value(result).size());
 }
@@ -78,7 +78,7 @@ TEST(TradeQueries, GetTradesAll)
 TEST(TradeQueries, GetTradesBySymbol)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades("BTC_USDT");
+    auto result = recorder.getTrades("BTC_USDT");
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(3u, value(result).size());
 }
@@ -88,12 +88,12 @@ TEST(TradeQueries, GetTradesByTimeRange)
     auto recorder = open_populated_db();
 
     // All trades were inserted just now, so a wide range returns all.
-    auto result = recorder.get_trades("", 0, std::numeric_limits<std::int64_t>::max());
+    auto result = recorder.getTrades("", 0, std::numeric_limits<std::int64_t>::max());
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(5u, value(result).size());
 
     // A range in the past returns nothing.
-    auto empty = recorder.get_trades("", 1000, 2000);
+    auto empty = recorder.getTrades("", 1000, 2000);
     ASSERT_TRUE(ok(empty));
     EXPECT_EQ(0u, value(empty).size());
 }
@@ -101,7 +101,7 @@ TEST(TradeQueries, GetTradesByTimeRange)
 TEST(TradeQueries, GetTradesBySymbolAndTimeRange)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades(
+    auto result = recorder.getTrades(
         "ETH_USDT", 0, std::numeric_limits<std::int64_t>::max());
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(2u, value(result).size());
@@ -110,19 +110,19 @@ TEST(TradeQueries, GetTradesBySymbolAndTimeRange)
 TEST(TradeQueries, GetTradesEmptyResult)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades("DOGE_USDT");
+    auto result = recorder.getTrades("DOGE_USDT");
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(0u, value(result).size());
 }
 
 // ---------------------------------------------------------------------------
-// get_trades_by_strategy
+// getTradesByStrategy
 // ---------------------------------------------------------------------------
 
 TEST(TradeQueries, GetTradesByStrategy)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades_by_strategy("momentum_scalper");
+    auto result = recorder.getTradesByStrategy("momentum_scalper");
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(2u, value(result).size());
 }
@@ -130,23 +130,23 @@ TEST(TradeQueries, GetTradesByStrategy)
 TEST(TradeQueries, GetTradesByStrategyUnknown)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_trades_by_strategy("nonexistent_strategy");
+    auto result = recorder.getTradesByStrategy("nonexistent_strategy");
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(0u, value(result).size());
 }
 
 // ---------------------------------------------------------------------------
-// get_summary
+// getSummary
 // ---------------------------------------------------------------------------
 
 TEST(TradeQueries, GetSummaryAll)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_summary();
+    auto result = recorder.getSummary();
     ASSERT_TRUE(ok(result));
 
     const auto &s = value(result);
-    EXPECT_EQ(5, s.trade_count);
+    EXPECT_EQ(5, s.tradeCount);
     EXPECT_NEAR(6.0, s.total_pnl, 0.01);  // 3+5+2-1.5-2.5 = 6.0
     EXPECT_NEAR(0.5, s.total_fees, 0.01);  // 5 * 0.1
     EXPECT_GT(s.total_volume, 0.0);
@@ -157,21 +157,21 @@ TEST(TradeQueries, GetSummaryTimeRange)
     auto recorder = open_populated_db();
 
     // Wide range returns all.
-    auto result = recorder.get_summary(
+    auto result = recorder.getSummary(
         0, std::numeric_limits<std::int64_t>::max());
     ASSERT_TRUE(ok(result));
-    EXPECT_EQ(5, value(result).trade_count);
+    EXPECT_EQ(5, value(result).tradeCount);
 
     // Past range returns zero.
-    auto empty = recorder.get_summary(1000, 2000);
+    auto empty = recorder.getSummary(1000, 2000);
     ASSERT_TRUE(ok(empty));
-    EXPECT_EQ(0, value(empty).trade_count);
+    EXPECT_EQ(0, value(empty).tradeCount);
 }
 
 TEST(TradeQueries, GetSummaryWinRate)
 {
     auto recorder = open_populated_db();
-    auto result = recorder.get_summary();
+    auto result = recorder.getSummary();
     ASSERT_TRUE(ok(result));
 
     // 3 wins (pnl > 0) out of 5 trades = 0.6.
@@ -179,7 +179,7 @@ TEST(TradeQueries, GetSummaryWinRate)
 }
 
 // ---------------------------------------------------------------------------
-// get_daily_pnl
+// getDailyPnl
 // ---------------------------------------------------------------------------
 
 TEST(TradeQueries, GetDailyPnl)
@@ -187,11 +187,11 @@ TEST(TradeQueries, GetDailyPnl)
     auto recorder = open_populated_db();
 
     // Today's PnL — all trades were inserted just now.
-    auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    auto nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
                       std::chrono::system_clock::now().time_since_epoch())
                       .count();
 
-    auto result = recorder.get_daily_pnl(now_ns);
+    auto result = recorder.getDailyPnl(nowNs);
     ASSERT_TRUE(ok(result));
     EXPECT_NEAR(6.0, value(result), 0.01);
 }
@@ -201,7 +201,7 @@ TEST(TradeQueries, GetDailyPnlEmptyDay)
     auto recorder = open_populated_db();
 
     // A day far in the past — no trades.
-    auto result = recorder.get_daily_pnl(0);
+    auto result = recorder.getDailyPnl(0);
     ASSERT_TRUE(ok(result));
     EXPECT_DOUBLE_EQ(0.0, value(result));
 }

@@ -36,7 +36,7 @@ namespace pulse::ai
 //
 // Usage (production):
 //   AIClient client(config);
-//   auto result = client.analyze(system_prompt, user_prompt);
+//   auto result = client.analyze(systemPrompt, userPrompt);
 //   if (ok(result)) { use(value(result)); }
 //
 // Usage (testing):
@@ -83,13 +83,13 @@ class AIClient
     ///   5. Retry on transient failures (up to config.maxRetries attempts)
     ///
     /// Parameters:
-    ///   1. system_prompt — the system prompt enforcing JSON schema
-    ///   2. user_prompt   — the user prompt with market data
+    ///   1. systemPrompt — the system prompt enforcing JSON schema
+    ///   2. userPrompt   — the user prompt with market data
     ///
     /// Returns: AnalysisResult on success, PulseError on failure.
     [[nodiscard]] Result<AnalysisResult> analyze(
-            const std::string &system_prompt,
-            const std::string &user_prompt);
+            const std::string &systemPrompt,
+            const std::string &userPrompt);
 
   private:
     /// Bundle of backend-specific request components.
@@ -105,34 +105,34 @@ class AIClient
     /// Endpoint: POST {baseUrl}/v1/chat/completions
     /// Body:     {model, messages: [{role:system}, {role:user}], response_format: json_object}
     /// Headers:  Authorization: Bearer {apiKey}, Content-Type: application/json
-    [[nodiscard]] RequestParts build_openai_request(
-            const std::string &system_prompt,
-            const std::string &user_prompt) const;
+    [[nodiscard]] RequestParts buildOpenaiRequest(
+            const std::string &systemPrompt,
+            const std::string &userPrompt) const;
 
     /// Build a Claude Messages API request.
     ///
     /// Endpoint: POST {baseUrl}/v1/messages
     /// Body:     {model, system, messages: [{role:user}], max_tokens: 1024}
     /// Headers:  x-api-key: {apiKey}, anthropic-version: 2023-06-01, Content-Type: application/json
-    [[nodiscard]] RequestParts build_claude_request(
-            const std::string &system_prompt,
-            const std::string &user_prompt) const;
+    [[nodiscard]] RequestParts buildClaudeRequest(
+            const std::string &systemPrompt,
+            const std::string &userPrompt) const;
 
     /// Parse an OpenAI Chat Completions response.
     ///
     /// Extracts: choices[0].message.content → parse as JSON → AnalysisResult
-    [[nodiscard]] Result<AnalysisResult> parse_openai_response(const nlohmann::json &j) const;
+    [[nodiscard]] Result<AnalysisResult> parseOpenaiResponse(const nlohmann::json &j) const;
 
     /// Parse a Claude Messages API response.
     ///
     /// Extracts: content[0].text → parse as JSON → AnalysisResult
-    [[nodiscard]] Result<AnalysisResult> parse_claude_response(const nlohmann::json &j) const;
+    [[nodiscard]] Result<AnalysisResult> parseClaudeResponse(const nlohmann::json &j) const;
 
     /// Default HTTP transport using libcurl.
     ///
     /// Creates a per-request curl easy handle, sends the POST, and returns
     /// the parsed JSON response. Non-throwing — parse failures become PulseError.
-    [[nodiscard]] Result<nlohmann::json> curl_transport(
+    [[nodiscard]] Result<nlohmann::json> curlTransport(
             const std::string &url,
             const std::string &body,
             const std::vector<std::string> &headers) const;
@@ -143,10 +143,10 @@ class AIClient
     /// Otherwise, defaults are applied:
     ///   - "claude" → "https://api.anthropic.com"
     ///   - "openai" → "https://api.openai.com"
-    [[nodiscard]] std::string resolve_base_url() const;
+    [[nodiscard]] std::string resolveBaseUrl() const;
 
-    AiConfig config_;
-    HttpTransport transport_; ///< Non-null = use injected transport (testing); null = use curl.
+    AiConfig m_config;
+    HttpTransport m_transport; ///< Non-null = use injected transport (testing); null = use curl.
 };
 
 } // namespace pulse::ai

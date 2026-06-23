@@ -83,7 +83,7 @@ class OrderTracker
     ///   5. requested_qty    — original order quantity
     ///   6. submit_mid_price — mid-price at submission time (for slippage calc)
     ///   7. client_order_id  — optional client-assigned ID (strategy tracking)
-    void track_order(const std::string &order_id,
+    void trackOrder(const std::string &order_id,
         const Symbol &symbol,
         Side side,
         OrderType type,
@@ -92,60 +92,60 @@ class OrderTracker
         const std::string &client_order_id = "");
 
     /// Stop tracking an order (reached terminal state).
-    void stop_tracking(const std::string &order_id);
+    void stopTracking(const std::string &order_id);
 
     /// Get current order status.
-    [[nodiscard]] std::optional<OrderStatus> get_status(const std::string &order_id) const;
+    [[nodiscard]] std::optional<OrderStatus> getStatus(const std::string &order_id) const;
 
     /// Get execution report (only available for terminal states).
-    [[nodiscard]] std::optional<ExecutionReport> get_report(const std::string &order_id) const;
+    [[nodiscard]] std::optional<ExecutionReport> getReport(const std::string &order_id) const;
 
     /// Set callback invoked when an order reaches terminal state.
-    void set_completion_callback(CompletionCallback callback);
+    void setCompletionCallback(CompletionCallback callback);
 
     /// Poll order status via REST (fallback when WS events are missed).
     ///
     /// Calls GET /api/v4/spot/orders/{order_id} and updates internal state.
     /// Returns the updated status, or PulseError on failure.
-    [[nodiscard]] Result<OrderStatus> poll_order_status(const std::string &order_id);
+    [[nodiscard]] Result<OrderStatus> pollOrderStatus(const std::string &order_id);
 
     /// Check if an order status is terminal (Filled or Cancelled).
-    [[nodiscard]] static bool is_terminal_status(OrderStatus status);
+    [[nodiscard]] static bool isTerminalStatus(OrderStatus status);
 
     /// Parse order status string from Gate.io API.
-    [[nodiscard]] static OrderStatus parse_status(const std::string &status_str);
+    [[nodiscard]] static OrderStatus parseStatus(const std::string &status_str);
 
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
-    [[nodiscard]] std::vector<OrderSnapshot> active_orders() const;
+    [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
 
     /// Returns the N most recent execution reports (completed orders).
     /// Thread-safe: takes shared read lock.
     ///
     /// Parameters:
     ///   1. n — maximum number of reports to return (default: 20)
-    [[nodiscard]] std::vector<ExecutionReport> recent_reports(std::size_t n = 20) const;
+    [[nodiscard]] std::vector<ExecutionReport> recentReports(std::size_t n = 20) const;
 
   public:
-    /// Test-only: simulate a WS order update event (calls process_order_update).
+    /// Test-only: simulate a WS order update event (calls processOrderUpdate).
     /// Allows unit tests to exercise the state machine without a real WS connection.
-    void test_simulate_ws_update(const nlohmann::json &event)
+    void testSimulateWsUpdate(const nlohmann::json &event)
     {
-        process_order_update(event);
+        processOrderUpdate(event);
     }
 
     /// Test-only: try to acquire a shared read lock (returns immediately).
     /// Used to verify that callbacks run outside the write lock.
-    [[nodiscard]] bool test_try_shared_lock()
+    [[nodiscard]] bool testTrySharedLock()
     {
-        std::shared_lock<std::shared_mutex> lock(mutex_, std::try_to_lock);
+        std::shared_lock<std::shared_mutex> lock(m_mutex, std::try_to_lock);
         return lock.owns_lock();
     }
 
   private:
-    exchange::GateWsClient &ws_client_;
-    exchange::GateRestClient &rest_client_;
-    MarketType market_type_;
+    exchange::GateWsClient &m_wsClient;
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
 
     /// Internal state for a tracked order.
     struct TrackedOrder
@@ -165,20 +165,20 @@ class OrderTracker
         Timestamp last_update_time;
     };
 
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, TrackedOrder> tracked_orders_;
-    std::unordered_map<std::string, ExecutionReport> completed_reports_;
-    CompletionCallback completion_callback_;
-    bool ws_subscribed_; ///< Whether we've subscribed to spot.orders channel.
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<std::string, TrackedOrder> m_trackedOrders;
+    std::unordered_map<std::string, ExecutionReport> m_completedReports;
+    CompletionCallback m_completionCallback;
+    bool m_wsSubscribed; ///< Whether we've subscribed to spot.orders channel.
 
     /// WS callback for spot.orders channel events.
-    void on_order_update(const nlohmann::json &event);
+    void onOrderUpdate(const nlohmann::json &event);
 
     /// Parse WS order update event and update tracked order state.
-    void process_order_update(const nlohmann::json &event);
+    void processOrderUpdate(const nlohmann::json &event);
 
     /// Generate ExecutionReport when order reaches terminal state.
-    [[nodiscard]] ExecutionReport generate_report(const TrackedOrder &order, Timestamp fill_time) const;
+    [[nodiscard]] ExecutionReport generateReport(const TrackedOrder &order, Timestamp fill_time) const;
 };
 
 } // namespace pulse::execution

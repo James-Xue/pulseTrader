@@ -37,11 +37,11 @@ class TakeProfitEngine
     // --- Position registration ---
 
     /// Register a position for take-profit monitoring.
-    void register_position(const std::string &position_id, const Position &pos,
+    void registerPosition(const std::string &position_id, const Position &pos,
         const TakeProfitConfig &config = TakeProfitConfig{ true, {}, {} });
 
     /// Stop monitoring a position (position was closed).
-    void remove_position(const std::string &position_id);
+    void removePosition(const std::string &position_id);
 
     // --- Evaluation ---
 
@@ -73,13 +73,13 @@ class TakeProfitEngine
         const std::unordered_map<std::string, Position> &current_positions);
 
     // --- Queries ---
-    [[nodiscard]] bool is_tracked(const std::string &position_id) const;
-    [[nodiscard]] std::size_t tracked_count() const;
-    [[nodiscard]] int next_target_index(const std::string &position_id) const;
+    [[nodiscard]] bool isTracked(const std::string &position_id) const;
+    [[nodiscard]] std::size_t trackedCount() const;
+    [[nodiscard]] int nextTargetIndex(const std::string &position_id) const;
 
   private:
-    TakeProfitConfig default_config_;
-    mutable std::shared_mutex mutex_;
+    TakeProfitConfig m_defaultConfig;
+    mutable std::shared_mutex m_mutex;
 
     /// Internal tracking state per position.
     struct TrackedTp
@@ -90,7 +90,7 @@ class TakeProfitEngine
         int next_target_idx; ///< Index of next target to check (advances as hit).
     };
 
-    std::unordered_map<std::string, TrackedTp> tracked_;
+    std::unordered_map<std::string, TrackedTp> m_tracked;
 };
 
 } // namespace pulse::risk

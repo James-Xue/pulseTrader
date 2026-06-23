@@ -195,7 +195,7 @@ PulseConfig
 ## Code Conventions
 
 - `.clang-format`: Allman braces, 120 col, 4-space indent
-- Naming: PascalCase classes, snake_case functions/vars, kPascalCase constants, trailing_underscore_ privates
+- Naming: PascalCase classes (no underscores), camelCase functions/methods (no underscores), m_camelCase member variables, kPascalCase constants. Pure-data struct fields keep snake_case.
 - Yoda conditions, mandatory braces, `Result<T>` = `std::variant<T, PulseError>`
 - `ExchangeConfig.restBaseUrl` = host only (`https://api.gateio.ws`), path includes `/api/v4`
 

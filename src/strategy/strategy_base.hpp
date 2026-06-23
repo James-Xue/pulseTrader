@@ -6,18 +6,18 @@
 // market data and calls these hooks at appropriate intervals.
 //
 // Lifecycle:
-//   1. on_tick(ticker)       — every best-bid/ask update (highest frequency)
-//   2. on_orderbook(book)    — when top N levels change
-//   3. on_kline(kline)       — on candle close (lowest frequency on hot path)
+//   1. onTick(ticker)       — every best-bid/ask update (highest frequency)
+//   2. onOrderbook(book)    — when top N levels change
+//   3. onKline(kline)       — on candle close (lowest frequency on hot path)
 //
 // Signal emission:
-//   - Concrete strategies call emit_signal() when they detect an opportunity
+//   - Concrete strategies call emitSignal() when they detect an opportunity
 //   - StrategyManager sets a callback that forwards to SignalAggregator
 //
 // Thread safety:
 //   - Each strategy runs on its own std::jthread (started by StrategyManager)
-//   - active_ is atomic<bool> for cooperative stop checking
-//   - params_ is atomic for lock-free AI hot-reload
+//   - m_active is atomic<bool> for cooperative stop checking
+//   - m_params is atomic for lock-free AI hot-reload
 
 #include "core/types.hpp"
 #include "market/kline_buffer.hpp"
@@ -65,25 +65,25 @@ class StrategyBase
     ///
     /// Parameters:
     ///   1. ticker — latest best-bid/ask snapshot for this strategy's symbol
-    virtual void on_tick(const market::Ticker &ticker) = 0;
+    virtual void onTick(const market::Ticker &ticker) = 0;
 
     /// Called on each closed K-line candle.
     ///
     /// Parameters:
     ///   1. kline — the just-closed candle
-    virtual void on_kline(const market::Kline &kline) = 0;
+    virtual void onKline(const market::Kline &kline) = 0;
 
     /// Called when the order book top N levels change.
     ///
     /// Parameters:
     ///   1. book — current order book snapshot
-    virtual void on_orderbook(const market::OrderBook &book) = 0;
+    virtual void onOrderbook(const market::OrderBook &book) = 0;
 
     // --- Signal emission ---
 
     /// Set the callback that receives emitted signals.
     /// Called once by StrategyManager during registration.
-    void set_signal_callback(SignalCallback cb);
+    void setSignalCallback(SignalCallback cb);
 
     /// Atomic flag for cooperative stop (checked by strategy thread).
     [[nodiscard]] std::atomic<bool> &active();
@@ -96,11 +96,11 @@ class StrategyBase
     ///
     /// Parameters:
     ///   1. signal — the signal to emit (type, symbol, confidence, reason)
-    void emit_signal(const TradingSignal &signal);
+    void emitSignal(const TradingSignal &signal);
 
-    StrategyContext context_;   ///< Injected dependencies (market, risk, execution).
-    SignalCallback signal_callback_; ///< Where emitted signals are forwarded.
-    std::atomic<bool> active_{ false }; ///< Cooperative stop flag.
+    StrategyContext m_context;   ///< Injected dependencies (market, risk, execution).
+    SignalCallback m_signalCallback; ///< Where emitted signals are forwarded.
+    std::atomic<bool> m_active{ false }; ///< Cooperative stop flag.
 };
 
 } // namespace pulse::strategy

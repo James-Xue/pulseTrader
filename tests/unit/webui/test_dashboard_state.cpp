@@ -5,8 +5,8 @@
 //
 // Component construction approach:
 //   - GateWsClient / GateRestClient: constructed with empty ExchangeConfig (never started)
-//   - MarketFeed: constructed with above clients (never started); ticker_cache and
-//     orderbook_manager are populated directly for tests
+//   - MarketFeed: constructed with above clients (never started); tickerCache and
+//     orderbookManager are populated directly for tests
 //   - StrategyManager: constructed empty; strategies registered for specific tests
 //   - RiskManager: constructed with PositionManager, DrawdownGuard, OrderRateLimiter
 //   - OrderTracker: constructed with empty WS/REST clients
@@ -67,25 +67,25 @@ class DashboardStateTest : public ::testing::Test
     {
         // 1. WS/REST clients with empty config (never started, no network).
         ExchangeConfig exchange_config;
-        ws_client_ = std::make_unique<GateWsClient>(exchange_config);
-        rest_client_ = std::make_unique<GateRestClient>(exchange_config);
+        m_wsClient = std::make_unique<GateWsClient>(exchange_config);
+        m_restClient = std::make_unique<GateRestClient>(exchange_config);
 
         // 2. MarketFeed (not started — components populated directly).
-        market_feed_ = std::make_unique<MarketFeed>(*ws_client_, *rest_client_);
+        m_marketFeed = std::make_unique<MarketFeed>(*m_wsClient, *m_restClient);
 
         // 3. StrategyManager (empty — strategies registered per-test).
-        strategy_mgr_ = std::make_unique<StrategyManager>();
+        m_strategyMgr = std::make_unique<StrategyManager>();
 
         // 4. Risk components.
         risk_config_ = RiskConfig{};
         position_mgr_ = std::make_unique<PositionManager>(risk_config_);
-        drawdown_guard_ = std::make_unique<DrawdownGuard>(risk_config_);
-        rate_limiter_ = std::make_unique<OrderRateLimiter>(risk_config_.maxOrdersPerSec);
-        risk_mgr_ = std::make_unique<RiskManager>(
-            risk_config_, *position_mgr_, *drawdown_guard_, *rate_limiter_);
+        m_drawdownGuard = std::make_unique<DrawdownGuard>(risk_config_);
+        m_rateLimiter = std::make_unique<OrderRateLimiter>(risk_config_.maxOrdersPerSec);
+        m_riskMgr = std::make_unique<RiskManager>(
+            risk_config_, *position_mgr_, *m_drawdownGuard, *m_rateLimiter);
 
         // 5. OrderTracker with empty WS/REST clients.
-        order_tracker_ = std::make_unique<OrderTracker>(*ws_client_, *rest_client_);
+        m_orderTracker = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
 
         // 6. AiPipeline with mock transport (never actually called in these tests).
         AiConfig ai_config;
@@ -105,45 +105,45 @@ class DashboardStateTest : public ::testing::Test
             return PulseError{ ErrorCode::HttpError, "mock transport" };
         };
 
-        ai_pipeline_ = std::make_unique<AiPipeline>(
+        m_aiPipeline = std::make_unique<AiPipeline>(
             ai_config, tw_config, news_config, mock_transport);
 
         // 7. WebUI config.
         webui_config_ = WebUiConfig{};
 
         // 8. DashboardState under test.
-        state_ = std::make_unique<DashboardState>(
+        m_state = std::make_unique<DashboardState>(
             webui_config_,
-            *market_feed_,
-            *strategy_mgr_,
-            *risk_mgr_,
-            *order_tracker_,
-            *ai_pipeline_);
+            *m_marketFeed,
+            *m_strategyMgr,
+            *m_riskMgr,
+            *m_orderTracker,
+            *m_aiPipeline);
     }
 
     void TearDown() override
     {
         // Ensure the state is stopped before tearing down.
-        if (state_)
+        if (m_state)
         {
-            state_->stop();
+            m_state->stop();
         }
     }
 
     // Components (owned by fixture).
-    std::unique_ptr<GateWsClient> ws_client_;
-    std::unique_ptr<GateRestClient> rest_client_;
-    std::unique_ptr<MarketFeed> market_feed_;
-    std::unique_ptr<StrategyManager> strategy_mgr_;
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
+    std::unique_ptr<MarketFeed> m_marketFeed;
+    std::unique_ptr<StrategyManager> m_strategyMgr;
     RiskConfig risk_config_;
     std::unique_ptr<PositionManager> position_mgr_;
-    std::unique_ptr<DrawdownGuard> drawdown_guard_;
-    std::unique_ptr<OrderRateLimiter> rate_limiter_;
-    std::unique_ptr<RiskManager> risk_mgr_;
-    std::unique_ptr<OrderTracker> order_tracker_;
-    std::unique_ptr<AiPipeline> ai_pipeline_;
+    std::unique_ptr<DrawdownGuard> m_drawdownGuard;
+    std::unique_ptr<OrderRateLimiter> m_rateLimiter;
+    std::unique_ptr<RiskManager> m_riskMgr;
+    std::unique_ptr<OrderTracker> m_orderTracker;
+    std::unique_ptr<AiPipeline> m_aiPipeline;
     WebUiConfig webui_config_;
-    std::unique_ptr<DashboardState> state_;
+    std::unique_ptr<DashboardState> m_state;
 };
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ class DashboardStateTest : public ::testing::Test
 TEST_F(DashboardStateTest, DefaultStateIsNotRunning)
 {
     // A freshly constructed DashboardState must not be running.
-    EXPECT_FALSE(state_->running());
+    EXPECT_FALSE(m_state->running());
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +162,14 @@ TEST_F(DashboardStateTest, DefaultStateIsNotRunning)
 
 TEST_F(DashboardStateTest, StartSetsRunning)
 {
-    state_->start();
+    m_state->start();
 
     // Give the thread a moment to start.
     std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
 
-    EXPECT_TRUE(state_->running());
+    EXPECT_TRUE(m_state->running());
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -178,15 +178,15 @@ TEST_F(DashboardStateTest, StartSetsRunning)
 
 TEST_F(DashboardStateTest, StopClearsRunning)
 {
-    state_->start();
+    m_state->start();
     std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
 
-    EXPECT_TRUE(state_->running());
+    EXPECT_TRUE(m_state->running());
 
-    state_->stop();
+    m_state->stop();
 
     // After stop(), running must be false.
-    EXPECT_FALSE(state_->running());
+    EXPECT_FALSE(m_state->running());
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +196,7 @@ TEST_F(DashboardStateTest, StopClearsRunning)
 TEST_F(DashboardStateTest, LatestReturnsNullBeforePoll)
 {
     // Before start(), latest() must return nullptr.
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     EXPECT_EQ(nullptr, snap);
 }
 
@@ -206,15 +206,15 @@ TEST_F(DashboardStateTest, LatestReturnsNullBeforePoll)
 
 TEST_F(DashboardStateTest, PollProducesSnapshot)
 {
-    state_->start();
+    m_state->start();
 
     // Wait for at least one poll cycle (fast tier fires after 200 ms + 50 ms sleep).
     std::this_thread::sleep_for(std::chrono::milliseconds{ 400 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     EXPECT_NE(nullptr, snap);
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -223,16 +223,16 @@ TEST_F(DashboardStateTest, PollProducesSnapshot)
 
 TEST_F(DashboardStateTest, SnapshotHasTimestamp)
 {
-    state_->start();
+    m_state->start();
     std::this_thread::sleep_for(std::chrono::milliseconds{ 400 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     ASSERT_NE(nullptr, snap);
 
     // Timestamp must be non-zero (set from system_clock).
     EXPECT_GT(snap->timestamp_ms, 0);
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ TEST_F(DashboardStateTest, PollFastPopulatesOrderBooks)
     ticker.bid = 49999.0;
     ticker.ask = 50001.0;
     ticker.timestamp = 1700000000000;
-    market_feed_->ticker_cache().update("BTC_USDT", ticker);
+    m_marketFeed->tickerCache().update("BTC_USDT", ticker);
 
     // Pre-populate the order book with a snapshot.
     nlohmann::json ob_snapshot = {
@@ -262,14 +262,14 @@ TEST_F(DashboardStateTest, PollFastPopulatesOrderBooks)
             nlohmann::json::array({50002.0, 1.2}),
         })},
     };
-    market_feed_->orderbook_manager().apply_snapshot("BTC_USDT", ob_snapshot);
+    m_marketFeed->orderbookManager().applySnapshot("BTC_USDT", ob_snapshot);
 
-    state_->start();
+    m_state->start();
 
     // Wait for the fast tier to fire (200 ms + 50 ms sleep + margin).
     std::this_thread::sleep_for(std::chrono::milliseconds{ 400 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     ASSERT_NE(nullptr, snap);
 
     // Order book should be populated with the symbol.
@@ -277,7 +277,7 @@ TEST_F(DashboardStateTest, PollFastPopulatesOrderBooks)
     EXPECT_FALSE(snap->order_book.bids.empty());
     EXPECT_FALSE(snap->order_book.asks.empty());
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -287,23 +287,23 @@ TEST_F(DashboardStateTest, PollFastPopulatesOrderBooks)
 TEST_F(DashboardStateTest, PollMediumPopulatesPositions)
 {
     // Open a position in the position manager.
-    auto result = position_mgr_->open_position(
+    auto result = position_mgr_->openPosition(
         "BTC_USDT", Side::Buy, 0.001, 50000.0, "test_strategy");
     ASSERT_TRUE(ok(result));
 
-    state_->start();
+    m_state->start();
 
     // Wait for the medium tier to fire (500 ms + 50 ms sleep + margin).
     std::this_thread::sleep_for(std::chrono::milliseconds{ 800 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     ASSERT_NE(nullptr, snap);
 
     // Positions should be populated.
     EXPECT_FALSE(snap->positions.positions.empty());
-    EXPECT_EQ(1, snap->positions.portfolio.open_position_count);
+    EXPECT_EQ(1, snap->positions.portfolio.openPositionCount);
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -313,16 +313,16 @@ TEST_F(DashboardStateTest, PollMediumPopulatesPositions)
 TEST_F(DashboardStateTest, PollSlowPopulatesStrategies)
 {
     // The strategy manager is empty by default — snapshot should be empty.
-    state_->start();
+    m_state->start();
 
     // Wait for the slow tier to fire (1 s + 50 ms sleep + margin).
     std::this_thread::sleep_for(std::chrono::milliseconds{ 1400 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     ASSERT_NE(nullptr, snap);
 
     // Strategies panel should be present (even if empty).
-    // The slow tier sets snap.strategies.strategies = strategy_mgr_.snapshot()
+    // The slow tier sets snap.strategies.strategies = m_strategyMgr.snapshot()
     // which is empty for an empty manager.
     EXPECT_TRUE(snap->strategies.strategies.empty());
 
@@ -332,7 +332,7 @@ TEST_F(DashboardStateTest, PollSlowPopulatesStrategies)
     // Metrics should be marked as unavailable (not implemented yet).
     EXPECT_FALSE(snap->metrics.available);
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -343,18 +343,18 @@ TEST_F(DashboardStateTest, PollAiPopulatesWhenAvailable)
 {
     // The AI pipeline has no result yet (mock transport always fails).
     // The AI snapshot should be unavailable.
-    state_->start();
+    m_state->start();
 
     // Wait for the initial AI poll (fires on first iteration).
     std::this_thread::sleep_for(std::chrono::milliseconds{ 400 });
 
-    const auto snap = state_->latest();
+    const auto snap = m_state->latest();
     ASSERT_NE(nullptr, snap);
 
     // AI should be unavailable (no successful analysis cycle).
     EXPECT_FALSE(snap->ai.available);
 
-    state_->stop();
+    m_state->stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -365,18 +365,18 @@ TEST_F(DashboardStateTest, SnapshotCallbackInvoked)
 {
     std::atomic<int> callback_count{ 0 };
 
-    state_->set_snapshot_callback([&callback_count](std::shared_ptr<const DashboardSnapshot> snap)
+    m_state->setSnapshotCallback([&callback_count](std::shared_ptr<const DashboardSnapshot> snap)
     {
         (void)snap;
         callback_count.fetch_add(1, std::memory_order_relaxed);
     });
 
-    state_->start();
+    m_state->start();
 
     // Wait for multiple poll cycles.
     std::this_thread::sleep_for(std::chrono::milliseconds{ 600 });
 
-    state_->stop();
+    m_state->stop();
 
     // The callback should have been invoked at least once.
     EXPECT_GT(callback_count.load(std::memory_order_relaxed), 0);
@@ -388,14 +388,14 @@ TEST_F(DashboardStateTest, SnapshotCallbackInvoked)
 
 TEST_F(DashboardStateTest, StopTokenCancelsPollLoop)
 {
-    state_->start();
+    m_state->start();
     std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
 
-    EXPECT_TRUE(state_->running());
+    EXPECT_TRUE(m_state->running());
 
     // Stop should cause the poll loop to exit within a reasonable time.
-    state_->stop();
+    m_state->stop();
 
     // After stop(), running must be false within 200 ms.
-    EXPECT_FALSE(state_->running());
+    EXPECT_FALSE(m_state->running());
 }

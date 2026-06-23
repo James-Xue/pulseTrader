@@ -72,7 +72,7 @@ TEST(MarketFeedStats, ConcurrentIncrement)
 }
 
 // ---------------------------------------------------------------------------
-// FeedStats delta computation — the pattern used by log_system_heartbeat
+// FeedStats delta computation — the pattern used by logSystemHeartbeat
 // ---------------------------------------------------------------------------
 
 TEST(MarketFeedStats, DeltaComputation)
@@ -121,7 +121,7 @@ TEST(MarketFeedStats, DeltaComputationZeroActivity)
 // Kline JSON format — symbol extraction differences between spot and futures
 //
 // These tests validate the JSON structure assumptions used by
-// MarketFeed::on_kline_update(). The symbol field location differs:
+// MarketFeed::onKlineUpdate(). The symbol field location differs:
 //   Spot:    full_frame["currency_pair"] = "BTC_USDT"
 //   Futures: result["n"] = "BTC_USDT"
 // ---------------------------------------------------------------------------

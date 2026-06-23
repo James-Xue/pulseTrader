@@ -13,20 +13,20 @@ using pulse::exchange::EndpointRouter;
 
 MarketFeed::MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
                        MarketType market_type)
-    : ws_client_{ ws_client }
-    , rest_client_{ rest_client }
-    , market_type_{ market_type }
-    , symbol_registry_{ rest_client, market_type }
+    : m_wsClient{ ws_client }
+    , m_restClient{ rest_client }
+    , m_marketType{ market_type }
+    , m_symbolRegistry{ rest_client, market_type }
 {
 }
 
 void MarketFeed::start(const std::vector<Symbol> &symbols)
 {
-    const std::string mt_label = MarketType::Futures == market_type_ ? "futures" : "spot";
+    const std::string mt_label = MarketType::Futures == m_marketType ? "futures" : "spot";
     PULSE_LOG_INFO("market", "Starting {} MarketFeed for {} symbols", mt_label, symbols.size());
 
     // 1. Load symbol metadata from REST.
-    if (!symbol_registry_.load_from_rest())
+    if (!m_symbolRegistry.loadFromRest())
     {
         PULSE_LOG_WARN("market", "Failed to load symbol registry — continuing without metadata");
     }
@@ -34,33 +34,33 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     // 2. Create per-symbol K-line buffers.
     for (const auto &symbol : symbols)
     {
-        kline_buffers_.try_emplace(symbol, 500);
+        m_klineBuffers.try_emplace(symbol, 500);
     }
 
     // 3. Subscribe to WebSocket channels (market-type-aware).
-    subscribed_symbols_ = symbols;
+    m_subscribedSymbols = symbols;
 
-    const std::string tickers_ch = EndpointRouter::ws_channel(market_type_, "tickers");
-    const std::string candlesticks_ch = EndpointRouter::ws_channel(market_type_, "candlesticks");
+    const std::string tickers_ch = EndpointRouter::wsChannel(m_marketType, "tickers");
+    const std::string candlesticks_ch = EndpointRouter::wsChannel(m_marketType, "candlesticks");
 
     // Tickers: real-time price updates.
-    ws_client_.subscribe(tickers_ch,
+    m_wsClient.subscribe(tickers_ch,
         symbols,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-        { on_ticker_update(result, full_frame); });
+        { onTickerUpdate(result, full_frame); });
 
     // Order book: incremental updates, 100ms interval, 20 levels.
     // Gate.io requires per-symbol subscription with channel "order_book_update".
     // Supported levels: 20, 50, 100 (level 10 removed 2024-11-18).
     // Payload format: [contract, interval, limit] — e.g. ["BTC_USDT", "100ms", "20"]
-    const std::string orderbook_update_ch = EndpointRouter::ws_channel(market_type_, "order_book_update");
+    const std::string orderbook_update_ch = EndpointRouter::wsChannel(m_marketType, "order_book_update");
     for (const auto &symbol : symbols)
     {
         std::vector<std::string> ob_payload = { symbol, "100ms", "20" };
-        ws_client_.subscribe(orderbook_update_ch,
+        m_wsClient.subscribe(orderbook_update_ch,
             ob_payload,
             [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-            { on_orderbook_update(result, full_frame); });
+            { onOrderbookUpdate(result, full_frame); });
     }
 
     // K-lines: 1-minute interval.
@@ -72,10 +72,10 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         kline_payload.push_back(symbol);
     }
 
-    ws_client_.subscribe(candlesticks_ch,
+    m_wsClient.subscribe(candlesticks_ch,
         kline_payload,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-        { on_kline_update(result, full_frame); });
+        { onKlineUpdate(result, full_frame); });
 
     PULSE_LOG_INFO("market", "{} MarketFeed started — subscribed to {} symbols",
                    mt_label, symbols.size());
@@ -84,49 +84,49 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
 void MarketFeed::stop()
 {
     PULSE_LOG_INFO("market", "Stopping MarketFeed");
-    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "tickers"));
-    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "order_book_update"));
-    ws_client_.unsubscribe(EndpointRouter::ws_channel(market_type_, "candlesticks"));
-    subscribed_symbols_.clear();
+    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "tickers"));
+    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "order_book_update"));
+    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "candlesticks"));
+    m_subscribedSymbols.clear();
 }
 
-TickerCache &MarketFeed::ticker_cache()
+TickerCache &MarketFeed::tickerCache()
 {
-    return ticker_cache_;
+    return m_tickerCache;
 }
 
-SymbolRegistry &MarketFeed::symbol_registry()
+SymbolRegistry &MarketFeed::symbolRegistry()
 {
-    return symbol_registry_;
+    return m_symbolRegistry;
 }
 
-KlineBuffer &MarketFeed::get_kline_buffer(const Symbol &symbol)
+KlineBuffer &MarketFeed::getKlineBuffer(const Symbol &symbol)
 {
     // Create buffer if it doesn't exist (lazy initialization).
-    auto it = kline_buffers_.find(symbol);
-    if (it == kline_buffers_.end())
+    auto it = m_klineBuffers.find(symbol);
+    if (it == m_klineBuffers.end())
     {
-        kline_buffers_.try_emplace(symbol, 500);
-        it = kline_buffers_.find(symbol);
+        m_klineBuffers.try_emplace(symbol, 500);
+        it = m_klineBuffers.find(symbol);
     }
     return it->second;
 }
 
-OrderBookManager &MarketFeed::orderbook_manager()
+OrderBookManager &MarketFeed::orderbookManager()
 {
-    return orderbook_manager_;
+    return m_orderbookManager;
 }
 
 FeedStats MarketFeed::stats() const
 {
     return FeedStats{
-        .ticker_count    = ticker_count_.load(std::memory_order_relaxed),
-        .orderbook_count = orderbook_count_.load(std::memory_order_relaxed),
-        .kline_count     = kline_count_.load(std::memory_order_relaxed),
+        .ticker_count    = m_tickerCount.load(std::memory_order_relaxed),
+        .orderbook_count = m_orderbookCount.load(std::memory_order_relaxed),
+        .kline_count     = m_klineCount.load(std::memory_order_relaxed),
     };
 }
 
-void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::json &full_frame)
+void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     // Gate.io ticker format:
     //
@@ -153,7 +153,7 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
             // Futures ticker format.
             ticker.symbol = item["contract"].get<std::string>();
 
-            auto last_opt = safe_parse_double(item["last"].get<std::string>());
+            auto last_opt = safeParseDouble(item["last"].get<std::string>());
             if (!last_opt.has_value())
             {
                 PULSE_LOG_WARN("market", "Malformed futures ticker 'last' for {}, skipping",
@@ -164,27 +164,27 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
 
             if (item.contains("mark_price") && !item["mark_price"].is_null())
             {
-                ticker.mark_price = safe_parse_double(item["mark_price"].get<std::string>()).value_or(0.0);
+                ticker.mark_price = safeParseDouble(item["mark_price"].get<std::string>()).value_or(0.0);
             }
 
             if (item.contains("index_price") && !item["index_price"].is_null())
             {
-                ticker.index_price = safe_parse_double(item["index_price"].get<std::string>()).value_or(0.0);
+                ticker.index_price = safeParseDouble(item["index_price"].get<std::string>()).value_or(0.0);
             }
 
             if (item.contains("funding_rate") && !item["funding_rate"].is_null())
             {
-                ticker.funding_rate = safe_parse_double(item["funding_rate"].get<std::string>()).value_or(0.0);
+                ticker.funding_rate = safeParseDouble(item["funding_rate"].get<std::string>()).value_or(0.0);
             }
 
             if (item.contains("volume_24h") && !item["volume_24h"].is_null())
             {
-                ticker.volume_24h = safe_parse_double(item["volume_24h"].get<std::string>()).value_or(0.0);
+                ticker.volume_24h = safeParseDouble(item["volume_24h"].get<std::string>()).value_or(0.0);
             }
 
             if (item.contains("change_percentage"))
             {
-                ticker.change_pct = safe_parse_double(item["change_percentage"].get<std::string>()).value_or(0.0);
+                ticker.change_pct = safeParseDouble(item["change_percentage"].get<std::string>()).value_or(0.0);
             }
 
             ticker.bid = 0.0;
@@ -195,7 +195,7 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
             // Spot ticker format.
             ticker.symbol = item["currency_pair"].get<std::string>();
 
-            auto last_opt = safe_parse_double(item["last"].get<std::string>());
+            auto last_opt = safeParseDouble(item["last"].get<std::string>());
             if (!last_opt.has_value())
             {
                 PULSE_LOG_WARN("market", "Malformed spot ticker 'last' for {}, skipping",
@@ -203,10 +203,10 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
                 return;
             }
             ticker.last = last_opt.value();
-            ticker.bid = safe_parse_double(item["highest_bid"].get<std::string>()).value_or(0.0);
-            ticker.ask = safe_parse_double(item["lowest_ask"].get<std::string>()).value_or(0.0);
-            ticker.volume_24h = safe_parse_double(item["base_volume"].get<std::string>()).value_or(0.0);
-            ticker.change_pct = safe_parse_double(item["change_percentage"].get<std::string>()).value_or(0.0);
+            ticker.bid = safeParseDouble(item["highest_bid"].get<std::string>()).value_or(0.0);
+            ticker.ask = safeParseDouble(item["lowest_ask"].get<std::string>()).value_or(0.0);
+            ticker.volume_24h = safeParseDouble(item["base_volume"].get<std::string>()).value_or(0.0);
+            ticker.change_pct = safeParseDouble(item["change_percentage"].get<std::string>()).value_or(0.0);
         }
         else
         {
@@ -214,8 +214,8 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
         }
 
         ticker.timestamp = 0; // Will be set below from full_frame if available.
-        ticker_cache_.update(ticker.symbol, ticker);
-        ticker_count_.fetch_add(1, std::memory_order_relaxed);
+        m_tickerCache.update(ticker.symbol, ticker);
+        m_tickerCount.fetch_add(1, std::memory_order_relaxed);
     };
 
     if (result.is_array())
@@ -239,7 +239,7 @@ void MarketFeed::on_ticker_update(const nlohmann::json &result, const nlohmann::
     }
 }
 
-void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohmann::json &full_frame)
+void MarketFeed::onOrderbookUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     const std::string event = full_frame.value("event", "");
 
@@ -328,19 +328,19 @@ void MarketFeed::on_orderbook_update(const nlohmann::json &result, const nlohman
     converted["time"] = full_frame.value("time", static_cast<std::int64_t>(0));
 
     // Gate.io: event "all" = full snapshot, event "update" = incremental delta.
-    if ("all" == event || !orderbook_manager_.contains(symbol))
+    if ("all" == event || !m_orderbookManager.contains(symbol))
     {
-        orderbook_manager_.apply_snapshot(symbol, converted);
+        m_orderbookManager.applySnapshot(symbol, converted);
     }
     else
     {
-        orderbook_manager_.apply_delta(symbol, converted);
+        m_orderbookManager.applyDelta(symbol, converted);
     }
 
-    orderbook_count_.fetch_add(1, std::memory_order_relaxed);
+    m_orderbookCount.fetch_add(1, std::memory_order_relaxed);
 }
 
-void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame)
+void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     // Gate.io K-line format:
     //
@@ -382,10 +382,10 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
             // Futures: symbol in each candle element.
             symbol = candle["contract"].get<std::string>();
         }
-        else if (!subscribed_symbols_.empty())
+        else if (!m_subscribedSymbols.empty())
         {
             // Fallback: use the first subscribed symbol (single-symbol subscription).
-            symbol = subscribed_symbols_[0];
+            symbol = m_subscribedSymbols[0];
         }
 
         if (symbol.empty())
@@ -400,16 +400,16 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
             : candle["t"].get<std::int64_t>() * 1000; // Convert to ms.
         kline.close_time = kline.open_time + 60000; // 1 minute later.
 
-        auto open  = safe_parse_double(candle["o"].get<std::string>());
-        auto high  = safe_parse_double(candle["h"].get<std::string>());
-        auto low   = safe_parse_double(candle["l"].get<std::string>());
-        auto close = safe_parse_double(candle["c"].get<std::string>());
+        auto open  = safeParseDouble(candle["o"].get<std::string>());
+        auto high  = safeParseDouble(candle["h"].get<std::string>());
+        auto low   = safeParseDouble(candle["l"].get<std::string>());
+        auto close = safeParseDouble(candle["c"].get<std::string>());
 
         // Volume: may be string (spot) or integer (futures).
         std::optional<double> vol;
         if (candle["v"].is_string())
         {
-            vol = safe_parse_double(candle["v"].get<std::string>());
+            vol = safeParseDouble(candle["v"].get<std::string>());
         }
         else if (candle["v"].is_number())
         {
@@ -430,13 +430,13 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
         // Futures volume is in contracts — convert to base currency (e.g., BTC)
         // via quanto_multiplier (1 contract = quanto_multiplier BTC).
         // Spot volume is already in base currency (multiplier defaults to 1.0).
-        auto info = symbol_registry_.get(symbol);
+        auto info = m_symbolRegistry.get(symbol);
         kline.volume = vol.value() * (info ? info->quanto_multiplier : 1.0);
         kline.closed = true;
 
-        auto &buffer = get_kline_buffer(symbol);
+        auto &buffer = getKlineBuffer(symbol);
         buffer.push(kline);
-        kline_count_.fetch_add(1, std::memory_order_relaxed);
+        m_klineCount.fetch_add(1, std::memory_order_relaxed);
     };
 
     if (result.is_array())

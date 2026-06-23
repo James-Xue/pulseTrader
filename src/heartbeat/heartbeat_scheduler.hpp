@@ -49,11 +49,11 @@ class HeartbeatScheduler
     /// Parameters:
     ///   1. config     — AiConfig with heartbeat interval and retry settings
     ///   2. pipeline   — reference to the AiPipeline to execute on each beat
-    ///   3. all_params — mutable pointers to each strategy's StrategyParams;
+    ///   3. allParams — mutable pointers to each strategy's StrategyParams;
     ///                   the AI pipeline writes deltas to all of them
     HeartbeatScheduler(const AiConfig &config,
                        ai::AiPipeline &pipeline,
-                       std::vector<strategy::StrategyParams *> all_params);
+                       std::vector<strategy::StrategyParams *> allParams);
 
     /// Destructor — calls stop() if still running.
     ~HeartbeatScheduler();
@@ -72,38 +72,38 @@ class HeartbeatScheduler
 
     /// Manually trigger one AI analysis cycle (enqueues immediately).
     /// Useful for testing or on-demand analysis.
-    void trigger_now();
+    void triggerNow();
 
     /// Number of beats that have fired since start.
-    [[nodiscard]] std::uint64_t beat_count() const;
+    [[nodiscard]] std::uint64_t beatCount() const;
 
     /// Whether the scheduler is currently running.
     [[nodiscard]] bool running() const;
 
   private:
     /// Arm (or re-arm) the steady_timer for the next beat.
-    void schedule_next();
+    void scheduleNext();
 
     /// Timer callback — enqueues pipeline task and re-arms.
     ///
     /// Parameters:
     ///   1. ec — asio error code (non-zero if timer was cancelled)
-    void on_timer(const asio::error_code &ec);
+    void onTimer(const asio::error_code &ec);
 
     /// Execute the AI pipeline on the TaskQueue worker thread.
-    void run_pipeline();
+    void runPipeline();
 
-    AiConfig config_;                            ///< Heartbeat configuration.
-    ai::AiPipeline &pipeline_;                   ///< AI pipeline reference.
-    std::vector<strategy::StrategyParams *> all_params_; ///< Per-strategy params.
+    AiConfig m_config;                            ///< Heartbeat configuration.
+    ai::AiPipeline &m_pipeline;                   ///< AI pipeline reference.
+    std::vector<strategy::StrategyParams *> m_allParams; ///< Per-strategy params.
 
-    asio::io_context io_ctx_;                    ///< ASIO I/O context for timer.
-    asio::steady_timer timer_;                   ///< Periodic timer.
-    std::jthread io_thread_;                     ///< Runs io_context::run().
-    TaskQueue task_queue_;                       ///< Worker thread for pipeline.
+    asio::io_context m_ioCtx;                    ///< ASIO I/O context for timer.
+    asio::steady_timer m_timer;                   ///< Periodic timer.
+    std::jthread m_ioThread;                     ///< Runs io_context::run().
+    TaskQueue m_taskQueue;                       ///< Worker thread for pipeline.
 
-    std::atomic<std::uint64_t> beat_count_{ 0 }; ///< Monotonic beat counter.
-    std::atomic<bool> running_{ false };         ///< Scheduler running state.
+    std::atomic<std::uint64_t> m_beatCount{ 0 }; ///< Monotonic beat counter.
+    std::atomic<bool> m_running{ false };         ///< Scheduler running state.
 };
 
 } // namespace pulse::heartbeat

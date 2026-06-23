@@ -1,5 +1,5 @@
 #pragma once
-// param_advisor.hpp — Delta validation + atomic StrategyParams writes (Layer 4 AI Analysis)
+// paramAdvisor.hpp — Delta validation + atomic StrategyParams writes (Layer 4 AI Analysis)
 //
 // Receives an AnalysisResult from AIClient and applies the recommended parameter
 // deltas to a StrategyParams instance atomically. Every delta is validated against
@@ -19,8 +19,8 @@
 // Thread safety:
 //   - apply() writes to StrategyParams atomics (release ordering)
 //   - Strategy threads read the same atomics (acquire ordering)
-//   - bounds_ is not modified during apply() — safe for concurrent reads
-//   - set_bound() should only be called from the configuration thread (not concurrent with apply)
+//   - m_bounds is not modified during apply() — safe for concurrent reads
+//   - setBound() should only be called from the configuration thread (not concurrent with apply)
 
 #include "ai/analysis_result.hpp"
 #include "heartbeat/heartbeat_events.hpp"
@@ -100,7 +100,7 @@ class ParamAdvisor
     /// If it does not exist, a new entry is created.
     ///
     /// This should not be called concurrently with apply().
-    void set_bound(const std::string &param_name, const ParamBound &bound);
+    void setBound(const std::string &param_name, const ParamBound &bound);
 
   private:
     /// Apply a single delta to a single atomic parameter field.
@@ -113,7 +113,7 @@ class ParamAdvisor
     ///   5. Store new_value (release ordering)
     ///   6. Log a warning if either clamping occurred
     ///   7. Return OnParamUpdate event with old and new values
-    heartbeat::OnParamUpdate apply_one(
+    heartbeat::OnParamUpdate applyOne(
             const std::string &name,
             double delta,
             const ParamBound &bound,
@@ -121,7 +121,7 @@ class ParamAdvisor
 
     /// Safety bounds map: parameter name → ParamBound.
     /// Populated in the constructor with defaults for all 10 AI-tunable parameters.
-    std::unordered_map<std::string, ParamBound> bounds_;
+    std::unordered_map<std::string, ParamBound> m_bounds;
 };
 
 } // namespace pulse::ai

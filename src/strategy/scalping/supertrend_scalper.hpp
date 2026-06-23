@@ -13,13 +13,13 @@
 //   confidence = clamp(|close - supertrend| / atr, 0.0, 1.0)
 //
 // Data source:
-//   - on_kline() reads closed candles from KlineBuffer via the context
+//   - onKline() reads closed candles from KlineBuffer via the context
 //   - Requires at least supertrend_period + 1 candles to produce a signal
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
 //   - prev_* fields are only written from the strategy thread
-//   - params_ is atomic (inherited from StrategyParams)
+//   - m_params is atomic (inherited from StrategyParams)
 
 #include "strategy/strategy_base.hpp"
 
@@ -48,26 +48,26 @@ class SuperTrendScalper : public StrategyBase
     ///
     /// Computes the SuperTrend indicator from historical candles and detects
     /// trend flips (bullish ↔ bearish crossover).
-    void on_kline(const market::Kline &kline) override;
+    void onKline(const market::Kline &kline) override;
 
     /// Called on each ticker update — not used by this strategy (kline-driven).
-    void on_tick(const market::Ticker &ticker) override;
+    void onTick(const market::Ticker &ticker) override;
 
     /// Called on orderbook updates — not used by this strategy (kline-driven).
-    void on_orderbook(const market::OrderBook &book) override;
+    void onOrderbook(const market::OrderBook &book) override;
 
   private:
-    StrategyParams params_;
+    StrategyParams m_params;
 
-    double prev_upper_band_{ 0.0 }; ///< Previous final upper band.
-    double prev_lower_band_{ 0.0 }; ///< Previous final lower band.
-    double prev_close_{ 0.0 };      ///< Previous candle close price.
-    double prev_supertrend_{ 0.0 }; ///< Previous SuperTrend value.
-    bool is_bullish_{ false };      ///< Current trend direction (true = bullish).
-    bool has_prev_{ false };        ///< Whether we have previous state for comparison.
-    std::int64_t last_signal_time_ms_{ 0 };  ///< Cooldown enforcement.
-    std::int64_t last_warmup_log_ms_{ 0 };   ///< Throttle warmup log to every 30 s.
-    std::int64_t last_no_data_log_ms_{ 0 };  ///< Throttle "no data" log to every 30 s.
+    double m_prevUpperBand{ 0.0 }; ///< Previous final upper band.
+    double m_prevLowerBand{ 0.0 }; ///< Previous final lower band.
+    double m_prevClose{ 0.0 };      ///< Previous candle close price.
+    double m_prevSupertrend{ 0.0 }; ///< Previous SuperTrend value.
+    bool m_isBullish{ false };      ///< Current trend direction (true = bullish).
+    bool m_hasPrev{ false };        ///< Whether we have previous state for comparison.
+    std::int64_t m_lastSignalTimeMs{ 0 };  ///< Cooldown enforcement.
+    std::int64_t m_lastWarmupLogMs{ 0 };   ///< Throttle warmup log to every 30 s.
+    std::int64_t m_lastNoDataLogMs{ 0 };  ///< Throttle "no data" log to every 30 s.
 
     /// Compute ATR (Average True Range) from a series of candles.
     ///
@@ -79,7 +79,7 @@ class SuperTrendScalper : public StrategyBase
     ///   2. period  — ATR window size
     ///
     /// Returns the ATR value, or 0.0 if insufficient data.
-    [[nodiscard]] double compute_atr(const std::vector<market::Kline> &candles,
+    [[nodiscard]] double computeAtr(const std::vector<market::Kline> &candles,
         std::size_t period) const;
 };
 

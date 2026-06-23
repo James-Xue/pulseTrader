@@ -11,13 +11,13 @@
 //   confidence = clamp(|fast - slow| / slow, 0.0, 1.0)
 //
 // Data source:
-//   - on_kline() reads closed candles from KlineBuffer via the context
+//   - onKline() reads closed candles from KlineBuffer via the context
 //   - Requires at least ema_slow_period candles to produce a signal
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
-//   - prev_ema_fast_ / prev_ema_slow_ are only written from the strategy thread
-//   - params_ is atomic (inherited from StrategyParams)
+//   - m_prevEmaFast / m_prevEmaSlow are only written from the strategy thread
+//   - m_params is atomic (inherited from StrategyParams)
 
 #include "strategy/strategy_base.hpp"
 
@@ -46,22 +46,22 @@ class MomentumScalper : public StrategyBase
     ///
     /// Computes fast/slow EMA from the last N candles and detects crossovers.
     /// Emits Buy/Sell signals on crossover events.
-    void on_kline(const market::Kline &kline) override;
+    void onKline(const market::Kline &kline) override;
 
     /// Called on each ticker update — not used by this strategy (kline-driven).
-    void on_tick(const market::Ticker &ticker) override;
+    void onTick(const market::Ticker &ticker) override;
 
     /// Called on orderbook updates — not used by this strategy (kline-driven).
-    void on_orderbook(const market::OrderBook &book) override;
+    void onOrderbook(const market::OrderBook &book) override;
 
   private:
-    StrategyParams params_;
+    StrategyParams m_params;
 
-    double prev_ema_fast_{ 0.0 }; ///< Previous fast EMA value (for crossover detection).
-    double prev_ema_slow_{ 0.0 }; ///< Previous slow EMA value (for crossover detection).
-    bool has_prev_{ false };      ///< Whether we have a previous EMA to compare against.
-    std::int64_t last_warmup_log_ms_{ 0 }; ///< Throttle warmup log to every 30 s.
-    std::int64_t last_no_data_log_ms_{ 0 }; ///< Throttle "no data" log to every 30 s.
+    double m_prevEmaFast{ 0.0 }; ///< Previous fast EMA value (for crossover detection).
+    double m_prevEmaSlow{ 0.0 }; ///< Previous slow EMA value (for crossover detection).
+    bool m_hasPrev{ false };      ///< Whether we have a previous EMA to compare against.
+    std::int64_t m_lastWarmupLogMs{ 0 }; ///< Throttle warmup log to every 30 s.
+    std::int64_t m_lastNoDataLogMs{ 0 }; ///< Throttle "no data" log to every 30 s.
 
     /// Compute EMA from a series of close prices.
     ///
@@ -73,7 +73,7 @@ class MomentumScalper : public StrategyBase
     ///   3. prev_ema  — previous EMA value (0.0 on first call → uses SMA seed)
     ///
     /// Returns the latest EMA value.
-    [[nodiscard]] double compute_ema(const std::vector<double> &closes,
+    [[nodiscard]] double computeEma(const std::vector<double> &closes,
         double period,
         double prev_ema) const;
 };

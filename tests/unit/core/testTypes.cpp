@@ -46,22 +46,22 @@ TEST(Timestamp, NowHasNanosecondResolution)
 
 TEST(MarketType, ToStringSpot)
 {
-    EXPECT_STREQ(to_string(MarketType::Spot), "spot");
+    EXPECT_STREQ(toString(MarketType::Spot), "spot");
 }
 
 TEST(MarketType, ToStringFutures)
 {
-    EXPECT_STREQ(to_string(MarketType::Futures), "futures");
+    EXPECT_STREQ(toString(MarketType::Futures), "futures");
 }
 
 TEST(MarginMode, ToStringCross)
 {
-    EXPECT_STREQ(to_string(MarginMode::Cross), "cross");
+    EXPECT_STREQ(toString(MarginMode::Cross), "cross");
 }
 
 TEST(MarginMode, ToStringIsolated)
 {
-    EXPECT_STREQ(to_string(MarginMode::Isolated), "isolated");
+    EXPECT_STREQ(toString(MarginMode::Isolated), "isolated");
 }
 
 // ---------------------------------------------------------------------------
@@ -142,72 +142,72 @@ TEST(PulseConfig, DefaultMarketType)
 }
 
 // ---------------------------------------------------------------------------
-// types.hpp — safe_parse_double
+// types.hpp — safeParseDouble
 // ---------------------------------------------------------------------------
 
 TEST(SafeParseDouble, ValidPositiveNumber)
 {
-    auto result = safe_parse_double("123.456");
+    auto result = safeParseDouble("123.456");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), 123.456);
 }
 
 TEST(SafeParseDouble, ValidNegativeNumber)
 {
-    auto result = safe_parse_double("-0.00123");
+    auto result = safeParseDouble("-0.00123");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), -0.00123);
 }
 
 TEST(SafeParseDouble, ValidInteger)
 {
-    auto result = safe_parse_double("50000");
+    auto result = safeParseDouble("50000");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), 50000.0);
 }
 
 TEST(SafeParseDouble, ValidZero)
 {
-    auto result = safe_parse_double("0.0");
+    auto result = safeParseDouble("0.0");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), 0.0);
 }
 
 TEST(SafeParseDouble, ValidScientificNotation)
 {
-    auto result = safe_parse_double("1.5e-4");
+    auto result = safeParseDouble("1.5e-4");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), 1.5e-4);
 }
 
 TEST(SafeParseDouble, EmptyStringReturnsNullopt)
 {
-    auto result = safe_parse_double("");
+    auto result = safeParseDouble("");
     EXPECT_FALSE(result.has_value());
 }
 
 TEST(SafeParseDouble, InvalidStringReturnsNullopt)
 {
-    auto result = safe_parse_double("N/A");
+    auto result = safeParseDouble("N/A");
     EXPECT_FALSE(result.has_value());
 }
 
 TEST(SafeParseDouble, PartialParseReturnsNullopt)
 {
     // "123abc" — from_chars stops at 'a', ptr != end → nullopt
-    auto result = safe_parse_double("123abc");
+    auto result = safeParseDouble("123abc");
     EXPECT_FALSE(result.has_value());
 }
 
 TEST(SafeParseDouble, WhitespaceReturnsNullopt)
 {
-    auto result = safe_parse_double("  42  ");
+    auto result = safeParseDouble("  42  ");
     EXPECT_FALSE(result.has_value());
 }
 
 TEST(SafeParseDouble, VerySmallNumber)
 {
-    auto result = safe_parse_double("0.00000001");
+    auto result = safeParseDouble("0.00000001");
     ASSERT_TRUE(result.has_value());
     EXPECT_DOUBLE_EQ(result.value(), 0.00000001);
 }

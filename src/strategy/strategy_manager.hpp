@@ -2,12 +2,12 @@
 // strategy_manager.hpp — Multi-strategy orchestration (Layer 6 Strategy Engine)
 //
 // Manages the lifecycle of all registered strategies:
-//   1. register_strategy() — add a strategy (takes ownership)
+//   1. registerStrategy() — add a strategy (takes ownership)
 //   2. start()             — spawn one std::jthread per enabled strategy
 //   3. stop()              — signal all threads to stop and join
 //
 // Each strategy thread polls market data at its configured interval and
-// calls the appropriate lifecycle hooks (on_tick, on_kline, on_orderbook).
+// calls the appropriate lifecycle hooks (onTick, onKline, onOrderbook).
 //
 // Thread topology:
 //   - One std::jthread per active strategy (cooperative cancellation via stop_token)
@@ -15,9 +15,9 @@
 //   - Signals are forwarded to a user-provided callback (typically SignalAggregator)
 //
 // Thread safety:
-//   - register_strategy() must be called before start()
+//   - registerStrategy() must be called before start()
 //   - start() / stop() are not thread-safe (call from main thread only)
-//   - signal_callback_ is set once before threads start (no race)
+//   - m_signalCallback is set once before threads start (no race)
 
 #include "strategy/strategy_base.hpp"
 
@@ -81,21 +81,21 @@ class StrategyManager
     ///
     /// Parameters:
     ///   1. strategy — the strategy instance to register
-    void register_strategy(std::unique_ptr<StrategyBase> strategy);
+    void registerStrategy(std::unique_ptr<StrategyBase> strategy);
 
     /// Set the callback that receives all emitted signals.
     ///
-    /// Typically wired to SignalAggregator::add_signal().
+    /// Typically wired to SignalAggregator::addSignal().
     /// Must be called before start().
-    void set_signal_callback(SignalCallback cb);
+    void setSignalCallback(SignalCallback cb);
 
     /// Start all enabled strategies — one std::jthread each.
     ///
     /// Each thread:
     ///   1. Polls ticker cache for the strategy's symbol
-    ///   2. Checks for new closed klines → calls on_kline()
-    ///   3. Checks for orderbook updates → calls on_orderbook()
-    ///   4. Calls on_tick() with latest ticker
+    ///   2. Checks for new closed klines → calls onKline()
+    ///   3. Checks for orderbook updates → calls onOrderbook()
+    ///   4. Calls onTick() with latest ticker
     ///   5. Sleeps for poll_interval_ms
     ///   6. Checks stop_token for cooperative cancellation
     void start();
@@ -104,10 +104,10 @@ class StrategyManager
     void stop();
 
     /// Number of registered strategies.
-    [[nodiscard]] std::size_t strategy_count() const;
+    [[nodiscard]] std::size_t strategyCount() const;
 
     /// Number of currently running strategy threads.
-    [[nodiscard]] std::size_t running_count() const;
+    [[nodiscard]] std::size_t runningCount() const;
 
     /// Returns a snapshot of all registered strategies (read-only, thread-safe).
     ///
@@ -121,19 +121,19 @@ class StrategyManager
     /// Used by the AI pipeline (HeartbeatScheduler → ParamAdvisor) to write
     /// parameter deltas directly to each strategy's own StrategyParams.
     /// Must be called after all strategies are registered (before or after start()).
-    [[nodiscard]] std::vector<StrategyParams *> all_params();
+    [[nodiscard]] std::vector<StrategyParams *> allParams();
 
   private:
-    std::vector<std::unique_ptr<StrategyBase>> strategies_;
-    std::vector<std::jthread> threads_;
-    SignalCallback signal_callback_;
+    std::vector<std::unique_ptr<StrategyBase>> m_strategies;
+    std::vector<std::jthread> m_threads;
+    SignalCallback m_signalCallback;
 
     /// The main loop for a single strategy thread.
     ///
     /// Parameters:
     ///   1. strategy — the strategy to run
     ///   2. stoken   — stop_token for cooperative cancellation
-    void strategy_loop(StrategyBase &strategy, std::stop_token stoken);
+    void strategyLoop(StrategyBase &strategy, std::stop_token stoken);
 };
 
 } // namespace pulse::strategy

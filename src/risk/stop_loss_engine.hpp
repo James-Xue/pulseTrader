@@ -39,11 +39,11 @@ class StopLossEngine
 
     /// Register a position for stop-loss monitoring.
     /// Uses default_config if config parameter has zero/empty values.
-    void register_position(const std::string &position_id, const Position &pos,
+    void registerPosition(const std::string &position_id, const Position &pos,
         const StopLossConfig &config = StopLossConfig{ StopMode::Fixed, 0.0, 0.0, 0 });
 
     /// Stop monitoring a position (position was closed).
-    void remove_position(const std::string &position_id);
+    void removePosition(const std::string &position_id);
 
     // --- Evaluation ---
 
@@ -66,12 +66,12 @@ class StopLossEngine
         Timestamp current_time);
 
     // --- Queries ---
-    [[nodiscard]] bool is_tracked(const std::string &position_id) const;
-    [[nodiscard]] std::size_t tracked_count() const;
+    [[nodiscard]] bool isTracked(const std::string &position_id) const;
+    [[nodiscard]] std::size_t trackedCount() const;
 
   private:
-    StopLossConfig default_config_;
-    mutable std::shared_mutex mutex_;
+    StopLossConfig m_defaultConfig;
+    mutable std::shared_mutex m_mutex;
 
     /// Internal tracking state per position.
     struct TrackedStop
@@ -83,7 +83,7 @@ class StopLossEngine
         Price entry_price;      ///< Entry price (for fixed stop).
     };
 
-    std::unordered_map<std::string, TrackedStop> tracked_;
+    std::unordered_map<std::string, TrackedStop> m_tracked;
 };
 
 } // namespace pulse::risk

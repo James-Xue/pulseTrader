@@ -52,7 +52,7 @@ static void test_momentum_scalper()
     ctx.config.order_quantity = 0.001;
     ctx.config.min_confidence = 0.0;
     ctx.config.poll_interval_ms = 100;
-    // Note: no market_feed — strategy will log and skip on_kline.
+    // Note: no market_feed — strategy will log and skip onKline.
     // We test the interface and parameter handling here.
 
     MomentumScalper scalper(ctx);
@@ -64,27 +64,27 @@ static void test_momentum_scalper()
     std::cout << "  Fast EMA:      " << scalper.params().ema_fast_period.load() << std::endl;
     std::cout << "  Slow EMA:      " << scalper.params().ema_slow_period.load() << std::endl;
 
-    // Test on_tick (should be silently ignored).
+    // Test onTick (should be silently ignored).
     market::Ticker ticker;
     ticker.symbol = "BTC_USDT";
     ticker.last = 50000.0;
     ticker.bid = 49999.0;
     ticker.ask = 50001.0;
-    scalper.on_tick(ticker);
-    std::cout << "  on_tick() — OK (ignored as expected)" << std::endl;
+    scalper.onTick(ticker);
+    std::cout << "  onTick() — OK (ignored as expected)" << std::endl;
 
-    // Test on_kline without market feed (should return early).
+    // Test onKline without market feed (should return early).
     market::Kline kline;
     kline.closed = true;
     kline.close = 50000.0;
-    scalper.on_kline(kline);
-    std::cout << "  on_kline() — OK (no market feed, returned early)" << std::endl;
+    scalper.onKline(kline);
+    std::cout << "  onKline() — OK (no market feed, returned early)" << std::endl;
 
     // Test signal callback wiring.
-    int signal_count = 0;
-    scalper.set_signal_callback([&](const TradingSignal &s)
+    int signalCount = 0;
+    scalper.setSignalCallback([&](const TradingSignal &s)
         {
-            ++signal_count;
+            ++signalCount;
             std::cout << "  Signal: " << (SignalType::Buy == s.type ? "BUY" : "SELL")
                       << " confidence=" << s.confidence << std::endl;
         });
@@ -112,7 +112,7 @@ static void test_orderbook_scalper()
     scalper.params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> signals;
-    scalper.set_signal_callback([&](const TradingSignal &s)
+    scalper.setSignalCallback([&](const TradingSignal &s)
         {
             signals.push_back(s);
         });
@@ -127,7 +127,7 @@ static void test_orderbook_scalper()
             book.asks[3001.0 + i] = 2.0;  // 10 total ask volume
         }
 
-        scalper.on_orderbook(book);
+        scalper.onOrderbook(book);
 
         if (!signals.empty() && SignalType::Buy == signals.back().type)
         {
@@ -150,7 +150,7 @@ static void test_orderbook_scalper()
             book.asks[3001.0 + i] = 10.0; // 50 total ask volume
         }
 
-        scalper.on_orderbook(book);
+        scalper.onOrderbook(book);
 
         if (signals.size() >= 2 && SignalType::Sell == signals.back().type)
         {
@@ -174,7 +174,7 @@ static void test_orderbook_scalper()
             book.asks[3001.0 + i] = 5.0;
         }
 
-        scalper.on_orderbook(book);
+        scalper.onOrderbook(book);
 
         if (signals.size() == before)
         {
@@ -212,12 +212,12 @@ static void test_mean_reversion_scalper()
     std::cout << "  BB Period:     " << scalper.params().bb_period.load() << std::endl;
     std::cout << "  BB StdDev:     " << scalper.params().bb_std_dev.load() << std::endl;
 
-    // on_kline without market feed — should return early.
+    // onKline without market feed — should return early.
     market::Kline kline;
     kline.closed = true;
     kline.close = 150.0;
-    scalper.on_kline(kline);
-    std::cout << "  on_kline() — OK (no market feed, returned early)" << std::endl;
+    scalper.onKline(kline);
+    std::cout << "  onKline() — OK (no market feed, returned early)" << std::endl;
 
     std::cout << "  [PASS] MeanReversionScalper interface test" << std::endl;
 }
@@ -236,7 +236,7 @@ static void test_signal_aggregator()
     SignalAggregator agg(config);
 
     std::vector<TradingSignal> emitted;
-    agg.set_output_callback([&](const TradingSignal &s)
+    agg.setOutputCallback([&](const TradingSignal &s)
         {
             emitted.push_back(s);
             std::cout << "  Emitted: " << s.symbol << " "
@@ -244,8 +244,8 @@ static void test_signal_aggregator()
                       << " confidence=" << s.confidence << std::endl;
         });
 
-    agg.set_weight("momentum_scalper_BTC_USDT", 1.5);
-    agg.set_weight("orderbook_scalper_BTC_USDT", 1.0);
+    agg.setWeight("momentum_scalper_BTC_USDT", 1.5);
+    agg.setWeight("orderbook_scalper_BTC_USDT", 1.0);
 
     // Signal 1: MomentumScalper buys BTC (high weight).
     TradingSignal s1;
@@ -256,7 +256,7 @@ static void test_signal_aggregator()
     s1.strategy_id = "momentum_scalper_BTC_USDT";
     s1.timestamp = now();
     s1.reason = "EMA crossover";
-    agg.add_signal(s1);
+    agg.addSignal(s1);
 
     // Signal 2: OrderBookScalper also buys BTC.
     TradingSignal s2;
@@ -267,9 +267,9 @@ static void test_signal_aggregator()
     s2.strategy_id = "orderbook_scalper_BTC_USDT";
     s2.timestamp = now();
     s2.reason = "Order book imbalance";
-    agg.add_signal(s2);
+    agg.addSignal(s2);
 
-    std::cout << "  Total input signals: " << agg.signal_count() << std::endl;
+    std::cout << "  Total input signals: " << agg.signalCount() << std::endl;
     std::cout << "  Emitted signals: " << emitted.size() << std::endl;
 
     if (!emitted.empty())
@@ -299,24 +299,24 @@ static void test_strategy_manager()
     ctx.config.poll_interval_ms = 50;
 
     auto scalper = std::make_unique<MomentumScalper>(ctx);
-    manager.register_strategy(std::move(scalper));
+    manager.registerStrategy(std::move(scalper));
 
-    manager.set_signal_callback([](const TradingSignal &s)
+    manager.setSignalCallback([](const TradingSignal &s)
         {
             std::cout << "  Manager received: " << s.symbol << " "
                       << (SignalType::Buy == s.type ? "BUY" : "SELL") << std::endl;
         });
 
-    std::cout << "  Registered strategies: " << manager.strategy_count() << std::endl;
+    std::cout << "  Registered strategies: " << manager.strategyCount() << std::endl;
 
     manager.start();
-    std::cout << "  Running threads: " << manager.running_count() << std::endl;
+    std::cout << "  Running threads: " << manager.runningCount() << std::endl;
 
     // Let threads run briefly (they'll exit due to no market feed).
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     manager.stop();
-    std::cout << "  After stop — running: " << manager.running_count() << std::endl;
+    std::cout << "  After stop — running: " << manager.runningCount() << std::endl;
     std::cout << "  [PASS] StrategyManager lifecycle test" << std::endl;
 }
 

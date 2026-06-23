@@ -13,7 +13,7 @@ namespace pulse::strategy
 
 SuperTrendScalper::SuperTrendScalper(const StrategyContext &context)
 {
-    context_ = context;
+    m_context = context;
 }
 
 std::string SuperTrendScalper::name() const
@@ -23,80 +23,80 @@ std::string SuperTrendScalper::name() const
 
 std::string SuperTrendScalper::id() const
 {
-    return "supertrend_scalper_" + context_.config.symbol;
+    return "supertrend_scalper_" + m_context.config.symbol;
 }
 
 StrategyParams &SuperTrendScalper::params()
 {
-    return params_;
+    return m_params;
 }
 
-void SuperTrendScalper::on_tick(const market::Ticker & /*ticker*/)
+void SuperTrendScalper::onTick(const market::Ticker & /*ticker*/)
 {
     // This strategy is kline-driven; tick updates are ignored for trading.
-    // However, we use on_tick() to detect "no kline data at all" (e.g. WS not connected).
-    auto *feed = context_.market_feed;
+    // However, we use onTick() to detect "no kline data at all" (e.g. WS not connected).
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(1);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(1);
     if (candles.empty())
     {
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_no_data_log_ms_ >= 30'000)
+        if (nowMs - m_lastNoDataLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Waiting for kline data (WS may not be connected yet)", id());
-            last_no_data_log_ms_ = now_ms;
+            m_lastNoDataLogMs = nowMs;
         }
     }
 }
 
-void SuperTrendScalper::on_orderbook(const market::OrderBook & /*book*/)
+void SuperTrendScalper::onOrderbook(const market::OrderBook & /*book*/)
 {
     // This strategy is kline-driven; orderbook updates are ignored.
 }
 
-void SuperTrendScalper::on_kline(const market::Kline & /*kline*/)
+void SuperTrendScalper::onKline(const market::Kline & /*kline*/)
 {
     // 1. Read hot-reloadable parameters (lock-free atomic loads).
     const auto period = static_cast<std::size_t>(
-        params_.supertrend_period.load(std::memory_order_acquire));
-    const double multiplier = params_.supertrend_multiplier.load(std::memory_order_acquire);
-    const auto cooldown_sec = params_.cooldown_seconds.load(std::memory_order_acquire);
+        m_params.supertrend_period.load(std::memory_order_acquire));
+    const double multiplier = m_params.supertrend_multiplier.load(std::memory_order_acquire);
+    const auto cooldown_sec = m_params.cooldown_seconds.load(std::memory_order_acquire);
 
     // 2. Fetch enough candles to compute ATR and SuperTrend.
     //    Need period + 1 candles: period for ATR, +1 for the "previous close" of the first TR.
     const auto needed = period + 1;
-    auto *feed = context_.market_feed;
+    auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
         return;
     }
 
-    auto candles = feed->get_kline_buffer(context_.config.symbol).snapshot(needed);
+    auto candles = feed->getKlineBuffer(m_context.config.symbol).snapshot(needed);
     if (candles.size() < needed)
     {
         // Not enough data yet — log warmup progress every 30 seconds.
-        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();
-        if (now_ms - last_warmup_log_ms_ >= 30'000)
+        if (nowMs - m_lastWarmupLogMs >= 30'000)
         {
             PULSE_LOG_INFO("strategy",
                 "[{}] Warming up: {}/{} candles accumulated (need ~{} min of kline data)",
                 id(), candles.size(), needed, needed);
-            last_warmup_log_ms_ = now_ms;
+            m_lastWarmupLogMs = nowMs;
         }
         return;
     }
 
     // 3. Compute ATR.
-    const double atr = compute_atr(candles, period);
+    const double atr = computeAtr(candles, period);
     if (0.0 >= atr)
     {
         return; // ATR is zero — market is completely flat, skip.
@@ -112,58 +112,58 @@ void SuperTrendScalper::on_kline(const market::Kline & /*kline*/)
     //    Upper band: take the lower of basic_upper and prev_upper (tighten upward moves).
     //    Reset if previous close broke above the previous upper band.
     double final_upper = basic_upper;
-    if (has_prev_)
+    if (m_hasPrev)
     {
-        if (basic_upper < prev_upper_band_ || prev_close_ > prev_upper_band_)
+        if (basic_upper < m_prevUpperBand || m_prevClose > m_prevUpperBand)
         {
             final_upper = basic_upper;
         }
         else
         {
-            final_upper = prev_upper_band_;
+            final_upper = m_prevUpperBand;
         }
     }
 
     //    Lower band: take the higher of basic_lower and prev_lower (tighten downward moves).
     //    Reset if previous close broke below the previous lower band.
     double final_lower = basic_lower;
-    if (has_prev_)
+    if (m_hasPrev)
     {
-        if (basic_lower > prev_lower_band_ || prev_close_ < prev_lower_band_)
+        if (basic_lower > m_prevLowerBand || m_prevClose < m_prevLowerBand)
         {
             final_lower = basic_lower;
         }
         else
         {
-            final_lower = prev_lower_band_;
+            final_lower = m_prevLowerBand;
         }
     }
 
     // 6. Determine current SuperTrend value and trend direction.
-    bool current_bullish = is_bullish_;
+    bool current_bullish = m_isBullish;
     double current_supertrend = 0.0;
 
-    if (has_prev_)
+    if (m_hasPrev)
     {
         // If we were bullish and close stays above final_lower → stay bullish.
-        if (is_bullish_ && latest.close >= final_lower)
+        if (m_isBullish && latest.close >= final_lower)
         {
             current_bullish = true;
             current_supertrend = final_lower;
         }
         // If we were bearish and close stays below final_upper → stay bearish.
-        else if (!is_bullish_ && latest.close <= final_upper)
+        else if (!m_isBullish && latest.close <= final_upper)
         {
             current_bullish = false;
             current_supertrend = final_upper;
         }
         // Otherwise: trend flipped.
-        else if (is_bullish_ && latest.close < final_lower)
+        else if (m_isBullish && latest.close < final_lower)
         {
             current_bullish = false;
             current_supertrend = final_upper;
         }
-        else // !is_bullish_ && close > final_upper
+        else // !m_isBullish && close > final_upper
         {
             current_bullish = true;
             current_supertrend = final_lower;
@@ -177,19 +177,19 @@ void SuperTrendScalper::on_kline(const market::Kline & /*kline*/)
     }
 
     // 7. Detect trend flip and emit signal.
-    if (has_prev_)
+    if (m_hasPrev)
     {
-        const bool flipped_bullish = !is_bullish_ && current_bullish;
-        const bool flipped_bearish = is_bullish_ && !current_bullish;
+        const bool flipped_bullish = !m_isBullish && current_bullish;
+        const bool flipped_bearish = m_isBullish && !current_bullish;
 
         if (flipped_bullish || flipped_bearish)
         {
             // Enforce cooldown.
-            const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch())
                                     .count();
             const auto cooldown_ms = static_cast<std::int64_t>(cooldown_sec * 1000.0);
-            if (now_ms - last_signal_time_ms_ >= cooldown_ms)
+            if (nowMs - m_lastSignalTimeMs >= cooldown_ms)
             {
                 // 8. Compute confidence: distance from price to SuperTrend, normalized by ATR.
                 double confidence = std::abs(latest.close - current_supertrend) / atr;
@@ -198,7 +198,7 @@ void SuperTrendScalper::on_kline(const market::Kline & /*kline*/)
                 // 9. Build and emit signal.
                 TradingSignal signal;
                 signal.type = flipped_bullish ? SignalType::Buy : SignalType::Sell;
-                signal.symbol = context_.config.symbol;
+                signal.symbol = m_context.config.symbol;
                 signal.confidence = confidence;
                 signal.price = latest.close;
                 signal.strategy_id = id();
@@ -210,22 +210,22 @@ void SuperTrendScalper::on_kline(const market::Kline & /*kline*/)
                 PULSE_LOG_INFO("strategy", "[{}] {} signal: confidence={:.4f}, price={:.2f}, atr={:.2f}",
                     id(), signal.reason, confidence, signal.price, atr);
 
-                emit_signal(signal);
-                last_signal_time_ms_ = now_ms;
+                emitSignal(signal);
+                m_lastSignalTimeMs = nowMs;
             }
         }
     }
 
     // 10. Store state for next candle.
-    prev_upper_band_ = final_upper;
-    prev_lower_band_ = final_lower;
-    prev_close_ = latest.close;
-    prev_supertrend_ = current_supertrend;
-    is_bullish_ = current_bullish;
-    has_prev_ = true;
+    m_prevUpperBand = final_upper;
+    m_prevLowerBand = final_lower;
+    m_prevClose = latest.close;
+    m_prevSupertrend = current_supertrend;
+    m_isBullish = current_bullish;
+    m_hasPrev = true;
 }
 
-double SuperTrendScalper::compute_atr(const std::vector<market::Kline> &candles,
+double SuperTrendScalper::computeAtr(const std::vector<market::Kline> &candles,
     std::size_t period) const
 {
     // Need at least period + 1 candles to compute `period` true ranges.

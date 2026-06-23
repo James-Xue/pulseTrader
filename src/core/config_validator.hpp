@@ -6,7 +6,7 @@
 //   - Numeric parameters within safe ranges
 //   - Cross-field consistency (strategy symbols ⊆ top-level symbols)
 //
-// Call after load_config_file() or build_default_config() before starting
+// Call after loadConfigFile() or buildDefaultConfig() before starting
 // the trading engine.
 
 #include "core/config.hpp"
@@ -19,6 +19,6 @@ namespace pulse
 ///
 /// @return PulseError with ConfigValidationError on first failure found,
 ///         or a default-constructed PulseError{Ok, ""} on success.
-[[nodiscard]] PulseError validate_config(const PulseConfig &cfg);
+[[nodiscard]] PulseError validateConfig(const PulseConfig &cfg);
 
 } // namespace pulse

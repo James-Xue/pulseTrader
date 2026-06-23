@@ -72,10 +72,10 @@ struct WebServer::Impl
 WebServer::WebServer(const WebUiConfig &config,
                      DashboardState &state,
                      const std::string &frontend_dir)
-    : config_{ config }
-    , state_{ state }
-    , frontend_dir_{ frontend_dir }
-    , ws_server_{ std::make_unique<WsServer>(config) }
+    : m_config{ config }
+    , m_state{ state }
+    , m_frontendDir{ frontend_dir }
+    , m_wsServer{ std::make_unique<WsServer>(config) }
 {
 }
 
@@ -105,12 +105,12 @@ WebServer::~WebServer()
 [[nodiscard]] bool WebServer::start()
 {
     // Guard: do not start if already running or if Impl exists.
-    if (running_)
+    if (m_running)
     {
         return true;
     }
 
-    impl_ = std::make_unique<Impl>();
+    m_impl = std::make_unique<Impl>();
 
     // Synchronization: atomic flag set by the listen callback.
     // We use an atomic rather than a condition_variable because the lambda
@@ -119,21 +119,21 @@ WebServer::~WebServer()
     std::atomic<bool> bind_result{ false };
 
     // Record the start time for uptime calculation.
-    start_time_ = std::chrono::steady_clock::now();
+    m_startTime = std::chrono::steady_clock::now();
 
     // Capture references for the background thread.
-    auto &state_ref = state_;
-    auto *ws = ws_server_.get();
+    auto &state_ref = m_state;
+    auto *ws = m_wsServer.get();
 
-    impl_->event_thread = std::thread([this, &listen_ready, &bind_result,
+    m_impl->event_thread = std::thread([this, &listen_ready, &bind_result,
                                         &state_ref, ws]()
     {
         // a. Construct uWS::App on this thread.
         //    uWS::App internally calls Loop::get() which is thread-local.
-        impl_->app = std::make_unique<uWS::App>();
+        m_impl->app = std::make_unique<uWS::App>();
 
         // Check if construction succeeded.
-        if (impl_->app->constructorFailed())
+        if (m_impl->app->constructorFailed())
         {
             bind_result.store(false, std::memory_order_release);
             listen_ready.store(true, std::memory_order_release);
@@ -141,12 +141,12 @@ WebServer::~WebServer()
         }
 
         // Store the loop pointer for the WsServer's publish function.
-        uWS::Loop *loop = impl_->app->getLoop();
+        uWS::Loop *loop = m_impl->app->getLoop();
 
         // Set up the publish function: defers app->publish() to this thread.
         // Capture raw pointer to app; safe because Impl outlives the server.
-        uWS::App *app_ptr = impl_->app.get();
-        ws->set_publish_fn([loop, app_ptr](const std::string &json)
+        uWS::App *app_ptr = m_impl->app.get();
+        ws->setPublishFn([loop, app_ptr](const std::string &json)
         {
             loop->defer([app_ptr, json]()
             {
@@ -155,10 +155,10 @@ WebServer::~WebServer()
         });
 
         // b. Register /api/status — server health check.
-        impl_->app->get("/api/status", [this](auto *res, auto *req)
+        m_impl->app->get("/api/status", [this](auto *res, auto *req)
         {
             // Auth check.
-            if (!validate_auth(req->getHeader("authorization")))
+            if (!validateAuth(req->getHeader("authorization")))
             {
                 res->writeStatus("401 Unauthorized")
                    ->writeHeader("Content-Type", "text/plain")
@@ -167,7 +167,7 @@ WebServer::~WebServer()
             }
 
             // Host validation.
-            if (!validate_host(req->getHeader("host")))
+            if (!validateHost(req->getHeader("host")))
             {
                 res->writeStatus("403 Forbidden")
                    ->writeHeader("Content-Type", "text/plain")
@@ -177,7 +177,7 @@ WebServer::~WebServer()
 
             // Build the status JSON.
             const auto uptime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start_time_).count();
+                std::chrono::steady_clock::now() - m_startTime).count();
 
             nlohmann::json j;
             j["status"] = "ok";
@@ -189,10 +189,10 @@ WebServer::~WebServer()
         });
 
         // c. Register /api/snapshot — latest dashboard snapshot.
-        impl_->app->get("/api/snapshot", [this, &state_ref](auto *res, auto *req)
+        m_impl->app->get("/api/snapshot", [this, &state_ref](auto *res, auto *req)
         {
             // Auth check.
-            if (!validate_auth(req->getHeader("authorization")))
+            if (!validateAuth(req->getHeader("authorization")))
             {
                 res->writeStatus("401 Unauthorized")
                    ->writeHeader("Content-Type", "text/plain")
@@ -201,7 +201,7 @@ WebServer::~WebServer()
             }
 
             // Host validation.
-            if (!validate_host(req->getHeader("host")))
+            if (!validateHost(req->getHeader("host")))
             {
                 res->writeStatus("403 Forbidden")
                    ->writeHeader("Content-Type", "text/plain")
@@ -227,7 +227,7 @@ WebServer::~WebServer()
         //    Designated initializers must follow the struct declaration order:
         //    compression, maxPayloadLength, idleTimeout, ..., upgrade, open,
         //    message, dropped, drain, subscription, close.
-        impl_->app->ws<PerSocketData>("/ws", {
+        m_impl->app->ws<PerSocketData>("/ws", {
             // -- Settings (must come before handlers in declaration order) --
             .maxPayloadLength = 16 * 1024,
             .idleTimeout = 120,
@@ -237,10 +237,10 @@ WebServer::~WebServer()
             .upgrade = [this, ws](auto *res, auto *req, auto *context)
             {
                 // Auth via query parameter: ?token=AUTH_TOKEN
-                if (!config_.authToken.empty())
+                if (!m_config.authToken.empty())
                 {
                     const auto token = req->getQuery("token");
-                    if (token != std::string_view{ config_.authToken })
+                    if (token != std::string_view{ m_config.authToken })
                     {
                         res->writeStatus("401 Unauthorized")
                            ->end("Unauthorized");
@@ -249,7 +249,7 @@ WebServer::~WebServer()
                 }
 
                 // Host validation.
-                if (!validate_host(req->getHeader("host")))
+                if (!validateHost(req->getHeader("host")))
                 {
                     res->writeStatus("403 Forbidden")
                        ->end("Invalid host");
@@ -257,7 +257,7 @@ WebServer::~WebServer()
                 }
 
                 // Client limit check.
-                if (ws->client_count() >= ws->max_clients())
+                if (ws->clientCount() >= ws->maxClients())
                 {
                     res->writeStatus("503 Service Unavailable")
                        ->end("Too many clients");
@@ -281,13 +281,13 @@ WebServer::~WebServer()
             // -- Open handler: track client, subscribe to topic, send latest --
             .open = [this, ws](auto *ws_conn)
             {
-                ws->on_ws_open();
+                ws->onWsOpen();
 
                 // Subscribe to the snapshot pub/sub topic.
                 ws_conn->subscribe("snapshot");
 
                 // Send the cached latest snapshot immediately on connect.
-                const auto cached = ws->last_json();
+                const auto cached = ws->lastJson();
                 if (!cached.empty())
                 {
                     ws_conn->send(cached, uWS::OpCode::TEXT);
@@ -302,24 +302,24 @@ WebServer::~WebServer()
             // -- Close handler: untrack client --
             .close = [ws](auto * /*ws_conn*/, int /*code*/, auto /*msg*/)
             {
-                ws->on_ws_close();
+                ws->onWsClose();
             },
         });
 
-        // e. Register /* — static file serving from frontend_dir_.
+        // e. Register /* — static file serving from m_frontendDir.
         //    This catch-all must be last to avoid shadowing API routes.
-        impl_->app->get("/*", [this](auto *res, auto *req)
+        m_impl->app->get("/*", [this](auto *res, auto *req)
         {
             std::string path{ req->getUrl() };
-            serve_static(res, path);
+            serveStatic(res, path);
         });
 
         // f. Bind the listen socket.
-        impl_->app->listen(config_.bindAddress, static_cast<int>(config_.port),
+        m_impl->app->listen(m_config.bindAddress, static_cast<int>(m_config.port),
             [this, &listen_ready, &bind_result]
             (us_listen_socket_t *token)
             {
-                impl_->listen_socket = token;
+                m_impl->listen_socket = token;
 
                 if (token)
                 {
@@ -331,14 +331,14 @@ WebServer::~WebServer()
 
                     if (0 < bound_port)
                     {
-                        actual_port_ = static_cast<std::uint16_t>(bound_port);
+                        m_actualPort = static_cast<std::uint16_t>(bound_port);
                     }
                     else
                     {
-                        actual_port_ = config_.port;
+                        m_actualPort = m_config.port;
                     }
 
-                    running_ = true;
+                    m_running = true;
                     bind_result.store(true, std::memory_order_release);
                 }
                 else
@@ -351,10 +351,10 @@ WebServer::~WebServer()
             });
 
         // g. Run the event loop (blocks until us_listen_socket_close).
-        impl_->app->run();
+        m_impl->app->run();
 
         // Event loop exited — clean up the app.
-        impl_->app.reset();
+        m_impl->app.reset();
     });
 
     // 4. Wait for the listen callback to fire (poll the atomic flag).
@@ -380,26 +380,26 @@ WebServer::~WebServer()
 
 void WebServer::stop()
 {
-    if (!impl_)
+    if (!m_impl)
     {
         return;
     }
 
     // 1. Close the listen socket from the calling thread.
     //    This begins the shutdown process.
-    if (impl_->listen_socket)
+    if (m_impl->listen_socket)
     {
-        us_listen_socket_close(0, impl_->listen_socket);
-        impl_->listen_socket = nullptr;
+        us_listen_socket_close(0, m_impl->listen_socket);
+        m_impl->listen_socket = nullptr;
     }
 
     // 2. Defer a full close to the event loop thread. This wakes the loop
     //    immediately (via us_wakeup_loop) and closes all remaining sockets,
     //    which causes app.run() to return without waiting for the next
     //    timer tick (~1s granularity in uSockets).
-    if (impl_->app)
+    if (m_impl->app)
     {
-        uWS::App *app_ptr = impl_->app.get();
+        uWS::App *app_ptr = m_impl->app.get();
         uWS::Loop *loop = app_ptr->getLoop();
         if (loop)
         {
@@ -411,15 +411,15 @@ void WebServer::stop()
     }
 
     // 3. Join the background thread.
-    if (impl_->event_thread.joinable())
+    if (m_impl->event_thread.joinable())
     {
-        impl_->event_thread.join();
+        m_impl->event_thread.join();
     }
 
     // 3. Clean up.
-    running_ = false;
-    actual_port_ = 0;
-    impl_.reset();
+    m_running = false;
+    m_actualPort = 0;
+    m_impl.reset();
 }
 
 // ---------------------------------------------------------------------------
@@ -428,21 +428,21 @@ void WebServer::stop()
 
 [[nodiscard]] bool WebServer::running() const
 {
-    return running_;
+    return m_running;
 }
 
 [[nodiscard]] std::uint16_t WebServer::port() const
 {
-    return actual_port_;
+    return m_actualPort;
 }
 
-[[nodiscard]] const WsServer &WebServer::ws_server() const
+[[nodiscard]] const WsServer &WebServer::wsServer() const
 {
-    return *ws_server_;
+    return *m_wsServer;
 }
 
 // ---------------------------------------------------------------------------
-// validate_auth — check the Authorization header
+// validateAuth — check the Authorization header
 //
 // Rules:
 //   1. If authToken is empty (dev mode), all requests pass
@@ -450,10 +450,10 @@ void WebServer::stop()
 //   3. Case-sensitive comparison on both "Bearer" prefix and token value
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] bool WebServer::validate_auth(std::string_view auth_header) const
+[[nodiscard]] bool WebServer::validateAuth(std::string_view auth_header) const
 {
     // Dev mode: no auth required.
-    if (config_.authToken.empty())
+    if (m_config.authToken.empty())
     {
         return true;
     }
@@ -472,11 +472,11 @@ void WebServer::stop()
 
     // Compare the token portion.
     const auto token = auth_header.substr(prefix.size());
-    return token == std::string_view{ config_.authToken };
+    return token == std::string_view{ m_config.authToken };
 }
 
 // ---------------------------------------------------------------------------
-// validate_host — check the Host header for DNS rebinding protection
+// validateHost — check the Host header for DNS rebinding protection
 //
 // Accepts:
 //   1. "bindAddress:port" (e.g. "127.0.0.1:8080")
@@ -486,17 +486,17 @@ void WebServer::stop()
 // Returns false for empty or unrecognized host headers.
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] bool WebServer::validate_host(std::string_view host_header) const
+[[nodiscard]] bool WebServer::validateHost(std::string_view host_header) const
 {
     if (host_header.empty())
     {
         return false;
     }
 
-    const auto port_str = std::to_string(actual_port_);
+    const auto port_str = std::to_string(m_actualPort);
 
     // 1. Check bindAddress:port.
-    const auto bind_host = config_.bindAddress + ":" + port_str;
+    const auto bind_host = m_config.bindAddress + ":" + port_str;
     if (host_header == std::string_view{ bind_host })
     {
         return true;
@@ -510,7 +510,7 @@ void WebServer::stop()
     }
 
     // 3. Check 127.0.0.1:port (if bindAddress is not already 127.0.0.1).
-    if ("127.0.0.1" != config_.bindAddress)
+    if ("127.0.0.1" != m_config.bindAddress)
     {
         const auto loopback_host = std::string{ "127.0.0.1:" } + port_str;
         if (host_header == std::string_view{ loopback_host })
@@ -523,7 +523,7 @@ void WebServer::stop()
 }
 
 // ---------------------------------------------------------------------------
-// serve_static — serve a file from the frontend directory
+// serveStatic — serve a file from the frontend directory
 //
 // Security:
 //   1. Rejects paths containing ".." (directory traversal prevention)
@@ -533,7 +533,7 @@ void WebServer::stop()
 // ---------------------------------------------------------------------------
 
 template <typename Res>
-void WebServer::serve_static(Res *res, const std::string &path)
+void WebServer::serveStatic(Res *res, const std::string &path)
 {
     // 1. Security: reject directory traversal attempts.
     if (std::string::npos != path.find(".."))
@@ -552,7 +552,7 @@ void WebServer::serve_static(Res *res, const std::string &path)
     }
 
     // 3. Construct the full filesystem path.
-    const auto full_path = frontend_dir_ + file_path;
+    const auto full_path = m_frontendDir + file_path;
 
     // 4. Read the file.
     std::ifstream file{ full_path, std::ios::binary };
@@ -570,17 +570,17 @@ void WebServer::serve_static(Res *res, const std::string &path)
     std::string content = oss.str();
 
     // 6. Determine Content-Type and send the response.
-    const auto ct = mime_type(full_path);
+    const auto ct = mimeType(full_path);
     res->writeHeader("Content-Type", ct)
        ->end(std::move(content));
 }
 
 // Explicit template instantiation for the HttpResponse types we use.
 // uWebSockets uses HttpResponse<false> for non-SSL and HttpResponse<true> for SSL.
-template void WebServer::serve_static(uWS::HttpResponse<false> *, const std::string &);
+template void WebServer::serveStatic(uWS::HttpResponse<false> *, const std::string &);
 
 // ---------------------------------------------------------------------------
-// mime_type — determine Content-Type from file extension
+// mimeType — determine Content-Type from file extension
 //
 // Supported types:
 //   .html  → text/html
@@ -595,7 +595,7 @@ template void WebServer::serve_static(uWS::HttpResponse<false> *, const std::str
 //   other  → application/octet-stream
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] std::string WebServer::mime_type(const std::string &path)
+[[nodiscard]] std::string WebServer::mimeType(const std::string &path)
 {
     const auto dot = path.rfind('.');
     if (std::string::npos == dot)

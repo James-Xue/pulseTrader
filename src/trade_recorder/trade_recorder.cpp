@@ -18,12 +18,12 @@ namespace
 // Enum-to-string helpers
 // ---------------------------------------------------------------------------
 
-std::string side_to_string(Side s)
+std::string sideToString(Side s)
 {
     return Side::Buy == s ? "buy" : "sell";
 }
 
-std::string order_type_to_string(OrderType t)
+std::string orderTypeToString(OrderType t)
 {
     switch (t)
     {
@@ -37,7 +37,7 @@ std::string order_type_to_string(OrderType t)
     return "unknown";
 }
 
-std::string status_to_string(OrderStatus s)
+std::string statusToString(OrderStatus s)
 {
     switch (s)
     {
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_timestamp  ON trades(timestamp);
 // ---------------------------------------------------------------------------
 
 TradeRecorder::TradeRecorder(std::unique_ptr<SQLite::Database> db)
-    : db_{ std::move(db) }
+    : m_db{ std::move(db) }
 {
 }
 
@@ -99,7 +99,7 @@ TradeRecorder::~TradeRecorder()
 }
 
 TradeRecorder::TradeRecorder(TradeRecorder &&other) noexcept
-    : db_{ std::move(other.db_) }
+    : m_db{ std::move(other.m_db) }
 {
 }
 
@@ -108,7 +108,7 @@ TradeRecorder &TradeRecorder::operator=(TradeRecorder &&other) noexcept
     if (this != &other)
     {
         close();
-        db_ = std::move(other.db_);
+        m_db = std::move(other.m_db);
     }
     return *this;
 }
@@ -130,7 +130,7 @@ Result<TradeRecorder> TradeRecorder::open(const std::string &db_path)
         db->exec("PRAGMA foreign_keys=ON");
 
         TradeRecorder recorder(std::move(db));
-        auto schema_result = recorder.create_schema();
+        auto schema_result = recorder.createSchema();
 
         if (!ok(schema_result))
         {
@@ -149,12 +149,12 @@ Result<TradeRecorder> TradeRecorder::open(const std::string &db_path)
 // Schema
 // ---------------------------------------------------------------------------
 
-Result<bool> TradeRecorder::create_schema()
+Result<bool> TradeRecorder::createSchema()
 {
     try
     {
-        db_->exec(kCreateTable);
-        db_->exec(kCreateIndexes);
+        m_db->exec(kCreateTable);
+        m_db->exec(kCreateIndexes);
         return true;
     }
     catch (const SQLite::Exception &e)
@@ -167,14 +167,14 @@ Result<bool> TradeRecorder::create_schema()
 // Record trade
 // ---------------------------------------------------------------------------
 
-Result<bool> TradeRecorder::record_trade(
+Result<bool> TradeRecorder::recordTrade(
     const execution::ExecutionReport &report,
     double pnl,
     const std::string &strategy_name)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return PulseError{ErrorCode::TradeRecorderNotOpen,
                           "database is not open"};
@@ -186,7 +186,7 @@ Result<bool> TradeRecorder::record_trade(
                            report.fill_time.time_since_epoch())
                            .count();
 
-        SQLite::Statement stmt(*db_,
+        SQLite::Statement stmt(*m_db,
             "INSERT INTO trades "
             "(order_id, client_order_id, timestamp, symbol, side, "
             "order_type, requested_qty, filled_qty, avg_fill_price, "
@@ -198,8 +198,8 @@ Result<bool> TradeRecorder::record_trade(
         stmt.bind(2, report.client_order_id);
         stmt.bind(3, fill_ns);
         stmt.bind(4, report.symbol);
-        stmt.bind(5, side_to_string(report.side));
-        stmt.bind(6, order_type_to_string(report.type));
+        stmt.bind(5, sideToString(report.side));
+        stmt.bind(6, orderTypeToString(report.type));
         stmt.bind(7, report.requested_qty);
         stmt.bind(8, report.filled_qty);
         stmt.bind(9, report.avg_fill_price);
@@ -208,7 +208,7 @@ Result<bool> TradeRecorder::record_trade(
         stmt.bind(12, report.fees);
         stmt.bind(13, pnl);
         stmt.bind(14, static_cast<std::int64_t>(report.latency.count()));
-        stmt.bind(15, status_to_string(report.final_status));
+        stmt.bind(15, statusToString(report.final_status));
         stmt.bind(16, strategy_name);
 
         stmt.exec();
@@ -218,7 +218,7 @@ Result<bool> TradeRecorder::record_trade(
                        "pnl={:.4f} strategy={}",
                        report.order_id,
                        report.symbol,
-                       side_to_string(report.side),
+                       sideToString(report.side),
                        report.filled_qty,
                        report.avg_fill_price,
                        pnl,
@@ -245,14 +245,14 @@ Result<bool> TradeRecorder::record_trade(
 // Queries
 // ---------------------------------------------------------------------------
 
-Result<std::vector<TradeRecord>> TradeRecorder::get_trades(
+Result<std::vector<TradeRecord>> TradeRecorder::getTrades(
     const std::string &symbol,
     std::int64_t from_ns,
     std::int64_t to_ns) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return PulseError{ErrorCode::TradeRecorderNotOpen,
                           "database is not open"};
@@ -281,7 +281,7 @@ Result<std::vector<TradeRecord>> TradeRecorder::get_trades(
 
         sql += " ORDER BY timestamp DESC";
 
-        SQLite::Statement stmt(*db_, sql);
+        SQLite::Statement stmt(*m_db, sql);
 
         int idx = 1;
 
@@ -333,12 +333,12 @@ Result<std::vector<TradeRecord>> TradeRecorder::get_trades(
     }
 }
 
-Result<std::vector<TradeRecord>> TradeRecorder::get_trades_by_strategy(
+Result<std::vector<TradeRecord>> TradeRecorder::getTradesByStrategy(
     const std::string &strategy_name) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return PulseError{ErrorCode::TradeRecorderNotOpen,
                           "database is not open"};
@@ -346,7 +346,7 @@ Result<std::vector<TradeRecord>> TradeRecorder::get_trades_by_strategy(
 
     try
     {
-        SQLite::Statement stmt(*db_,
+        SQLite::Statement stmt(*m_db,
             "SELECT * FROM trades WHERE strategy_name = ? "
             "ORDER BY timestamp DESC");
         stmt.bind(1, strategy_name);
@@ -384,13 +384,13 @@ Result<std::vector<TradeRecord>> TradeRecorder::get_trades_by_strategy(
     }
 }
 
-Result<TradeSummary> TradeRecorder::get_summary(
+Result<TradeSummary> TradeRecorder::getSummary(
     std::int64_t from_ns,
     std::int64_t to_ns) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return PulseError{ErrorCode::TradeRecorderNotOpen,
                           "database is not open"};
@@ -418,7 +418,7 @@ Result<TradeSummary> TradeRecorder::get_summary(
             sql += " AND timestamp <= ?";
         }
 
-        SQLite::Statement stmt(*db_, sql);
+        SQLite::Statement stmt(*m_db, sql);
 
         int idx = 1;
 
@@ -436,7 +436,7 @@ Result<TradeSummary> TradeRecorder::get_summary(
 
         if (stmt.executeStep())
         {
-            summary.trade_count = stmt.getColumn(0).getInt64();
+            summary.tradeCount = stmt.getColumn(0).getInt64();
             summary.total_pnl = stmt.getColumn(1).getDouble();
             summary.total_fees = stmt.getColumn(2).getDouble();
             summary.win_rate = stmt.getColumn(3).getDouble();
@@ -453,11 +453,11 @@ Result<TradeSummary> TradeRecorder::get_summary(
     }
 }
 
-Result<double> TradeRecorder::get_daily_pnl(std::int64_t date_ns) const
+Result<double> TradeRecorder::getDailyPnl(std::int64_t date_ns) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return PulseError{ErrorCode::TradeRecorderNotOpen,
                           "database is not open"};
@@ -470,7 +470,7 @@ Result<double> TradeRecorder::get_daily_pnl(std::int64_t date_ns) const
         std::int64_t day_start = (date_ns / kNsPerDay) * kNsPerDay;
         std::int64_t day_end = day_start + kNsPerDay;
 
-        SQLite::Statement stmt(*db_,
+        SQLite::Statement stmt(*m_db,
             "SELECT COALESCE(SUM(pnl), 0) FROM trades "
             "WHERE timestamp >= ? AND timestamp < ?");
         stmt.bind(1, day_start);
@@ -495,18 +495,18 @@ Result<double> TradeRecorder::get_daily_pnl(std::int64_t date_ns) const
 // Utilities
 // ---------------------------------------------------------------------------
 
-std::int64_t TradeRecorder::trade_count() const
+std::int64_t TradeRecorder::tradeCount() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return 0;
     }
 
     try
     {
-        SQLite::Statement stmt(*db_, "SELECT COUNT(*) FROM trades");
+        SQLite::Statement stmt(*m_db, "SELECT COUNT(*) FROM trades");
 
         if (stmt.executeStep())
         {
@@ -523,16 +523,16 @@ std::int64_t TradeRecorder::trade_count() const
 
 void TradeRecorder::checkpoint()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!db_)
+    if (!m_db)
     {
         return;
     }
 
     try
     {
-        db_->exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        m_db->exec("PRAGMA wal_checkpoint(TRUNCATE)");
     }
     catch (const SQLite::Exception &)
     {
@@ -542,8 +542,8 @@ void TradeRecorder::checkpoint()
 
 void TradeRecorder::close()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    db_.reset();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_db.reset();
 }
 
 } // namespace pulse::trade_recorder

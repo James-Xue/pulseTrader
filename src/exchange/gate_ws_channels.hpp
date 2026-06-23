@@ -13,7 +13,7 @@
 //   5. Tracks active channels for re-subscription on reconnect
 //
 // Thread safety:
-//   - Multiple readers (dispatch, active_channels) can proceed concurrently
+//   - Multiple readers (dispatch, activeChannels) can proceed concurrently
 //   - Writers (subscribe, unsubscribe) hold exclusive lock
 //   - Callbacks are invoked under a shared read lock — they must NOT call back
 //     into subscribe/unsubscribe (would deadlock)
@@ -88,13 +88,13 @@ class GateWsChannels
     /// Build a Gate.io v4 subscribe JSON message.
     ///
     /// Format: {"time": <unix>, "channel": "<name>", "event": "subscribe", "payload": [...]}
-    [[nodiscard]] nlohmann::json build_subscribe_msg(const std::string &channel,
+    [[nodiscard]] nlohmann::json buildSubscribeMsg(const std::string &channel,
         const std::vector<std::string> &payload) const;
 
     /// Build a Gate.io v4 unsubscribe JSON message.
     ///
     /// Format: {"time": <unix>, "channel": "<name>", "event": "unsubscribe", "payload": [...]}
-    [[nodiscard]] nlohmann::json build_unsubscribe_msg(const std::string &channel,
+    [[nodiscard]] nlohmann::json buildUnsubscribeMsg(const std::string &channel,
         const std::vector<std::string> &payload) const;
 
     /// Build a pong reply for a server-initiated ping.
@@ -105,19 +105,19 @@ class GateWsChannels
     /// The pong channel is derived dynamically from the ping frame's channel
     /// by replacing ".ping" with ".pong", so the MarketType parameter is used
     /// only as a fallback when the channel field is absent.
-    [[nodiscard]] static nlohmann::json build_pong(const nlohmann::json &ping_frame,
+    [[nodiscard]] static nlohmann::json buildPong(const nlohmann::json &ping_frame,
         MarketType mt = MarketType::Spot);
 
     /// Returns a list of currently subscribed channel names.
     ///
     /// Thread safety: shared read lock.
-    [[nodiscard]] std::vector<std::string> active_channels() const;
+    [[nodiscard]] std::vector<std::string> activeChannels() const;
 
     /// Returns the payload for a given channel (used for re-subscription on reconnect).
     ///
     /// Returns an empty vector if the channel is not subscribed.
     /// Thread safety: shared read lock.
-    [[nodiscard]] std::vector<std::string> get_payload(const std::string &channel) const;
+    [[nodiscard]] std::vector<std::string> getPayload(const std::string &channel) const;
 
   private:
     /// Internal storage for one channel subscription.
@@ -127,8 +127,8 @@ class GateWsChannels
         ChannelCallback callback;
     };
 
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, ChannelEntry> channels_;
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<std::string, ChannelEntry> m_channels;
 };
 
 } // namespace pulse::exchange

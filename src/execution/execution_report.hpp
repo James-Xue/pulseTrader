@@ -63,7 +63,7 @@ struct ExecutionReport
     /// Formula: (avg_fill_price - submit_mid_price) / submit_mid_price * 10000
     /// For Buy orders: positive slippage = worse fill (paid more)
     /// For Sell orders: negative slippage = worse fill (received less)
-    [[nodiscard]] static Price calculate_slippage_bps(Price fill_price, Price mid_price, Side side);
+    [[nodiscard]] static Price calculateSlippageBps(Price fill_price, Price mid_price, Side side);
 };
 
 } // namespace pulse::execution

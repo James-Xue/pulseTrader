@@ -1,4 +1,4 @@
-// position_manager.cpp — Thread-safe position tracking (Layer 7 Risk Management)
+// positionManager.cpp — Thread-safe position tracking (Layer 7 Risk Management)
 
 #include "risk/position_manager.hpp"
 
@@ -17,7 +17,7 @@ using namespace pulse::logging;
 // ---------------------------------------------------------------------------
 
 PositionManager::PositionManager(const RiskConfig &config)
-    : config_{ config }
+    : m_config{ config }
 {
 }
 
@@ -25,16 +25,16 @@ PositionManager::PositionManager(const RiskConfig &config)
 // Position lifecycle
 // ---------------------------------------------------------------------------
 
-Result<std::string> PositionManager::open_position(
+Result<std::string> PositionManager::openPosition(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id)
 {
     // Delegate to the full overload with spot defaults.
-    return open_position(symbol, side, qty, entry_price, strategy_id,
+    return openPosition(symbol, side, qty, entry_price, strategy_id,
                          MarketType::Spot, 1.0, MarginMode::Cross, 1.0, 0.0);
 }
 
-Result<std::string> PositionManager::open_position(
+Result<std::string> PositionManager::openPosition(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id,
     MarketType market_type, double leverage, MarginMode margin_mode,
@@ -50,39 +50,39 @@ Result<std::string> PositionManager::open_position(
     // 6. Generate unique position_id
     // 7. Create Position, insert into map, return position_id
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     const double proposed_notional = qty * entry_price * quanto_multiplier;
 
     // 3. Check total notional limit.
     double total_notional = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         total_notional += pos.notional_value;
     }
 
-    if (total_notional + proposed_notional > config_.maxPositionNotional)
+    if (total_notional + proposed_notional > m_config.maxPositionNotional)
     {
         PULSE_LOG_WARN("risk",
             "Position rejected: total notional {:.2f} + proposed {:.2f} exceeds limit {:.2f}",
-            total_notional, proposed_notional, config_.maxPositionNotional);
+            total_notional, proposed_notional, m_config.maxPositionNotional);
         return PulseError{ ErrorCode::PositionLimitHit,
             "Total notional limit exceeded" };
     }
 
     // 4. Check open position count limit.
-    if (static_cast<int>(positions_.size()) >= config_.maxOpenPositions)
+    if (static_cast<int>(m_positions.size()) >= m_config.maxOpenPositions)
     {
         PULSE_LOG_WARN("risk",
             "Position rejected: {} open positions >= limit {}",
-            positions_.size(), config_.maxOpenPositions);
+            m_positions.size(), m_config.maxOpenPositions);
         return PulseError{ ErrorCode::PositionLimitHit,
             "Maximum open positions reached" };
     }
 
     // 5. Check per-symbol notional limit.
     double sym_notional = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         if (pos.symbol == symbol)
         {
@@ -90,17 +90,17 @@ Result<std::string> PositionManager::open_position(
         }
     }
 
-    if (sym_notional + proposed_notional > config_.maxSymbolNotional)
+    if (sym_notional + proposed_notional > m_config.maxSymbolNotional)
     {
         PULSE_LOG_WARN("risk",
             "Position rejected: symbol {} notional {:.2f} + proposed {:.2f} exceeds limit {:.2f}",
-            symbol, sym_notional, proposed_notional, config_.maxSymbolNotional);
+            symbol, sym_notional, proposed_notional, m_config.maxSymbolNotional);
         return PulseError{ ErrorCode::SymbolLimitHit,
             "Per-symbol notional limit exceeded" };
     }
 
     // 6. Generate unique position ID.
-    std::string pos_id = generate_position_id(symbol, side);
+    std::string pos_id = generatePositionId(symbol, side);
 
     // 7. Create Position and insert.
     Position pos;
@@ -150,17 +150,17 @@ Result<std::string> PositionManager::open_position(
         pos.liquidation_price = 0.0;
     }
 
-    positions_[pos_id] = pos;
+    m_positions[pos_id] = pos;
 
     // Auto-consume a matching pending reservation (same symbol).
-    // In the normal flow, reserve_notional() creates a reservation, then
-    // open_position() is called on fill. We consume the first matching
+    // In the normal flow, reserveNotional() creates a reservation, then
+    // openPosition() is called on fill. We consume the first matching
     // reservation to keep the pending count accurate.
-    for (auto it = pending_reservations_.begin(); it != pending_reservations_.end(); ++it)
+    for (auto it = m_pendingReservations.begin(); it != m_pendingReservations.end(); ++it)
     {
         if (it->second.symbol == symbol)
         {
-            pending_reservations_.erase(it);
+            m_pendingReservations.erase(it);
             break;
         }
     }
@@ -174,7 +174,7 @@ Result<std::string> PositionManager::open_position(
     return pos_id;
 }
 
-std::optional<double> PositionManager::close_position(const std::string &position_id, Quantity close_qty, Price exit_price)
+std::optional<double> PositionManager::closePosition(const std::string &position_id, Quantity close_qty, Price exit_price)
 {
     // Close a position fully or partially:
     // 1. Acquire exclusive lock
@@ -184,12 +184,12 @@ std::optional<double> PositionManager::close_position(const std::string &positio
     // 5. Else: reduce quantity, recalculate notional and unrealized PnL (partial close)
     // 6. Log and return realized PnL
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
-    auto it = positions_.find(position_id);
-    if (positions_.end() == it)
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
     {
-        PULSE_LOG_WARN("risk", "close_position: position {} not found", position_id);
+        PULSE_LOG_WARN("risk", "closePosition: position {} not found", position_id);
         return std::nullopt;
     }
 
@@ -215,7 +215,7 @@ std::optional<double> PositionManager::close_position(const std::string &positio
             (Side::Buy == pos.side ? "BUY" : "SELL"),
             exit_price, pos.quantity, pos.entry_price, realized_pnl);
 
-        positions_.erase(it);
+        m_positions.erase(it);
     }
     else
     {
@@ -223,7 +223,7 @@ std::optional<double> PositionManager::close_position(const std::string &positio
         pos.quantity -= close_qty;
         pos.current_price = exit_price;
         pos.notional_value = std::abs(pos.quantity * pos.current_price * pos.quanto_multiplier);
-        pos.unrealized_pnl = calculate_unrealized_pnl(
+        pos.unrealized_pnl = calculateUnrealizedPnl(
             pos.side, pos.entry_price, pos.current_price, pos.quantity,
             pos.leverage, pos.quanto_multiplier);
 
@@ -243,24 +243,24 @@ std::optional<double> PositionManager::close_position(const std::string &positio
     return realized_pnl;
 }
 
-void PositionManager::update_price(const std::string &position_id, Price current_price)
+void PositionManager::updatePrice(const std::string &position_id, Price current_price)
 {
     // Update mark price for a position:
     // 1. Acquire exclusive lock (modifying position state)
     // 2. Find position; return silently if not found
     // 3. Update current_price, recalculate unrealized_pnl and notional_value
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
-    auto it = positions_.find(position_id);
-    if (positions_.end() == it)
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
     {
         return;
     }
 
     auto &pos = it->second;
     pos.current_price = current_price;
-    pos.unrealized_pnl = calculate_unrealized_pnl(
+    pos.unrealized_pnl = calculateUnrealizedPnl(
         pos.side, pos.entry_price, current_price, pos.quantity,
         pos.leverage, pos.quanto_multiplier);
     pos.notional_value = std::abs(pos.quantity * current_price * pos.quanto_multiplier);
@@ -270,12 +270,12 @@ void PositionManager::update_price(const std::string &position_id, Price current
 // Queries
 // ---------------------------------------------------------------------------
 
-std::optional<Position> PositionManager::get_position(const std::string &position_id) const
+std::optional<Position> PositionManager::getPosition(const std::string &position_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    auto it = positions_.find(position_id);
-    if (positions_.end() == it)
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
     {
         return std::nullopt;
     }
@@ -283,13 +283,13 @@ std::optional<Position> PositionManager::get_position(const std::string &positio
     return it->second;
 }
 
-std::vector<Position> PositionManager::get_all_positions() const
+std::vector<Position> PositionManager::getAllPositions() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     std::vector<Position> result;
-    result.reserve(positions_.size());
-    for (const auto &[id, pos] : positions_)
+    result.reserve(m_positions.size());
+    for (const auto &[id, pos] : m_positions)
     {
         result.push_back(pos);
     }
@@ -297,12 +297,12 @@ std::vector<Position> PositionManager::get_all_positions() const
     return result;
 }
 
-std::vector<Position> PositionManager::get_positions_by_symbol(const Symbol &symbol) const
+std::vector<Position> PositionManager::getPositionsBySymbol(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     std::vector<Position> result;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         if (pos.symbol == symbol)
         {
@@ -313,12 +313,12 @@ std::vector<Position> PositionManager::get_positions_by_symbol(const Symbol &sym
     return result;
 }
 
-std::vector<Position> PositionManager::get_positions_by_strategy(const std::string &strategy_id) const
+std::vector<Position> PositionManager::getPositionsByStrategy(const std::string &strategy_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     std::vector<Position> result;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         if (pos.strategy_id == strategy_id)
         {
@@ -333,22 +333,22 @@ std::vector<Position> PositionManager::get_positions_by_strategy(const std::stri
 // Aggregation
 // ---------------------------------------------------------------------------
 
-PortfolioSummary PositionManager::portfolio_summary() const
+PortfolioSummary PositionManager::portfolioSummary() const
 {
     // Compute aggregated portfolio snapshot:
     // 1. Acquire shared lock
     // 2. Iterate all positions, accumulate:
-    //    - open_position_count
+    //    - openPositionCount
     //    - total_notional (sum of abs notional values)
     //    - total_unrealized_pnl
     //    - net_exposure (long notional - short notional)
 
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     PortfolioSummary summary;
-    summary.open_position_count = static_cast<int>(positions_.size());
+    summary.openPositionCount = static_cast<int>(m_positions.size());
 
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         summary.total_notional += pos.notional_value;
         summary.total_unrealized_pnl += pos.unrealized_pnl;
@@ -373,12 +373,12 @@ PortfolioSummary PositionManager::portfolio_summary() const
     return summary;
 }
 
-double PositionManager::symbol_notional(const Symbol &symbol) const
+double PositionManager::symbolNotional(const Symbol &symbol) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     double total = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         if (pos.symbol == symbol)
         {
@@ -393,7 +393,7 @@ double PositionManager::symbol_notional(const Symbol &symbol) const
 // Limit checks
 // ---------------------------------------------------------------------------
 
-bool PositionManager::can_open_position(const Symbol &symbol, Quantity qty, Price price) const
+bool PositionManager::canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const
 {
     // Pre-check whether a new position would exceed any limit:
     // 1. Acquire shared lock
@@ -403,31 +403,31 @@ bool PositionManager::can_open_position(const Symbol &symbol, Quantity qty, Pric
     // 5. Check per-symbol notional limit
     // 6. Return true only if all checks pass
 
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
     const double proposed_notional = qty * price;
 
     // 3. Check total notional limit.
     double total_notional = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         total_notional += pos.notional_value;
     }
 
-    if (total_notional + proposed_notional > config_.maxPositionNotional)
+    if (total_notional + proposed_notional > m_config.maxPositionNotional)
     {
         return false;
     }
 
     // 4. Check open position count.
-    if (static_cast<int>(positions_.size()) >= config_.maxOpenPositions)
+    if (static_cast<int>(m_positions.size()) >= m_config.maxOpenPositions)
     {
         return false;
     }
 
     // 5. Check per-symbol notional.
     double sym_notional = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         if (pos.symbol == symbol)
         {
@@ -435,7 +435,7 @@ bool PositionManager::can_open_position(const Symbol &symbol, Quantity qty, Pric
         }
     }
 
-    if (sym_notional + proposed_notional > config_.maxSymbolNotional)
+    if (sym_notional + proposed_notional > m_config.maxSymbolNotional)
     {
         return false;
     }
@@ -443,38 +443,38 @@ bool PositionManager::can_open_position(const Symbol &symbol, Quantity qty, Pric
     return true;
 }
 
-int PositionManager::open_position_count() const
+int PositionManager::openPositionCount() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    return static_cast<int>(positions_.size());
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    return static_cast<int>(m_positions.size());
 }
 
 // ---------------------------------------------------------------------------
 // Atomic notional reservation (TOCTOU-safe evaluate + reserve)
 // ---------------------------------------------------------------------------
 
-NotionalReservation PositionManager::reserve_notional(
+NotionalReservation PositionManager::reserveNotional(
     const Symbol &symbol, Quantity qty, Price price)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
-    // evaluate_order() calls see stale portfolio data and both approve orders
+    // evaluateOrder() calls see stale portfolio data and both approve orders
     // that together exceed the limit.
     //
-    // The reserved notional is added to pending_reservations_, so subsequent
-    // reserve_notional() calls see it and won't double-spend.
+    // The reserved notional is added to m_pendingReservations, so subsequent
+    // reserveNotional() calls see it and won't double-spend.
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     NotionalReservation res;
-    res.reservation_id = next_reservation_id_++;
+    res.reservation_id = m_nextReservationId++;
 
     const double proposed_notional = qty * price;
 
     // Compute current totals under the lock.
     double total_notional = 0.0;
     double sym_notional = 0.0;
-    for (const auto &[id, pos] : positions_)
+    for (const auto &[id, pos] : m_positions)
     {
         total_notional += pos.notional_value;
         if (pos.symbol == symbol)
@@ -484,7 +484,7 @@ NotionalReservation PositionManager::reserve_notional(
     }
 
     // Add pending reservations to totals (prevents double-spend).
-    for (const auto &[id, pend] : pending_reservations_)
+    for (const auto &[id, pend] : m_pendingReservations)
     {
         total_notional += pend.notional;
         if (pend.symbol == symbol)
@@ -493,13 +493,13 @@ NotionalReservation PositionManager::reserve_notional(
         }
     }
 
-    const int open_count = static_cast<int>(positions_.size())
-                         + static_cast<int>(pending_reservations_.size());
+    const int open_count = static_cast<int>(m_positions.size())
+                         + static_cast<int>(m_pendingReservations.size());
 
     // Check if the full order fits within all limits.
-    if (total_notional + proposed_notional <= config_.maxPositionNotional
-        && open_count < config_.maxOpenPositions
-        && sym_notional + proposed_notional <= config_.maxSymbolNotional)
+    if (total_notional + proposed_notional <= m_config.maxPositionNotional
+        && open_count < m_config.maxOpenPositions
+        && sym_notional + proposed_notional <= m_config.maxSymbolNotional)
     {
         res.approved = true;
         res.decision = RiskDecision::Approved;
@@ -508,7 +508,7 @@ NotionalReservation PositionManager::reserve_notional(
         res.reason_code = ErrorCode::Ok;
         res.reason_message = "";
     }
-    else if (open_count >= config_.maxOpenPositions)
+    else if (open_count >= m_config.maxOpenPositions)
     {
         // Hard reject: position count limit reached.
         res.approved = false;
@@ -521,8 +521,8 @@ NotionalReservation PositionManager::reserve_notional(
     else
     {
         // Try reduced quantity.
-        const double remaining_pos = config_.maxPositionNotional - total_notional;
-        const double remaining_sym = config_.maxSymbolNotional - sym_notional;
+        const double remaining_pos = m_config.maxPositionNotional - total_notional;
+        const double remaining_sym = m_config.maxSymbolNotional - sym_notional;
         const double budget = std::min(remaining_pos, remaining_sym);
 
         if (budget > 0.0 && price > 0.0)
@@ -561,7 +561,7 @@ NotionalReservation PositionManager::reserve_notional(
     // Store the reservation so subsequent checks see it.
     if (res.approved)
     {
-        pending_reservations_[res.reservation_id] = {
+        m_pendingReservations[res.reservation_id] = {
             symbol, res.reserved_notional, res.approved_qty };
 
         PULSE_LOG_INFO("risk",
@@ -580,38 +580,38 @@ NotionalReservation PositionManager::reserve_notional(
     return res;
 }
 
-void PositionManager::consume_reservation(std::uint64_t reservation_id)
+void PositionManager::consumeReservation(std::uint64_t reservation_id)
 {
     // Called when an order is filled. Removes the pending reservation so the
-    // budget is freed. open_position() will record the actual position.
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    auto it = pending_reservations_.find(reservation_id);
-    if (it != pending_reservations_.end())
+    // budget is freed. openPosition() will record the actual position.
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    auto it = m_pendingReservations.find(reservation_id);
+    if (it != m_pendingReservations.end())
     {
         PULSE_LOG_DEBUG("risk",
             "Consumed reservation: id={} symbol={} notional={:.2f}",
             reservation_id, it->second.symbol, it->second.notional);
-        pending_reservations_.erase(it);
+        m_pendingReservations.erase(it);
     }
 }
 
-void PositionManager::cancel_reservation(std::uint64_t reservation_id)
+void PositionManager::cancelReservation(std::uint64_t reservation_id)
 {
-    // Called when an order fails or is rejected after reserve_notional().
+    // Called when an order fails or is rejected after reserveNotional().
     // Releases the reserved budget back to the available pool.
     if (0 == reservation_id)
     {
         return; // No reservation to cancel.
     }
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    auto it = pending_reservations_.find(reservation_id);
-    if (it != pending_reservations_.end())
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    auto it = m_pendingReservations.find(reservation_id);
+    if (it != m_pendingReservations.end())
     {
         PULSE_LOG_INFO("risk",
             "Cancelled reservation: id={} symbol={} notional={:.2f}",
             reservation_id, it->second.symbol, it->second.notional);
-        pending_reservations_.erase(it);
+        m_pendingReservations.erase(it);
     }
 }
 
@@ -619,14 +619,14 @@ void PositionManager::cancel_reservation(std::uint64_t reservation_id)
 // Private helpers
 // ---------------------------------------------------------------------------
 
-std::string PositionManager::generate_position_id(const Symbol &symbol, Side side)
+std::string PositionManager::generatePositionId(const Symbol &symbol, Side side)
 {
-    ++next_position_id_;
+    ++m_nextPositionId;
     return symbol + "_" + (Side::Buy == side ? "Buy" : "Sell") + "_"
-        + std::to_string(next_position_id_);
+        + std::to_string(m_nextPositionId);
 }
 
-double PositionManager::calculate_unrealized_pnl(
+double PositionManager::calculateUnrealizedPnl(
     Side side, Price entry, Price current, Quantity qty,
     double leverage, double quanto_multiplier)
 {

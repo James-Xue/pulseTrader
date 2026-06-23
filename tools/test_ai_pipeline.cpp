@@ -182,9 +182,9 @@ int main(int argc, char *argv[])
     {
         const auto &r = value(result);
         std::cout << "\n--- Analysis Result ---\n";
-        std::cout << "Sentiment:      " << to_string(r.sentiment) << "\n";
+        std::cout << "Sentiment:      " << toString(r.sentiment) << "\n";
         std::cout << "Direction Bias: " << r.direction_bias << "\n";
-        std::cout << "Volatility:     " << to_string(r.volatility) << "\n";
+        std::cout << "Volatility:     " << toString(r.volatility) << "\n";
         std::cout << "Confidence:     " << r.confidence << "\n";
 
         std::cout << "\n--- Parameters (After) ---\n";

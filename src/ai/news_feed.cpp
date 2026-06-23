@@ -1,4 +1,4 @@
-// news_feed.cpp — News article ingestion for AI analysis (Layer 4 AI Analysis)
+// newsFeed.cpp — News article ingestion for AI analysis (Layer 4 AI Analysis)
 //
 // Architecture:
 //   1. poll() dispatches to the configured provider's URL builder
@@ -38,7 +38,7 @@ namespace
 
 std::once_flag g_curl_init_flag;
 
-void ensure_curl_init()
+void ensureCurlInit()
 {
     std::call_once(g_curl_init_flag, []()
             {
@@ -47,7 +47,7 @@ void ensure_curl_init()
 }
 
 // libcurl write callback: appends received data chunks to a string buffer.
-size_t curl_write_callback(void *contents, size_t size, size_t nmemb, std::string *output)
+size_t curlWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
 {
     const size_t total = size * nmemb;
     output->append(static_cast<char *>(contents), total);
@@ -59,7 +59,7 @@ constexpr long kHttpTimeoutMs = 5'000;
 
 // URL-encode a string (percent-encoding for query parameters).
 // Only encodes characters that are unsafe in URL query strings.
-std::string url_encode(const std::string &s)
+std::string urlEncode(const std::string &s)
 {
     std::string result;
     result.reserve(s.size() * 2);
@@ -95,7 +95,7 @@ std::string url_encode(const std::string &s)
 //   3. Apply timezone offset if present
 //   4. Convert to milliseconds and add fractional seconds
 // Returns 0 on parse failure.
-std::int64_t parse_iso8601(const std::string &s)
+std::int64_t parseIso8601(const std::string &s)
 {
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
     int tz_hour = 0, tz_min = 0;
@@ -155,7 +155,7 @@ std::int64_t parse_iso8601(const std::string &s)
 }
 
 // Get current time as Unix milliseconds (fallback for missing timestamps).
-std::int64_t now_ms()
+std::int64_t nowMs()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -167,9 +167,9 @@ std::int64_t now_ms()
 // NewsFeed implementation
 // ---------------------------------------------------------------------------
 
-NewsFeed::NewsFeed(const NewsConfig &config) : config_(config)
+NewsFeed::NewsFeed(const NewsConfig &config) : m_config(config)
 {
-    ensure_curl_init();
+    ensureCurlInit();
 }
 
 // ---------------------------------------------------------------------------
@@ -189,24 +189,24 @@ NewsFeed::NewsFeed(const NewsConfig &config) : config_(config)
 int NewsFeed::poll()
 {
     // 1. Check if feed is enabled
-    if (!config_.enabled)
+    if (!m_config.enabled)
     {
         return 0;
     }
 
     // 2. Build the request URL based on provider
     std::string url;
-    if ("newsapi" == config_.provider)
+    if ("newsapi" == m_config.provider)
     {
-        url = build_newsapi_url();
+        url = buildNewsapiUrl();
     }
-    else if ("cryptopanic" == config_.provider)
+    else if ("cryptopanic" == m_config.provider)
     {
-        url = build_cryptopanic_url();
+        url = buildCryptopanicUrl();
     }
     else
     {
-        PULSE_LOG_WARN("news", "unknown provider: {} — skipping poll", config_.provider);
+        PULSE_LOG_WARN("news", "unknown provider: {} — skipping poll", m_config.provider);
         return 0;
     }
 
@@ -216,17 +216,17 @@ int NewsFeed::poll()
         return 0;
     }
 
-    PULSE_LOG_DEBUG("news", "polling {} via {}", config_.provider, url);
+    PULSE_LOG_DEBUG("news", "polling {} via {}", m_config.provider, url);
 
     // Check API key
-    if (config_.apiKey.empty())
+    if (m_config.apiKey.empty())
     {
         PULSE_LOG_WARN("news", "no API key configured — skipping poll");
         return 0;
     }
 
     // 3. HTTP GET
-    const HttpResponse response = do_request(url);
+    const HttpResponse response = doRequest(url);
 
     // 4. Check HTTP status
     if (0 == response.status_code)
@@ -251,71 +251,71 @@ int NewsFeed::poll()
 
     // 6. Dispatch to provider-specific parser
     std::vector<NewsArticle> new_articles;
-    if ("newsapi" == config_.provider)
+    if ("newsapi" == m_config.provider)
     {
-        new_articles = parse_newsapi(json_data);
+        new_articles = parseNewsapi(json_data);
     }
-    else if ("cryptopanic" == config_.provider)
+    else if ("cryptopanic" == m_config.provider)
     {
-        new_articles = parse_cryptopanic(json_data);
+        new_articles = parseCryptopanic(json_data);
     }
 
     // 7. Deduplicate and add to rolling window
     int new_count = 0;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     for (auto &article : new_articles)
     {
         // Dedup by URL
-        if (seen_urls_.count(article.url) > 0)
+        if (m_seenUrls.count(article.url) > 0)
         {
             continue;
         }
 
-        seen_urls_.insert(article.url);
-        articles_.push_back(std::move(article));
+        m_seenUrls.insert(article.url);
+        m_articles.push_back(std::move(article));
         ++new_count;
     }
 
     // 8. Trim to maxArticles (evict oldest from front)
-    while (articles_.size() > config_.maxArticles)
+    while (m_articles.size() > m_config.maxArticles)
     {
-        seen_urls_.erase(articles_.front().url);
-        articles_.pop_front();
+        m_seenUrls.erase(m_articles.front().url);
+        m_articles.pop_front();
     }
 
-    PULSE_LOG_INFO("news", "polled {} new article(s), window size: {}", new_count, articles_.size());
+    PULSE_LOG_INFO("news", "polled {} new article(s), window size: {}", new_count, m_articles.size());
     return new_count;
 }
 
 // ---------------------------------------------------------------------------
-// recent_text — concatenate headlines + snippets for AI prompt inclusion
+// recentText — concatenate headlines + snippets for AI prompt inclusion
 //
 // Format: each article on its own block:
 //   [N] Title (Source)
 //       Snippet
 // Articles are ordered oldest-first (front of deque).
 // ---------------------------------------------------------------------------
-std::string NewsFeed::recent_text(std::size_t max_count) const
+std::string NewsFeed::recentText(std::size_t max_count) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (articles_.empty())
+    if (m_articles.empty())
     {
         return "";
     }
 
     // Take the last max_count articles (most recent)
-    const std::size_t start = (articles_.size() > max_count) ? (articles_.size() - max_count) : 0;
-    const std::size_t count = articles_.size() - start;
+    const std::size_t start = (m_articles.size() > max_count) ? (m_articles.size() - max_count) : 0;
+    const std::size_t count = m_articles.size() - start;
 
     std::string result;
     result.reserve(count * 300); // Rough estimate
 
     for (std::size_t i = 0; i < count; ++i)
     {
-        const auto &article = articles_[start + i];
+        const auto &article = m_articles[start + i];
         if (!result.empty())
         {
             result += "\n";
@@ -337,19 +337,19 @@ std::string NewsFeed::recent_text(std::size_t max_count) const
 
 std::size_t NewsFeed::size() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return articles_.size();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_articles.size();
 }
 
 void NewsFeed::clear()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    articles_.clear();
-    seen_urls_.clear();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_articles.clear();
+    m_seenUrls.clear();
 }
 
 // ---------------------------------------------------------------------------
-// do_request — single HTTP GET request via libcurl
+// doRequest — single HTTP GET request via libcurl
 //
 // Steps:
 //   1. Create a curl easy handle
@@ -358,7 +358,7 @@ void NewsFeed::clear()
 //   4. Execute and collect response
 //   5. Clean up handle and return
 // ---------------------------------------------------------------------------
-NewsFeed::HttpResponse NewsFeed::do_request(const std::string &url) const
+NewsFeed::HttpResponse NewsFeed::doRequest(const std::string &url) const
 {
     HttpResponse response;
 
@@ -371,7 +371,7 @@ NewsFeed::HttpResponse NewsFeed::do_request(const std::string &url) const
 
     // 1. Configure the request (API key is in the URL query string)
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, kHttpTimeoutMs);
 
@@ -395,7 +395,7 @@ NewsFeed::HttpResponse NewsFeed::do_request(const std::string &url) const
 }
 
 // ---------------------------------------------------------------------------
-// build_newsapi_url — construct NewsAPI v2 everything endpoint URL
+// buildNewsapiUrl — construct NewsAPI v2 everything endpoint URL
 //
 // Format: https://newsapi.org/v2/everything?q={keywords}&apiKey={key}
 //         &sortBy=publishedAt&pageSize=10
@@ -403,15 +403,15 @@ NewsFeed::HttpResponse NewsFeed::do_request(const std::string &url) const
 // Keywords are joined with OR for broader matching.
 // Returns empty string if API key is missing.
 // ---------------------------------------------------------------------------
-std::string NewsFeed::build_newsapi_url() const
+std::string NewsFeed::buildNewsapiUrl() const
 {
-    if (config_.apiKey.empty())
+    if (m_config.apiKey.empty())
     {
         return "";
     }
 
     // Determine base URL (use config or default)
-    std::string base = config_.baseUrl;
+    std::string base = m_config.baseUrl;
     if (base.empty())
     {
         base = "https://newsapi.org/v2";
@@ -419,13 +419,13 @@ std::string NewsFeed::build_newsapi_url() const
 
     // Build query string from keywords (joined with OR)
     std::string query;
-    for (std::size_t i = 0; i < config_.keywords.size(); ++i)
+    for (std::size_t i = 0; i < m_config.keywords.size(); ++i)
     {
         if (i > 0)
         {
             query += " OR ";
         }
-        query += config_.keywords[i];
+        query += m_config.keywords[i];
     }
 
     // If no keywords, use a generic crypto query
@@ -434,39 +434,39 @@ std::string NewsFeed::build_newsapi_url() const
         query = "cryptocurrency OR bitcoin OR crypto";
     }
 
-    return base + "/everything?q=" + url_encode(query)
-           + "&apiKey=" + url_encode(config_.apiKey)
+    return base + "/everything?q=" + urlEncode(query)
+           + "&apiKey=" + urlEncode(m_config.apiKey)
            + "&sortBy=publishedAt&pageSize=10";
 }
 
 // ---------------------------------------------------------------------------
-// build_cryptopanic_url — construct CryptoPanic posts API v1 URL
+// buildCryptopanicUrl — construct CryptoPanic posts API v1 URL
 //
 // Format: https://cryptopanic.com/api/v1/posts/?auth_token={key}
 //         &currencies=BTC&kind=news
 //
 // Returns empty string if API key is missing.
 // ---------------------------------------------------------------------------
-std::string NewsFeed::build_cryptopanic_url() const
+std::string NewsFeed::buildCryptopanicUrl() const
 {
-    if (config_.apiKey.empty())
+    if (m_config.apiKey.empty())
     {
         return "";
     }
 
     // Determine base URL (use config or default)
-    std::string base = config_.baseUrl;
+    std::string base = m_config.baseUrl;
     if (base.empty())
     {
         base = "https://cryptopanic.com/api/v1";
     }
 
-    return base + "/posts/?auth_token=" + url_encode(config_.apiKey)
+    return base + "/posts/?auth_token=" + urlEncode(m_config.apiKey)
            + "&currencies=BTC&kind=news";
 }
 
 // ---------------------------------------------------------------------------
-// parse_newsapi — parse NewsAPI v2 response into NewsArticle vector
+// parseNewsapi — parse NewsAPI v2 response into NewsArticle vector
 //
 // Response structure:
 //   {
@@ -483,7 +483,7 @@ std::string NewsFeed::build_cryptopanic_url() const
 //     ]
 //   }
 // ---------------------------------------------------------------------------
-std::vector<NewsArticle> NewsFeed::parse_newsapi(const nlohmann::json &j) const
+std::vector<NewsArticle> NewsFeed::parseNewsapi(const nlohmann::json &j) const
 {
     std::vector<NewsArticle> result;
 
@@ -532,15 +532,15 @@ std::vector<NewsArticle> NewsFeed::parse_newsapi(const nlohmann::json &j) const
         // Parse publishedAt timestamp (ISO 8601 → Unix ms)
         if (item.contains("publishedAt") && item["publishedAt"].is_string())
         {
-            article.timestamp = parse_iso8601(item["publishedAt"].get<std::string>());
+            article.timestamp = parseIso8601(item["publishedAt"].get<std::string>());
             if (0 == article.timestamp)
             {
-                article.timestamp = now_ms();
+                article.timestamp = nowMs();
             }
         }
         else
         {
-            article.timestamp = now_ms();
+            article.timestamp = nowMs();
         }
 
         result.push_back(std::move(article));
@@ -551,7 +551,7 @@ std::vector<NewsArticle> NewsFeed::parse_newsapi(const nlohmann::json &j) const
 }
 
 // ---------------------------------------------------------------------------
-// parse_cryptopanic — parse CryptoPanic v1 response into NewsArticle vector
+// parseCryptopanic — parse CryptoPanic v1 response into NewsArticle vector
 //
 // Response structure:
 //   {
@@ -565,7 +565,7 @@ std::vector<NewsArticle> NewsFeed::parse_newsapi(const nlohmann::json &j) const
 //     ]
 //   }
 // ---------------------------------------------------------------------------
-std::vector<NewsArticle> NewsFeed::parse_cryptopanic(const nlohmann::json &j) const
+std::vector<NewsArticle> NewsFeed::parseCryptopanic(const nlohmann::json &j) const
 {
     std::vector<NewsArticle> result;
 
@@ -614,16 +614,16 @@ std::vector<NewsArticle> NewsFeed::parse_cryptopanic(const nlohmann::json &j) co
         // Parse timestamp if available (CryptoPanic uses "published_at")
         if (item.contains("published_at") && item["published_at"].is_string())
         {
-            article.timestamp = parse_iso8601(item["published_at"].get<std::string>());
+            article.timestamp = parseIso8601(item["published_at"].get<std::string>());
             if (0 == article.timestamp)
             {
-                article.timestamp = now_ms();
+                article.timestamp = nowMs();
             }
         }
         else
         {
             // CryptoPanic may not always provide timestamps
-            article.timestamp = now_ms();
+            article.timestamp = nowMs();
         }
 
         result.push_back(std::move(article));

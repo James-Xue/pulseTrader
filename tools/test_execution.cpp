@@ -104,7 +104,7 @@ int main()
     std::cout << "[INFO] Waiting for market data..." << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    const auto ticker = feed.ticker_cache().get("BTC_USDT");
+    const auto ticker = feed.tickerCache().get("BTC_USDT");
     if (!ticker.has_value())
     {
         std::cerr << "[ERROR] Failed to get BTC_USDT ticker" << std::endl;
@@ -125,7 +125,7 @@ int main()
     std::atomic<bool> order_completed{ false };
     ExecutionReport final_report;
 
-    tracker.set_completion_callback([&](const ExecutionReport &report)
+    tracker.setCompletionCallback([&](const ExecutionReport &report)
     {
         final_report = report;
         order_completed.store(true);
@@ -142,7 +142,7 @@ int main()
 
     std::cout << "[INFO] Placing limit order: buy 0.0001 BTC @ " << req.price << std::endl;
 
-    auto order_result = executor.place_order(req);
+    auto order_result = executor.placeOrder(req);
     if (!ok(order_result))
     {
         std::cerr << "[ERROR] Failed to place order: " << error(order_result).message << std::endl;
@@ -156,7 +156,7 @@ int main()
     std::cout << "[OK] Order placed: id=" << order_resp.order_id << std::endl;
 
     // 10. Start tracking the order
-    tracker.track_order(order_resp.order_id, req.symbol, req.side, req.type, req.quantity, mid_price);
+    tracker.trackOrder(order_resp.order_id, req.symbol, req.side, req.type, req.quantity, mid_price);
 
     // 11. Wait for order completion (up to 30 seconds)
     std::cout << "[INFO] Waiting for order completion (up to 30s)..." << std::endl;
@@ -171,7 +171,7 @@ int main()
         if (++poll_counter >= 10) // 10 * 500ms = 5s
         {
             poll_counter = 0;
-            auto poll_result = tracker.poll_order_status(order_resp.order_id);
+            auto poll_result = tracker.pollOrderStatus(order_resp.order_id);
             if (ok(poll_result))
             {
                 const auto status = value(poll_result);
@@ -197,7 +197,7 @@ int main()
 
         // Cancel the order
         std::cout << "[INFO] Cancelling order..." << std::endl;
-        const bool cancel_ok = executor.cancel_order(order_resp.order_id);
+        const bool cancel_ok = executor.cancelOrder(order_resp.order_id);
         if (cancel_ok)
         {
             std::cout << "[OK] Order cancelled" << std::endl;
@@ -211,7 +211,7 @@ int main()
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
         // Check if report was generated
-        const auto report_opt = tracker.get_report(order_resp.order_id);
+        const auto report_opt = tracker.getReport(order_resp.order_id);
         if (report_opt.has_value())
         {
             print_report(*report_opt);

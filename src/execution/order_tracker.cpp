@@ -15,14 +15,14 @@ using pulse::exchange::EndpointRouter;
 
 OrderTracker::OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
                            MarketType market_type)
-    : ws_client_{ ws_client }
-    , rest_client_{ rest_client }
-    , market_type_{ market_type }
-    , ws_subscribed_{ false }
+    : m_wsClient{ ws_client }
+    , m_restClient{ rest_client }
+    , m_marketType{ market_type }
+    , m_wsSubscribed{ false }
 {
 }
 
-void OrderTracker::track_order(const std::string &order_id,
+void OrderTracker::trackOrder(const std::string &order_id,
     const Symbol &symbol,
     Side side,
     OrderType type,
@@ -34,14 +34,14 @@ void OrderTracker::track_order(const std::string &order_id,
         side == Side::Buy ? "buy" : "sell");
 
     // Subscribe to WS private channel if not already done
-    if (!ws_subscribed_)
+    if (!m_wsSubscribed)
     {
-        const std::string orders_channel = EndpointRouter::ws_channel(market_type_, "orders");
-        ws_client_.subscribe_private(orders_channel,
+        const std::string orders_channel = EndpointRouter::wsChannel(m_marketType, "orders");
+        m_wsClient.subscribePrivate(orders_channel,
             {},
             [this](const nlohmann::json &result, const nlohmann::json & /*full_frame*/)
-            { on_order_update(result); });
-        ws_subscribed_ = true;
+            { onOrderUpdate(result); });
+        m_wsSubscribed = true;
     }
 
     // Store tracked order metadata
@@ -61,53 +61,53 @@ void OrderTracker::track_order(const std::string &order_id,
     order.last_update_time = order.submit_time;
 
     {
-        std::unique_lock<std::shared_mutex> write_lock(mutex_);
-        tracked_orders_[order_id] = order;
+        std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+        m_trackedOrders[order_id] = order;
     }
 }
 
-void OrderTracker::stop_tracking(const std::string &order_id)
+void OrderTracker::stopTracking(const std::string &order_id)
 {
     PULSE_LOG_INFO("execution", "Stop tracking order: {}", order_id);
 
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    tracked_orders_.erase(order_id);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_trackedOrders.erase(order_id);
 }
 
-std::optional<OrderStatus> OrderTracker::get_status(const std::string &order_id) const
+std::optional<OrderStatus> OrderTracker::getStatus(const std::string &order_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = tracked_orders_.find(order_id);
-    if (it == tracked_orders_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_trackedOrders.find(order_id);
+    if (it == m_trackedOrders.end())
     {
         return std::nullopt;
     }
     return it->second.status;
 }
 
-std::optional<ExecutionReport> OrderTracker::get_report(const std::string &order_id) const
+std::optional<ExecutionReport> OrderTracker::getReport(const std::string &order_id) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
-    const auto it = completed_reports_.find(order_id);
-    if (it == completed_reports_.end())
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    const auto it = m_completedReports.find(order_id);
+    if (it == m_completedReports.end())
     {
         return std::nullopt;
     }
     return it->second;
 }
 
-void OrderTracker::set_completion_callback(CompletionCallback callback)
+void OrderTracker::setCompletionCallback(CompletionCallback callback)
 {
-    std::unique_lock<std::shared_mutex> write_lock(mutex_);
-    completion_callback_ = std::move(callback);
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_completionCallback = std::move(callback);
 }
 
-Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
+Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
 {
     PULSE_LOG_DEBUG("execution", "Polling order status: {}", order_id);
 
-    const std::string path = EndpointRouter::order_path(market_type_, order_id);
-    auto result = rest_client_.request("GET", path);
+    const std::string path = EndpointRouter::orderPath(m_marketType, order_id);
+    auto result = m_restClient.request("GET", path);
 
     if (!ok(result))
     {
@@ -118,7 +118,7 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
 
     // Parse status
     const std::string status_str = resp.value("status", "");
-    const OrderStatus new_status = parse_status(status_str);
+    const OrderStatus new_status = parseStatus(status_str);
 
     // Prepare callback data under lock, invoke outside lock to avoid
     // lock-ordering coupling with downstream mutexes (PositionManager, etc.)
@@ -127,9 +127,9 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
 
     // Update tracked order
     {
-        std::unique_lock<std::shared_mutex> write_lock(mutex_);
-        auto it = tracked_orders_.find(order_id);
-        if (it != tracked_orders_.end())
+        std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+        auto it = m_trackedOrders.find(order_id);
+        if (it != m_trackedOrders.end())
         {
             it->second.status = new_status;
             it->second.last_update_time = now();
@@ -137,28 +137,28 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
             // Parse fill details if available
             if (resp.contains("filled_total"))
             {
-                auto val = safe_parse_double(resp["filled_total"].get<std::string>());
+                auto val = safeParseDouble(resp["filled_total"].get<std::string>());
                 if (val.has_value()) it->second.filled_qty = val.value();
             }
             if (resp.contains("avg_deal_price"))
             {
-                auto val = safe_parse_double(resp["avg_deal_price"].get<std::string>());
+                auto val = safeParseDouble(resp["avg_deal_price"].get<std::string>());
                 if (val.has_value()) it->second.avg_fill_price = val.value();
             }
             if (resp.contains("fee"))
             {
-                auto val = safe_parse_double(resp["fee"].get<std::string>());
+                auto val = safeParseDouble(resp["fee"].get<std::string>());
                 if (val.has_value()) it->second.fees = val.value();
             }
 
             // Check if terminal state — collect report + callback under lock
-            if (is_terminal_status(new_status))
+            if (isTerminalStatus(new_status))
             {
-                completed_report = generate_report(it->second, now());
-                completed_reports_[order_id] = *completed_report;
+                completed_report = generateReport(it->second, now());
+                m_completedReports[order_id] = *completed_report;
 
-                callback_copy = completion_callback_;
-                tracked_orders_.erase(it);
+                callback_copy = m_completionCallback;
+                m_trackedOrders.erase(it);
             }
         }
     } // write_lock released
@@ -172,7 +172,7 @@ Result<OrderStatus> OrderTracker::poll_order_status(const std::string &order_id)
     return new_status;
 }
 
-void OrderTracker::on_order_update(const nlohmann::json &event)
+void OrderTracker::onOrderUpdate(const nlohmann::json &event)
 {
     // Gate.io spot.orders event format:
     // {
@@ -194,10 +194,10 @@ void OrderTracker::on_order_update(const nlohmann::json &event)
         return;
     }
 
-    process_order_update(event["result"]);
+    processOrderUpdate(event["result"]);
 }
 
-void OrderTracker::process_order_update(const nlohmann::json &update)
+void OrderTracker::processOrderUpdate(const nlohmann::json &update)
 {
     if (!update.contains("id"))
     {
@@ -206,7 +206,7 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
 
     const std::string order_id = update["id"].get<std::string>();
     const std::string status_str = update.value("status", "");
-    const OrderStatus new_status = parse_status(status_str);
+    const OrderStatus new_status = parseStatus(status_str);
 
     PULSE_LOG_DEBUG("execution", "Order update: {} -> {}", order_id, status_str);
 
@@ -216,9 +216,9 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
     CompletionCallback callback_copy;
 
     {
-        std::unique_lock<std::shared_mutex> write_lock(mutex_);
-        auto it = tracked_orders_.find(order_id);
-        if (it == tracked_orders_.end())
+        std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+        auto it = m_trackedOrders.find(order_id);
+        if (it == m_trackedOrders.end())
         {
             return; // Not tracking this order
         }
@@ -230,32 +230,32 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
         // Parse fill details
         if (update.contains("filled_total"))
         {
-            auto val = safe_parse_double(update["filled_total"].get<std::string>());
+            auto val = safeParseDouble(update["filled_total"].get<std::string>());
             if (val.has_value()) it->second.filled_qty = val.value();
         }
         if (update.contains("avg_deal_price"))
         {
-            auto val = safe_parse_double(update["avg_deal_price"].get<std::string>());
+            auto val = safeParseDouble(update["avg_deal_price"].get<std::string>());
             if (val.has_value()) it->second.avg_fill_price = val.value();
         }
         if (update.contains("fee"))
         {
-            auto val = safe_parse_double(update["fee"].get<std::string>());
+            auto val = safeParseDouble(update["fee"].get<std::string>());
             if (val.has_value()) it->second.fees = val.value();
         }
 
         // Check if terminal state — collect report + callback under lock
-        if (is_terminal_status(new_status))
+        if (isTerminalStatus(new_status))
         {
-            completed_report = generate_report(it->second, now());
-            completed_reports_[order_id] = *completed_report;
+            completed_report = generateReport(it->second, now());
+            m_completedReports[order_id] = *completed_report;
 
             PULSE_LOG_INFO("execution", "Order completed: {} {} filled_qty={} avg_price={} slippage={}bps",
                 order_id, status_str, completed_report->filled_qty,
                 completed_report->avg_fill_price, completed_report->slippage_bps);
 
-            callback_copy = completion_callback_;
-            tracked_orders_.erase(it);
+            callback_copy = m_completionCallback;
+            m_trackedOrders.erase(it);
         }
     } // write_lock released
 
@@ -266,7 +266,7 @@ void OrderTracker::process_order_update(const nlohmann::json &update)
     }
 }
 
-ExecutionReport OrderTracker::generate_report(const TrackedOrder &order, Timestamp fill_time) const
+ExecutionReport OrderTracker::generateReport(const TrackedOrder &order, Timestamp fill_time) const
 {
     ExecutionReport report;
     report.order_id = order.order_id;
@@ -278,7 +278,7 @@ ExecutionReport OrderTracker::generate_report(const TrackedOrder &order, Timesta
     report.filled_qty = order.filled_qty;
     report.avg_fill_price = order.avg_fill_price;
     report.submit_mid_price = order.submit_mid_price;
-    report.slippage_bps = ExecutionReport::calculate_slippage_bps(order.avg_fill_price, order.submit_mid_price, order.side);
+    report.slippage_bps = ExecutionReport::calculateSlippageBps(order.avg_fill_price, order.submit_mid_price, order.side);
     report.fees = order.fees;
     report.latency = std::chrono::duration_cast<std::chrono::milliseconds>(fill_time - order.submit_time);
     report.submit_time = order.submit_time;
@@ -288,12 +288,12 @@ ExecutionReport OrderTracker::generate_report(const TrackedOrder &order, Timesta
     return report;
 }
 
-bool OrderTracker::is_terminal_status(OrderStatus status)
+bool OrderTracker::isTerminalStatus(OrderStatus status)
 {
     return OrderStatus::Filled == status || OrderStatus::Cancelled == status;
 }
 
-OrderStatus OrderTracker::parse_status(const std::string &status_str)
+OrderStatus OrderTracker::parseStatus(const std::string &status_str)
 {
     if ("open" == status_str)
     {
@@ -310,14 +310,14 @@ OrderStatus OrderTracker::parse_status(const std::string &status_str)
     return OrderStatus::Pending;
 }
 
-std::vector<OrderSnapshot> OrderTracker::active_orders() const
+std::vector<OrderSnapshot> OrderTracker::activeOrders() const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
     std::vector<OrderSnapshot> result;
-    result.reserve(tracked_orders_.size());
-    for (const auto &[id, order] : tracked_orders_)
+    result.reserve(m_trackedOrders.size());
+    for (const auto &[id, order] : m_trackedOrders)
     {
-        if (!is_terminal_status(order.status))
+        if (!isTerminalStatus(order.status))
         {
             OrderSnapshot snap;
             snap.order_id = order.order_id;
@@ -335,12 +335,12 @@ std::vector<OrderSnapshot> OrderTracker::active_orders() const
     return result;
 }
 
-std::vector<ExecutionReport> OrderTracker::recent_reports(std::size_t n) const
+std::vector<ExecutionReport> OrderTracker::recentReports(std::size_t n) const
 {
-    std::shared_lock<std::shared_mutex> read_lock(mutex_);
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
     std::vector<ExecutionReport> result;
-    result.reserve(completed_reports_.size());
-    for (const auto &[id, report] : completed_reports_)
+    result.reserve(m_completedReports.size());
+    for (const auto &[id, report] : m_completedReports)
     {
         result.push_back(report);
     }

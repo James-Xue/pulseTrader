@@ -10,7 +10,7 @@
 //   3. Flat — no actionable signal (hold / neutral)
 //
 // TradingSignal:
-//   - Emitted by StrategyBase::emit_signal()
+//   - Emitted by StrategyBase::emitSignal()
 //   - Aggregated by SignalAggregator
 //   - Carries confidence (0.0–1.0) for weighted voting
 //   - Carries strategy_id for traceability

@@ -1,4 +1,4 @@
-// param_advisor.cpp — Delta validation + atomic StrategyParams writes (Layer 4 AI Analysis)
+// paramAdvisor.cpp — Delta validation + atomic StrategyParams writes (Layer 4 AI Analysis)
 //
 // Implementation of the ParamAdvisor that applies AI-recommended deltas to strategy
 // parameters with safety-bound clamping.
@@ -41,34 +41,34 @@ ParamAdvisor::ParamAdvisor()
 {
     // Order sizing — order_quantity is in base currency (e.g., BTC)
     // A delta of 0.0005 BTC per cycle allows reaching 0.1 from 0.001 in ~200 cycles
-    bounds_["order_quantity"] = ParamBound{0.0005, 0.0001, 0.1};
+    m_bounds["order_quantity"] = ParamBound{0.0005, 0.0001, 0.1};
 
     // Confidence threshold — controls the minimum signal quality to emit
-    bounds_["min_confidence"] = ParamBound{0.1, 0.1, 0.95};
+    m_bounds["min_confidence"] = ParamBound{0.1, 0.1, 0.95};
 
     // Momentum (EMA crossover) — fast EMA window in candle periods
-    bounds_["ema_fast_period"] = ParamBound{2.0, 3.0, 50.0};
+    m_bounds["ema_fast_period"] = ParamBound{2.0, 3.0, 50.0};
 
     // Momentum (EMA crossover) — slow EMA window in candle periods
-    bounds_["ema_slow_period"] = ParamBound{3.0, 10.0, 100.0};
+    m_bounds["ema_slow_period"] = ParamBound{3.0, 10.0, 100.0};
 
     // Mean reversion (Bollinger Bands) — BB window in candle periods
-    bounds_["bb_period"] = ParamBound{3.0, 5.0, 50.0};
+    m_bounds["bb_period"] = ParamBound{3.0, 5.0, 50.0};
 
     // Mean reversion (Bollinger Bands) — standard deviation multiplier
-    bounds_["bb_std_dev"] = ParamBound{0.25, 1.0, 4.0};
+    m_bounds["bb_std_dev"] = ParamBound{0.25, 1.0, 4.0};
 
     // Order book scalping — imbalance threshold (0.0–1.0)
-    bounds_["ob_imbalance_threshold"] = ParamBound{0.05, 0.1, 0.9};
+    m_bounds["ob_imbalance_threshold"] = ParamBound{0.05, 0.1, 0.9};
 
     // Timing — cooldown between signals per symbol (seconds)
-    bounds_["cooldown_seconds"] = ParamBound{5.0, 5.0, 120.0};
+    m_bounds["cooldown_seconds"] = ParamBound{5.0, 5.0, 120.0};
 
     // Risk — stop-loss distance as fraction of entry price
-    bounds_["stop_loss_pct"] = ParamBound{0.002, 0.003, 0.05};
+    m_bounds["stop_loss_pct"] = ParamBound{0.002, 0.003, 0.05};
 
     // Risk — take-profit target as fraction of entry price
-    bounds_["take_profit_pct"] = ParamBound{0.001, 0.002, 0.03};
+    m_bounds["take_profit_pct"] = ParamBound{0.001, 0.002, 0.03};
 }
 
 // ---------------------------------------------------------------------------
@@ -93,71 +93,71 @@ std::vector<heartbeat::OnParamUpdate> ParamAdvisor::apply(
     // 1. order_quantity
     if (0.0 != d.order_quantity_delta)
     {
-        events.push_back(apply_one("order_quantity", d.order_quantity_delta,
-                                   bounds_.at("order_quantity"), params.order_quantity));
+        events.push_back(applyOne("order_quantity", d.order_quantity_delta,
+                                   m_bounds.at("order_quantity"), params.order_quantity));
     }
 
     // 2. min_confidence
     if (0.0 != d.min_confidence_delta)
     {
-        events.push_back(apply_one("min_confidence", d.min_confidence_delta,
-                                   bounds_.at("min_confidence"), params.min_confidence));
+        events.push_back(applyOne("min_confidence", d.min_confidence_delta,
+                                   m_bounds.at("min_confidence"), params.min_confidence));
     }
 
     // 3. ema_fast_period
     if (0.0 != d.ema_fast_period_delta)
     {
-        events.push_back(apply_one("ema_fast_period", d.ema_fast_period_delta,
-                                   bounds_.at("ema_fast_period"), params.ema_fast_period));
+        events.push_back(applyOne("ema_fast_period", d.ema_fast_period_delta,
+                                   m_bounds.at("ema_fast_period"), params.ema_fast_period));
     }
 
     // 4. ema_slow_period
     if (0.0 != d.ema_slow_period_delta)
     {
-        events.push_back(apply_one("ema_slow_period", d.ema_slow_period_delta,
-                                   bounds_.at("ema_slow_period"), params.ema_slow_period));
+        events.push_back(applyOne("ema_slow_period", d.ema_slow_period_delta,
+                                   m_bounds.at("ema_slow_period"), params.ema_slow_period));
     }
 
     // 5. bb_period
     if (0.0 != d.bb_period_delta)
     {
-        events.push_back(apply_one("bb_period", d.bb_period_delta,
-                                   bounds_.at("bb_period"), params.bb_period));
+        events.push_back(applyOne("bb_period", d.bb_period_delta,
+                                   m_bounds.at("bb_period"), params.bb_period));
     }
 
     // 6. bb_std_dev
     if (0.0 != d.bb_std_dev_delta)
     {
-        events.push_back(apply_one("bb_std_dev", d.bb_std_dev_delta,
-                                   bounds_.at("bb_std_dev"), params.bb_std_dev));
+        events.push_back(applyOne("bb_std_dev", d.bb_std_dev_delta,
+                                   m_bounds.at("bb_std_dev"), params.bb_std_dev));
     }
 
     // 7. ob_imbalance_threshold
     if (0.0 != d.ob_imbalance_threshold_delta)
     {
-        events.push_back(apply_one("ob_imbalance_threshold", d.ob_imbalance_threshold_delta,
-                                   bounds_.at("ob_imbalance_threshold"), params.ob_imbalance_threshold));
+        events.push_back(applyOne("ob_imbalance_threshold", d.ob_imbalance_threshold_delta,
+                                   m_bounds.at("ob_imbalance_threshold"), params.ob_imbalance_threshold));
     }
 
     // 8. cooldown_seconds
     if (0.0 != d.cooldown_seconds_delta)
     {
-        events.push_back(apply_one("cooldown_seconds", d.cooldown_seconds_delta,
-                                   bounds_.at("cooldown_seconds"), params.cooldown_seconds));
+        events.push_back(applyOne("cooldown_seconds", d.cooldown_seconds_delta,
+                                   m_bounds.at("cooldown_seconds"), params.cooldown_seconds));
     }
 
     // 9. stop_loss_pct
     if (0.0 != d.stop_loss_pct_delta)
     {
-        events.push_back(apply_one("stop_loss_pct", d.stop_loss_pct_delta,
-                                   bounds_.at("stop_loss_pct"), params.stop_loss_pct));
+        events.push_back(applyOne("stop_loss_pct", d.stop_loss_pct_delta,
+                                   m_bounds.at("stop_loss_pct"), params.stop_loss_pct));
     }
 
     // 10. take_profit_pct
     if (0.0 != d.take_profit_pct_delta)
     {
-        events.push_back(apply_one("take_profit_pct", d.take_profit_pct_delta,
-                                   bounds_.at("take_profit_pct"), params.take_profit_pct));
+        events.push_back(applyOne("take_profit_pct", d.take_profit_pct_delta,
+                                   m_bounds.at("take_profit_pct"), params.take_profit_pct));
     }
 
     PULSE_LOG_INFO("ai", "ParamAdvisor applied {}/10 parameter deltas", events.size());
@@ -165,7 +165,7 @@ std::vector<heartbeat::OnParamUpdate> ParamAdvisor::apply(
 }
 
 // ---------------------------------------------------------------------------
-// apply_one — apply a single delta to a single atomic parameter field
+// applyOne — apply a single delta to a single atomic parameter field
 //
 // Steps:
 //   1. Load the current value (acquire ordering — see the latest writes)
@@ -176,7 +176,7 @@ std::vector<heartbeat::OnParamUpdate> ParamAdvisor::apply(
 //   6. Log a warning if either clamping occurred (observability)
 //   7. Return OnParamUpdate event for downstream consumers
 // ---------------------------------------------------------------------------
-heartbeat::OnParamUpdate ParamAdvisor::apply_one(
+heartbeat::OnParamUpdate ParamAdvisor::applyOne(
         const std::string &name,
         double delta,
         const ParamBound &bound,
@@ -220,19 +220,19 @@ heartbeat::OnParamUpdate ParamAdvisor::apply_one(
 // ---------------------------------------------------------------------------
 const std::unordered_map<std::string, ParamBound> &ParamAdvisor::bounds() const
 {
-    return bounds_;
+    return m_bounds;
 }
 
 // ---------------------------------------------------------------------------
-// set_bound() — modify safety bounds at runtime
+// setBound() — modify safety bounds at runtime
 //
 // Replaces (or creates) the bound for the given parameter name.
 // Should not be called concurrently with apply() — typically called during
 // configuration loading or from the WebUI parameter tuning interface.
 // ---------------------------------------------------------------------------
-void ParamAdvisor::set_bound(const std::string &param_name, const ParamBound &bound)
+void ParamAdvisor::setBound(const std::string &param_name, const ParamBound &bound)
 {
-    bounds_[param_name] = bound;
+    m_bounds[param_name] = bound;
     PULSE_LOG_INFO("ai", "ParamAdvisor: bound for '{}' updated (max_delta={}, hard=[{}, {}])",
             param_name, bound.max_delta, bound.hard_min, bound.hard_max);
 }

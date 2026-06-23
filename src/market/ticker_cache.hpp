@@ -1,5 +1,5 @@
 #pragma once
-// ticker_cache.hpp — Thread-safe ticker cache for Layer 3 Market Data
+// tickerCache.hpp — Thread-safe ticker cache for Layer 3 Market Data
 //
 // Stores the latest ticker data (best bid/ask, last price, 24h volume) per symbol.
 // Updates and reads are protected by a shared_mutex (readers-writer lock).
@@ -93,8 +93,8 @@ class TickerCache
     [[nodiscard]] std::vector<Symbol> symbols() const;
 
   private:
-    mutable std::shared_mutex mutex_; ///< Protects the cache map.
-    std::unordered_map<Symbol, Ticker> cache_;
+    mutable std::shared_mutex m_mutex; ///< Protects the cache map.
+    std::unordered_map<Symbol, Ticker> m_cache;
 };
 
 } // namespace pulse::market

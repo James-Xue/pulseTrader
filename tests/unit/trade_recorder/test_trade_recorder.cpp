@@ -75,7 +75,7 @@ TEST(TradeRecorder, OpenCreatesDatabaseFile)
 TEST(TradeRecorder, OpenCreatesTableAndIndexes)
 {
     auto recorder = open_memory_db();
-    EXPECT_EQ(0, recorder.trade_count());
+    EXPECT_EQ(0, recorder.tradeCount());
 }
 
 TEST(TradeRecorder, OpenExistingDatabase)
@@ -88,14 +88,14 @@ TEST(TradeRecorder, OpenExistingDatabase)
         auto result = TradeRecorder::open(path);
         ASSERT_TRUE(ok(result));
         auto &rec = value(result);
-        EXPECT_TRUE(ok(rec.record_trade(make_report(), 1.5, "test")));
+        EXPECT_TRUE(ok(rec.recordTrade(make_report(), 1.5, "test")));
     }
 
     // Reopen — data should persist.
     {
         auto result = TradeRecorder::open(path);
         ASSERT_TRUE(ok(result));
-        EXPECT_EQ(1, value(result).trade_count());
+        EXPECT_EQ(1, value(result).tradeCount());
     }
 
     std::filesystem::remove(path);
@@ -118,9 +118,9 @@ TEST(TradeRecorder, RecordTradeFilled)
     auto report = make_report();
     report.final_status = OrderStatus::Filled;
 
-    auto result = recorder.record_trade(report, 2.5, "momentum_scalper");
+    auto result = recorder.recordTrade(report, 2.5, "momentum_scalper");
     ASSERT_TRUE(ok(result));
-    EXPECT_EQ(1, recorder.trade_count());
+    EXPECT_EQ(1, recorder.tradeCount());
 }
 
 TEST(TradeRecorder, RecordTradeCancelled)
@@ -128,9 +128,9 @@ TEST(TradeRecorder, RecordTradeCancelled)
     auto recorder = open_memory_db();
     auto report = make_report("ORD002", 0.0, 0.0, 0.0, OrderStatus::Cancelled);
 
-    auto result = recorder.record_trade(report, 0.0, "");
+    auto result = recorder.recordTrade(report, 0.0, "");
     ASSERT_TRUE(ok(result));
-    EXPECT_EQ(1, recorder.trade_count());
+    EXPECT_EQ(1, recorder.tradeCount());
 }
 
 TEST(TradeRecorder, RecordTradeDuplicateOrderId)
@@ -138,9 +138,9 @@ TEST(TradeRecorder, RecordTradeDuplicateOrderId)
     auto recorder = open_memory_db();
     auto report = make_report("DUP001");
 
-    EXPECT_TRUE(ok(recorder.record_trade(report, 1.0, "strat")));
+    EXPECT_TRUE(ok(recorder.recordTrade(report, 1.0, "strat")));
 
-    auto dup_result = recorder.record_trade(report, 1.0, "strat");
+    auto dup_result = recorder.recordTrade(report, 1.0, "strat");
     ASSERT_FALSE(ok(dup_result));
     EXPECT_EQ(ErrorCode::TradeRecorderDuplicate, error(dup_result).code);
 }
@@ -156,9 +156,9 @@ TEST(TradeRecorder, RecordTradeAllFieldsPreserved)
     report.slippage_bps = 2.38;
     report.latency = std::chrono::milliseconds(250);
 
-    EXPECT_TRUE(ok(recorder.record_trade(report, 5.75, "orderbook_scalper")));
+    EXPECT_TRUE(ok(recorder.recordTrade(report, 5.75, "orderbook_scalper")));
 
-    auto query = recorder.get_trades();
+    auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
     auto &trades = value(query);
     ASSERT_EQ(1u, trades.size());
@@ -184,9 +184,9 @@ TEST(TradeRecorder, RecordTradeAllFieldsPreserved)
 TEST(TradeRecorder, RecordTradeZeroPnl)
 {
     auto recorder = open_memory_db();
-    EXPECT_TRUE(ok(recorder.record_trade(make_report(), 0.0, "")));
+    EXPECT_TRUE(ok(recorder.recordTrade(make_report(), 0.0, "")));
 
-    auto query = recorder.get_trades();
+    auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
     EXPECT_DOUBLE_EQ(0.0, value(query)[0].pnl);
 }
@@ -194,9 +194,9 @@ TEST(TradeRecorder, RecordTradeZeroPnl)
 TEST(TradeRecorder, RecordTradeNegativePnl)
 {
     auto recorder = open_memory_db();
-    EXPECT_TRUE(ok(recorder.record_trade(make_report(), -5.2, "strat")));
+    EXPECT_TRUE(ok(recorder.recordTrade(make_report(), -5.2, "strat")));
 
-    auto query = recorder.get_trades();
+    auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
     EXPECT_DOUBLE_EQ(-5.2, value(query)[0].pnl);
 }
@@ -208,11 +208,11 @@ TEST(TradeRecorder, RecordTradeMultiple)
     for (int i = 0; i < 5; ++i)
     {
         EXPECT_TRUE(ok(
-            recorder.record_trade(
+            recorder.recordTrade(
                 make_report("MULTI" + std::to_string(i)), 1.0, "s")));
     }
 
-    EXPECT_EQ(5, recorder.trade_count());
+    EXPECT_EQ(5, recorder.tradeCount());
 }
 
 TEST(TradeRecorder, CloseAndReopen)
@@ -224,8 +224,8 @@ TEST(TradeRecorder, CloseAndReopen)
         auto result = TradeRecorder::open(path);
         ASSERT_TRUE(ok(result));
         auto &rec = value(result);
-        EXPECT_TRUE(ok(rec.record_trade(make_report("P001"), 1.0, "s1")));
-        EXPECT_TRUE(ok(rec.record_trade(make_report("P002"), 2.0, "s2")));
+        EXPECT_TRUE(ok(rec.recordTrade(make_report("P001"), 1.0, "s1")));
+        EXPECT_TRUE(ok(rec.recordTrade(make_report("P002"), 2.0, "s2")));
         rec.checkpoint();
         rec.close();
     }
@@ -233,7 +233,7 @@ TEST(TradeRecorder, CloseAndReopen)
     {
         auto result = TradeRecorder::open(path);
         ASSERT_TRUE(ok(result));
-        EXPECT_EQ(2, value(result).trade_count());
+        EXPECT_EQ(2, value(result).tradeCount());
     }
 
     std::filesystem::remove(path);
@@ -242,17 +242,17 @@ TEST(TradeRecorder, CloseAndReopen)
 TEST(TradeRecorder, CheckpointDoesNotThrow)
 {
     auto recorder = open_memory_db();
-    EXPECT_TRUE(ok(recorder.record_trade(make_report(), 0.0, "")));
+    EXPECT_TRUE(ok(recorder.recordTrade(make_report(), 0.0, "")));
     recorder.checkpoint();
-    EXPECT_EQ(1, recorder.trade_count());
+    EXPECT_EQ(1, recorder.tradeCount());
 }
 
 TEST(TradeRecorder, RecordTradeEmptyStrategyName)
 {
     auto recorder = open_memory_db();
-    EXPECT_TRUE(ok(recorder.record_trade(make_report(), 0.0, "")));
+    EXPECT_TRUE(ok(recorder.recordTrade(make_report(), 0.0, "")));
 
-    auto query = recorder.get_trades();
+    auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
     EXPECT_EQ("", value(query)[0].strategy_name);
 }
@@ -263,9 +263,9 @@ TEST(TradeRecorder, RecordTradePartialFill)
     auto report = make_report("PARTIAL001", 0.0005, 65000.0, 0.13);
     report.requested_qty = 0.001;  // requested 0.001 but only filled 0.0005
 
-    EXPECT_TRUE(ok(recorder.record_trade(report, 0.5, "strat")));
+    EXPECT_TRUE(ok(recorder.recordTrade(report, 0.5, "strat")));
 
-    auto query = recorder.get_trades();
+    auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
     const auto &t = value(query)[0];
     EXPECT_DOUBLE_EQ(0.001, t.requested_qty);

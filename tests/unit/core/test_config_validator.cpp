@@ -43,7 +43,7 @@ PulseConfig valid_config()
 TEST(ConfigValidator, AcceptsValidConfig)
 {
     auto cfg = valid_config();
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
 }
 
@@ -55,7 +55,7 @@ TEST(ConfigValidator, RejectsEmptySymbols)
 {
     auto cfg = valid_config();
     cfg.symbols.clear();
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("symbols"));
 }
@@ -68,7 +68,7 @@ TEST(ConfigValidator, RejectsEmptyApiKey)
 {
     auto cfg = valid_config();
     cfg.exchange.apiKey = "";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("apiKey"));
 }
@@ -77,7 +77,7 @@ TEST(ConfigValidator, RejectsEmptyApiSecret)
 {
     auto cfg = valid_config();
     cfg.exchange.apiSecret = "";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("apiSecret"));
 }
@@ -86,7 +86,7 @@ TEST(ConfigValidator, RejectsZeroRestTimeout)
 {
     auto cfg = valid_config();
     cfg.exchange.restTimeoutMs = 0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("restTimeoutMs"));
 }
@@ -99,7 +99,7 @@ TEST(ConfigValidator, RejectsNegativePositionNotional)
 {
     auto cfg = valid_config();
     cfg.risk.maxPositionNotional = -100.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("maxPositionNotional"));
 }
@@ -108,7 +108,7 @@ TEST(ConfigValidator, RejectsZeroMaxOpenPositions)
 {
     auto cfg = valid_config();
     cfg.risk.maxOpenPositions = 0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("maxOpenPositions"));
 }
@@ -118,13 +118,13 @@ TEST(ConfigValidator, RejectsDailyDrawdownOutOfRange)
     {
         auto cfg = valid_config();
         cfg.risk.maxDailyDrawdown = 0.0;
-        auto err = validate_config(cfg);
+        auto err = validateConfig(cfg);
         EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     }
     {
         auto cfg = valid_config();
         cfg.risk.maxDailyDrawdown = 1.5;
-        auto err = validate_config(cfg);
+        auto err = validateConfig(cfg);
         EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     }
 }
@@ -133,7 +133,7 @@ TEST(ConfigValidator, RejectsDrawdownOutOfRange)
 {
     auto cfg = valid_config();
     cfg.risk.maxDrawdown = 2.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("maxDrawdown"));
 }
@@ -142,7 +142,7 @@ TEST(ConfigValidator, RejectsZeroOrdersPerSec)
 {
     auto cfg = valid_config();
     cfg.risk.maxOrdersPerSec = 0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("maxOrdersPerSec"));
 }
@@ -155,7 +155,7 @@ TEST(ConfigValidator, RejectsInvalidFixedPct)
 {
     auto cfg = valid_config();
     cfg.risk.stop_loss.fixed_pct = 0.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("fixed_pct"));
 }
@@ -164,7 +164,7 @@ TEST(ConfigValidator, RejectsInvalidTrailingPct)
 {
     auto cfg = valid_config();
     cfg.risk.stop_loss.trailing_pct = 0.6;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("trailing_pct"));
 }
@@ -178,7 +178,7 @@ TEST(ConfigValidator, RejectsTakeProfitSizeMismatch)
     auto cfg = valid_config();
     cfg.risk.take_profit.targets_pct = {0.005, 0.01};
     cfg.risk.take_profit.fractions = {0.5};
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("same length"));
 }
@@ -187,7 +187,7 @@ TEST(ConfigValidator, RejectsTakeProfitFractionSumOverOne)
 {
     auto cfg = valid_config();
     cfg.risk.take_profit.fractions = {0.5, 0.5, 0.5};
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("sum"));
 }
@@ -200,7 +200,7 @@ TEST(ConfigValidator, RejectsEmptyStrategyList)
 {
     auto cfg = valid_config();
     cfg.strategy.strategies.clear();
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("strategy"));
 }
@@ -209,7 +209,7 @@ TEST(ConfigValidator, RejectsStrategyWithEmptyName)
 {
     auto cfg = valid_config();
     cfg.strategy.strategies[0].name = "";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("name"));
 }
@@ -218,7 +218,7 @@ TEST(ConfigValidator, RejectsStrategySymbolNotInList)
 {
     auto cfg = valid_config();
     cfg.strategy.strategies[0].symbol = "DOGE_USDT";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("DOGE_USDT"));
 }
@@ -227,7 +227,7 @@ TEST(ConfigValidator, RejectsNegativeOrderQuantity)
 {
     auto cfg = valid_config();
     cfg.strategy.strategies[0].order_quantity = -0.001;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("order_quantity"));
 }
@@ -237,13 +237,13 @@ TEST(ConfigValidator, RejectsConfidenceOutOfRange)
     {
         auto cfg = valid_config();
         cfg.strategy.strategies[0].min_confidence = -0.1;
-        auto err = validate_config(cfg);
+        auto err = validateConfig(cfg);
         EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     }
     {
         auto cfg = valid_config();
         cfg.strategy.strategies[0].min_confidence = 1.1;
-        auto err = validate_config(cfg);
+        auto err = validateConfig(cfg);
         EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     }
 }
@@ -252,7 +252,7 @@ TEST(ConfigValidator, RejectsInvalidAggregatorThreshold)
 {
     auto cfg = valid_config();
     cfg.strategy.signal_aggregator_threshold = 1.5;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos,
               err.message.find("signal_aggregator_threshold"));
@@ -269,7 +269,7 @@ TEST(ConfigValidator, RejectsInvalidAiBackend)
     cfg.ai.backend = "gemini";
     cfg.ai.model = "some-model";
     cfg.ai.apiKey = "some-key";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("backend"));
 }
@@ -281,7 +281,7 @@ TEST(ConfigValidator, SkipsAiValidationWhenDisabled)
     cfg.ai.backend = "invalid";      // Should not be checked.
     cfg.ai.model = "";
     cfg.ai.apiKey = "";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
 }
 
@@ -293,7 +293,7 @@ TEST(ConfigValidator, RejectsInvalidLogLevel)
 {
     auto cfg = valid_config();
     cfg.log.level = "verbose";
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("log.level"));
 }
@@ -305,7 +305,7 @@ TEST(ConfigValidator, AcceptsAllValidLogLevels)
     {
         auto cfg = valid_config();
         cfg.log.level = level;
-        auto err = validate_config(cfg);
+        auto err = validateConfig(cfg);
         EXPECT_EQ(ErrorCode::Ok, err.code)
             << "log level '" << level << "' should be valid";
     }
@@ -321,7 +321,7 @@ TEST(ConfigValidator, AcceptsFuturesStrategyWithLeverage)
     cfg.strategy.strategies[0].market_type = MarketType::Futures;
     cfg.strategy.strategies[0].leverage = 5.0;
     cfg.risk.max_leverage = 10.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
@@ -329,7 +329,7 @@ TEST(ConfigValidator, RejectsLeverageBelowOne)
 {
     auto cfg = valid_config();
     cfg.strategy.strategies[0].leverage = 0.5;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("leverage"));
 }
@@ -339,7 +339,7 @@ TEST(ConfigValidator, RejectsLeverageExceedingMaxLeverage)
     auto cfg = valid_config();
     cfg.strategy.strategies[0].leverage = 20.0;
     cfg.risk.max_leverage = 10.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("exceeds"));
 }
@@ -348,7 +348,7 @@ TEST(ConfigValidator, RejectsMaxLeverageOutOfRange)
 {
     auto cfg = valid_config();
     cfg.risk.max_leverage = 200.0; // > 125.0
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("max_leverage"));
 }
@@ -357,7 +357,7 @@ TEST(ConfigValidator, RejectsMaxMarginUsedOutOfRange)
 {
     auto cfg = valid_config();
     cfg.risk.max_margin_used = 1.5; // > 1.0
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("max_margin_used"));
 }
@@ -367,7 +367,7 @@ TEST(ConfigValidator, AcceptsDefaultLeverageOne)
     auto cfg = valid_config();
     // Default leverage is 1.0 — should pass for both spot and futures
     EXPECT_DOUBLE_EQ(1.0, cfg.strategy.strategies[0].leverage);
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
@@ -375,7 +375,7 @@ TEST(ConfigValidator, AcceptsMaxLeverageBoundary125)
 {
     auto cfg = valid_config();
     cfg.risk.max_leverage = 125.0; // boundary value
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
@@ -388,7 +388,7 @@ TEST(ConfigValidator, RejectsTestnetWithSpotStrategy)
     auto cfg = valid_config();
     cfg.exchange.testnet = true;
     cfg.strategy.strategies[0].market_type = MarketType::Spot;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("testnet"));
 }
@@ -400,7 +400,7 @@ TEST(ConfigValidator, AcceptsTestnetWithFuturesStrategy)
     cfg.strategy.strategies[0].market_type = MarketType::Futures;
     cfg.strategy.strategies[0].leverage = 5.0;
     cfg.risk.max_leverage = 10.0;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
 }
 
@@ -409,7 +409,7 @@ TEST(ConfigValidator, AcceptsMainnetWithSpotStrategy)
     auto cfg = valid_config();
     cfg.exchange.testnet = false;
     cfg.strategy.strategies[0].market_type = MarketType::Spot;
-    auto err = validate_config(cfg);
+    auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
