@@ -274,19 +274,157 @@
     }
 
     // =========================================================================
-    // Panel 2: K-line Chart
+    // Panel 2: K-line Chart (Candlestick + Table toggle)
     // =========================================================================
 
+    // Chart state — lazily initialized on first render
+    var klineViewMode = 'chart'; // 'chart' or 'table'
+    var klineChart = null;
+    var klineSeries = null;
+    var klineVolumeSeries = null;
+    var klineLastOpenTime = 0;
+    var klineLastData = null; // cached for toggle switch
+
+    /**
+     * Dispatch to chart or table renderer based on current view mode.
+     */
     function renderKline(kl) {
+        klineLastData = kl; // cache for toggle
         if (!kl || !kl.symbol || !kl.candles || kl.candles.length === 0) {
             setContent('kline-content', '<p class="placeholder">Waiting for candle data...</p>');
             return;
         }
 
+        if (klineViewMode === 'chart') {
+            renderKlineChart(kl);
+        } else {
+            renderKlineTable(kl);
+        }
+    }
+
+    /**
+     * Render candlestick chart using TradingView Lightweight Charts.
+     */
+    function renderKlineChart(kl) {
+        var candles = kl.candles;
+        var container = document.getElementById('kline-chart-container');
+
+        // First render: build HTML skeleton and create chart instance
+        if (!klineChart || !container) {
+            var html = '<div class="kline-header">'
+                + '<span class="kline-symbol">' + escHtml(kl.symbol) + '</span>'
+                + '<div class="kline-toggle-bar">'
+                + '<button class="kline-toggle active" onclick="window._pulseKlineToggle(\'chart\')">Chart</button>'
+                + '<button class="kline-toggle" onclick="window._pulseKlineToggle(\'table\')">Table</button>'
+                + '</div></div>'
+                + '<div id="kline-chart-container" style="width:100%;height:280px;"></div>';
+            setContent('kline-content', html);
+
+            container = document.getElementById('kline-chart-container');
+            if (!container || typeof LightweightCharts === 'undefined') {
+                setContent('kline-content', '<p class="placeholder">Chart library not loaded</p>');
+                return;
+            }
+
+            klineChart = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { type: 'solid', color: '#1a1a2e' },
+                    textColor: '#a0a0c0',
+                    fontSize: 11
+                },
+                grid: {
+                    vertLines: { color: 'rgba(15, 52, 96, 0.4)' },
+                    horzLines: { color: 'rgba(15, 52, 96, 0.4)' }
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: '#a0a0c0', width: 1, style: LightweightCharts.LineStyle.Dashed },
+                    horzLine: { color: '#a0a0c0', width: 1, style: LightweightCharts.LineStyle.Dashed }
+                },
+                rightPriceScale: {
+                    borderColor: '#0f3460'
+                },
+                timeScale: {
+                    borderColor: '#0f3460',
+                    timeVisible: true,
+                    secondsVisible: false
+                },
+                autoSize: true
+            });
+
+            klineSeries = klineChart.addSeries(LightweightCharts.CandlestickSeries, {
+                upColor: '#4caf50',
+                downColor: '#f44336',
+                borderUpColor: '#4caf50',
+                borderDownColor: '#f44336',
+                wickUpColor: '#4caf50',
+                wickDownColor: '#f44336'
+            });
+
+            klineVolumeSeries = klineChart.addSeries(LightweightCharts.HistogramSeries, {
+                color: '#555580',
+                priceFormat: { type: 'volume' },
+                priceScaleId: 'volume'
+            });
+
+            klineChart.priceScale('volume').applyOptions({
+                scaleMargins: { top: 0.85, bottom: 0 }
+            });
+        }
+
+        // Convert candles to Lightweight Charts format
+        var chartData = [];
+        var volumeData = [];
+        for (var i = 0; i < candles.length; i++) {
+            var c = candles[i];
+            var timeSec = Math.floor(c.open_time / 1000);
+            chartData.push({
+                time: timeSec,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close
+            });
+            volumeData.push({
+                time: timeSec,
+                value: c.volume,
+                color: c.close >= c.open ? 'rgba(76, 175, 80, 0.3)' : 'rgba(244, 67, 54, 0.3)'
+            });
+        }
+
+        // Check if we can do incremental update (same symbol, only last candle changed)
+        var lastCandle = candles[candles.length - 1];
+        var lastTime = Math.floor(lastCandle.open_time / 1000);
+
+        if (klineLastOpenTime > 0 && lastTime === klineLastOpenTime) {
+            // Same last candle — just update it (price moved within the same bar)
+            klineSeries.update(chartData[chartData.length - 1]);
+            klineVolumeSeries.update(volumeData[volumeData.length - 1]);
+        } else {
+            // New candle(s) appeared or first load — full setData + fit
+            klineSeries.setData(chartData);
+            klineVolumeSeries.setData(volumeData);
+            klineChart.timeScale().fitContent();
+        }
+
+        klineLastOpenTime = lastTime;
+    }
+
+    /**
+     * Render the original OHLCV data table (extracted from old renderKline).
+     */
+    function renderKlineTable(kl) {
         var candles = kl.candles;
         var show = candles.slice(-50).reverse(); // Last 50, newest first
 
-        var html = '<div style="font-size:0.8em;color:#a0a0c0;margin-bottom:6px">' + escHtml(kl.symbol) + '</div>';
+        var html = '<div class="kline-header">'
+            + '<span class="kline-symbol">' + escHtml(kl.symbol) + '</span>'
+            + '<div class="kline-toggle-bar">'
+            + '<button class="kline-toggle" onclick="window._pulseKlineToggle(\'chart\')">Chart</button>'
+            + '<button class="kline-toggle active" onclick="window._pulseKlineToggle(\'table\')">Table</button>'
+            + '</div></div>';
+
+        html += '<div class="kline-table-view">';
         html += '<table><thead><tr><th>Time</th><th>O</th><th>H</th><th>L</th><th>C</th><th>V</th><th></th></tr></thead><tbody>';
 
         for (var i = 0; i < show.length; i++) {
@@ -306,9 +444,31 @@
                 + '</tr>';
         }
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         setContent('kline-content', html);
     }
+
+    /**
+     * Toggle between chart and table views. Exposed globally for onclick handlers.
+     */
+    window._pulseKlineToggle = function (mode) {
+        if (mode === klineViewMode) { return; }
+        klineViewMode = mode;
+
+        // Destroy chart instance when switching away
+        if (mode === 'table' && klineChart) {
+            klineChart.remove();
+            klineChart = null;
+            klineSeries = null;
+            klineVolumeSeries = null;
+            klineLastOpenTime = 0;
+        }
+
+        // Re-render with cached data
+        if (klineLastData) {
+            renderKline(klineLastData);
+        }
+    };
 
     // =========================================================================
     // Panel 3: Open Positions
