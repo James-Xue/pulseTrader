@@ -27,13 +27,31 @@ TaskQueue::TaskQueue()
 // ---------------------------------------------------------------------------
 TaskQueue::~TaskQueue()
 {
+    stop();
+}
+
+// ---------------------------------------------------------------------------
+// stop — explicitly stop the worker thread before destructor
+// ---------------------------------------------------------------------------
+void TaskQueue::stop()
+{
+    if (!m_running.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
     // 1. Signal the worker to stop
     m_worker.request_stop();
 
     // 2. Wake the worker if it is blocked on the condition variable
     m_cv.notify_one();
 
-    // 3. m_worker is a jthread — destructor auto-joins
+    // 3. Join the worker thread (blocks until currently-executing task finishes)
+    if (m_worker.joinable())
+    {
+        m_worker.join();
+    }
+
     m_running.store(false, std::memory_order_release);
     PULSE_LOG_INFO("heartbeat", "TaskQueue worker thread stopped");
 }

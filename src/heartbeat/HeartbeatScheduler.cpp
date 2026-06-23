@@ -108,8 +108,8 @@ void HeartbeatScheduler::stop()
     // 3. Request stop on io_thread and let jthread join
     m_ioThread.request_stop();
 
-    // 4. TaskQueue destructor (called when this object is destroyed)
-    //    will join its worker thread
+    // 4. Stop the TaskQueue worker thread (may be mid-pipeline with blocking HTTP)
+    m_taskQueue.stop();
 
     PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler stopped (beats={})",
                    m_beatCount.load(std::memory_order_acquire));

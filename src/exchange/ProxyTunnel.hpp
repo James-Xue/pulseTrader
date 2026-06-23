@@ -99,6 +99,10 @@ class ProxyTunnel
     std::mutex m_relayMutex;
     std::vector<std::thread> m_relayThreads;
     std::vector<std::shared_ptr<asio::ip::tcp::socket>> m_relaySockets;
+
+    /// Socket used during handleConnection's asio::connect() phase.
+    /// Tracked so stop() can close it to unblock a pending connection.
+    std::shared_ptr<asio::ip::tcp::socket> m_connectingSock;
 };
 
 } // namespace pulse::exchange

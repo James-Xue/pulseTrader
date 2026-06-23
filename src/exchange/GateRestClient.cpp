@@ -85,6 +85,15 @@ bool isRetryable(long status_code)
     return status_code >= 500 && status_code < 600;
 }
 
+// libcurl progress callback: checks an atomic abort flag.
+// Returning non-zero tells curl to abort the transfer (CURLE_ABORTED_BY_CALLBACK).
+int curlAbortCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/,
+                      curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+{
+    auto *abort_flag = static_cast<std::atomic<bool> *>(clientp);
+    return abort_flag->load(std::memory_order_acquire) ? 1 : 0;
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -98,12 +107,34 @@ GateRestClient::GateRestClient(const ExchangeConfig &config, MarketType market_t
 }
 
 GateRestClient::~GateRestClient() = default;
-GateRestClient::GateRestClient(GateRestClient &&) noexcept = default;
-GateRestClient &GateRestClient::operator=(GateRestClient &&) noexcept = default;
+
+GateRestClient::GateRestClient(GateRestClient &&other) noexcept
+    : m_config(std::move(other.m_config))
+    , m_marketType(other.m_marketType)
+    , m_abortRequested(other.m_abortRequested.load(std::memory_order_acquire))
+{
+}
+
+GateRestClient &GateRestClient::operator=(GateRestClient &&other) noexcept
+{
+    if (this != &other)
+    {
+        m_config = std::move(other.m_config);
+        m_marketType = other.m_marketType;
+        m_abortRequested.store(other.m_abortRequested.load(std::memory_order_acquire),
+                               std::memory_order_release);
+    }
+    return *this;
+}
 
 bool GateRestClient::hasCredentials() const
 {
     return !m_config.apiKey.empty() && !m_config.apiSecret.empty();
+}
+
+void GateRestClient::cancelRequests()
+{
+    m_abortRequested.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +183,13 @@ HttpResponse GateRestClient::doRequest(
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(m_config.restTimeoutMs));
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
+
+    // Abort callback — cancelRequests() sets m_abortRequested, and the progress
+    // callback fires every ~1 s during transfer.  Returning 1 aborts curl_easy_perform.
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlAbortCallback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &m_abortRequested);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 
     // Proxy support — read from environment (HTTPS_PROXY / HTTP_PROXY)
     if (!m_config.proxyUrl.empty())
@@ -260,7 +298,7 @@ Result<nlohmann::json> GateRestClient::request(
         // Retryable failure — exponential backoff (100ms, 200ms, 400ms, ...)
         if (0 == response.status_code || isRetryable(response.status_code))
         {
-            if (attempt < max_attempts)
+            if (attempt < max_attempts && !m_abortRequested.load(std::memory_order_acquire))
             {
                 const auto backoff_ms = std::chrono::milliseconds(100 * (1u << (attempt - 1)));
                 PULSE_LOG_WARN("exchange",
