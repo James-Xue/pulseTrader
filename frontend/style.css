@@ -407,7 +407,60 @@ tbody tr:hover {
     transition: left 0.3s ease;
 }
 
-/* === K-line Table === */
+/* === K-line Chart === */
+#panel-kline .panel-content {
+    max-height: 360px;
+    overflow: visible;
+}
+
+.kline-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.kline-symbol {
+    font-size: 0.8em;
+    color: #a0a0c0;
+}
+
+.kline-toggle-bar {
+    display: flex;
+    gap: 2px;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.kline-toggle {
+    padding: 3px 12px;
+    border: none;
+    background: transparent;
+    color: #a0a0c0;
+    font-size: 0.75em;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.kline-toggle:hover {
+    background: rgba(15, 52, 96, 0.5);
+}
+
+.kline-toggle.active {
+    background: #0f3460;
+    color: #e0e0e0;
+}
+
+#kline-chart-container {
+    border-radius: 4px;
+}
+
+.kline-table-view {
+    max-height: 260px;
+    overflow-y: auto;
+}
+
 .kline-up {
     color: #4caf50;
 }
