@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-21
-> File size: 14969 chars / 20000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-06-23
+> File size: 15950 chars / 20000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,7 +32,7 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **540 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- **547 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 + supertrend_scalper 7
 - 513 without SQLITE · 475 without WEBUI or SQLITE
 
 ### Milestones
@@ -138,7 +138,14 @@
 - **WebUI top status bar**: Total / Available / Unrealized PnL / Margin Used (dark theme, 10s refresh)
 - **Heartbeat log**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
 - `Result<T>` is `std::variant<T, PulseError>` — use `ok()` / `value()` / `error()`, not `has_value()`
-- 540 tests all green
+- 547 tests all green
+
+### Naming Convention Refactoring (2026-06-23)
+- **Commit `cd8a4d5`**: Functions/methods snake_case → camelCase (~210 renames), member variables `trailing_underscore_` → `m_camelCase` prefix (~47 classes). 137 files, ±3271 lines. Exempt: `to_json`/`from_json` (ADL), TEST_F names, pure-data struct fields.
+- **Commit `6309be0`**: File names renamed to match primary class name (PascalCase). 80 files (40 .hpp + 40 .cpp), e.g. `order_executor.hpp` → `OrderExecutor.hpp`. All `#include` paths and CMakeLists.txt updated. 7+ multi-type modules kept as-is (`config.hpp`, `types.hpp`, `risk_types.hpp`, etc.).
+- **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
+- **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
+- AGENTS.md updated with new naming + file naming rules. 547 tests all green.
 
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
