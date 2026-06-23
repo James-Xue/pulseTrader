@@ -1,7 +1,7 @@
 # src/trade_recorder/CMakeLists.txt — SQLite trade recorder (Phase 2)
 
 add_library(pulse_trade_recorder STATIC
-    trade_recorder.cpp
+    TradeRecorder.cpp
 )
 
 add_library(pulse::trade_recorder ALIAS pulse_trade_recorder)

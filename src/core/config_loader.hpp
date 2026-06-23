@@ -10,7 +10,7 @@
 // Thread-safety: safe to call from any thread; reads env vars via std::getenv.
 
 #include "core/config.hpp"
-#include "core/error.hpp"
+#include "core/PulseError.hpp"
 
 #include <filesystem>
 #include <string>

@@ -8,7 +8,7 @@
 //   5. Exception in task does not crash worker
 //   6. Destructor drains pending tasks
 
-#include "heartbeat/task_queue.hpp"
+#include "heartbeat/TaskQueue.hpp"
 
 #include <gtest/gtest.h>
 

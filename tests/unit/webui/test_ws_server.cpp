@@ -13,7 +13,7 @@
 //   7. PushSnapshotCachesJson       — pushSnapshot() caches serialized JSON
 //   8. PushSnapshotCallsPublishFn   — publish function invoked when clients > 0
 
-#include "webui/ws_server.hpp"
+#include "webui/WsServer.hpp"
 
 #include <gtest/gtest.h>
 

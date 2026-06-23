@@ -1,12 +1,12 @@
 # pulse_risk — Layer 7 Risk Management (position tracking, order gating, stop/profit engines)
 
 add_library(pulse_risk STATIC
-    position_manager.cpp
-    drawdown_guard.cpp
-    order_rate_limiter.cpp
-    risk_manager.cpp
-    stop_loss_engine.cpp
-    take_profit_engine.cpp
+    PositionManager.cpp
+    DrawdownGuard.cpp
+    OrderRateLimiter.cpp
+    RiskManager.cpp
+    StopLossEngine.cpp
+    TakeProfitEngine.cpp
 )
 
 add_library(pulse::risk ALIAS pulse_risk)

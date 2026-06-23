@@ -1,6 +1,6 @@
 // test_proxy_tunnel.cpp — Unit tests for ProxyTunnel helpers (Layer 1 Exchange)
 
-#include "exchange/proxy_tunnel.hpp"
+#include "exchange/ProxyTunnel.hpp"
 
 #include <gtest/gtest.h>
 

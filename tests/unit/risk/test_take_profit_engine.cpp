@@ -1,6 +1,6 @@
 // test_take_profit_engine.cpp — Unit tests for TakeProfitEngine (Layer 7 Risk Management)
 
-#include "risk/take_profit_engine.hpp"
+#include "risk/TakeProfitEngine.hpp"
 
 #include <gtest/gtest.h>
 

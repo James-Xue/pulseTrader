@@ -1,6 +1,6 @@
 // test_order_rate_limiter.cpp — Unit tests for OrderRateLimiter (Layer 7 Risk Management)
 
-#include "risk/order_rate_limiter.hpp"
+#include "risk/OrderRateLimiter.hpp"
 
 #include <gtest/gtest.h>
 

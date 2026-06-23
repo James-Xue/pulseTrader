@@ -9,10 +9,10 @@
 
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
-#include "core/error.hpp"
+#include "core/PulseError.hpp"
 #include "core/types.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "logging/logger.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "logging/Logger.hpp"
 
 #include <cstdlib>
 #include <iomanip>

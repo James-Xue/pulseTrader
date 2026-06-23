@@ -1,6 +1,6 @@
 // test_mean_reversion_scalper.cpp — Unit tests for Bollinger Band strategy (Layer 6 Strategy Engine)
 
-#include "strategy/scalping/mean_reversion_scalper.hpp"
+#include "strategy/scalping/MeanReversionScalper.hpp"
 
 #include <gtest/gtest.h>
 

@@ -24,14 +24,14 @@
 //   - All structs are plain data (value types); thread safety is enforced
 //     by DashboardState which holds them behind a shared_mutex.
 
-#include "ai/analysis_result.hpp"
+#include "ai/AnalysisResult.hpp"
 #include "core/types.hpp"
-#include "execution/execution_report.hpp"
-#include "execution/order_tracker.hpp"
-#include "market/kline_buffer.hpp"
-#include "market/orderbook_manager.hpp"
+#include "execution/ExecutionReport.hpp"
+#include "execution/OrderTracker.hpp"
+#include "market/KlineBuffer.hpp"
+#include "market/OrderBookManager.hpp"
 #include "risk/risk_types.hpp"
-#include "strategy/strategy_manager.hpp"
+#include "strategy/StrategyManager.hpp"
 
 #include <nlohmann/json.hpp>
 

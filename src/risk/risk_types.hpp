@@ -11,7 +11,7 @@
 //   - All structs are plain data; thread safety is enforced by the
 //     containers that hold them (PositionManager, etc.)
 
-#include "core/error.hpp"
+#include "core/PulseError.hpp"
 #include "core/types.hpp"
 
 #include <chrono>

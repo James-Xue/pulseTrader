@@ -13,7 +13,7 @@
 //   7. Custom baseUrl is respected
 //   8. Missing content field returns error
 
-#include "ai/ai_client.hpp"
+#include "ai/AIClient.hpp"
 
 #include <gtest/gtest.h>
 

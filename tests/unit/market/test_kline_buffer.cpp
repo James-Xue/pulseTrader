@@ -1,6 +1,6 @@
 // test_kline_buffer.cpp — Unit tests for KlineBuffer (Layer 3 Market Data)
 
-#include "market/kline_buffer.hpp"
+#include "market/KlineBuffer.hpp"
 
 #include <gtest/gtest.h>
 

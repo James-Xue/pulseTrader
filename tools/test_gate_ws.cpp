@@ -11,8 +11,8 @@
 // NOT part of CTest — this is a manual verification tool.
 
 #include "core/config.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
 
 #include <nlohmann/json.hpp>
 

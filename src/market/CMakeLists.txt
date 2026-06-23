@@ -1,11 +1,11 @@
 # pulse_market — Layer 3 Market Data Pipeline (ticker, orderbook, kline, dispatcher)
 
 add_library(pulse_market STATIC
-    ticker_cache.cpp
-    symbol_registry.cpp
-    kline_buffer.cpp
-    orderbook_manager.cpp
-    market_feed.cpp
+    TickerCache.cpp
+    SymbolRegistry.cpp
+    KlineBuffer.cpp
+    OrderBookManager.cpp
+    MarketFeed.cpp
 )
 
 add_library(pulse::market ALIAS pulse_market)

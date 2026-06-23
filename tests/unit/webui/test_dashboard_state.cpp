@@ -26,19 +26,19 @@
 //  11. SnapshotCallbackInvoked
 //  12. StopTokenCancelsPollLoop
 
-#include "webui/dashboard_state.hpp"
+#include "webui/DashboardState.hpp"
 
-#include "ai/ai_pipeline.hpp"
+#include "ai/AiPipeline.hpp"
 #include "core/config.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "execution/order_tracker.hpp"
-#include "market/market_feed.hpp"
-#include "risk/drawdown_guard.hpp"
-#include "risk/order_rate_limiter.hpp"
-#include "risk/position_manager.hpp"
-#include "risk/risk_manager.hpp"
-#include "strategy/strategy_manager.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "execution/OrderTracker.hpp"
+#include "market/MarketFeed.hpp"
+#include "risk/DrawdownGuard.hpp"
+#include "risk/OrderRateLimiter.hpp"
+#include "risk/PositionManager.hpp"
+#include "risk/RiskManager.hpp"
+#include "strategy/StrategyManager.hpp"
 
 #include <gtest/gtest.h>
 
