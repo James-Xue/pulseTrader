@@ -1,12 +1,12 @@
 # pulse_exchange — Gate.io v4 REST + WebSocket client with HMAC-SHA512 signing.
 
 add_library(pulse_exchange STATIC
-    endpoint_router.cpp
+    EndpointRouter.cpp
     gate_auth.cpp
-    gate_rest_client.cpp
-    gate_ws_channels.cpp
-    gate_ws_client.cpp
-    proxy_tunnel.cpp
+    GateRestClient.cpp
+    GateWsChannels.cpp
+    GateWsClient.cpp
+    ProxyTunnel.cpp
 )
 
 add_library(pulse::exchange ALIAS pulse_exchange)
@@ -30,7 +30,7 @@ target_link_libraries(pulse_exchange
 # websocketpp: prefer system / vcpkg-installed package; fall back to vendored copy
 # in third_party/websocketpp (required on Windows where vcpkg websocketpp is unavailable).
 # asio: header-only, installed via vcpkg.
-# ASIO_STANDALONE is defined in gate_ws_client.cpp before including websocketpp headers.
+# ASIO_STANDALONE is defined in GateWsClient.cpp before including websocketpp headers.
 if(websocketpp_FOUND)
     # vcpkg or system package found (typical on Linux / macOS)
     target_link_libraries(pulse_exchange PRIVATE websocketpp::websocketpp)

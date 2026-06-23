@@ -127,7 +127,7 @@ struct AccountBalance
 }
 
 /// Convert MarketType to a human-readable string.
-[[nodiscard]] constexpr const char* to_string(MarketType mt) noexcept
+[[nodiscard]] constexpr const char* toString(MarketType mt) noexcept
 {
     switch (mt)
     {
@@ -140,7 +140,7 @@ struct AccountBalance
 }
 
 /// Convert MarginMode to a human-readable string.
-[[nodiscard]] constexpr const char* to_string(MarginMode mm) noexcept
+[[nodiscard]] constexpr const char* toString(MarginMode mm) noexcept
 {
     switch (mm)
     {
@@ -160,7 +160,7 @@ struct AccountBalance
 /// This is the safe replacement for std::stod() in exchange data parsing —
 /// std::stod throws std::invalid_argument on malformed input, which can crash
 /// the WebSocket event thread.
-[[nodiscard]] inline std::optional<double> safe_parse_double(std::string_view sv) noexcept
+[[nodiscard]] inline std::optional<double> safeParseDouble(std::string_view sv) noexcept
 {
     if (sv.empty())
     {

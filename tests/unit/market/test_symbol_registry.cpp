@@ -1,8 +1,8 @@
 // test_symbol_registry.cpp — Unit tests for SymbolRegistry (Layer 3 Market Data)
 
-#include "market/symbol_registry.hpp"
+#include "market/SymbolRegistry.hpp"
 
-#include "exchange/gate_rest_client.hpp"
+#include "exchange/GateRestClient.hpp"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@ using namespace pulse::market;
 using namespace pulse::exchange;
 
 // ---------------------------------------------------------------------------
-// Parse currency pair (tested via load_from_rest with mock response)
+// Parse currency pair (tested via loadFromRest with mock response)
 // ---------------------------------------------------------------------------
 
 TEST(SymbolRegistry, ParseCurrencyPairBTC)
@@ -32,7 +32,7 @@ TEST(SymbolRegistry, ParseCurrencyPairBTC)
         { "trade_status", "tradable" }
     };
 
-    // We cannot directly call parse_currency_pair (private), so we test via get().
+    // We cannot directly call parseCurrencyPair (private), so we test via get().
     // Create a mock REST client that returns this single pair.
     ExchangeConfig config;
     GateRestClient rest_client(config);
@@ -43,7 +43,7 @@ TEST(SymbolRegistry, ParseCurrencyPairBTC)
     // Instead, we test the validation logic with known values.
 
     // Expected: tick_size = 0.01, lot_size = 0.0001, min_quote = 1.0
-    // We will test this indirectly via validate_order after manual setup.
+    // We will test this indirectly via validateOrder after manual setup.
 }
 
 // ---------------------------------------------------------------------------
@@ -57,14 +57,14 @@ class SymbolRegistryValidationTest : public ::testing::Test
     {
         // Create a registry and manually inject a SymbolInfo for testing.
         ExchangeConfig config;
-        rest_client_ = std::make_unique<GateRestClient>(config);
-        registry_ = std::make_unique<SymbolRegistry>(*rest_client_);
+        m_restClient = std::make_unique<GateRestClient>(config);
+        registry_ = std::make_unique<SymbolRegistry>(*m_restClient);
 
-        // We cannot directly access symbols_ (private), so we skip this test setup.
+        // We cannot directly access m_symbols (private), so we skip this test setup.
         // Instead, we test validation logic conceptually in separate tests.
     }
 
-    std::unique_ptr<GateRestClient> rest_client_;
+    std::unique_ptr<GateRestClient> m_restClient;
     std::unique_ptr<SymbolRegistry> registry_;
 };
 
@@ -76,7 +76,7 @@ TEST_F(SymbolRegistryValidationTest, ValidateOrderPriceTickSize)
     // - Valid: 50000.01, 50000.02, 50000.10
     // - Invalid: 50000.005, 50000.015
 
-    // Since we cannot inject, we test with a real registry after load_from_rest.
+    // Since we cannot inject, we test with a real registry after loadFromRest.
     // This test is a placeholder for future integration tests.
 }
 
@@ -166,10 +166,10 @@ TEST(SymbolRegistry, FuturesRegistryGetReturnsNullopt)
     EXPECT_FALSE(registry.get("BTC_USDT").has_value());
 }
 
-// Note: Testing parse_futures_contract and validate_order with futures data
+// Note: Testing parseFuturesContract and validateOrder with futures data
 // requires a live or mock REST client. Integration tests in tools/ cover
 // the full flow. The struct defaults and constructor are validated here.
 
 // Note: Testing symbols() with populated data requires a live or mock REST
-// client (load_from_rest is the only public path to inject SymbolInfo).
+// client (loadFromRest is the only public path to inject SymbolInfo).
 // Integration tests in tools/ will cover the populated case.

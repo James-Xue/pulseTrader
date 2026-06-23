@@ -8,7 +8,7 @@
 //   5. Exception in task does not crash worker
 //   6. Destructor drains pending tasks
 
-#include "heartbeat/task_queue.hpp"
+#include "heartbeat/TaskQueue.hpp"
 
 #include <gtest/gtest.h>
 
@@ -28,7 +28,7 @@ TEST(TaskQueue, ConstructionStartsWorker)
 {
     TaskQueue queue;
     EXPECT_TRUE(queue.running());
-    EXPECT_EQ(queue.pending_count(), 0u);
+    EXPECT_EQ(queue.pendingCount(), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ TEST(TaskQueue, PendingCount)
     TaskQueue queue;
 
     // Initially empty
-    EXPECT_EQ(queue.pending_count(), 0u);
+    EXPECT_EQ(queue.pendingCount(), 0u);
 
     // Enqueue tasks that block briefly
     for (int i = 0; i < 3; ++i)
@@ -161,5 +161,5 @@ TEST(TaskQueue, PendingCount)
 
     // At least some should be pending (first one executing, rest queued)
     // Note: this is timing-dependent, but with 50ms tasks it should be reliable
-    EXPECT_GE(queue.pending_count(), 0u);
+    EXPECT_GE(queue.pendingCount(), 0u);
 }

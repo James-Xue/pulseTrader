@@ -1,27 +1,27 @@
 #!/bin/bash
-# run.sh — pulseTrader 快捷运行脚本
+# run.sh — pulseTrader launcher script
 #
 # Usage:
-#   ./run.sh trade      启动交易主程序（9层全量运行）
-#   ./run.sh rest       测试 REST API（公开 + 私有接口）
-#   ./run.sh ws         测试 WebSocket（行情 + 私有频道）
-#   ./run.sh market     测试行情数据管道
-#   ./run.sh strategy   测试策略引擎
-#   ./run.sh ai         测试 AI Pipeline（--mock 模式）
-#   ./run.sh webui      启动 WebUI 服务器
-#   ./run.sh test       运行全部单元测试
+#   ./run.sh trade      Start trading engine (all 9 layers)
+#   ./run.sh rest       Test REST API (public + private endpoints)
+#   ./run.sh ws         Test WebSocket (market data + private channels)
+#   ./run.sh market     Test market data pipeline
+#   ./run.sh strategy   Test strategy engine
+#   ./run.sh ai         Test AI Pipeline (--mock mode)
+#   ./run.sh webui      Start WebUI server
+#   ./run.sh test       Run all unit tests
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 加载环境变量
+# Load environment variables
 if [ -f .env ]; then
     source .env
 else
-    echo "⚠️  .env 文件不存在，API Key 未加载"
-    echo "   创建 .env 并填入 GATE_API_KEY 和 GATE_API_SECRET"
+    echo "⚠️  .env file not found, API Key not loaded"
+    echo "   Create .env with GATE_API_KEY and GATE_API_SECRET"
 fi
 
 BUILD_DIR="build"
@@ -29,14 +29,14 @@ BUILD_DIR="build"
 usage() {
     echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test} [args...]"
     echo ""
-    echo "  trade [--config <path>]  启动交易主程序（可选 TOML 配置文件）"
-    echo "  rest      测试 Gate.io REST API"
-    echo "  ws        测试 Gate.io WebSocket"
-    echo "  market    测试行情数据管道"
-    echo "  strategy  测试策略引擎"
-    echo "  ai        测试 AI Pipeline (mock)"
-    echo "  webui     启动 WebUI 服务器"
-    echo "  test      运行全部单元测试"
+    echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
+    echo "  rest      Test Gate.io REST API"
+    echo "  ws        Test Gate.io WebSocket"
+    echo "  market    Test market data pipeline"
+    echo "  strategy  Test strategy engine"
+    echo "  ai        Test AI Pipeline (mock)"
+    echo "  webui     Start WebUI server"
+    echo "  test      Run all unit tests"
     exit 1
 }
 
@@ -48,9 +48,9 @@ case "$1" in
     trade)
         echo "=== pulseTrader Trading Engine ==="
         shift  # consume 'trade' argument
-        # 如果没有手动指定 --config，且 trading.toml 存在，自动使用
+        # Auto-load trading.toml if no --config specified
         if [ $# -eq 0 ] && [ -f trading.toml ]; then
-            echo "📄 自动加载 trading.toml"
+            echo "📄 Auto-loading trading.toml"
             "$BUILD_DIR/apps/pulsetrader/pulsetrader" --config trading.toml
         else
             "$BUILD_DIR/apps/pulsetrader/pulsetrader" "$@"

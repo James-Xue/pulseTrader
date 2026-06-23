@@ -5,8 +5,8 @@
 #   - heartbeat_scheduler: asio::steady_timer 5-minute AI analysis clock
 
 add_library(pulse_heartbeat STATIC
-    task_queue.cpp
-    heartbeat_scheduler.cpp
+    TaskQueue.cpp
+    HeartbeatScheduler.cpp
 )
 
 add_library(pulse::heartbeat ALIAS pulse_heartbeat)

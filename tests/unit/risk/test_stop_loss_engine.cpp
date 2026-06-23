@@ -1,6 +1,6 @@
 // test_stop_loss_engine.cpp — Unit tests for StopLossEngine (Layer 7 Risk Management)
 
-#include "risk/stop_loss_engine.hpp"
+#include "risk/StopLossEngine.hpp"
 
 #include <gtest/gtest.h>
 
@@ -48,7 +48,7 @@ TEST(StopLossEngine, DefaultConfigEmptyTracker)
 {
     StopLossConfig cfg;
     StopLossEngine engine(cfg);
-    EXPECT_EQ(0u, engine.tracked_count());
+    EXPECT_EQ(0u, engine.trackedCount());
 }
 
 TEST(StopLossEngine, EvaluateEmptyTrackerReturnsNothing)
@@ -66,21 +66,21 @@ TEST(StopLossEngine, RegisterAddsPosition)
 {
     StopLossEngine engine(StopLossConfig{});
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
-    EXPECT_TRUE(engine.is_tracked("p1"));
-    EXPECT_EQ(1u, engine.tracked_count());
+    EXPECT_TRUE(engine.isTracked("p1"));
+    EXPECT_EQ(1u, engine.trackedCount());
 }
 
 TEST(StopLossEngine, RemoveErasesPosition)
 {
     StopLossEngine engine(StopLossConfig{});
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
-    engine.remove_position("p1");
+    engine.registerPosition("p1", pos);
+    engine.removePosition("p1");
 
-    EXPECT_FALSE(engine.is_tracked("p1"));
-    EXPECT_EQ(0u, engine.tracked_count());
+    EXPECT_FALSE(engine.isTracked("p1"));
+    EXPECT_EQ(0u, engine.trackedCount());
 }
 
 TEST(StopLossEngine, RegisterWithCustomConfig)
@@ -91,7 +91,7 @@ TEST(StopLossEngine, RegisterWithCustomConfig)
 
     StopLossEngine engine(StopLossConfig{});
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, custom);
+    engine.registerPosition("p1", pos, custom);
 
     // 5% below 50000 = 47500. Price at 47400 should trigger.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 47400.0));
@@ -111,7 +111,7 @@ TEST(StopLossEngine, FixedStopBuyTriggersBelowThreshold)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // 2% below 50000 = 49000. Price at 48900 should trigger.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 48900.0));
@@ -128,7 +128,7 @@ TEST(StopLossEngine, FixedStopBuyDoesNotTriggerAboveThreshold)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Price at 49500 is above 49000 stop level.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 49500.0));
@@ -148,7 +148,7 @@ TEST(StopLossEngine, FixedStopSellTriggersAboveThreshold)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Sell, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // 2% above 50000 = 51000. Price at 51100 should trigger.
     auto positions = make_positions(make_position("p1", Side::Sell, 50000.0, 51100.0));
@@ -164,7 +164,7 @@ TEST(StopLossEngine, FixedStopSellDoesNotTriggerBelowThreshold)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Sell, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Price at 50500 is below 51000 stop level.
     auto positions = make_positions(make_position("p1", Side::Sell, 50000.0, 50500.0));
@@ -184,7 +184,7 @@ TEST(StopLossEngine, TrailingStopTracksBestPrice)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Price goes up to 52000 — best_price should update.
     auto positions_up = make_positions(make_position("p1", Side::Buy, 50000.0, 52000.0));
@@ -205,7 +205,7 @@ TEST(StopLossEngine, TrailingStopSellTracksLowestPrice)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Sell, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Price drops to 48000 — best_price (lowest) should update.
     auto positions_down = make_positions(make_position("p1", Side::Sell, 50000.0, 48000.0));
@@ -226,7 +226,7 @@ TEST(StopLossEngine, TrailingStopDoesNotTriggerWhileMovingFavorably)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Price keeps going up — never triggers.
     for (double price = 50000.0; price <= 55000.0; price += 500.0)
@@ -249,7 +249,7 @@ TEST(StopLossEngine, TimeBasedStopTriggersAfterMaxHold)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Evaluate 30 seconds later — should not trigger.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 50000.0));
@@ -271,7 +271,7 @@ TEST(StopLossEngine, TimeBasedStopExactBoundary)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 50000.0));
     auto t120 = pos.open_time + std::chrono::seconds(120);
@@ -293,8 +293,8 @@ TEST(StopLossEngine, EvaluatesMultiplePositions)
 
     const auto p1 = make_position("p1", Side::Buy, 50000.0, 50000.0);
     const auto p2 = make_position("p2", Side::Buy, 3000.0, 3000.0);
-    engine.register_position("p1", p1, cfg);
-    engine.register_position("p2", p2, cfg);
+    engine.registerPosition("p1", p1, cfg);
+    engine.registerPosition("p2", p2, cfg);
 
     // p1 drops below stop (48900 < 49000), p2 stays above (2950 > 2940).
     auto positions = make_positions({
@@ -313,7 +313,7 @@ TEST(StopLossEngine, SkipsClosedPositions)
 
     StopLossEngine engine(cfg);
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos, cfg);
+    engine.registerPosition("p1", pos, cfg);
 
     // Evaluate with empty positions map — p1 is not found, should be skipped.
     std::unordered_map<std::string, Position> empty_positions;

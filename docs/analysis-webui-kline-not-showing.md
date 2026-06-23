@@ -1,35 +1,35 @@
-# WebUI K线图不显示 — 根因分析与修复方案
+# WebUI K-line Chart Not Displaying — Root Cause Analysis and Fix Plan
 
-> **日期**: 2026-06-20
-> **状态**: 分析完成，待修复
-> **前端现象**: K-line Chart 面板显示 "Waiting for candle data..."
+> **Date**: 2026-06-20
+> **Status**: Analysis complete, pending fix
+> **Frontend symptom**: K-line Chart panel shows "Waiting for candle data..."
 
-## 1. 数据管道全链路追踪
+## 1. Full Data Pipeline Trace
 
 ```
 Gate.io Futures WS (fx-ws.gateio.ws)
-  ↓ [futures.candlesticks 频道订阅]
-MarketFeed::on_kline_update()          ← 解析 OHLCV JSON → push 到 KlineBuffer
+  ↓ [futures.candlesticks channel subscription]
+MarketFeed::on_kline_update()          ← Parse OHLCV JSON → push to KlineBuffer
   ↓
-KlineBuffer (per-symbol, 500 根环形缓冲, seqlock)
+KlineBuffer (per-symbol, 500-entry ring buffer, seqlock)
   ↓
-DashboardState::poll_klines()          ← 每 200ms 检测新 K 线
+DashboardState::poll_klines()          ← Check for new K-lines every 200ms
   ↓
-WsServer::push_snapshot()              ← JSON 序列化 → uWebSockets 广播
+WsServer::push_snapshot()              ← JSON serialization → uWebSockets broadcast
   ↓
-前端 renderKline(snap.kline)           ← 渲染 OHLCV 表格（非图形蜡烛图）
+Frontend renderKline(snap.kline)       ← Renders OHLCV table (not graphical candlestick chart)
 ```
 
-**关键代码路径**:
-- `src/market/market_feed.cpp:278-344` — `on_kline_update()` 解析 Gate.io JSON
-- `src/market/kline_buffer.hpp` — 环形缓冲区 (500 candles, seqlock)
-- `src/webui/dashboard_state.cpp:229-262` — `poll_klines()` 新 K 线检测
-- `src/webui/ws_server.cpp:57-77` — WebSocket 广播
-- `frontend/app.js:235-266` — `renderKline()` 渲染为 HTML 表格
+**Key code paths**:
+- `src/market/market_feed.cpp:278-344` — `on_kline_update()` parses Gate.io JSON
+- `src/market/kline_buffer.hpp` — Ring buffer (500 candles, seqlock)
+- `src/webui/dashboard_state.cpp:229-262` — `poll_klines()` new K-line detection
+- `src/webui/ws_server.cpp:57-77` — WebSocket broadcast
+- `frontend/app.js:235-266` — `renderKline()` renders as HTML table
 
-## 2. 日志证据
+## 2. Log Evidence
 
-### 2.1 WS 连接和订阅（正常）
+### 2.1 WS Connection and Subscription (Normal)
 
 ```
 [exchange.log 17:03:19-21]
@@ -40,47 +40,47 @@ WS subscribed to futures.order_book
 WS subscribed to futures.candlesticks
 ```
 
-WS 成功连接并保持 13 分钟不断开（17:03 → 17:15），网络层正常。
+WS successfully connected and remained connected for 13 minutes (17:03 → 17:15), network layer is functioning normally.
 
-### 2.2 行情数据（零事件）
+### 2.2 Market Data (Zero Events)
 
 ```
 [market.log 17:03:19-21]
 Starting futures MarketFeed for 1 symbols
 Loaded 62 futures instruments from REST
 futures MarketFeed started — subscribed to 1 symbols
-[... 13 分钟内没有任何 ticker/kline 事件日志 ...]
+[... No ticker/kline event logs within 13 minutes ...]
 [market.log 17:15:59]
 Stopping MarketFeed
 ```
 
-### 2.3 策略诊断（完全静默）
+### 2.3 Strategy Diagnostics (Completely Silent)
 
 ```
 [strategy.log 17:03:21]
 Started strategy: MomentumScalper on BTC_USDT
 [MomentumScalper] Thread started, polling every 500ms
-[... 13 分钟内没有 "Waiting for kline data" 或 "Warming up" 日志 ...]
+[... No "Waiting for kline data" or "Warming up" logs within 13 minutes ...]
 [strategy.log 17:15:59]
 [MomentumScalper] Thread exiting
 ```
 
-**结论**: Gate.io 服务器接受了 WS 连接和订阅，但在 13 分钟内未推送任何行情数据帧。
+**Conclusion**: The Gate.io server accepted the WS connection and subscription, but did not push any market data frames within 13 minutes.
 
-## 3. 发现的 Bug
+## 3. Bugs Found
 
-### Bug #1（关键）：`poll_klines()` 依赖 ticker_cache 作为 symbol 索引
+### Bug #1 (Critical): `poll_klines()` depends on ticker_cache as symbol index
 
-**文件**: `src/webui/dashboard_state.cpp:229-262`
+**File**: `src/webui/dashboard_state.cpp:229-262`
 
 ```cpp
 void DashboardState::poll_klines(DashboardSnapshot &snap)
 {
-    // ❌ 用 ticker_cache 的 symbol 列表来决定查哪个 kline buffer
+    // ❌ Uses ticker_cache's symbol list to determine which kline buffer to query
     const auto symbols = market_feed_.ticker_cache().symbols();
     if (symbols.empty())
     {
-        return;  // ← ticker 没数据就完全放弃 kline，即使 kline buffer 有数据
+        return;  // ← If ticker has no data, kline is completely abandoned, even if kline buffer has data
     }
 
     const auto &symbol = symbols[0];
@@ -91,46 +91,46 @@ void DashboardState::poll_klines(DashboardSnapshot &snap)
 }
 ```
 
-**问题**: K 线和 Ticker 是独立的 WS 频道。`poll_klines()` 不应该依赖 ticker 数据来决定是否检查 kline。即使 kline 数据已到达，ticker 缓存为空会导致 kline 数据被完全忽略。
+**Problem**: K-line and Ticker are independent WS channels. `poll_klines()` should not depend on ticker data to decide whether to check klines. Even if kline data has arrived, an empty ticker cache causes kline data to be completely ignored.
 
-**修复方案**: 改为遍历 `subscribed_symbols_` 或 `kline_buffers_` 的 key，不依赖 `ticker_cache().symbols()`。
+**Fix**: Iterate over `subscribed_symbols_` or `kline_buffers_` keys instead, without depending on `ticker_cache().symbols()`.
 
 ```cpp
-// 修复建议：使用 subscribed_symbols 替代 ticker_cache().symbols()
+// Fix suggestion: Use subscribed_symbols instead of ticker_cache().symbols()
 void DashboardState::poll_klines(DashboardSnapshot &snap)
 {
-    // 改用 MarketFeed 提供的 subscribed symbols 列表
-    const auto symbols = market_feed_.subscribed_symbols();  // 需要新增此方法
-    // 或者直接遍历 kline_buffers_ 的所有 key
+    // Use the subscribed symbols list provided by MarketFeed instead
+    const auto symbols = market_feed_.subscribed_symbols();  // This method needs to be added
+    // Or directly iterate over all keys in kline_buffers_
     for (const auto &symbol : symbols)
     {
         auto &kline_buf = market_feed_.get_kline_buffer(symbol);
         auto latest = kline_buf.latest();
         if (!latest.has_value()) continue;
-        // ... 检测新 K 线并更新 snap
+        // ... Detect new K-line and update snap
     }
 }
 ```
 
-### Bug #2（中等）：策略诊断日志依赖 ticker 到达
+### Bug #2 (Medium): Strategy diagnostic logs depend on ticker arrival
 
-**文件**: `src/strategy/strategy_manager.cpp:196-201`
+**File**: `src/strategy/strategy_manager.cpp:196-201`
 
 ```cpp
 // 1. Poll ticker for on_tick().
 auto ticker_opt = feed->ticker_cache().get(cfg.symbol);
-if (ticker_opt.has_value())      // ← ticker 没数据就跳过
+if (ticker_opt.has_value())      // ← Skips if ticker has no data
 {
     strategy.on_tick(ticker_opt.value());
 }
 ```
 
-**问题**: `on_tick()` 包含 "Waiting for kline data" 诊断逻辑，但只在 ticker 数据到达后才被调用。ticker 不来 → `on_tick()` 永远不执行 → 策略诊断完全静默 → 用户无法判断程序状态。
+**Problem**: `on_tick()` contains the "Waiting for kline data" diagnostic logic, but it is only called after ticker data arrives. If no ticker arrives → `on_tick()` never executes → strategy diagnostics are completely silent → the user cannot determine the program state.
 
-**修复方案**: ticker 为空时也触发诊断（传入空 ticker 或新增 `on_no_data()` 回调）。
+**Fix**: Trigger diagnostics even when ticker is empty (pass an empty ticker or add a new `on_no_data()` callback).
 
 ```cpp
-// 修复建议：ticker 为空时也通知策略
+// Fix suggestion: Notify strategy even when ticker is empty
 auto ticker_opt = feed->ticker_cache().get(cfg.symbol);
 if (ticker_opt.has_value())
 {
@@ -138,27 +138,27 @@ if (ticker_opt.has_value())
 }
 else
 {
-    // 传入默认空 ticker，让 on_tick() 的诊断分支执行
+    // Pass a default empty ticker so that on_tick()'s diagnostic branch executes
     strategy.on_tick(market::Ticker{});
 }
 ```
 
-### Bug #3（辅助）：WS 数据帧无 INFO 级别日志
+### Bug #3 (Auxiliary): No INFO-level logs for WS data frames
 
-**文件**: `src/market/market_feed.cpp` — `on_ticker_update()`, `on_kline_update()`
+**File**: `src/market/market_feed.cpp` — `on_ticker_update()`, `on_kline_update()`
 
-**问题**: 这两个回调在成功接收并处理数据时**不产生 INFO 级别日志**。导致无法从运行时日志判断 Gate.io 是否在推送数据。
+**Problem**: These callbacks do **not produce INFO-level logs** when data is successfully received and processed. This makes it impossible to determine from runtime logs whether Gate.io is actually pushing data.
 
-**修复方案**: 添加首次数据接收的 INFO 日志（每个 symbol 只记录一次）。
+**Fix**: Add INFO-level logging for first data reception (log only once per symbol).
 
 ```cpp
-// 修复建议：在 on_kline_update() 中添加首次数据日志
+// Fix suggestion: Add first-data log in on_kline_update()
 void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
-    // ... 解析 kline ...
+    // ... Parse kline ...
 
     auto &buffer = get_kline_buffer(symbol);
-    if (buffer.size() == 0)  // 第一根 K 线
+    if (buffer.size() == 0)  // First K-line
     {
         PULSE_LOG_INFO("market", "First kline received for {} (open_time={}, close={:.2f})",
                        symbol, kline.open_time, kline.close);
@@ -167,54 +167,54 @@ void MarketFeed::on_kline_update(const nlohmann::json &result, const nlohmann::j
 }
 ```
 
-### Bug #4（辅助）：WS 连接日志使用了错误的 URL
+### Bug #4 (Auxiliary): WS connection log uses wrong URL
 
-**文件**: `src/exchange/gate_ws_client.cpp:842`
+**File**: `src/exchange/gate_ws_client.cpp:842`
 
 ```cpp
-PULSE_LOG_INFO("exchange", "WS connected to {}", config_.wsUrl);  // ← 始终打印 spot URL
+PULSE_LOG_INFO("exchange", "WS connected to {}", config_.wsUrl);  // ← Always prints spot URL
 ```
 
-**问题**: 无论实际连接的是 spot 还是 futures WS 服务器，日志始终打印 `config_.wsUrl`（spot URL）。导致排查时产生误导。
+**Problem**: Regardless of whether the actual connection is to the spot or futures WS server, the log always prints `config_.wsUrl` (the spot URL). This is misleading during troubleshooting.
 
-**修复方案**: 打印实际使用的 `ws_url` 变量。
+**Fix**: Print the actual `ws_url` variable in use.
 
 ```cpp
 PULSE_LOG_INFO("exchange", "WS connected to {}", ws_url);
 ```
 
-## 4. 待确认的外部问题
+## 4. External Issues to Confirm
 
-即使修复上述代码 Bug，仍需确认 Gate.io Futures WS 是否正常推送数据：
+Even after fixing the above code bugs, we still need to confirm whether Gate.io Futures WS is actually pushing data normally:
 
-| 检查项 | 方法 |
-|--------|------|
-| Gate.io Futures WS 是否真的不发数据 | 修复 Bug #3 后重新运行，检查 market.log |
-| 代理是否干扰 futures WS | 临时关闭代理直连测试（如果网络允许） |
-| Gate.io API 变更 | 用 `wscat` 手动连接 `wss://fx-ws.gateio.ws/v4/ws/usdt` 发送订阅消息验证 |
-| futures 合约名 "BTC_USDT" 是否正确 | REST `/api/v4/futures/usdt/contracts` 返回的 name 字段 |
+| Check Item | Method |
+|------------|--------|
+| Whether Gate.io Futures WS actually sends no data | Re-run after fixing Bug #3, check market.log |
+| Whether proxy interferes with futures WS | Temporarily disable proxy for direct connection test (if network permits) |
+| Gate.io API changes | Manually connect to `wss://fx-ws.gateio.ws/v4/ws/usdt` with `wscat` and send subscription message to verify |
+| Whether futures contract name "BTC_USDT" is correct | Check the name field returned by REST `/api/v4/futures/usdt/contracts` |
 
-### 手动验证命令
+### Manual Verification Commands
 
 ```bash
-# 用 wscat 测试 Gate.io futures WS（需要代理）
+# Test Gate.io futures WS with wscat (proxy required)
 wscat -c "wss://fx-ws.gateio.ws/v4/ws/usdt" -x '{"time":1718900000,"channel":"futures.candlesticks","event":"subscribe","payload":["BTC_USDT","1m"]}'
 
-# 或用 curl 测试 REST 接口确认合约名
+# Or test REST endpoint with curl to confirm contract name
 curl -s "https://api.gateio.ws/api/v4/futures/usdt/contracts" | jq '.[0].name'
 ```
 
-## 5. 额外发现：前端 K 线面板是表格而非图形
+## 5. Additional Finding: Frontend K-line Panel is a Table, Not a Chart
 
-当前 `frontend/app.js:235-266` 的 `renderKline()` 将 K 线数据渲染为 **HTML 表格**（Time/O/H/L/C/V + 红绿箭头），不是传统的蜡烛图。
+Currently, `renderKline()` in `frontend/app.js:235-266` renders K-line data as an **HTML table** (Time/O/H/L/C/V + red/green arrows), not a traditional candlestick chart.
 
-**后续改进**（非阻塞）：引入 [TradingView Lightweight Charts](https://github.com/nicehash/lightweight-charts)（~40KB gzipped），实现真正的蜡烛图渲染。
+**Future improvement** (non-blocking): Integrate [TradingView Lightweight Charts](https://github.com/nicehash/lightweight-charts) (~40KB gzipped) to implement proper candlestick chart rendering.
 
-## 6. 修复优先级
+## 6. Fix Priority
 
-| 优先级 | Bug | 影响 |
-|--------|-----|------|
-| 🔴 P0 | #1 poll_klines() 依赖 ticker_cache | K 线面板永远无法显示（直接根因） |
-| 🟡 P1 | #2 策略诊断依赖 ticker | 用户无法判断程序是否在正常工作 |
-| 🟡 P1 | #3 WS 数据帧无日志 | 无法从日志判断 WS 是否在收数据 |
-| 🟢 P2 | #4 WS 连接日志 URL 错误 | 排查误导 |
+| Priority | Bug | Impact |
+|----------|-----|--------|
+| 🔴 P0 | #1 poll_klines() depends on ticker_cache | K-line panel can never display (direct root cause) |
+| 🟡 P1 | #2 Strategy diagnostics depend on ticker | User cannot determine whether the program is working correctly |
+| 🟡 P1 | #3 No logs for WS data frames | Cannot determine from logs whether WS is receiving data |
+| 🟢 P2 | #4 WS connection log URL is wrong | Misleading during troubleshooting |

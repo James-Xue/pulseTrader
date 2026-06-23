@@ -7,25 +7,25 @@
 // Open browser to http://127.0.0.1:8080?token=demo
 // Press Enter to stop.
 
-#include "ai/ai_pipeline.hpp"
+#include "ai/AiPipeline.hpp"
 #include "core/config.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "execution/order_tracker.hpp"
-#include "logging/logger.hpp"
-#include "market/kline_buffer.hpp"
-#include "market/market_feed.hpp"
-#include "market/orderbook_manager.hpp"
-#include "market/ticker_cache.hpp"
-#include "risk/drawdown_guard.hpp"
-#include "risk/order_rate_limiter.hpp"
-#include "risk/position_manager.hpp"
-#include "risk/risk_manager.hpp"
-#include "strategy/scalping/momentum_scalper.hpp"
-#include "strategy/scalping/orderbook_scalper.hpp"
-#include "strategy/strategy_manager.hpp"
-#include "webui/dashboard_state.hpp"
-#include "webui/web_server.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "execution/OrderTracker.hpp"
+#include "logging/Logger.hpp"
+#include "market/KlineBuffer.hpp"
+#include "market/MarketFeed.hpp"
+#include "market/OrderBookManager.hpp"
+#include "market/TickerCache.hpp"
+#include "risk/DrawdownGuard.hpp"
+#include "risk/OrderRateLimiter.hpp"
+#include "risk/PositionManager.hpp"
+#include "risk/RiskManager.hpp"
+#include "strategy/scalping/MomentumScalper.hpp"
+#include "strategy/scalping/OrderBookScalper.hpp"
+#include "strategy/StrategyManager.hpp"
+#include "webui/DashboardState.hpp"
+#include "webui/WebServer.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -120,7 +120,7 @@ static void populate_orderbook(OrderBookManager &mgr)
             nlohmann::json::array({65470.00, 0.700}),
         })},
     };
-    mgr.apply_snapshot("BTC_USDT", btc_snap);
+    mgr.applySnapshot("BTC_USDT", btc_snap);
 
     // ETH_USDT order book
     nlohmann::json eth_snap = {
@@ -150,7 +150,7 @@ static void populate_orderbook(OrderBookManager &mgr)
             nlohmann::json::array({3464.00, 10.00}),
         })},
     };
-    mgr.apply_snapshot("ETH_USDT", eth_snap);
+    mgr.applySnapshot("ETH_USDT", eth_snap);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,16 +158,16 @@ static void populate_orderbook(OrderBookManager &mgr)
 // ---------------------------------------------------------------------------
 static void populate_klines(MarketFeed &feed)
 {
-    auto &buf = feed.get_kline_buffer("BTC_USDT");
+    auto &buf = feed.getKlineBuffer("BTC_USDT");
 
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::system_clock::now().time_since_epoch())
                       .count();
 
     for (int i = 19; i >= 0; --i)
     {
         Kline k;
-        k.open_time = now_ms - (i * 60'000); // 1-minute candles
+        k.open_time = nowMs - (i * 60'000); // 1-minute candles
         k.close_time = k.open_time + 59'999;
         k.open = 65'000.0 + (i % 5) * 100.0 - (i % 3) * 50.0;
         k.high = k.open + 150.0 + (i % 4) * 30.0;
@@ -201,8 +201,8 @@ int main()
 
     // 3. Create and populate MarketFeed components
     MarketFeed feed(ws_client, rest_client);
-    populate_tickers(feed.ticker_cache());
-    populate_orderbook(feed.orderbook_manager());
+    populate_tickers(feed.tickerCache());
+    populate_orderbook(feed.orderbookManager());
     populate_klines(feed);
 
     std::cout << "[OK] MarketFeed populated with mock data" << std::endl;
@@ -215,21 +215,21 @@ int main()
 
     PositionManager position_mgr(risk_cfg);
 
-    auto pos1 = position_mgr.open_position(
+    auto pos1 = position_mgr.openPosition(
         "BTC_USDT", Side::Buy, 0.015, 65'200.0, "momentum_scalper_BTC_USDT");
     if (ok(pos1))
     {
-        position_mgr.update_price(value(pos1), 65'432.10);
+        position_mgr.updatePrice(value(pos1), 65'432.10);
     }
 
-    auto pos2 = position_mgr.open_position(
+    auto pos2 = position_mgr.openPosition(
         "ETH_USDT", Side::Sell, 1.0, 3'500.0, "orderbook_scalper_ETH_USDT");
     if (ok(pos2))
     {
-        position_mgr.update_price(value(pos2), 3'456.78);
+        position_mgr.updatePrice(value(pos2), 3'456.78);
     }
 
-    std::cout << "[OK] PositionManager: " << position_mgr.get_all_positions().size()
+    std::cout << "[OK] PositionManager: " << position_mgr.getAllPositions().size()
               << " positions opened" << std::endl;
 
     // 5. Create StrategyManager and register strategies
@@ -242,7 +242,7 @@ int main()
     ctx1.config.min_confidence = 0.6;
     ctx1.config.enabled = true;
     ctx1.config.poll_interval_ms = 500;
-    strategy_mgr.register_strategy(std::make_unique<MomentumScalper>(ctx1));
+    strategy_mgr.registerStrategy(std::make_unique<MomentumScalper>(ctx1));
 
     StrategyContext ctx2;
     ctx2.config.name = "orderbook_scalper";
@@ -251,18 +251,18 @@ int main()
     ctx2.config.min_confidence = 0.5;
     ctx2.config.enabled = true;
     ctx2.config.poll_interval_ms = 200;
-    strategy_mgr.register_strategy(std::make_unique<OrderBookScalper>(ctx2));
+    strategy_mgr.registerStrategy(std::make_unique<OrderBookScalper>(ctx2));
 
-    std::cout << "[OK] StrategyManager: " << strategy_mgr.strategy_count()
+    std::cout << "[OK] StrategyManager: " << strategy_mgr.strategyCount()
               << " strategies registered" << std::endl;
 
     // 6. Create DrawdownGuard, OrderRateLimiter, RiskManager
-    DrawdownGuard drawdown_guard(risk_cfg);
-    drawdown_guard.update_equity(10'000.0); // Set initial equity
+    DrawdownGuard drawdownGuard(risk_cfg);
+    drawdownGuard.updateEquity(10'000.0); // Set initial equity
 
-    OrderRateLimiter rate_limiter(risk_cfg.maxOrdersPerSec);
+    OrderRateLimiter rateLimiter(risk_cfg.maxOrdersPerSec);
 
-    RiskManager risk_mgr(risk_cfg, position_mgr, drawdown_guard, rate_limiter);
+    RiskManager risk_mgr(risk_cfg, position_mgr, drawdownGuard, rateLimiter);
 
     std::cout << "[OK] RiskManager initialized" << std::endl;
 
@@ -302,13 +302,13 @@ int main()
     WebServer server(webui_cfg, state, "frontend");
 
     // 11. Wire snapshot callback: DashboardState → WsServer
-    //     NOTE: ws_server() returns const ref but push_snapshot() is non-const.
-    //     This const_cast is safe: push_snapshot() only modifies mutex-protected
+    //     NOTE: wsServer() returns const ref but pushSnapshot() is non-const.
+    //     This const_cast is safe: pushSnapshot() only modifies mutex-protected
     //     internal state. A non-const accessor should be added to WebServer.
-    auto &ws_ref = const_cast<WsServer &>(server.ws_server());
-    state.set_snapshot_callback([&ws_ref](std::shared_ptr<const DashboardSnapshot> snap)
+    auto &ws_ref = const_cast<WsServer &>(server.wsServer());
+    state.setSnapshotCallback([&ws_ref](std::shared_ptr<const DashboardSnapshot> snap)
         {
-            ws_ref.push_snapshot(snap);
+            ws_ref.pushSnapshot(snap);
         });
 
     // 12. Start DashboardState polling

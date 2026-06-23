@@ -5,7 +5,7 @@
 //   - Numeric parameters within safe ranges
 //   - Cross-field consistency (strategy symbols ⊆ top-level symbols)
 //
-// Call after load_config_file() or build_default_config() before starting
+// Call after loadConfigFile() or buildDefaultConfig() before starting
 // the trading engine.
 
 #include "core/config_validator.hpp"
@@ -17,7 +17,7 @@
 namespace pulse
 {
 
-PulseError validate_config(const PulseConfig &cfg)
+PulseError validateConfig(const PulseConfig &cfg)
 {
     // -----------------------------------------------------------------------
     // 1. Symbols list

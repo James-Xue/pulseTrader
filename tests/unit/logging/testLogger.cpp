@@ -6,11 +6,11 @@
 //   3. get() returns different loggers for different module names
 //   4. Log messages are written to the correct per-module file
 //   5. Log level filtering works at init time
-//   6. set_level() changes the filter at runtime
+//   6. setLevel() changes the filter at runtime
 //   7. PULSE_LOG_* macros compile and produce output
 //   8. shutdown() is idempotent (safe to call twice)
 
-#include "logging/logger.hpp"
+#include "logging/Logger.hpp"
 
 #include <gtest/gtest.h>
 
@@ -140,7 +140,7 @@ TEST_F(LoggerTest, LogLevelFiltersMessages)
 
 TEST_F(LoggerTest, SetLevelChangesFilterAtRuntime)
 {
-    // set_level() must change the filter without requiring re-initialisation
+    // setLevel() must change the filter without requiring re-initialisation
     LogConfig config;
     config.level = "info";
     config.logDir = test_log_dir_.string();
@@ -155,7 +155,7 @@ TEST_F(LoggerTest, SetLevelChangesFilterAtRuntime)
     log->flush();
 
     // After changing to debug level, debug messages should appear
-    Logger::set_level("dynamic_level", spdlog::level::debug);
+    Logger::setLevel("dynamic_level", spdlog::level::debug);
     log->debug("visible_debug");
     log->flush();
 

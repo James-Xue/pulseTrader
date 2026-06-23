@@ -1,6 +1,6 @@
 // test_position_manager.cpp — Unit tests for PositionManager (Layer 7 Risk Management)
 
-#include "risk/position_manager.hpp"
+#include "risk/PositionManager.hpp"
 
 #include <gtest/gtest.h>
 
@@ -33,15 +33,15 @@ static RiskConfig make_config(
 TEST(PositionManager, DefaultStateHasNoPositions)
 {
     PositionManager pm(make_config());
-    EXPECT_EQ(0, pm.open_position_count());
-    EXPECT_TRUE(pm.get_all_positions().empty());
+    EXPECT_EQ(0, pm.openPositionCount());
+    EXPECT_TRUE(pm.getAllPositions().empty());
 }
 
 TEST(PositionManager, PortfolioSummaryEmptyOnDefault)
 {
     PositionManager pm(make_config());
-    const auto summary = pm.portfolio_summary();
-    EXPECT_EQ(0, summary.open_position_count);
+    const auto summary = pm.portfolioSummary();
+    EXPECT_EQ(0, summary.openPositionCount);
     EXPECT_DOUBLE_EQ(0.0, summary.total_notional);
     EXPECT_DOUBLE_EQ(0.0, summary.total_unrealized_pnl);
     EXPECT_DOUBLE_EQ(0.0, summary.net_exposure);
@@ -54,7 +54,7 @@ TEST(PositionManager, PortfolioSummaryEmptyOnDefault)
 TEST(PositionManager, OpenPositionReturnsId)
 {
     PositionManager pm(make_config());
-    auto result = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "strategy_1");
+    auto result = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "strategy_1");
     ASSERT_TRUE(ok(result));
     EXPECT_FALSE(value(result).empty());
 }
@@ -62,10 +62,10 @@ TEST(PositionManager, OpenPositionReturnsId)
 TEST(PositionManager, OpenPositionSetsCorrectFields)
 {
     PositionManager pm(make_config());
-    auto result = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "strategy_1");
+    auto result = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "strategy_1");
     ASSERT_TRUE(ok(result));
 
-    const auto pos = pm.get_position(value(result));
+    const auto pos = pm.getPosition(value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_EQ("BTC_USDT", pos->symbol);
     EXPECT_EQ(Side::Buy, pos->side);
@@ -80,11 +80,11 @@ TEST(PositionManager, OpenPositionSetsCorrectFields)
 TEST(PositionManager, OpenPositionIncrementsCount)
 {
     PositionManager pm(make_config(10000.0, 5, 10000.0));
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));
-    EXPECT_EQ(1, pm.open_position_count());
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));
+    EXPECT_EQ(1, pm.openPositionCount());
 
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1")));
-    EXPECT_EQ(2, pm.open_position_count());
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1")));
+    EXPECT_EQ(2, pm.openPositionCount());
 }
 
 // ---------------------------------------------------------------------------
@@ -94,11 +94,11 @@ TEST(PositionManager, OpenPositionIncrementsCount)
 TEST(PositionManager, RejectsWhenMaxNotionalExceeded)
 {
     PositionManager pm(make_config(/*max_notional=*/600.0, 5, 500.0));
-    auto r1 = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r1 = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r1)); // 500 USDT notional.
 
     // Second position would add 300 USDT, total 800 > 600.
-    auto r2 = pm.open_position("ETH_USDT", Side::Buy, 0.1, 3000.0, "s1");
+    auto r2 = pm.openPosition("ETH_USDT", Side::Buy, 0.1, 3000.0, "s1");
     ASSERT_FALSE(ok(r2));
     EXPECT_EQ(ErrorCode::PositionLimitHit, error(r2).code);
 }
@@ -107,10 +107,10 @@ TEST(PositionManager, RejectsWhenMaxPositionsReached)
 {
     PositionManager pm(make_config(10000.0, /*max_positions=*/2, 10000.0));
 
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1")));
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Buy, 0.01, 3000.0, "s1")));
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1")));
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Buy, 0.01, 3000.0, "s1")));
 
-    auto r3 = pm.open_position("SOL_USDT", Side::Buy, 1.0, 100.0, "s1");
+    auto r3 = pm.openPosition("SOL_USDT", Side::Buy, 1.0, 100.0, "s1");
     ASSERT_FALSE(ok(r3));
     EXPECT_EQ(ErrorCode::PositionLimitHit, error(r3).code);
 }
@@ -119,11 +119,11 @@ TEST(PositionManager, RejectsWhenSymbolNotionalExceeded)
 {
     PositionManager pm(make_config(10000.0, 10, /*max_symbol_notional=*/500.0));
 
-    auto r1 = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r1 = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r1)); // 500 USDT for BTC_USDT.
 
     // Second BTC_USDT position would exceed per-symbol limit.
-    auto r2 = pm.open_position("BTC_USDT", Side::Sell, 0.001, 50000.0, "s1");
+    auto r2 = pm.openPosition("BTC_USDT", Side::Sell, 0.001, 50000.0, "s1");
     ASSERT_FALSE(ok(r2));
     EXPECT_EQ(ErrorCode::SymbolLimitHit, error(r2).code);
 }
@@ -131,8 +131,8 @@ TEST(PositionManager, RejectsWhenSymbolNotionalExceeded)
 TEST(PositionManager, CanOpenPositionPreCheck)
 {
     PositionManager pm(make_config(1000.0, 2, 500.0));
-    EXPECT_TRUE(pm.can_open_position("BTC_USDT", 0.01, 50000.0)); // 500 <= 500 symbol limit.
-    EXPECT_FALSE(pm.can_open_position("BTC_USDT", 0.02, 50000.0)); // 1000 > 500 symbol limit.
+    EXPECT_TRUE(pm.canOpenPosition("BTC_USDT", 0.01, 50000.0)); // 500 <= 500 symbol limit.
+    EXPECT_FALSE(pm.canOpenPosition("BTC_USDT", 0.02, 50000.0)); // 1000 > 500 symbol limit.
 }
 
 // ---------------------------------------------------------------------------
@@ -142,30 +142,30 @@ TEST(PositionManager, CanOpenPositionPreCheck)
 TEST(PositionManager, FullCloseRemovesPosition)
 {
     PositionManager pm(make_config());
-    auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
-    auto pnl = pm.close_position(value(r), 0.01, 51000.0);
+    auto pnl = pm.closePosition(value(r), 0.01, 51000.0);
     ASSERT_TRUE(pnl.has_value());
     // Buy 0.01 BTC @ 50000, sell @ 51000 → PnL = (51000-50000)*0.01 = 10.0
     EXPECT_DOUBLE_EQ(10.0, pnl.value());
-    EXPECT_EQ(0, pm.open_position_count());
-    EXPECT_FALSE(pm.get_position(value(r)).has_value());
+    EXPECT_EQ(0, pm.openPositionCount());
+    EXPECT_FALSE(pm.getPosition(value(r)).has_value());
 }
 
 TEST(PositionManager, PartialCloseReducesQuantity)
 {
     PositionManager pm(make_config());
-    auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
-    auto pnl = pm.close_position(value(r), 0.005, 51000.0);
+    auto pnl = pm.closePosition(value(r), 0.005, 51000.0);
     ASSERT_TRUE(pnl.has_value());
     // Buy 0.01 @ 50000, close 0.005 @ 51000 → realized = (51000-50000)*0.005 = 5.0
     EXPECT_DOUBLE_EQ(5.0, pnl.value());
-    EXPECT_EQ(1, pm.open_position_count());
+    EXPECT_EQ(1, pm.openPositionCount());
 
-    const auto pos = pm.get_position(value(r));
+    const auto pos = pm.getPosition(value(r));
     ASSERT_TRUE(pos.has_value());
     EXPECT_DOUBLE_EQ(0.005, pos->quantity);
     EXPECT_DOUBLE_EQ(51000.0, pos->current_price);
@@ -174,23 +174,23 @@ TEST(PositionManager, PartialCloseReducesQuantity)
 TEST(PositionManager, CloseNonExistentReturnsNullopt)
 {
     PositionManager pm(make_config());
-    auto result = pm.close_position("nonexistent", 0.01, 50000.0);
+    auto result = pm.closePosition("nonexistent", 0.01, 50000.0);
     EXPECT_FALSE(result.has_value());
 }
 
 TEST(PositionManager, PartialCloseRecalculatesPnl)
 {
     PositionManager pm(make_config());
-    auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
     // Close half at 52000 — remaining 0.005 BTC, unrealized PnL = (52000-50000)*0.005 = 10.
-    auto pnl = pm.close_position(value(r), 0.005, 52000.0);
+    auto pnl = pm.closePosition(value(r), 0.005, 52000.0);
     ASSERT_TRUE(pnl.has_value());
     // Realized PnL for closed half: (52000-50000)*0.005 = 10.0
     EXPECT_DOUBLE_EQ(10.0, pnl.value());
 
-    const auto pos = pm.get_position(value(r));
+    const auto pos = pm.getPosition(value(r));
     ASSERT_TRUE(pos.has_value());
     EXPECT_DOUBLE_EQ(0.005, pos->quantity);
     EXPECT_DOUBLE_EQ(10.0, pos->unrealized_pnl);
@@ -204,12 +204,12 @@ TEST(PositionManager, PartialCloseRecalculatesPnl)
 TEST(PositionManager, UpdatePriceRecalculatesBuyPnl)
 {
     PositionManager pm(make_config());
-    auto r = pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
+    auto r = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1");
     ASSERT_TRUE(ok(r));
 
-    pm.update_price(value(r), 52000.0);
+    pm.updatePrice(value(r), 52000.0);
 
-    const auto pos = pm.get_position(value(r));
+    const auto pos = pm.getPosition(value(r));
     ASSERT_TRUE(pos.has_value());
     EXPECT_DOUBLE_EQ(52000.0, pos->current_price);
     EXPECT_DOUBLE_EQ(20.0, pos->unrealized_pnl); // (52000-50000)*0.01
@@ -219,13 +219,13 @@ TEST(PositionManager, UpdatePriceRecalculatesBuyPnl)
 TEST(PositionManager, UpdatePriceRecalculatesSellPnl)
 {
     PositionManager pm(make_config(10000.0, 5, 10000.0));
-    auto r = pm.open_position("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1");
+    auto r = pm.openPosition("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1");
     ASSERT_TRUE(ok(r));
 
     // Price drops to 2900 — sell position profits: (3000-2900)*1 = 100.
-    pm.update_price(value(r), 2900.0);
+    pm.updatePrice(value(r), 2900.0);
 
-    const auto pos = pm.get_position(value(r));
+    const auto pos = pm.getPosition(value(r));
     ASSERT_TRUE(pos.has_value());
     EXPECT_DOUBLE_EQ(2900.0, pos->current_price);
     EXPECT_DOUBLE_EQ(100.0, pos->unrealized_pnl);
@@ -235,8 +235,8 @@ TEST(PositionManager, UpdatePriceRecalculatesSellPnl)
 TEST(PositionManager, UpdatePriceNonExistentIsNoOp)
 {
     PositionManager pm(make_config());
-    pm.update_price("nonexistent", 50000.0); // Should not crash.
-    EXPECT_EQ(0, pm.open_position_count());
+    pm.updatePrice("nonexistent", 50000.0); // Should not crash.
+    EXPECT_EQ(0, pm.openPositionCount());
 }
 
 // ---------------------------------------------------------------------------
@@ -246,24 +246,24 @@ TEST(PositionManager, UpdatePriceNonExistentIsNoOp)
 TEST(PositionManager, GetPositionReturnsNulloptForMissing)
 {
     PositionManager pm(make_config());
-    EXPECT_FALSE(pm.get_position("missing").has_value());
+    EXPECT_FALSE(pm.getPosition("missing").has_value());
 }
 
 TEST(PositionManager, GetPositionsBySymbolFiltersCorrectly)
 {
     PositionManager pm(make_config(10000.0, 10, 10000.0));
 
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1")));
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Buy, 0.1, 3000.0, "s1")));
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Sell, 0.001, 50000.0, "s1")));
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1")));
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Buy, 0.1, 3000.0, "s1")));
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Sell, 0.001, 50000.0, "s1")));
 
-    const auto btc = pm.get_positions_by_symbol("BTC_USDT");
+    const auto btc = pm.getPositionsBySymbol("BTC_USDT");
     EXPECT_EQ(2u, btc.size());
 
-    const auto eth = pm.get_positions_by_symbol("ETH_USDT");
+    const auto eth = pm.getPositionsBySymbol("ETH_USDT");
     EXPECT_EQ(1u, eth.size());
 
-    const auto sol = pm.get_positions_by_symbol("SOL_USDT");
+    const auto sol = pm.getPositionsBySymbol("SOL_USDT");
     EXPECT_TRUE(sol.empty());
 }
 
@@ -271,10 +271,10 @@ TEST(PositionManager, GetPositionsByStrategyFiltersCorrectly)
 {
     PositionManager pm(make_config(10000.0, 10, 10000.0));
 
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "scalper")));
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Buy, 0.1, 3000.0, "swing")));
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0, "scalper")));
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Buy, 0.1, 3000.0, "swing")));
 
-    const auto scalper = pm.get_positions_by_strategy("scalper");
+    const auto scalper = pm.getPositionsByStrategy("scalper");
     EXPECT_EQ(1u, scalper.size());
     EXPECT_EQ("BTC_USDT", scalper[0].symbol);
 }
@@ -287,15 +287,15 @@ TEST(PositionManager, PortfolioSummaryAggregatesCorrectly)
 {
     PositionManager pm(make_config(10000.0, 10, 10000.0));
 
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));  // notional: 500
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1")));  // notional: 3000
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));  // notional: 500
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Sell, 1.0, 3000.0, "s1")));  // notional: 3000
 
     // Update BTC price to 52000 — unrealized PnL = (52000-50000)*0.01 = 20.
-    auto btc_positions = pm.get_positions_by_symbol("BTC_USDT");
-    pm.update_price(btc_positions[0].position_id, 52000.0);
+    auto btc_positions = pm.getPositionsBySymbol("BTC_USDT");
+    pm.updatePrice(btc_positions[0].position_id, 52000.0);
 
-    const auto summary = pm.portfolio_summary();
-    EXPECT_EQ(2, summary.open_position_count);
+    const auto summary = pm.portfolioSummary();
+    EXPECT_EQ(2, summary.openPositionCount);
     EXPECT_DOUBLE_EQ(520.0 + 3000.0, summary.total_notional);  // 520 + 3000
     EXPECT_DOUBLE_EQ(20.0, summary.total_unrealized_pnl);       // (52000-50000)*0.01 = 20
     EXPECT_DOUBLE_EQ(520.0 - 3000.0, summary.net_exposure);     // Long - Short.
@@ -305,12 +305,12 @@ TEST(PositionManager, SymbolNotionalCalculatesCorrectly)
 {
     PositionManager pm(make_config(10000.0, 10, 10000.0));
 
-    EXPECT_TRUE(ok(pm.open_position("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));  // 500
-    EXPECT_TRUE(ok(pm.open_position("ETH_USDT", Side::Buy, 1.0, 3000.0, "s1")));   // 3000
+    EXPECT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1")));  // 500
+    EXPECT_TRUE(ok(pm.openPosition("ETH_USDT", Side::Buy, 1.0, 3000.0, "s1")));   // 3000
 
-    EXPECT_DOUBLE_EQ(500.0, pm.symbol_notional("BTC_USDT"));
-    EXPECT_DOUBLE_EQ(3000.0, pm.symbol_notional("ETH_USDT"));
-    EXPECT_DOUBLE_EQ(0.0, pm.symbol_notional("SOL_USDT"));
+    EXPECT_DOUBLE_EQ(500.0, pm.symbolNotional("BTC_USDT"));
+    EXPECT_DOUBLE_EQ(3000.0, pm.symbolNotional("ETH_USDT"));
+    EXPECT_DOUBLE_EQ(0.0, pm.symbolNotional("SOL_USDT"));
 }
 
 // ---------------------------------------------------------------------------
@@ -331,14 +331,14 @@ TEST(PositionManager, ConcurrentOpensAreSerialized)
         {
             for (int i = 0; i < kOpensPerThread; ++i)
             {
-                (void)pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0,
+                (void)pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0,
                     "thread_" + std::to_string(t));
             }
         });
     }
 
     threads.clear(); // Join all threads.
-    EXPECT_EQ(kThreadCount * kOpensPerThread, pm.open_position_count());
+    EXPECT_EQ(kThreadCount * kOpensPerThread, pm.openPositionCount());
 }
 
 TEST(PositionManager, ConcurrentReadsAndWritesAreSafe)
@@ -348,7 +348,7 @@ TEST(PositionManager, ConcurrentReadsAndWritesAreSafe)
     // Pre-open some positions.
     for (int i = 0; i < 10; ++i)
     {
-        (void)pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
+        (void)pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
     }
 
     std::atomic<bool> stop{ false };
@@ -358,7 +358,7 @@ TEST(PositionManager, ConcurrentReadsAndWritesAreSafe)
     {
         while (!stop.load())
         {
-            const auto summary = pm.portfolio_summary();
+            const auto summary = pm.portfolioSummary();
             (void)summary; // Just exercise the read path.
         }
     });
@@ -369,10 +369,10 @@ TEST(PositionManager, ConcurrentReadsAndWritesAreSafe)
         double price = 50000.0;
         while (!stop.load())
         {
-            const auto positions = pm.get_all_positions();
+            const auto positions = pm.getAllPositions();
             for (const auto &pos : positions)
             {
-                pm.update_price(pos.position_id, price);
+                pm.updatePrice(pos.position_id, price);
             }
             price += 100.0;
         }
@@ -403,13 +403,13 @@ TEST(PositionManager, OpenFuturesPosition_SetsFields)
 {
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
-    auto result = pm.open_position(
+    auto result = pm.openPosition(
         "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
         MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
 
     ASSERT_TRUE(pulse::ok(result));
 
-    const auto pos = pm.get_position(pulse::value(result));
+    const auto pos = pm.getPosition(pulse::value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_EQ(MarketType::Futures, pos->market_type);
     EXPECT_DOUBLE_EQ(10.0, pos->leverage);
@@ -422,13 +422,13 @@ TEST(PositionManager, OpenFuturesPosition_MarginCalculation)
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
     // margin = qty * entry * quanto / leverage = 10 * 50000 * 0.0001 / 10 = 5.0
-    auto result = pm.open_position(
+    auto result = pm.openPosition(
         "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
         MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
 
     ASSERT_TRUE(pulse::ok(result));
 
-    const auto pos = pm.get_position(pulse::value(result));
+    const auto pos = pm.getPosition(pulse::value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_NEAR(5.0, pos->margin_used, 1e-9);
 }
@@ -439,13 +439,13 @@ TEST(PositionManager, OpenFuturesPosition_LiquidationPriceBuy)
 
     // liq = entry * (1 - 1/leverage + maintenance_rate)
     //     = 50000 * (1 - 1/10 + 0.005) = 50000 * 0.905 = 45250
-    auto result = pm.open_position(
+    auto result = pm.openPosition(
         "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
         MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
 
     ASSERT_TRUE(pulse::ok(result));
 
-    const auto pos = pm.get_position(pulse::value(result));
+    const auto pos = pm.getPosition(pulse::value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_NEAR(45250.0, pos->liquidation_price, 1.0);
 }
@@ -456,13 +456,13 @@ TEST(PositionManager, OpenFuturesPosition_LiquidationPriceSell)
 
     // liq = entry * (1 + 1/leverage - maintenance_rate)
     //     = 50000 * (1 + 1/10 - 0.005) = 50000 * 1.095 = 54750
-    auto result = pm.open_position(
+    auto result = pm.openPosition(
         "BTC_USDT", Side::Sell, 10, 50000.0, "scalper",
         MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
 
     ASSERT_TRUE(pulse::ok(result));
 
-    const auto pos = pm.get_position(pulse::value(result));
+    const auto pos = pm.getPosition(pulse::value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_NEAR(54750.0, pos->liquidation_price, 1.0);
 }
@@ -472,7 +472,7 @@ TEST(PositionManager, UpdatePrice_FuturesPnlWithLeverage)
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
     // Open 10x leveraged buy: 10 contracts @ 50000, quanto=0.0001
-    auto result = pm.open_position(
+    auto result = pm.openPosition(
         "BTC_USDT", Side::Buy, 10, 50000.0, "scalper",
         MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005);
 
@@ -481,9 +481,9 @@ TEST(PositionManager, UpdatePrice_FuturesPnlWithLeverage)
 
     // Price moves to 51000 (+2%)
     // PnL = (51000 - 50000) * 10 * 0.0001 * 10 = 1000 * 10 * 0.0001 * 10 = 10.0
-    pm.update_price(pos_id, 51000.0);
+    pm.updatePrice(pos_id, 51000.0);
 
-    const auto pos = pm.get_position(pos_id);
+    const auto pos = pm.getPosition(pos_id);
     ASSERT_TRUE(pos.has_value());
     EXPECT_NEAR(10.0, pos->unrealized_pnl, 1e-6);
 }
@@ -495,12 +495,12 @@ TEST(PositionManager, CalculatePnl_SpotEquivalent)
     // Expected PnL = (51000 - 50000) * 0.001 = 1.0
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
-    auto result = pm.open_position("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
+    auto result = pm.openPosition("BTC_USDT", Side::Buy, 0.001, 50000.0, "s1");
     ASSERT_TRUE(pulse::ok(result));
 
-    pm.update_price(pulse::value(result), 51000.0);
+    pm.updatePrice(pulse::value(result), 51000.0);
 
-    const auto pos = pm.get_position(pulse::value(result));
+    const auto pos = pm.getPosition(pulse::value(result));
     ASSERT_TRUE(pos.has_value());
     EXPECT_NEAR(1.0, pos->unrealized_pnl, 1e-9);
 }
@@ -510,13 +510,13 @@ TEST(PositionManager, PortfolioSummary_FuturesFields)
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
     // Open 1 spot + 1 futures position.
-    (void)pm.open_position("ETH_USDT", Side::Buy, 1.0, 3000.0, "s1");
-    (void)pm.open_position(
+    (void)pm.openPosition("ETH_USDT", Side::Buy, 1.0, 3000.0, "s1");
+    (void)pm.openPosition(
         "BTC_USDT", Side::Buy, 10, 50000.0, "s2",
         MarketType::Futures, 5.0, MarginMode::Cross, 0.0001, 0.005);
 
-    const auto summary = pm.portfolio_summary();
-    EXPECT_EQ(2, summary.open_position_count);
+    const auto summary = pm.portfolioSummary();
+    EXPECT_EQ(2, summary.openPositionCount);
     EXPECT_EQ(1, summary.futures_position_count);
     EXPECT_GT(summary.total_margin_used, 0.0);
 }

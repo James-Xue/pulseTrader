@@ -9,10 +9,10 @@
 // NOT part of CTest — this is a manual verification tool.
 
 #include "core/config.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
-#include "market/market_feed.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
+#include "market/MarketFeed.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -34,13 +34,13 @@ void print_ticker(const Ticker &ticker)
 /// Print order book top 5 levels.
 void print_orderbook(const OrderBookManager &manager, const Symbol &symbol)
 {
-    const auto top_bids = manager.top_bids(symbol, 5);
-    const auto top_asks = manager.top_asks(symbol, 5);
+    const auto topBids = manager.topBids(symbol, 5);
+    const auto topAsks = manager.topAsks(symbol, 5);
 
     std::cout << "[ORDERBOOK] " << symbol << std::endl;
 
     // Print asks (reversed so highest is on top).
-    for (auto it = top_asks.rbegin(); it != top_asks.rend(); ++it)
+    for (auto it = topAsks.rbegin(); it != topAsks.rend(); ++it)
     {
         std::cout << "  ASK " << it->price << " x " << it->quantity << std::endl;
     }
@@ -48,7 +48,7 @@ void print_orderbook(const OrderBookManager &manager, const Symbol &symbol)
     std::cout << "  ---" << std::endl;
 
     // Print bids.
-    for (const auto &level : top_bids)
+    for (const auto &level : topBids)
     {
         std::cout << "  BID " << level.price << " x " << level.quantity << std::endl;
     }
@@ -104,7 +104,7 @@ int main()
     while (std::chrono::steady_clock::now() < deadline && print_count < max_prints)
     {
         // Print ticker.
-        const auto ticker = feed.ticker_cache().get("BTC_USDT");
+        const auto ticker = feed.tickerCache().get("BTC_USDT");
         if (ticker.has_value())
         {
             print_ticker(*ticker);
@@ -114,13 +114,13 @@ int main()
         // Print order book (every 3rd iteration to avoid flooding).
         if (print_count % 3 == 0)
         {
-            print_orderbook(feed.orderbook_manager(), "BTC_USDT");
+            print_orderbook(feed.orderbookManager(), "BTC_USDT");
         }
 
         // Print K-line (every 5th iteration).
         if (print_count % 5 == 0)
         {
-            print_kline(feed.get_kline_buffer("BTC_USDT"), "BTC_USDT");
+            print_kline(feed.getKlineBuffer("BTC_USDT"), "BTC_USDT");
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(1));

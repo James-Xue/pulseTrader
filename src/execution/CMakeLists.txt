@@ -1,7 +1,7 @@
 add_library(pulse_execution STATIC
-    execution_report.cpp
-    order_executor.cpp
-    order_tracker.cpp
+    ExecutionReport.cpp
+    OrderExecutor.cpp
+    OrderTracker.cpp
 )
 
 add_library(pulse::execution ALIAS pulse_execution)

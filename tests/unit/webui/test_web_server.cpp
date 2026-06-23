@@ -21,19 +21,19 @@
 //   9. StatusEndpointReturnsOk     — GET /api/status returns JSON with status=ok
 //  10. SnapshotEndpointReturnsJson — GET /api/snapshot returns JSON (possibly error)
 
-#include "webui/web_server.hpp"
+#include "webui/WebServer.hpp"
 
-#include "ai/ai_pipeline.hpp"
+#include "ai/AiPipeline.hpp"
 #include "core/config.hpp"
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "execution/order_tracker.hpp"
-#include "market/market_feed.hpp"
-#include "risk/drawdown_guard.hpp"
-#include "risk/order_rate_limiter.hpp"
-#include "risk/position_manager.hpp"
-#include "risk/risk_manager.hpp"
-#include "strategy/strategy_manager.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "execution/OrderTracker.hpp"
+#include "market/MarketFeed.hpp"
+#include "risk/DrawdownGuard.hpp"
+#include "risk/OrderRateLimiter.hpp"
+#include "risk/PositionManager.hpp"
+#include "risk/RiskManager.hpp"
+#include "strategy/StrategyManager.hpp"
 
 #include <gtest/gtest.h>
 
@@ -43,10 +43,16 @@
 #include <thread>
 
 // POSIX sockets for raw TCP testing.
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 using namespace pulse;
 using namespace pulse::webui;
@@ -188,25 +194,25 @@ class WebServerTest : public ::testing::Test
     {
         // 1. WS/REST clients with empty config (never started, no network).
         ExchangeConfig exchange_config;
-        ws_client_ = std::make_unique<GateWsClient>(exchange_config);
-        rest_client_ = std::make_unique<GateRestClient>(exchange_config);
+        m_wsClient = std::make_unique<GateWsClient>(exchange_config);
+        m_restClient = std::make_unique<GateRestClient>(exchange_config);
 
         // 2. MarketFeed (not started).
-        market_feed_ = std::make_unique<MarketFeed>(*ws_client_, *rest_client_);
+        m_marketFeed = std::make_unique<MarketFeed>(*m_wsClient, *m_restClient);
 
         // 3. StrategyManager (empty).
-        strategy_mgr_ = std::make_unique<StrategyManager>();
+        m_strategyMgr = std::make_unique<StrategyManager>();
 
         // 4. Risk components.
         risk_config_ = RiskConfig{};
         position_mgr_ = std::make_unique<PositionManager>(risk_config_);
-        drawdown_guard_ = std::make_unique<DrawdownGuard>(risk_config_);
-        rate_limiter_ = std::make_unique<OrderRateLimiter>(risk_config_.maxOrdersPerSec);
-        risk_mgr_ = std::make_unique<RiskManager>(
-            risk_config_, *position_mgr_, *drawdown_guard_, *rate_limiter_);
+        m_drawdownGuard = std::make_unique<DrawdownGuard>(risk_config_);
+        m_rateLimiter = std::make_unique<OrderRateLimiter>(risk_config_.maxOrdersPerSec);
+        m_riskMgr = std::make_unique<RiskManager>(
+            risk_config_, *position_mgr_, *m_drawdownGuard, *m_rateLimiter);
 
         // 5. OrderTracker.
-        order_tracker_ = std::make_unique<OrderTracker>(*ws_client_, *rest_client_);
+        m_orderTracker = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
 
         // 6. AiPipeline with mock transport.
         AiConfig ai_config;
@@ -226,7 +232,7 @@ class WebServerTest : public ::testing::Test
             return PulseError{ ErrorCode::HttpError, "mock transport" };
         };
 
-        ai_pipeline_ = std::make_unique<AiPipeline>(
+        m_aiPipeline = std::make_unique<AiPipeline>(
             ai_config, tw_config, news_config, mock_transport);
 
         // 7. WebUI config with auth enabled and port 0 (OS-assigned).
@@ -237,17 +243,17 @@ class WebServerTest : public ::testing::Test
         webui_config_.maxClients = 4;
 
         // 8. DashboardState.
-        state_ = std::make_unique<DashboardState>(
+        m_state = std::make_unique<DashboardState>(
             webui_config_,
-            *market_feed_,
-            *strategy_mgr_,
-            *risk_mgr_,
-            *order_tracker_,
-            *ai_pipeline_);
+            *m_marketFeed,
+            *m_strategyMgr,
+            *m_riskMgr,
+            *m_orderTracker,
+            *m_aiPipeline);
 
         // 9. WebServer under test.
         server_ = std::make_unique<WebServer>(
-            webui_config_, *state_, "/tmp/pulse_test_nonexistent_frontend");
+            webui_config_, *m_state, "/tmp/pulse_test_nonexistent_frontend");
     }
 
     void TearDown() override
@@ -256,26 +262,26 @@ class WebServerTest : public ::testing::Test
         {
             server_->stop();
         }
-        if (state_)
+        if (m_state)
         {
-            state_->stop();
+            m_state->stop();
         }
     }
 
     // --- Components (owned by fixture) ---
-    std::unique_ptr<GateWsClient> ws_client_;
-    std::unique_ptr<GateRestClient> rest_client_;
-    std::unique_ptr<MarketFeed> market_feed_;
-    std::unique_ptr<StrategyManager> strategy_mgr_;
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
+    std::unique_ptr<MarketFeed> m_marketFeed;
+    std::unique_ptr<StrategyManager> m_strategyMgr;
     RiskConfig risk_config_;
     std::unique_ptr<PositionManager> position_mgr_;
-    std::unique_ptr<DrawdownGuard> drawdown_guard_;
-    std::unique_ptr<OrderRateLimiter> rate_limiter_;
-    std::unique_ptr<RiskManager> risk_mgr_;
-    std::unique_ptr<OrderTracker> order_tracker_;
-    std::unique_ptr<AiPipeline> ai_pipeline_;
+    std::unique_ptr<DrawdownGuard> m_drawdownGuard;
+    std::unique_ptr<OrderRateLimiter> m_rateLimiter;
+    std::unique_ptr<RiskManager> m_riskMgr;
+    std::unique_ptr<OrderTracker> m_orderTracker;
+    std::unique_ptr<AiPipeline> m_aiPipeline;
     WebUiConfig webui_config_;
-    std::unique_ptr<DashboardState> state_;
+    std::unique_ptr<DashboardState> m_state;
     std::unique_ptr<WebServer> server_;
 };
 
@@ -302,7 +308,7 @@ TEST_F(WebServerTest, StartBindsPort)
 
     // Port should be assigned (non-zero).
     // If us_socket_local_port works, it returns the OS-assigned port.
-    // If not, it falls back to config_.port which is 0.
+    // If not, it falls back to m_config.port which is 0.
     const auto bound_port = server_->port();
     EXPECT_GT(bound_port, 0) << "Expected OS-assigned port > 0";
 

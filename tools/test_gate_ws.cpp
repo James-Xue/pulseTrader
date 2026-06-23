@@ -11,8 +11,8 @@
 // NOT part of CTest — this is a manual verification tool.
 
 #include "core/config.hpp"
-#include "exchange/gate_ws_client.hpp"
-#include "logging/logger.hpp"
+#include "exchange/GateWsClient.hpp"
+#include "logging/Logger.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -82,7 +82,7 @@ int main()
     const bool has_auth = !exchange_cfg.apiKey.empty();
     if (has_auth)
     {
-        client.subscribe_private("spot.orders",
+        client.subscribePrivate("spot.orders",
             {},
             [](const nlohmann::json &result, const nlohmann::json & /*frame*/)
             { std::cout << "[order] " << result.dump() << std::endl; });

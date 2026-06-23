@@ -1,7 +1,7 @@
 # pulseTrader — Historical Details (Secondary Memory)
 
-> 本文件存放从 project-memory.md 迁移出的历史细节。
-> 当需要回顾已完成模块的实现细节时按需读取。
+> This file stores historical details migrated from project-memory.md.
+> Read on demand when reviewing implementation details of completed modules.
 
 ## Trading Engine (M5, 2026-06-19)
 

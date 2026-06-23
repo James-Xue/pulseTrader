@@ -4,7 +4,7 @@
 // WebSocket channel prefixes, and ping/pong channel names.
 // No network connections required — pure logic tests.
 
-#include "exchange/endpoint_router.hpp"
+#include "exchange/EndpointRouter.hpp"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +18,7 @@ namespace pulse::exchange::test
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, RestPrefix_Spot)
 {
-    EXPECT_EQ("/api/v4/spot", EndpointRouter::rest_prefix(MarketType::Spot));
+    EXPECT_EQ("/api/v4/spot", EndpointRouter::restPrefix(MarketType::Spot));
 }
 
 // ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ TEST(EndpointRouterTest, RestPrefix_Spot)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, RestPrefix_Futures)
 {
-    EXPECT_EQ("/api/v4/futures/usdt", EndpointRouter::rest_prefix(MarketType::Futures));
+    EXPECT_EQ("/api/v4/futures/usdt", EndpointRouter::restPrefix(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ TEST(EndpointRouterTest, RestPrefix_Futures)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsPrefix_Spot)
 {
-    EXPECT_EQ("spot", EndpointRouter::ws_prefix(MarketType::Spot));
+    EXPECT_EQ("spot", EndpointRouter::wsPrefix(MarketType::Spot));
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ TEST(EndpointRouterTest, WsPrefix_Spot)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsPrefix_Futures)
 {
-    EXPECT_EQ("futures", EndpointRouter::ws_prefix(MarketType::Futures));
+    EXPECT_EQ("futures", EndpointRouter::wsPrefix(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ TEST(EndpointRouterTest, WsPrefix_Futures)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsChannel_SpotTickers)
 {
-    EXPECT_EQ("spot.tickers", EndpointRouter::ws_channel(MarketType::Spot, "tickers"));
+    EXPECT_EQ("spot.tickers", EndpointRouter::wsChannel(MarketType::Spot, "tickers"));
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ TEST(EndpointRouterTest, WsChannel_SpotTickers)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsChannel_FuturesTickers)
 {
-    EXPECT_EQ("futures.tickers", EndpointRouter::ws_channel(MarketType::Futures, "tickers"));
+    EXPECT_EQ("futures.tickers", EndpointRouter::wsChannel(MarketType::Futures, "tickers"));
 }
 
 // ---------------------------------------------------------------------------
@@ -67,12 +67,12 @@ TEST(EndpointRouterTest, WsChannel_FuturesTickers)
 TEST(EndpointRouterTest, PingPongChannels)
 {
     // Spot
-    EXPECT_EQ("spot.ping", EndpointRouter::ping_channel(MarketType::Spot));
-    EXPECT_EQ("spot.pong", EndpointRouter::pong_channel(MarketType::Spot));
+    EXPECT_EQ("spot.ping", EndpointRouter::pingChannel(MarketType::Spot));
+    EXPECT_EQ("spot.pong", EndpointRouter::pongChannel(MarketType::Spot));
 
     // Futures
-    EXPECT_EQ("futures.ping", EndpointRouter::ping_channel(MarketType::Futures));
-    EXPECT_EQ("futures.pong", EndpointRouter::pong_channel(MarketType::Futures));
+    EXPECT_EQ("futures.ping", EndpointRouter::pingChannel(MarketType::Futures));
+    EXPECT_EQ("futures.pong", EndpointRouter::pongChannel(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +84,8 @@ TEST(EndpointRouterTest, SelectWsUrl)
     cfg.wsUrl = "wss://api.gateio.ws/ws/v4/";
     cfg.futuresWsUrl = "wss://fx-ws.gateio.ws/v4/ws/usdt";
 
-    EXPECT_EQ("wss://api.gateio.ws/ws/v4/", EndpointRouter::select_ws_url(cfg, MarketType::Spot));
-    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", EndpointRouter::select_ws_url(cfg, MarketType::Futures));
+    EXPECT_EQ("wss://api.gateio.ws/ws/v4/", EndpointRouter::selectWsUrl(cfg, MarketType::Spot));
+    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", EndpointRouter::selectWsUrl(cfg, MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +93,8 @@ TEST(EndpointRouterTest, SelectWsUrl)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, NeedsJsonPing)
 {
-    EXPECT_TRUE(EndpointRouter::needs_json_ping(MarketType::Spot));
-    EXPECT_FALSE(EndpointRouter::needs_json_ping(MarketType::Futures));
+    EXPECT_TRUE(EndpointRouter::needsJsonPing(MarketType::Spot));
+    EXPECT_FALSE(EndpointRouter::needsJsonPing(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -103,14 +103,14 @@ TEST(EndpointRouterTest, NeedsJsonPing)
 TEST(EndpointRouterTest, RestEndpointPaths)
 {
     // Spot paths
-    EXPECT_EQ("/api/v4/spot/currency_pairs", EndpointRouter::contracts_path(MarketType::Spot));
-    EXPECT_EQ("/api/v4/spot/tickers", EndpointRouter::tickers_path(MarketType::Spot));
-    EXPECT_EQ("/api/v4/spot/accounts", EndpointRouter::accounts_path(MarketType::Spot));
+    EXPECT_EQ("/api/v4/spot/currency_pairs", EndpointRouter::contractsPath(MarketType::Spot));
+    EXPECT_EQ("/api/v4/spot/tickers", EndpointRouter::tickersPath(MarketType::Spot));
+    EXPECT_EQ("/api/v4/spot/accounts", EndpointRouter::accountsPath(MarketType::Spot));
 
     // Futures paths
-    EXPECT_EQ("/api/v4/futures/usdt/contracts", EndpointRouter::contracts_path(MarketType::Futures));
-    EXPECT_EQ("/api/v4/futures/usdt/tickers", EndpointRouter::tickers_path(MarketType::Futures));
-    EXPECT_EQ("/api/v4/futures/usdt/accounts", EndpointRouter::accounts_path(MarketType::Futures));
+    EXPECT_EQ("/api/v4/futures/usdt/contracts", EndpointRouter::contractsPath(MarketType::Futures));
+    EXPECT_EQ("/api/v4/futures/usdt/tickers", EndpointRouter::tickersPath(MarketType::Futures));
+    EXPECT_EQ("/api/v4/futures/usdt/accounts", EndpointRouter::accountsPath(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -118,8 +118,8 @@ TEST(EndpointRouterTest, RestEndpointPaths)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsChannel_OrderBook)
 {
-    EXPECT_EQ("spot.order_book", EndpointRouter::ws_channel(MarketType::Spot, "order_book"));
-    EXPECT_EQ("futures.order_book", EndpointRouter::ws_channel(MarketType::Futures, "order_book"));
+    EXPECT_EQ("spot.order_book", EndpointRouter::wsChannel(MarketType::Spot, "order_book"));
+    EXPECT_EQ("futures.order_book", EndpointRouter::wsChannel(MarketType::Futures, "order_book"));
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +127,10 @@ TEST(EndpointRouterTest, WsChannel_OrderBook)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, WsChannel_PrivateChannels)
 {
-    EXPECT_EQ("spot.orders", EndpointRouter::ws_channel(MarketType::Spot, "orders"));
-    EXPECT_EQ("futures.orders", EndpointRouter::ws_channel(MarketType::Futures, "orders"));
-    EXPECT_EQ("spot.usertrades", EndpointRouter::ws_channel(MarketType::Spot, "usertrades"));
-    EXPECT_EQ("futures.usertrades", EndpointRouter::ws_channel(MarketType::Futures, "usertrades"));
+    EXPECT_EQ("spot.orders", EndpointRouter::wsChannel(MarketType::Spot, "orders"));
+    EXPECT_EQ("futures.orders", EndpointRouter::wsChannel(MarketType::Futures, "orders"));
+    EXPECT_EQ("spot.usertrades", EndpointRouter::wsChannel(MarketType::Spot, "usertrades"));
+    EXPECT_EQ("futures.usertrades", EndpointRouter::wsChannel(MarketType::Futures, "usertrades"));
 }
 
 // ---------------------------------------------------------------------------
@@ -140,8 +140,8 @@ TEST(EndpointRouterTest, SelectWsUrl_DefaultConfig)
 {
     const ExchangeConfig cfg; // all defaults
 
-    EXPECT_EQ("wss://api.gateio.ws/ws/v4/", EndpointRouter::select_ws_url(cfg, MarketType::Spot));
-    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", EndpointRouter::select_ws_url(cfg, MarketType::Futures));
+    EXPECT_EQ("wss://api.gateio.ws/ws/v4/", EndpointRouter::selectWsUrl(cfg, MarketType::Spot));
+    EXPECT_EQ("wss://fx-ws.gateio.ws/v4/ws/usdt", EndpointRouter::selectWsUrl(cfg, MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ TEST(EndpointRouterTest, SelectWsUrl_DefaultConfig)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, OrdersPath_Spot)
 {
-    EXPECT_EQ("/api/v4/spot/orders", EndpointRouter::orders_path(MarketType::Spot));
+    EXPECT_EQ("/api/v4/spot/orders", EndpointRouter::ordersPath(MarketType::Spot));
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ TEST(EndpointRouterTest, OrdersPath_Spot)
 // ---------------------------------------------------------------------------
 TEST(EndpointRouterTest, OrdersPath_Futures)
 {
-    EXPECT_EQ("/api/v4/futures/usdt/orders", EndpointRouter::orders_path(MarketType::Futures));
+    EXPECT_EQ("/api/v4/futures/usdt/orders", EndpointRouter::ordersPath(MarketType::Futures));
 }
 
 // ---------------------------------------------------------------------------
@@ -166,13 +166,13 @@ TEST(EndpointRouterTest, OrdersPath_Futures)
 TEST(EndpointRouterTest, OrderPath_SpotWithId)
 {
     EXPECT_EQ("/api/v4/spot/orders/12345",
-              EndpointRouter::order_path(MarketType::Spot, "12345"));
+              EndpointRouter::orderPath(MarketType::Spot, "12345"));
 }
 
 TEST(EndpointRouterTest, OrderPath_FuturesWithId)
 {
     EXPECT_EQ("/api/v4/futures/usdt/orders/67890",
-              EndpointRouter::order_path(MarketType::Futures, "67890"));
+              EndpointRouter::orderPath(MarketType::Futures, "67890"));
 }
 
 // ---------------------------------------------------------------------------
@@ -181,12 +181,12 @@ TEST(EndpointRouterTest, OrderPath_FuturesWithId)
 TEST(EndpointRouterTest, LeveragePath_Futures)
 {
     EXPECT_EQ("/api/v4/futures/usdt/positions/BTC_USDT/leverage",
-              EndpointRouter::leverage_path(MarketType::Futures, "BTC_USDT"));
+              EndpointRouter::leveragePath(MarketType::Futures, "BTC_USDT"));
 }
 
 TEST(EndpointRouterTest, LeveragePath_Spot_Empty)
 {
-    EXPECT_EQ("", EndpointRouter::leverage_path(MarketType::Spot, "BTC_USDT"));
+    EXPECT_EQ("", EndpointRouter::leveragePath(MarketType::Spot, "BTC_USDT"));
 }
 
 } // namespace pulse::exchange::test
