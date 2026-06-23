@@ -10,7 +10,9 @@
     "openssl",
     "asio",
     "gtest",
-    "toml11"
+    "toml11",
+    "usockets",
+    "uwebsockets"
   ],
   "features": {
     "sqlite": {

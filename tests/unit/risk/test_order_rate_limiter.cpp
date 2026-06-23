@@ -1,6 +1,6 @@
 // test_order_rate_limiter.cpp — Unit tests for OrderRateLimiter (Layer 7 Risk Management)
 
-#include "risk/order_rate_limiter.hpp"
+#include "risk/OrderRateLimiter.hpp"
 
 #include <gtest/gtest.h>
 
@@ -16,14 +16,14 @@ using namespace pulse::risk;
 TEST(OrderRateLimiter, DefaultCapacity)
 {
     OrderRateLimiter limiter(5);
-    EXPECT_DOUBLE_EQ(10.0, limiter.available_tokens()); // burst = 2 * rate.
-    EXPECT_FALSE(limiter.is_exhausted());
+    EXPECT_DOUBLE_EQ(10.0, limiter.availableTokens()); // burst = 2 * rate.
+    EXPECT_FALSE(limiter.isExhausted());
 }
 
 TEST(OrderRateLimiter, CustomBurst)
 {
     OrderRateLimiter limiter(5, /*burst_capacity=*/3);
-    EXPECT_DOUBLE_EQ(3.0, limiter.available_tokens());
+    EXPECT_DOUBLE_EQ(3.0, limiter.availableTokens());
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ TEST(OrderRateLimiter, AcquireWithinCapacitySucceeds)
     // Should be able to acquire 5 tokens.
     for (int i = 0; i < 5; ++i)
     {
-        EXPECT_TRUE(limiter.try_acquire());
+        EXPECT_TRUE(limiter.tryAcquire());
     }
 }
 
@@ -45,20 +45,20 @@ TEST(OrderRateLimiter, AcquireBeyondCapacityFails)
 {
     OrderRateLimiter limiter(5, /*burst_capacity=*/3);
 
-    EXPECT_TRUE(limiter.try_acquire());
-    EXPECT_TRUE(limiter.try_acquire());
-    EXPECT_TRUE(limiter.try_acquire());
-    EXPECT_FALSE(limiter.try_acquire()); // Bucket empty.
+    EXPECT_TRUE(limiter.tryAcquire());
+    EXPECT_TRUE(limiter.tryAcquire());
+    EXPECT_TRUE(limiter.tryAcquire());
+    EXPECT_FALSE(limiter.tryAcquire()); // Bucket empty.
 }
 
 TEST(OrderRateLimiter, IsExhaustedWhenEmpty)
 {
     OrderRateLimiter limiter(5, /*burst_capacity=*/2);
 
-    EXPECT_FALSE(limiter.is_exhausted());
-    EXPECT_TRUE(limiter.try_acquire());
-    EXPECT_TRUE(limiter.try_acquire());
-    EXPECT_TRUE(limiter.is_exhausted());
+    EXPECT_FALSE(limiter.isExhausted());
+    EXPECT_TRUE(limiter.tryAcquire());
+    EXPECT_TRUE(limiter.tryAcquire());
+    EXPECT_TRUE(limiter.isExhausted());
 }
 
 // ---------------------------------------------------------------------------
@@ -72,14 +72,14 @@ TEST(OrderRateLimiter, TokensRefillOverTime)
     // Drain all tokens.
     for (int i = 0; i < 100; ++i)
     {
-        (void)limiter.try_acquire();
+        (void)limiter.tryAcquire();
     }
 
     // Wait for some tokens to refill (~50ms should add ~5 tokens at 100/sec).
     std::this_thread::sleep_for(std::chrono::milliseconds(60));
 
-    // try_acquire() triggers refill internally, so this should succeed.
-    EXPECT_TRUE(limiter.try_acquire());
+    // tryAcquire() triggers refill internally, so this should succeed.
+    EXPECT_TRUE(limiter.tryAcquire());
 }
 
 TEST(OrderRateLimiter, TokensCappedAtBurstCapacity)
@@ -90,7 +90,7 @@ TEST(OrderRateLimiter, TokensCappedAtBurstCapacity)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Tokens should be capped at burst capacity.
-    EXPECT_LE(limiter.available_tokens(), 5.0 + 1.0); // Small tolerance for timing.
+    EXPECT_LE(limiter.availableTokens(), 5.0 + 1.0); // Small tolerance for timing.
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ TEST(OrderRateLimiter, BurstAllowsShortBurst)
     int acquired = 0;
     for (int i = 0; i < 15; ++i)
     {
-        if (limiter.try_acquire())
+        if (limiter.tryAcquire())
         {
             ++acquired;
         }
@@ -121,7 +121,7 @@ TEST(OrderRateLimiter, BurstRecoversAfterDrain)
     // Drain.
     for (int i = 0; i < 10; ++i)
     {
-        (void)limiter.try_acquire();
+        (void)limiter.tryAcquire();
     }
 
     // Wait for partial refill.
@@ -131,7 +131,7 @@ TEST(OrderRateLimiter, BurstRecoversAfterDrain)
     int acquired = 0;
     for (int i = 0; i < 10; ++i)
     {
-        if (limiter.try_acquire())
+        if (limiter.tryAcquire())
         {
             ++acquired;
         }
@@ -150,13 +150,13 @@ TEST(OrderRateLimiter, ResetRestoresCapacity)
     // Drain.
     for (int i = 0; i < 5; ++i)
     {
-        EXPECT_TRUE(limiter.try_acquire());
+        EXPECT_TRUE(limiter.tryAcquire());
     }
-    EXPECT_TRUE(limiter.is_exhausted());
+    EXPECT_TRUE(limiter.isExhausted());
 
     limiter.reset();
-    EXPECT_FALSE(limiter.is_exhausted());
-    EXPECT_DOUBLE_EQ(5.0, limiter.available_tokens());
+    EXPECT_FALSE(limiter.isExhausted());
+    EXPECT_DOUBLE_EQ(5.0, limiter.availableTokens());
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ TEST(OrderRateLimiter, ConcurrentAcquiresAreSerialized)
         {
             for (int i = 0; i < kAttemptsPerThread; ++i)
             {
-                if (limiter.try_acquire())
+                if (limiter.tryAcquire())
                 {
                     acquired_count.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -205,7 +205,7 @@ TEST(OrderRateLimiter, ConcurrentAcquireAndReset)
     {
         while (!stop.load())
         {
-            (void)limiter.try_acquire();
+            (void)limiter.tryAcquire();
         }
     });
 

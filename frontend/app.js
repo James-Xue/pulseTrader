@@ -29,15 +29,7 @@
             localStorage.setItem('pulseToken', urlToken);
             return urlToken;
         }
-        const cached = localStorage.getItem('pulseToken');
-        if (cached) {
-            return cached;
-        }
-        const token = prompt('Enter auth token:', '') || '';
-        if (token) {
-            localStorage.setItem('pulseToken', token);
-        }
-        return token;
+        return localStorage.getItem('pulseToken') || '';
     }
 
     /**
@@ -161,6 +153,12 @@
         return d.toLocaleTimeString();
     }
 
+    function msToHHMM(ms) {
+        if (!ms) { return '—'; }
+        var d = new Date(ms);
+        return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    }
+
     // =========================================================================
     // Account Balance Bar
     // =========================================================================
@@ -169,27 +167,42 @@
         var bar = document.getElementById('account-bar');
         if (!bar) { return; }
 
-        if (!acct || !acct.available) {
+        var hasFutures = acct && acct.available;
+        var hasSpot = acct && acct.spot_available;
+
+        if (!hasFutures && !hasSpot) {
             bar.classList.add('hidden');
             return;
         }
 
         bar.classList.remove('hidden');
-        var cur = acct.currency || 'USDT';
 
-        document.getElementById('account-total').textContent =
-            fmt(acct.total) + ' ' + cur;
-        document.getElementById('account-available').textContent =
-            fmt(acct.available_balance) + ' ' + cur;
+        // --- Futures ---
+        if (hasFutures) {
+            var cur = acct.currency || 'USDT';
+            document.getElementById('account-total').textContent =
+                fmt(acct.total) + ' ' + cur;
+            document.getElementById('account-available').textContent =
+                fmt(acct.available_balance) + ' ' + cur;
 
-        var pnlEl = document.getElementById('account-pnl');
-        pnlEl.textContent = (acct.unrealised_pnl >= 0 ? '+' : '') +
-            fmt(acct.unrealised_pnl) + ' ' + cur;
-        pnlEl.className = 'account-value ' + pnlClass(acct.unrealised_pnl);
+            var pnlEl = document.getElementById('account-pnl');
+            pnlEl.textContent = (acct.unrealised_pnl >= 0 ? '+' : '') +
+                fmt(acct.unrealised_pnl) + ' ' + cur;
+            pnlEl.className = 'account-value ' + pnlClass(acct.unrealised_pnl);
 
-        var marginUsed = (acct.position_margin || 0) + (acct.order_margin || 0);
-        document.getElementById('account-margin').textContent =
-            fmt(marginUsed) + ' ' + cur;
+            var marginUsed = (acct.position_margin || 0) + (acct.order_margin || 0);
+            document.getElementById('account-margin').textContent =
+                fmt(marginUsed) + ' ' + cur;
+        }
+
+        // --- Spot ---
+        if (hasSpot) {
+            var scur = acct.spot_currency || 'USDT';
+            document.getElementById('account-spot-total').textContent =
+                fmt(acct.spot_total) + ' ' + scur;
+            document.getElementById('account-spot-available').textContent =
+                fmt(acct.spot_available_balance) + ' ' + scur;
+        }
     }
 
     // =========================================================================
@@ -283,7 +296,7 @@
             var arrow = up ? '▲' : '▼';
 
             html += '<tr>'
-                + '<td class="mono">' + msToTime(c.open_time) + '</td>'
+                + '<td class="mono">' + msToHHMM(c.open_time) + '</td>'
                 + '<td class="mono">' + fmt(c.open) + '</td>'
                 + '<td class="mono">' + fmt(c.high) + '</td>'
                 + '<td class="mono">' + fmt(c.low) + '</td>'

@@ -1,6 +1,6 @@
 // test_strategy_base.cpp — Unit tests for StrategyBase (Layer 6 Strategy Engine)
 
-#include "strategy/strategy_base.hpp"
+#include "strategy/StrategyBase.hpp"
 
 #include <gtest/gtest.h>
 
@@ -27,34 +27,34 @@ class MockStrategy : public StrategyBase
 
     [[nodiscard]] StrategyParams &params() override
     {
-        return params_;
+        return m_params;
     }
 
-    void on_tick(const market::Ticker & /*ticker*/) override
+    void onTick(const market::Ticker & /*ticker*/) override
     {
         ++tick_count_;
     }
 
-    void on_kline(const market::Kline & /*kline*/) override
+    void onKline(const market::Kline & /*kline*/) override
     {
-        ++kline_count_;
+        ++m_klineCount;
     }
 
-    void on_orderbook(const market::OrderBook & /*book*/) override
+    void onOrderbook(const market::OrderBook & /*book*/) override
     {
-        ++orderbook_count_;
+        ++m_orderbookCount;
     }
 
-    // Expose protected emit_signal for testing.
+    // Expose protected emitSignal for testing.
     void test_emit_signal(const TradingSignal &signal)
     {
-        emit_signal(signal);
+        emitSignal(signal);
     }
 
-    StrategyParams params_;
+    StrategyParams m_params;
     int tick_count_ = 0;
-    int kline_count_ = 0;
-    int orderbook_count_ = 0;
+    int m_klineCount = 0;
+    int m_orderbookCount = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -88,14 +88,14 @@ TEST(StrategyBase, LifecycleHookCounters)
     market::Kline kline;
     market::OrderBook book;
 
-    strategy.on_tick(ticker);
-    strategy.on_tick(ticker);
-    strategy.on_kline(kline);
-    strategy.on_orderbook(book);
+    strategy.onTick(ticker);
+    strategy.onTick(ticker);
+    strategy.onKline(kline);
+    strategy.onOrderbook(book);
 
     EXPECT_EQ(2, strategy.tick_count_);
-    EXPECT_EQ(1, strategy.kline_count_);
-    EXPECT_EQ(1, strategy.orderbook_count_);
+    EXPECT_EQ(1, strategy.m_klineCount);
+    EXPECT_EQ(1, strategy.m_orderbookCount);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,10 +105,10 @@ TEST(StrategyBase, LifecycleHookCounters)
 TEST(StrategyBase, EmitSignalWithCallback)
 {
     MockStrategy strategy;
-    strategy.params_.min_confidence.store(0.5, std::memory_order_release);
+    strategy.m_params.min_confidence.store(0.5, std::memory_order_release);
 
     std::vector<TradingSignal> received;
-    strategy.set_signal_callback([&](const TradingSignal &s)
+    strategy.setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
@@ -133,10 +133,10 @@ TEST(StrategyBase, EmitSignalWithCallback)
 TEST(StrategyBase, EmitSignalBelowThresholdDropped)
 {
     MockStrategy strategy;
-    strategy.params_.min_confidence.store(0.5, std::memory_order_release);
+    strategy.m_params.min_confidence.store(0.5, std::memory_order_release);
 
     std::vector<TradingSignal> received;
-    strategy.set_signal_callback([&](const TradingSignal &s)
+    strategy.setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });

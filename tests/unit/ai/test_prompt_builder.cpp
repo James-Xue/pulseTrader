@@ -7,7 +7,7 @@
 //   4. Empty klines handled gracefully
 //   5. Current params are included in user prompt
 
-#include "ai/prompt_builder.hpp"
+#include "ai/PromptBuilder.hpp"
 
 #include <gtest/gtest.h>
 

@@ -1,9 +1,9 @@
 // test_order_tracker.cpp — Unit tests for OrderTracker (Layer 8 Order Execution)
 
-#include "execution/order_tracker.hpp"
+#include "execution/OrderTracker.hpp"
 
-#include "exchange/gate_rest_client.hpp"
-#include "exchange/gate_ws_client.hpp"
+#include "exchange/GateRestClient.hpp"
+#include "exchange/GateWsClient.hpp"
 
 #include <gtest/gtest.h>
 
@@ -22,42 +22,42 @@ using namespace pulse::exchange;
 
 TEST(OrderTracker, IsTerminalStatusFilled)
 {
-    EXPECT_TRUE(OrderTracker::is_terminal_status(OrderStatus::Filled));
+    EXPECT_TRUE(OrderTracker::isTerminalStatus(OrderStatus::Filled));
 }
 
 TEST(OrderTracker, IsTerminalStatusCancelled)
 {
-    EXPECT_TRUE(OrderTracker::is_terminal_status(OrderStatus::Cancelled));
+    EXPECT_TRUE(OrderTracker::isTerminalStatus(OrderStatus::Cancelled));
 }
 
 TEST(OrderTracker, IsTerminalStatusOpen)
 {
-    EXPECT_FALSE(OrderTracker::is_terminal_status(OrderStatus::Open));
+    EXPECT_FALSE(OrderTracker::isTerminalStatus(OrderStatus::Open));
 }
 
 TEST(OrderTracker, IsTerminalStatusPending)
 {
-    EXPECT_FALSE(OrderTracker::is_terminal_status(OrderStatus::Pending));
+    EXPECT_FALSE(OrderTracker::isTerminalStatus(OrderStatus::Pending));
 }
 
 TEST(OrderTracker, ParseStatusOpen)
 {
-    EXPECT_EQ(OrderTracker::parse_status("open"), OrderStatus::Open);
+    EXPECT_EQ(OrderTracker::parseStatus("open"), OrderStatus::Open);
 }
 
 TEST(OrderTracker, ParseStatusClosed)
 {
-    EXPECT_EQ(OrderTracker::parse_status("closed"), OrderStatus::Filled);
+    EXPECT_EQ(OrderTracker::parseStatus("closed"), OrderStatus::Filled);
 }
 
 TEST(OrderTracker, ParseStatusCancelled)
 {
-    EXPECT_EQ(OrderTracker::parse_status("cancelled"), OrderStatus::Cancelled);
+    EXPECT_EQ(OrderTracker::parseStatus("cancelled"), OrderStatus::Cancelled);
 }
 
 TEST(OrderTracker, ParseStatusUnknown)
 {
-    EXPECT_EQ(OrderTracker::parse_status("unknown"), OrderStatus::Pending);
+    EXPECT_EQ(OrderTracker::parseStatus("unknown"), OrderStatus::Pending);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,9 +66,9 @@ TEST(OrderTracker, ParseStatusUnknown)
 
 // Note: Full OrderTracker testing requires real or mock WS/REST clients.
 // Integration tests in tools/test_execution.cpp will cover:
-// - track_order() and WS subscription
-// - on_order_update() state machine
-// - poll_order_status() REST fallback
+// - trackOrder() and WS subscription
+// - onOrderUpdate() state machine
+// - pollOrderStatus() REST fallback
 // - ExecutionReport generation
 // - Completion callback invocation
 
@@ -80,12 +80,12 @@ TEST(OrderTracker, ParseStatusUnknown)
 // TEST(OrderTracker, CompletionCallbackInvoked)
 
 // ---------------------------------------------------------------------------
-// active_orders() + recent_reports() — interface gap bridges for dashboard
+// activeOrders() + recentReports() — interface gap bridges for dashboard
 //
 // These tests use real WS/REST client objects constructed with a default
 // (empty) ExchangeConfig. The clients are never started, so no network
 // connections are made. This is sufficient to test the snapshot APIs that
-// only read from internal maps populated by track_order() / stop_tracking().
+// only read from internal maps populated by trackOrder() / stopTracking().
 // ---------------------------------------------------------------------------
 
 class OrderTrackerSnapshotTest : public ::testing::Test
@@ -95,30 +95,30 @@ class OrderTrackerSnapshotTest : public ::testing::Test
     {
         // Construct WS/REST clients with empty config (never started).
         ExchangeConfig config;
-        ws_client_ = std::make_unique<GateWsClient>(config);
-        rest_client_ = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*ws_client_, *rest_client_);
+        m_wsClient = std::make_unique<GateWsClient>(config);
+        m_restClient = std::make_unique<GateRestClient>(config);
+        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
     }
 
-    std::unique_ptr<GateWsClient> ws_client_;
-    std::unique_ptr<GateRestClient> rest_client_;
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
     std::unique_ptr<OrderTracker> tracker_;
 };
 
 TEST_F(OrderTrackerSnapshotTest, ActiveOrdersEmptyOnFreshTracker)
 {
-    // A fresh tracker must return an empty vector from active_orders().
-    const auto orders = tracker_->active_orders();
+    // A fresh tracker must return an empty vector from activeOrders().
+    const auto orders = tracker_->activeOrders();
     EXPECT_TRUE(orders.empty());
 }
 
 TEST_F(OrderTrackerSnapshotTest, TrackedOrdersAppearInActiveOrders)
 {
-    // After track_order(), the order must appear in active_orders().
-    tracker_->track_order("order_1", "BTC_USDT", Side::Buy, OrderType::Limit, 0.001, 50000.0);
-    tracker_->track_order("order_2", "ETH_USDT", Side::Sell, OrderType::Market, 1.0, 3000.0);
+    // After trackOrder(), the order must appear in activeOrders().
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit, 0.001, 50000.0);
+    tracker_->trackOrder("order_2", "ETH_USDT", Side::Sell, OrderType::Market, 1.0, 3000.0);
 
-    const auto orders = tracker_->active_orders();
+    const auto orders = tracker_->activeOrders();
     ASSERT_EQ(orders.size(), 2u);
 
     // Find each order by order_id (order is unspecified from unordered_map).
@@ -153,41 +153,41 @@ TEST_F(OrderTrackerSnapshotTest, TrackedOrdersAppearInActiveOrders)
 
 TEST_F(OrderTrackerSnapshotTest, StopTrackingRemovesFromActiveOrders)
 {
-    // After stop_tracking(), the order must no longer appear in active_orders().
+    // After stopTracking(), the order must no longer appear in activeOrders().
     // This simulates what happens when an order reaches terminal state.
-    tracker_->track_order("order_1", "BTC_USDT", Side::Buy, OrderType::Limit, 0.001, 50000.0);
-    tracker_->track_order("order_2", "ETH_USDT", Side::Sell, OrderType::Market, 1.0, 3000.0);
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit, 0.001, 50000.0);
+    tracker_->trackOrder("order_2", "ETH_USDT", Side::Sell, OrderType::Market, 1.0, 3000.0);
 
     // Verify both are present.
-    EXPECT_EQ(tracker_->active_orders().size(), 2u);
+    EXPECT_EQ(tracker_->activeOrders().size(), 2u);
 
     // Stop tracking one order (simulates terminal state removal).
-    tracker_->stop_tracking("order_1");
+    tracker_->stopTracking("order_1");
 
-    const auto orders = tracker_->active_orders();
+    const auto orders = tracker_->activeOrders();
     ASSERT_EQ(orders.size(), 1u);
     EXPECT_EQ(orders[0].order_id, "order_2");
 }
 
 TEST_F(OrderTrackerSnapshotTest, RecentReportsEmptyOnFreshTracker)
 {
-    // A fresh tracker must return an empty vector from recent_reports().
-    const auto reports = tracker_->recent_reports();
+    // A fresh tracker must return an empty vector from recentReports().
+    const auto reports = tracker_->recentReports();
     EXPECT_TRUE(reports.empty());
 }
 
 TEST_F(OrderTrackerSnapshotTest, RecentReportsRespectsLimit)
 {
-    // recent_reports(n) must return at most n reports.
+    // recentReports(n) must return at most n reports.
     // With no completed reports, even a large limit returns empty.
-    const auto reports = tracker_->recent_reports(100);
+    const auto reports = tracker_->recentReports(100);
     EXPECT_TRUE(reports.empty());
 }
 
 // ---------------------------------------------------------------------------
 // Callback safety tests — verifies the "invoke outside lock" fix
 //
-// These tests use friend access to call process_order_update() directly,
+// These tests use friend access to call processOrderUpdate() directly,
 // simulating WS events without requiring a real WebSocket connection.
 // ---------------------------------------------------------------------------
 
@@ -197,37 +197,37 @@ class OrderTrackerCallbackTest : public ::testing::Test
     void SetUp() override
     {
         ExchangeConfig config;
-        ws_client_ = std::make_unique<GateWsClient>(config);
-        rest_client_ = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*ws_client_, *rest_client_);
+        m_wsClient = std::make_unique<GateWsClient>(config);
+        m_restClient = std::make_unique<GateRestClient>(config);
+        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
     }
 
-    std::unique_ptr<GateWsClient> ws_client_;
-    std::unique_ptr<GateRestClient> rest_client_;
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
     std::unique_ptr<OrderTracker> tracker_;
 };
 
 TEST_F(OrderTrackerCallbackTest, CompletionCallbackInvokedOutsideLock)
 {
-    // Verify: when an order reaches terminal state via process_order_update(),
+    // Verify: when an order reaches terminal state via processOrderUpdate(),
     // the completion callback is invoked AFTER the mutex is released.
     // If the callback tries to acquire a shared_lock, it must succeed
     // (proving the write_lock was released first).
 
-    tracker_->track_order("test_order_1", "BTC_USDT", Side::Buy, OrderType::Market,
+    tracker_->trackOrder("test_order_1", "BTC_USDT", Side::Buy, OrderType::Market,
                           0.001, 50000.0);
 
     std::atomic<bool> callback_invoked{ false };
     std::atomic<bool> lock_acquired_in_callback{ false };
 
-    tracker_->set_completion_callback(
+    tracker_->setCompletionCallback(
         [this, &callback_invoked, &lock_acquired_in_callback]([[maybe_unused]] const ExecutionReport &report)
         {
             callback_invoked = true;
 
             // Try to acquire a shared lock — this would deadlock if the
-            // write_lock is still held by process_order_update().
-            lock_acquired_in_callback = tracker_->test_try_shared_lock();
+            // write_lock is still held by processOrderUpdate().
+            lock_acquired_in_callback = tracker_->testTrySharedLock();
         });
 
     // Simulate a "closed" (filled) WS event.
@@ -238,7 +238,7 @@ TEST_F(OrderTrackerCallbackTest, CompletionCallbackInvokedOutsideLock)
     ws_event["avg_deal_price"] = "50001";
     ws_event["fee"] = "0.05";
 
-    tracker_->test_simulate_ws_update(ws_event);
+    tracker_->testSimulateWsUpdate(ws_event);
 
     EXPECT_TRUE(callback_invoked.load());
     EXPECT_TRUE(lock_acquired_in_callback.load());
@@ -246,8 +246,8 @@ TEST_F(OrderTrackerCallbackTest, CompletionCallbackInvokedOutsideLock)
 
 TEST_F(OrderTrackerCallbackTest, SetCompletionCallbackThreadSafe)
 {
-    // Verify: concurrent calls to set_completion_callback() don't cause
-    // a data race with process_order_update() reading the callback.
+    // Verify: concurrent calls to setCompletionCallback() don't cause
+    // a data race with processOrderUpdate() reading the callback.
 
     std::atomic<bool> stop{ false };
     std::atomic<int> callback_count{ 0 };
@@ -258,7 +258,7 @@ TEST_F(OrderTrackerCallbackTest, SetCompletionCallbackThreadSafe)
         int i = 0;
         while (!stop.load())
         {
-            tracker_->set_completion_callback(
+            tracker_->setCompletionCallback(
                 [&callback_count, i](const ExecutionReport &)
                 {
                     callback_count++;
@@ -279,10 +279,10 @@ TEST_F(OrderTrackerCallbackTest, SetCompletionCallbackThreadSafe)
 
 TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
 {
-    // Verify: process_order_update() with terminal status generates a correct
-    // ExecutionReport and removes the order from active_orders().
+    // Verify: processOrderUpdate() with terminal status generates a correct
+    // ExecutionReport and removes the order from activeOrders().
 
-    tracker_->track_order("report_test_1", "ETH_USDT", Side::Sell, OrderType::Limit,
+    tracker_->trackOrder("report_test_1", "ETH_USDT", Side::Sell, OrderType::Limit,
                           2.0, 3000.0, "strategy_alpha");
 
     // First: partial fill (non-terminal) — should NOT trigger callback.
@@ -293,14 +293,14 @@ TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
     partial_event["avg_deal_price"] = "3001";
 
     std::atomic<bool> callback_called{ false };
-    tracker_->set_completion_callback([&](const ExecutionReport &)
+    tracker_->setCompletionCallback([&](const ExecutionReport &)
     {
         callback_called = true;
     });
 
-    tracker_->test_simulate_ws_update(partial_event);
+    tracker_->testSimulateWsUpdate(partial_event);
     EXPECT_FALSE(callback_called.load());
-    EXPECT_EQ(tracker_->active_orders().size(), 1u);
+    EXPECT_EQ(tracker_->activeOrders().size(), 1u);
 
     // Second: full fill (terminal) — should trigger callback.
     nlohmann::json filled_event;
@@ -310,13 +310,13 @@ TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
     filled_event["avg_deal_price"] = "3002";
     filled_event["fee"] = "0.1";
 
-    tracker_->test_simulate_ws_update(filled_event);
+    tracker_->testSimulateWsUpdate(filled_event);
 
     EXPECT_TRUE(callback_called.load());
-    EXPECT_TRUE(tracker_->active_orders().empty());
+    EXPECT_TRUE(tracker_->activeOrders().empty());
 
-    // Report should be in recent_reports.
-    const auto reports = tracker_->recent_reports(1);
+    // Report should be in recentReports.
+    const auto reports = tracker_->recentReports(1);
     ASSERT_EQ(reports.size(), 1u);
     EXPECT_EQ(reports[0].order_id, "report_test_1");
     EXPECT_EQ(reports[0].symbol, "ETH_USDT");

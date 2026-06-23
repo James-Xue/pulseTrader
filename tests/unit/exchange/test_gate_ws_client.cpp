@@ -4,7 +4,7 @@
 // No real WebSocket connection required — all tests exercise detail:: free functions
 // and the GateWsClient's observable state.
 
-#include "exchange/gate_ws_client.hpp"
+#include "exchange/GateWsClient.hpp"
 
 #include "core/config.hpp"
 
@@ -36,7 +36,7 @@ TEST(GateWsClientTest, ComputeBackoffFirstAttempt)
 {
     // attempt=0, base=1000, max=30000
     // Expected: 1000 * 2^0 = 1000, jittered to [750, 1250]
-    const auto delay = detail::compute_backoff_ms(0, 1000, 30000);
+    const auto delay = detail::computeBackoffMs(0, 1000, 30000);
 
     EXPECT_GE(delay, 750u);
     EXPECT_LE(delay, 1250u);
@@ -49,7 +49,7 @@ TEST(GateWsClientTest, ComputeBackoffExponential)
 {
     // attempt=3, base=1000, max=30000
     // Expected: 1000 * 2^3 = 8000, jittered to [6000, 10000]
-    const auto delay = detail::compute_backoff_ms(3, 1000, 30000);
+    const auto delay = detail::computeBackoffMs(3, 1000, 30000);
 
     EXPECT_GE(delay, 6000u);
     EXPECT_LE(delay, 10000u);
@@ -66,7 +66,7 @@ TEST(GateWsClientTest, ComputeBackoffCappedAtMax)
     // So jittered range is [22500, 37500]
     for (int i = 0; i < 20; ++i)
     {
-        const auto delay = detail::compute_backoff_ms(10, 1000, 30000);
+        const auto delay = detail::computeBackoffMs(10, 1000, 30000);
         // With cap at 30000 and jitter ±25%: [22500, 37500]
         EXPECT_GE(delay, 22500u);
         EXPECT_LE(delay, 37500u);
@@ -86,7 +86,7 @@ TEST(GateWsClientTest, ComputeBackoffJitterRange)
 
     for (int i = 0; i < 50; ++i)
     {
-        const auto delay = detail::compute_backoff_ms(0, base_ms, max_ms);
+        const auto delay = detail::computeBackoffMs(0, base_ms, max_ms);
         EXPECT_GE(delay, low);
         EXPECT_LE(delay, high);
     }
@@ -97,7 +97,7 @@ TEST(GateWsClientTest, ComputeBackoffJitterRange)
 // ---------------------------------------------------------------------------
 TEST(GateWsClientTest, BuildWsAuthFormat)
 {
-    const auto auth = detail::build_ws_auth("test_key", "test_secret", "spot.orders", "subscribe");
+    const auto auth = detail::buildWsAuth("test_key", "test_secret", "spot.orders", "subscribe");
 
     // 1. Verify all required fields exist
     EXPECT_TRUE(auth.contains("method"));
@@ -123,8 +123,8 @@ TEST(GateWsClientTest, BuildWsAuthFormat)
 TEST(GateWsClientTest, BuildWsAuthDifferentKeysDifferentSigs)
 {
     // Two different secrets should produce different signatures
-    const auto auth1 = detail::build_ws_auth("key1", "secret1", "spot.orders", "subscribe");
-    const auto auth2 = detail::build_ws_auth("key1", "secret2", "spot.orders", "subscribe");
+    const auto auth1 = detail::buildWsAuth("key1", "secret1", "spot.orders", "subscribe");
+    const auto auth2 = detail::buildWsAuth("key1", "secret2", "spot.orders", "subscribe");
 
     // SIGN values should differ (different secrets → different HMAC)
     // Note: time might be the same if called within the same second
@@ -155,7 +155,7 @@ TEST(GateWsClientTest, ClientChannelsAccessible)
         "spot.tickers", { "BTC_USDT" }, [&](const nlohmann::json &, const nlohmann::json &) { invoked = true; });
 
     // 2. Verify channel is registered
-    const auto active = client.channels().active_channels();
+    const auto active = client.channels().activeChannels();
     EXPECT_EQ(1u, active.size());
     EXPECT_EQ("spot.tickers", active[0]);
 
@@ -177,10 +177,10 @@ TEST(GateWsClientTest, ClientSubscribeRegistersCallback)
     // Subscribe via the public API (not directly on channels())
     client.subscribe("spot.trades", { "ETH_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
 
-    const auto active = client.channels().active_channels();
+    const auto active = client.channels().activeChannels();
     EXPECT_EQ(1u, active.size());
 
-    const auto payload = client.channels().get_payload("spot.trades");
+    const auto payload = client.channels().getPayload("spot.trades");
     EXPECT_EQ(1u, payload.size());
     EXPECT_EQ("ETH_USDT", payload[0]);
 }
@@ -194,10 +194,10 @@ TEST(GateWsClientTest, ClientUnsubscribeRemovesChannel)
     GateWsClient client(config);
 
     client.subscribe("spot.tickers", { "BTC_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
-    EXPECT_EQ(1u, client.channels().active_channels().size());
+    EXPECT_EQ(1u, client.channels().activeChannels().size());
 
     client.unsubscribe("spot.tickers");
-    EXPECT_TRUE(client.channels().active_channels().empty());
+    EXPECT_TRUE(client.channels().activeChannels().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ TEST(GateWsClientTest, ClientUnsubscribeRemovesChannel)
 // ---------------------------------------------------------------------------
 TEST(GateWsClientTest, BuildWsAuthSignIsHexLowercase)
 {
-    const auto auth = detail::build_ws_auth("mykey", "mysecret", "spot.orders", "subscribe");
+    const auto auth = detail::buildWsAuth("mykey", "mysecret", "spot.orders", "subscribe");
     const auto sign = auth["SIGN"].get<std::string>();
 
     // 1. Should be exactly 128 hex chars

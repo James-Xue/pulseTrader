@@ -1,6 +1,6 @@
 // test_strategy_params.cpp — Unit tests for hot-reload strategy params (Layer 6 Strategy Engine)
 
-#include "strategy/strategy_params.hpp"
+#include "strategy/StrategyParams.hpp"
 
 #include <gtest/gtest.h>
 

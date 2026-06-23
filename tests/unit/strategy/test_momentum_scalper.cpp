@@ -1,6 +1,6 @@
 // test_momentum_scalper.cpp — Unit tests for EMA crossover strategy (Layer 6 Strategy Engine)
 
-#include "strategy/scalping/momentum_scalper.hpp"
+#include "strategy/scalping/MomentumScalper.hpp"
 
 #include <gtest/gtest.h>
 
@@ -54,7 +54,7 @@ TEST(MomentumScalper, OnTickIgnored)
     ticker.last = 50000.0;
 
     // Should not crash or produce side effects.
-    scalper->on_tick(ticker);
+    scalper->onTick(ticker);
 }
 
 TEST(MomentumScalper, OnOrderbookIgnored)
@@ -63,7 +63,7 @@ TEST(MomentumScalper, OnOrderbookIgnored)
     market::OrderBook book;
     book.symbol = "BTC_USDT";
 
-    scalper->on_orderbook(book);
+    scalper->onOrderbook(book);
 }
 
 TEST(MomentumScalper, InsufficientDataNoSignal)
@@ -71,15 +71,15 @@ TEST(MomentumScalper, InsufficientDataNoSignal)
     auto scalper = make_scalper(9.0, 21.0);
 
     std::vector<TradingSignal> received;
-    scalper->set_signal_callback([&](const TradingSignal &s)
+    scalper->setSignalCallback([&](const TradingSignal &s)
         {
             received.push_back(s);
         });
 
-    // on_kline without market feed — will return early because feed is null.
+    // onKline without market feed — will return early because feed is null.
     market::Kline kline;
     kline.closed = true;
-    scalper->on_kline(kline);
+    scalper->onKline(kline);
 
     EXPECT_TRUE(received.empty());
 }

@@ -8,12 +8,12 @@
 #   - param_advisor: delta validation + atomic StrategyParams writes
 
 add_library(pulse_ai STATIC
-    twitter_feed.cpp
-    news_feed.cpp
-    prompt_builder.cpp
-    ai_client.cpp
-    param_advisor.cpp
-    ai_pipeline.cpp
+    TwitterFeed.cpp
+    NewsFeed.cpp
+    PromptBuilder.cpp
+    AIClient.cpp
+    ParamAdvisor.cpp
+    AiPipeline.cpp
 )
 
 add_library(pulse::ai ALIAS pulse_ai)

@@ -20,19 +20,17 @@ target_link_libraries(pulsetrader
 )
 
 if(PULSE_ENABLE_WEBUI)
-    target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_WEBUI=1)
+    find_package(unofficial-usockets CONFIG REQUIRED)
+    find_package(unofficial-uwebsockets CONFIG REQUIRED)
 
-    target_include_directories(pulsetrader
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets
-    )
+    target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_WEBUI=1)
 
     target_link_libraries(pulsetrader
         PRIVATE
             pulse::webui
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
-            z
+            unofficial::uwebsockets::uwebsockets
+            unofficial::usockets::usockets
+            ZLIB::ZLIB
     )
 endif()
 

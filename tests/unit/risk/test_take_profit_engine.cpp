@@ -1,6 +1,6 @@
 // test_take_profit_engine.cpp — Unit tests for TakeProfitEngine (Layer 7 Risk Management)
 
-#include "risk/take_profit_engine.hpp"
+#include "risk/TakeProfitEngine.hpp"
 
 #include <gtest/gtest.h>
 
@@ -55,7 +55,7 @@ static TakeProfitConfig make_default_tp_config()
 TEST(TakeProfitEngine, DefaultConfigEmptyTracker)
 {
     TakeProfitEngine engine(make_default_tp_config());
-    EXPECT_EQ(0u, engine.tracked_count());
+    EXPECT_EQ(0u, engine.trackedCount());
 }
 
 TEST(TakeProfitEngine, EvaluateEmptyTrackerReturnsNothing)
@@ -73,22 +73,22 @@ TEST(TakeProfitEngine, RegisterAddsPosition)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
-    EXPECT_TRUE(engine.is_tracked("p1"));
-    EXPECT_EQ(1u, engine.tracked_count());
-    EXPECT_EQ(0, engine.next_target_index("p1"));
+    EXPECT_TRUE(engine.isTracked("p1"));
+    EXPECT_EQ(1u, engine.trackedCount());
+    EXPECT_EQ(0, engine.nextTargetIndex("p1"));
 }
 
 TEST(TakeProfitEngine, RemoveErasesPosition)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
-    engine.remove_position("p1");
+    engine.registerPosition("p1", pos);
+    engine.removePosition("p1");
 
-    EXPECT_FALSE(engine.is_tracked("p1"));
-    EXPECT_EQ(-1, engine.next_target_index("p1")); // Not found returns -1.
+    EXPECT_FALSE(engine.isTracked("p1"));
+    EXPECT_EQ(-1, engine.nextTargetIndex("p1")); // Not found returns -1.
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ TEST(TakeProfitEngine, BuyTargetTriggersAtPrice)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // 1% above 50000 = 50500. Price at 50600 should trigger.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 50600.0));
@@ -114,7 +114,7 @@ TEST(TakeProfitEngine, BuyTargetDoesNotTriggerBelowPrice)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // Price at 50400 is below 50500 target.
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 50400.0));
@@ -130,7 +130,7 @@ TEST(TakeProfitEngine, SellTargetTriggersAtPrice)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Sell, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // 1% below 50000 = 49500. Price at 49400 should trigger.
     auto positions = make_positions(make_position("p1", Side::Sell, 50000.0, 49400.0));
@@ -143,7 +143,7 @@ TEST(TakeProfitEngine, SellTargetDoesNotTriggerAbovePrice)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Sell, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // Price at 49600 is above 49500 target.
     auto positions = make_positions(make_position("p1", Side::Sell, 50000.0, 49600.0));
@@ -159,14 +159,14 @@ TEST(TakeProfitEngine, FirstTargetAdvancesIndex)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // Hit first target (50500).
     auto positions = make_positions(make_position("p1", Side::Buy, 50000.0, 50600.0));
     auto signals = engine.evaluate(positions);
     ASSERT_EQ(1u, signals.size());
     EXPECT_EQ(0, signals[0].target_index);
-    EXPECT_EQ(1, engine.next_target_index("p1"));
+    EXPECT_EQ(1, engine.nextTargetIndex("p1"));
 
     // Hit second target (51000).
     positions = make_positions(make_position("p1", Side::Buy, 50000.0, 51100.0));
@@ -174,14 +174,14 @@ TEST(TakeProfitEngine, FirstTargetAdvancesIndex)
     ASSERT_EQ(1u, signals.size());
     EXPECT_EQ(1, signals[0].target_index);
     EXPECT_DOUBLE_EQ(0.30, signals[0].close_fraction);
-    EXPECT_EQ(2, engine.next_target_index("p1"));
+    EXPECT_EQ(2, engine.nextTargetIndex("p1"));
 }
 
 TEST(TakeProfitEngine, AllTargetsConsumedNoMoreSignals)
 {
     TakeProfitEngine engine(make_default_tp_config());
     const auto pos = make_position("p1", Side::Buy, 50000.0, 50000.0);
-    engine.register_position("p1", pos);
+    engine.registerPosition("p1", pos);
 
     // Hit all 3 targets sequentially.
     auto p1 = make_positions(make_position("p1", Side::Buy, 50000.0, 50600.0));
@@ -193,7 +193,7 @@ TEST(TakeProfitEngine, AllTargetsConsumedNoMoreSignals)
     auto p3 = make_positions(make_position("p1", Side::Buy, 50000.0, 52600.0));
     (void)engine.evaluate(p3); // Target 2.
 
-    EXPECT_EQ(3, engine.next_target_index("p1"));
+    EXPECT_EQ(3, engine.nextTargetIndex("p1"));
 
     // Further evaluations produce no signals.
     auto p4 = make_positions(make_position("p1", Side::Buy, 50000.0, 60000.0));
@@ -211,8 +211,8 @@ TEST(TakeProfitEngine, IndependentTrackingPerPosition)
 
     const auto p1 = make_position("p1", Side::Buy, 50000.0, 50000.0);
     const auto p2 = make_position("p2", Side::Buy, 3000.0, 3000.0);
-    engine.register_position("p1", p1);
-    engine.register_position("p2", p2);
+    engine.registerPosition("p1", p1);
+    engine.registerPosition("p2", p2);
 
     // p1 hits first target (50500), p2 does not (needs 3030).
     auto positions = make_positions({
@@ -222,8 +222,8 @@ TEST(TakeProfitEngine, IndependentTrackingPerPosition)
     ASSERT_EQ(1u, signals.size());
     EXPECT_EQ("p1", signals[0].position_id);
 
-    EXPECT_EQ(1, engine.next_target_index("p1"));
-    EXPECT_EQ(0, engine.next_target_index("p2"));
+    EXPECT_EQ(1, engine.nextTargetIndex("p1"));
+    EXPECT_EQ(0, engine.nextTargetIndex("p2"));
 }
 
 TEST(TakeProfitEngine, MultiplePositionsTriggerSimultaneously)
@@ -232,8 +232,8 @@ TEST(TakeProfitEngine, MultiplePositionsTriggerSimultaneously)
 
     const auto p1 = make_position("p1", Side::Buy, 50000.0, 50000.0);
     const auto p2 = make_position("p2", Side::Buy, 3000.0, 3000.0);
-    engine.register_position("p1", p1);
-    engine.register_position("p2", p2);
+    engine.registerPosition("p1", p1);
+    engine.registerPosition("p2", p2);
 
     // Both hit their first targets.
     auto positions = make_positions({

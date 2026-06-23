@@ -154,7 +154,7 @@ TEST(SnapshotTypes, PositionsSnapshotToJson)
     snap.positions.push_back(pos);
 
     // Portfolio summary.
-    snap.portfolio.open_position_count = 1;
+    snap.portfolio.openPositionCount = 1;
     snap.portfolio.total_notional = 505.0;
     snap.portfolio.total_unrealized_pnl = 5.0;
     snap.portfolio.net_exposure = 505.0;
@@ -176,7 +176,7 @@ TEST(SnapshotTypes, PositionsSnapshotToJson)
     EXPECT_EQ("momentum_scalper_BTC_USDT", jp["strategy_id"].get<std::string>());
 
     // Verify portfolio summary.
-    EXPECT_EQ(1, j["portfolio"]["open_position_count"].get<int>());
+    EXPECT_EQ(1, j["portfolio"]["openPositionCount"].get<int>());
     EXPECT_DOUBLE_EQ(505.0, j["portfolio"]["total_notional"].get<double>());
 }
 
@@ -200,15 +200,15 @@ TEST(SnapshotTypes, OrdersSnapshotToJson)
     order.submit_time = Timestamp{ std::chrono::milliseconds{ 1700000000000 } };
     order.last_update_time = Timestamp{ std::chrono::milliseconds{ 1700000001000 } };
 
-    snap.active_orders.push_back(order);
+    snap.activeOrders.push_back(order);
 
     nlohmann::json j = snap;
 
-    // Verify active_orders array.
-    ASSERT_TRUE(j["active_orders"].is_array());
-    ASSERT_EQ(1u, j["active_orders"].size());
+    // Verify activeOrders array.
+    ASSERT_TRUE(j["activeOrders"].is_array());
+    ASSERT_EQ(1u, j["activeOrders"].size());
 
-    const auto &jo = j["active_orders"][0];
+    const auto &jo = j["activeOrders"][0];
     EXPECT_EQ("order_123", jo["order_id"].get<std::string>());
     EXPECT_EQ("BTC_USDT", jo["symbol"].get<std::string>());
     EXPECT_EQ("sell", jo["side"].get<std::string>());
@@ -217,9 +217,9 @@ TEST(SnapshotTypes, OrdersSnapshotToJson)
     EXPECT_DOUBLE_EQ(0.002, jo["filled_qty"].get<double>());
     EXPECT_EQ("open", jo["status"].get<std::string>());
 
-    // Verify recent_reports is empty.
-    ASSERT_TRUE(j["recent_reports"].is_array());
-    EXPECT_TRUE(j["recent_reports"].empty());
+    // Verify recentReports is empty.
+    ASSERT_TRUE(j["recentReports"].is_array());
+    EXPECT_TRUE(j["recentReports"].empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +233,7 @@ TEST(SnapshotTypes, MetricsSnapshotUnavailable)
     // Default-constructed metrics must be unavailable.
     EXPECT_FALSE(snap.available);
     EXPECT_DOUBLE_EQ(0.0, snap.net_pnl);
-    EXPECT_EQ(0, snap.trade_count);
+    EXPECT_EQ(0, snap.tradeCount);
 
     nlohmann::json j = snap;
 
@@ -243,8 +243,8 @@ TEST(SnapshotTypes, MetricsSnapshotUnavailable)
     EXPECT_DOUBLE_EQ(0.0, j["win_rate"].get<double>());
     EXPECT_DOUBLE_EQ(0.0, j["avg_win_loss_ratio"].get<double>());
     EXPECT_DOUBLE_EQ(0.0, j["sharpe_ratio"].get<double>());
-    EXPECT_DOUBLE_EQ(0.0, j["max_drawdown"].get<double>());
-    EXPECT_EQ(0, j["trade_count"].get<int>());
+    EXPECT_DOUBLE_EQ(0.0, j["maxDrawdown"].get<double>());
+    EXPECT_EQ(0, j["tradeCount"].get<int>());
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +285,7 @@ TEST(SnapshotTypes, DashboardSnapshotToJson)
 
     snap.kline.symbol = "BTC_USDT";
 
-    snap.positions.portfolio.open_position_count = 2;
+    snap.positions.portfolio.openPositionCount = 2;
 
     snap.metrics.available = false;
 
@@ -320,7 +320,7 @@ TEST(SnapshotTypes, DashboardSnapshotToJson)
 
     // Verify nested panels have expected content.
     EXPECT_EQ("BTC_USDT", j["order_book"]["symbol"].get<std::string>());
-    EXPECT_EQ(2, j["positions"]["portfolio"]["open_position_count"].get<int>());
+    EXPECT_EQ(2, j["positions"]["portfolio"]["openPositionCount"].get<int>());
 
     // Verify strategies array.
     ASSERT_TRUE(j["strategies"]["strategies"].is_array());

@@ -15,10 +15,10 @@
 //   AI_MODEL       — model identifier (e.g. "claude-sonnet-4-6")
 //   AI_API_KEY     — API key for the chosen backend
 
-#include "ai/ai_pipeline.hpp"
+#include "ai/AiPipeline.hpp"
 #include "core/config.hpp"
-#include "logging/logger.hpp"
-#include "strategy/strategy_params.hpp"
+#include "logging/Logger.hpp"
+#include "strategy/StrategyParams.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -182,9 +182,9 @@ int main(int argc, char *argv[])
     {
         const auto &r = value(result);
         std::cout << "\n--- Analysis Result ---\n";
-        std::cout << "Sentiment:      " << to_string(r.sentiment) << "\n";
+        std::cout << "Sentiment:      " << toString(r.sentiment) << "\n";
         std::cout << "Direction Bias: " << r.direction_bias << "\n";
-        std::cout << "Volatility:     " << to_string(r.volatility) << "\n";
+        std::cout << "Volatility:     " << toString(r.volatility) << "\n";
         std::cout << "Confidence:     " << r.confidence << "\n";
 
         std::cout << "\n--- Parameters (After) ---\n";

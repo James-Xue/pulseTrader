@@ -1,8 +1,8 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-21
-> 文件大小：11727 字符 / 20000 字符。更新本文件后必须重新计算并同步这一行。
-> 历史细节已迁移至 `project-memory-archive.md`
+> Last updated: 2026-06-23
+> File size: 15950 chars / 20000 chars. Must recalculate and sync this line after updating this file.
+> Historical details migrated to `project-memory-archive.md`
 
 ## Overview
 
@@ -32,7 +32,7 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **540 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27
+- **547 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 + supertrend_scalper 7
 - 513 without SQLITE · 475 without WEBUI or SQLITE
 
 ### Milestones
@@ -91,64 +91,71 @@
   - `on_kline()`: logs "Warming up: X/N candles accumulated" every 30s when insufficient data for EMA/BB computation
   - New members: `last_warmup_log_ms_`, `last_no_data_log_ms_` in both `.hpp` headers
 - **Aggregator threshold lowered** — `trading.toml` `signal_aggregator_threshold` from 0.7 → 0.6 to match single-strategy min_confidence, preventing valid signals from being silently dropped
-- **OPERATIONAL_GUIDE.md 更新** — §4.4 添加策略预热期说明（日志示例 + "至少等 25 分钟"）、§5.1 更新 threshold 调优说明、新增 Q7"启动后一直没有下单？"排查清单
+- **OPERATIONAL_GUIDE.md updated** — §4.4 added strategy warmup period explanation (log examples + "wait at least 25 minutes"), §5.1 updated threshold tuning guidance, added Q7 "No orders placed after startup?" troubleshooting checklist
 
 ### Architecture Review Fixes (2026-06-20)
-- **#1 PnL 接通 DrawdownGuard** (`c857e21`): `close_position()` 返回 `optional<double>` 已实现 PnL，main.cpp 累加后传给 `drawdown_guard.record_pnl()`。回撤保护现已生效。
-- **#2 AI 反馈回路接通** (`786e9f8`): `StrategyManager.all_params()` 收集每个策略的真实 params 指针，`AiPipeline::run()` 改为 `vector<StrategyParams*>&`，ParamAdvisor 循环写入所有策略的 atomic params。
-- **#3 stod 防崩溃** (`7c052cf`): 新增 `safe_parse_double()` (基于 `std::from_chars`，无异常，locale-independent)，替换 34 处 `std::stod` 调用 + 10 个新测试。测试总数 513。
+- **#1 PnL Wired to DrawdownGuard** (`c857e21`): `close_position()` returns `optional<double>` with realized PnL; main.cpp accumulates it and passes to `drawdown_guard.record_pnl()`. Drawdown protection is now active.
+- **#2 AI Feedback Loop Wired** (`786e9f8`): `StrategyManager.all_params()` collects real params pointers from each strategy; `AiPipeline::run()` changed to accept `vector<StrategyParams*>&`; ParamAdvisor iterates and writes to all strategies' atomic params.
+- **#3 stod Crash Prevention** (`7c052cf`): Added `safe_parse_double()` (based on `std::from_chars`, exception-free, locale-independent), replaced 34 `std::stod` calls + 10 new tests. Total tests 513.
 
 ### Testnet URL Auto-Switch Fix (2026-06-21)
-- **问题**: `testnet=true` 时只有 REST URL 切换到测试网，WS URL 保持主网（私有频道认证失败）
-- **方案**: `config_loader.cpp` 调整加载顺序 — 先读 `testnet` flag → 按网络模式设 URL 默认值 → 再用 `find_or` 加载 URL 字段
-- **效果**: `testnet=true` 时 REST/Spot WS/Futures WS 全部自动切换为测试网地址；显式 TOML URL 可覆盖（中国用户回退主网 WS）
-- **改动**: `config.hpp` 新增 `pulse::url` 命名空间（6 个 URL 常量）; `config_loader.cpp` 调整 `parse_exchange()` 加载顺序; `main.cpp` 删除旧 override 块 + banner 显示全部 3 URL; `trading.toml` 简化（删除显式 URL）
-- **新增 4 测试**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
-- **笔记本环境搭建**: apt 安装 libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0（~/.local）
-- 532 测试全绿（原 528 + 4 新测试）
+- **Problem**: When `testnet=true`, only the REST URL switched to testnet; WS URL stayed on mainnet (private channel auth failures)
+- **Solution**: `config_loader.cpp` adjusted load order — read `testnet` flag first → set URL defaults by network mode → then load URL fields with `find_or`
+- **Result**: When `testnet=true`, REST/Spot WS/Futures WS all auto-switch to testnet addresses; explicit TOML URLs can override (China users falling back to mainnet WS)
+- **Changes**: `config.hpp` added `pulse::url` namespace (6 URL constants); `config_loader.cpp` adjusted `parse_exchange()` load order; `main.cpp` removed old override block + banner displays all 3 URLs; `trading.toml` simplified (removed explicit URLs)
+- **Added 4 tests**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
+- **Laptop environment setup**: apt install libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0 (~/.local)
+- 532 tests all green (original 528 + 4 new tests)
 
-### Testnet WS CloudFront TLS 不兼容 (2026-06-21)
-- **问题**: 测试网行情 WS `wss://ws-testnet.gate.com/v4/ws/futures/usdt` 在 CloudFront 后面，TLS 握手时 HTTP/2 协商导致 websocketpp 0.8.3-dev 报 `Invalid HTTP status`
-- **诊断**: Python raw socket 直连返回 `HTTP/1.1 101` ✅，但 websocketpp 通过 ProxyTunnel 无法解析响应（服务器返回 3535 字节 Amazon 证书 + DOWNGRD 标记）
-- **方案**: `kTestnetFuturesWs` 改回主网 URL `wss://fx-ws.gateio.ws/v4/ws/usdt`（行情数据主网/测试网完全一致），REST 仍走测试网
-- **TOML**: `trading.toml` 显式列出 3 个 URL，便于用户按需覆盖
+### Testnet WS CloudFront TLS Incompatibility (2026-06-21)
+- **Problem**: Testnet market data WS `wss://ws-testnet.gate.com/v4/ws/futures/usdt` behind CloudFront; TLS handshake HTTP/2 negotiation causes websocketpp 0.8.3-dev to report `Invalid HTTP status`
+- **Diagnosis**: Python raw socket direct connection returns `HTTP/1.1 101` ✅, but websocketpp via ProxyTunnel cannot parse response (server returns 3535-byte Amazon certificate + DOWNGRD flag)
+- **Solution**: `kTestnetFuturesWs` changed back to mainnet URL `wss://fx-ws.gateio.ws/v4/ws/usdt` (market data is identical between mainnet/testnet), REST still uses testnet
+- **TOML**: `trading.toml` explicitly lists 3 URLs for easy user override
 - **commit**: `0e61877`
 
 ### System Heartbeat Logging (2026-06-21)
-- **问题**: 预热结束后系统完全静默，无法确认是否存活
-- **方案**: MarketFeed 添加 `FeedStats` 原子计数器（ticker/orderbook/kline），main loop 每 60 秒打印系统状态摘要
-- **日志格式**: `[heartbeat] uptime 1h23m | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)`
-- **性能**: 热路径仅 `fetch_add(1, relaxed)` ~1 cycle；60 秒一次日志在主线程（原本空闲）
-- **改动**: `market_feed.hpp` (+FeedStats +3 atomic) · `market_feed.cpp` (+计数器 +stats()) · `main.cpp` (+log_system_heartbeat +修改主循环)
-- 5 新测试 (FeedStats 初始化/并发/delta 计算)
-- 537 测试全绿
+- **Problem**: System completely silent after warmup, no way to confirm it's alive
+- **Solution**: MarketFeed added `FeedStats` atomic counters (ticker/orderbook/kline); main loop prints system status summary every 60 seconds
+- **Log format**: `[heartbeat] uptime 1h23m | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)`
+- **Performance**: Hot path only `fetch_add(1, relaxed)` ~1 cycle; one log per 60s on main thread (otherwise idle)
+- **Changes**: `market_feed.hpp` (+FeedStats +3 atomic) · `market_feed.cpp` (+counters +stats()) · `main.cpp` (+log_system_heartbeat +modified main loop)
+- 5 new tests (FeedStats initialization/concurrency/delta calculation)
+- 537 tests all green
 
-### WebUI K 线图修复 (2026-06-21)
-- **Bug #1 (致命)**: `on_kline_update()` 从 `full_frame["contract"]` 提取合约名，但 futures candlesticks 外层帧没有 `contract` 字段，合约名在 `result["n"]` 中 → 100% futures K 线数据被静默丢弃
-- **Bug #2 (高)**: K 线订阅 payload 顺序错误 `["BTC_USDT", "1m"]`，Gate.io 要求 `["1m", "BTC_USDT"]`（interval 在前）
-- **Bug #3 (低)**: `poll_klines()` 仅在 `open_time` 变化时推送快照（~60 秒一次），当前 K 线的 OHLCV 变化不反映到前端。新增 `last_kline_close_` map 检测价格变动
-- **分析文档**: `docs/kline-bug-analysis-2026-06-21.md`
-- 3 新测试 (spot/futures kline JSON 格式 + payload 顺序)
-- 540 测试全绿
+### WebUI K-Line Chart Fix (2026-06-21)
+- **Bug #1 (Critical)**: `on_kline_update()` extracts contract name from `full_frame["contract"]`, but futures candlestick outer frame has no `contract` field — contract name is in `result["n"]` → 100% of futures K-line data silently dropped
+- **Bug #2 (High)**: K-line subscription payload order wrong `["BTC_USDT", "1m"]`; Gate.io requires `["1m", "BTC_USDT"]` (interval first)
+- **Bug #3 (Low)**: `poll_klines()` only pushes snapshot on `open_time` change (~every 60s); OHLCV changes in the current candle are not reflected to the frontend. Added `last_kline_close_` map to detect price changes
+- **Analysis doc**: `docs/kline-bug-analysis-2026-06-21.md`
+- 3 new tests (spot/futures kline JSON format + payload order)
+- 540 tests all green
 
 ### Account Balance Display (2026-06-21)
 - **AccountBalance struct**: total, available, unrealised_pnl, position_margin, order_margin, currency
 - **REST parsing**: `GateRestClient::get_futures_account_balance()` — parses Gate.io futures account JSON (all values as strings → safe_parse_double)
-- **DashboardState**: 10 秒轮询 REST 获取账户余额，存入 `AccountSnapshot`
-- **WebUI 顶部状态栏**: Total / Available / Unrealized PnL / Margin Used（深色主题，10 秒刷新）
-- **心跳日志**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
-- `Result<T>` 是 `std::variant<T, PulseError>` — 用 `ok()` / `value()` / `error()` 而非 `has_value()`
-- 540 测试全绿
+- **DashboardState**: 10-second REST polling for account balance, stored in `AccountSnapshot`
+- **WebUI top status bar**: Total / Available / Unrealized PnL / Margin Used (dark theme, 10s refresh)
+- **Heartbeat log**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
+- `Result<T>` is `std::variant<T, PulseError>` — use `ok()` / `value()` / `error()`, not `has_value()`
+- 547 tests all green
+
+### Naming Convention Refactoring (2026-06-23)
+- **Commit `cd8a4d5`**: Functions/methods snake_case → camelCase (~210 renames), member variables `trailing_underscore_` → `m_camelCase` prefix (~47 classes). 137 files, ±3271 lines. Exempt: `to_json`/`from_json` (ADL), TEST_F names, pure-data struct fields.
+- **Commit `6309be0`**: File names renamed to match primary class name (PascalCase). 80 files (40 .hpp + 40 .cpp), e.g. `order_executor.hpp` → `OrderExecutor.hpp`. All `#include` paths and CMakeLists.txt updated. 7+ multi-type modules kept as-is (`config.hpp`, `types.hpp`, `risk_types.hpp`, etc.).
+- **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
+- **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
+- AGENTS.md updated with new naming + file naming rules. 547 tests all green.
 
 ### Next Steps
-- ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` 原子预留模式，单次 unique_lock 替代 3 次独立 shared_lock。`RiskEvalResult` 新增 `reservation_id`，`main.cpp` 失败路径 `cancel_reservation()`，成功路径自动消耗。5 新测试。
-- ✅ #5 OrderTracker 写锁下回调 — "锁内收集，锁外执行"模式：`process_order_update()` 和 `poll_order_status()` 的 `completion_callback_` 在 unique_lock 释放后调用。`set_completion_callback()` 加锁保护。新增 `test_simulate_ws_update()` / `test_try_shared_lock()` 测试接口。3 新测试。
-- ✅ #6 ProxyTunnel 提取 — 373 行网络代码从 `gate_ws_client.cpp` 提取为 `proxy_tunnel.hpp/.cpp`。修复 2 个隐藏 bug：(1) `handle_connection` 线程从 `.detach()` 改为可 join；(2) relay socket/thread 注册合并为单个 lock_guard 作用域。删除 58 行死代码（SSL relay 重载）。7 新测试。
+- ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
+- ✅ #5 OrderTracker Callback Under Write Lock — "collect inside lock, execute outside lock" pattern: `completion_callback_` in `process_order_update()` and `poll_order_status()` called after unique_lock is released. `set_completion_callback()` protected by lock. Added `test_simulate_ws_update()` / `test_try_shared_lock()` test interfaces. 3 new tests.
+- ✅ #6 ProxyTunnel Extraction — 373 lines of network code extracted from `gate_ws_client.cpp` into `proxy_tunnel.hpp/.cpp`. Fixed 2 hidden bugs: (1) `handle_connection` thread changed from `.detach()` to joinable; (2) relay socket/thread registration merged into a single lock_guard scope. Removed 58 lines of dead code (SSL relay overloads). 7 new tests.
 - Run testnet for 1 week, collect strategy performance data
 - Verify signal quality and PnL in virtual fund environment
 - WebUI: http://127.0.0.1:8080 for real-time monitoring
 
-Then: P&L analysis → 小资金实盘 → production hardening
+Then: P&L analysis → small capital live trading → production hardening
 
 ## Config Structure
 
@@ -195,7 +202,8 @@ PulseConfig
 ## Code Conventions
 
 - `.clang-format`: Allman braces, 120 col, 4-space indent
-- Naming: PascalCase classes, snake_case functions/vars, kPascalCase constants, trailing_underscore_ privates
+- Naming: PascalCase classes (no underscores), camelCase functions/methods (no underscores), m_camelCase member variables, kPascalCase constants. Pure-data struct fields keep snake_case.
+- File naming: filenames match primary class name (e.g., `OrderExecutor.hpp` for `class OrderExecutor`). Multi-type modules keep descriptive names (`config.hpp`, `types.hpp`, `risk_types.hpp`).
 - Yoda conditions, mandatory braces, `Result<T>` = `std::variant<T, PulseError>`
 - `ExchangeConfig.restBaseUrl` = host only (`https://api.gateio.ws`), path includes `/api/v4`
 

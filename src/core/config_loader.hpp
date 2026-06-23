@@ -5,12 +5,12 @@
 //   1. Read and parse TOML file via toml11
 //   2. Resolve all "from_env:VAR_NAME" string values
 //   3. Map TOML keys to PulseConfig struct fields
-//   4. Caller invokes validate_config() separately
+//   4. Caller invokes validateConfig() separately
 //
 // Thread-safety: safe to call from any thread; reads env vars via std::getenv.
 
 #include "core/config.hpp"
-#include "core/error.hpp"
+#include "core/PulseError.hpp"
 
 #include <filesystem>
 #include <string>
@@ -26,6 +26,6 @@ namespace pulse
 ///
 /// @param path  Filesystem path to the .toml file.
 /// @return      Populated PulseConfig on success, PulseError on failure.
-[[nodiscard]] Result<PulseConfig> load_config_file(const std::filesystem::path &path);
+[[nodiscard]] Result<PulseConfig> loadConfigFile(const std::filesystem::path &path);
 
 } // namespace pulse

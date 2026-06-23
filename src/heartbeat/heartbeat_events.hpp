@@ -10,7 +10,7 @@
 // The TaskQueue processes callable tasks (not events directly); events
 // are informational wrappers used in logging and callbacks.
 
-#include "ai/analysis_result.hpp"
+#include "ai/AnalysisResult.hpp"
 
 #include <cstdint>
 #include <string>
