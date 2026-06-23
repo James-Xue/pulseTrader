@@ -72,6 +72,17 @@ void DashboardState::start()
 
 void DashboardState::stop()
 {
+    // Cancel any in-flight REST requests so curl_easy_perform aborts early
+    // (via CURLOPT_XFERINFOFUNCTION) instead of blocking up to restTimeoutMs.
+    if (nullptr != m_restClient)
+    {
+        m_restClient->cancelRequests();
+    }
+    if (nullptr != m_spotRestClient)
+    {
+        m_spotRestClient->cancelRequests();
+    }
+
     // Request cooperative cancellation.
     m_pollThread.request_stop();
 

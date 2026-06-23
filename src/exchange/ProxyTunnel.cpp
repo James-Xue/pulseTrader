@@ -227,6 +227,17 @@ void ProxyTunnel::stop()
         m_relaySockets.clear();
     }
 
+    // Close the connecting socket to unblock asio::connect() in handleConnection
+    {
+        std::lock_guard lock(m_relayMutex);
+        if (m_connectingSock && m_connectingSock->is_open())
+        {
+            asio::error_code ec;
+            m_connectingSock->close(ec);
+        }
+        m_connectingSock.reset();
+    }
+
     // Bug fix #1: Join the connection thread (handleConnection)
     if (m_connectionThread.joinable())
     {
@@ -250,21 +261,27 @@ void ProxyTunnel::handleConnection(asio::ip::tcp::socket local_sock,
     try
     {
         // 1. Connect to the HTTP proxy
-        asio::ip::tcp::socket remote_sock(m_ioCtx);
+        // Track the socket so stop() can close it to unblock asio::connect()
+        auto remote_ptr = std::make_shared<asio::ip::tcp::socket>(m_ioCtx);
+        {
+            std::lock_guard lock(m_relayMutex);
+            m_connectingSock = remote_ptr;
+        }
+
         asio::ip::tcp::resolver resolver(m_ioCtx);
         auto endpoints = resolver.resolve(proxy_host, proxy_port);
-        asio::connect(remote_sock, endpoints);
+        asio::connect(*remote_ptr, endpoints);
 
         // 2. Send HTTP CONNECT request to establish tunnel
         const std::string target = m_targetHost + ":" + std::to_string(m_targetPort);
         const std::string connect_req = "CONNECT " + target + " HTTP/1.1\r\n"
                                         "Host: " + target + "\r\n"
                                         "Proxy-Connection: keep-alive\r\n\r\n";
-        asio::write(remote_sock, asio::buffer(connect_req));
+        asio::write(*remote_ptr, asio::buffer(connect_req));
 
         // 3. Read proxy response — expect "HTTP/1.x 200 Connection established"
         asio::streambuf response_buf;
-        asio::read_until(remote_sock, response_buf, "\r\n\r\n");
+        asio::read_until(*remote_ptr, response_buf, "\r\n\r\n");
         std::istream response_stream(&response_buf);
         std::string status_line;
         std::getline(response_stream, status_line);
@@ -277,9 +294,15 @@ void ProxyTunnel::handleConnection(asio::ip::tcp::socket local_sock,
 
         PULSE_LOG_DEBUG("exchange", "WS proxy tunnel established to {}", target);
 
+        // Clear connecting socket — it's now tracked in m_relaySockets
+        {
+            std::lock_guard lock(m_relayMutex);
+            m_connectingSock.reset();
+        }
+
         // 4. Bidirectional relay using blocking I/O in two threads
         auto local_ptr = std::make_shared<asio::ip::tcp::socket>(std::move(local_sock));
-        auto remote_ptr = std::make_shared<asio::ip::tcp::socket>(std::move(remote_sock));
+        // remote_ptr already created above and used for connect/handshake
 
         // Bug fix #2: Register sockets and threads in a single locked section.
         // Previously there was a gap between socket registration and thread

@@ -20,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <string>
 
 namespace pulse::exchange
@@ -60,11 +61,18 @@ class GateRestClient
 
     GateRestClient(const GateRestClient &) = delete;
     GateRestClient &operator=(const GateRestClient &) = delete;
-    GateRestClient(GateRestClient &&) noexcept;
-    GateRestClient &operator=(GateRestClient &&) noexcept;
+    GateRestClient(GateRestClient &&other) noexcept;
+    GateRestClient &operator=(GateRestClient &&other) noexcept;
 
     /// Returns true if API key and secret are both non-empty.
     [[nodiscard]] bool hasCredentials() const;
+
+    /// Signal all in-flight curl requests to abort early.
+    ///
+    /// Uses CURLOPT_XFERINFOFUNCTION to cancel curl_easy_perform() at the
+    /// next progress callback tick (~1 s).  Thread-safe — called from the
+    /// main thread during shutdown while the poll thread is mid-request.
+    void cancelRequests();
 
     // -----------------------------------------------------------------------
     // Public endpoints (no authentication required)
@@ -161,6 +169,9 @@ class GateRestClient
   private:
     ExchangeConfig m_config;
     MarketType m_marketType;
+
+    /// When set to true, in-flight curl requests abort at the next progress tick.
+    std::atomic<bool> m_abortRequested{ false };
 
     /// Perform a single HTTP request (no retry). Returns raw HttpResponse.
     [[nodiscard]] HttpResponse doRequest(

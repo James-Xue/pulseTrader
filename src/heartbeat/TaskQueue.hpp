@@ -46,6 +46,13 @@ class TaskQueue
     /// Any pending tasks are discarded.
     ~TaskQueue();
 
+    /// Explicitly stop the worker thread before destructor runs.
+    ///
+    /// Signals the worker to stop, wakes it from the condition variable,
+    /// and joins the thread.  Safe to call multiple times.  After stop(),
+    /// the destructor join is a no-op (already joined).
+    void stop();
+
     // Non-copyable, non-movable (owns a thread).
     TaskQueue(const TaskQueue &) = delete;
     TaskQueue &operator=(const TaskQueue &) = delete;
