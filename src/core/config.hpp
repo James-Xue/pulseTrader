@@ -98,6 +98,7 @@ struct ExchangeConfig
     std::string wsUrl = url::kMainnetSpotWs;             ///< Spot WebSocket endpoint.
     std::string futuresWsUrl = url::kMainnetFuturesWs;   ///< Futures WebSocket endpoint (USDT-settled).
     std::string proxyUrl;                                ///< HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Falls back to HTTPS_PROXY env var.
+    bool proxyUrlExplicit = false;                       ///< True if proxyUrl was explicitly set in config (even to empty string).
     std::uint32_t restTimeoutMs = 10'000;    ///< Per-request timeout in milliseconds.
     std::uint32_t maxRetries = 3;            ///< Retries before giving up on a request.
     std::uint32_t wsReconnectBaseMs = 1'000; ///< Base backoff for WS reconnection (ms).

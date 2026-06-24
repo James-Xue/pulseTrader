@@ -223,7 +223,15 @@ PulseError parseExchange(const toml::value &root, ExchangeConfig &out)
     // Step 4: Load remaining fields.
     out.apiKey = toml::find_or(sec, "apiKey", out.apiKey);
     out.apiSecret = toml::find_or(sec, "apiSecret", out.apiSecret);
-    out.proxyUrl = toml::find_or(sec, "proxyUrl", out.proxyUrl);
+    try
+    {
+        out.proxyUrl = toml::find<std::string>(sec, "proxyUrl");
+        out.proxyUrlExplicit = true;  // Explicitly set (even if empty)
+    }
+    catch (const std::out_of_range&)
+    {
+        // Key not present — will fall back to env vars in detectProxyUrl()
+    }
     out.restTimeoutMs =
         static_cast<std::uint32_t>(
             toml::find_or(sec, "restTimeoutMs",

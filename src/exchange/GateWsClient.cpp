@@ -623,22 +623,16 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
                 break;
             }
 
-            // When using proxy tunnel, override the URI host/port to the real server.
-            // websocketpp uses m_uri->get_host() for TLS SNI (in pre_init),
-            // and uri->get_host_port() for the HTTP Host header (in handshake).
-            // Without this, SNI = 127.0.0.1 and the server rejects the handshake.
-            if (use_proxy)
-            {
-                auto old_uri = con->get_uri();
-                auto new_uri = websocketpp::lib::make_shared<websocketpp::uri>(
-                    true,                    // secure (wss://)
-                    real_host,               // real server hostname for SNI
-                    static_cast<uint16_t>(443),
-                    old_uri->get_resource()  // keep the same path
-                );
-                con->set_uri(new_uri);
-                PULSE_LOG_DEBUG("exchange", "URI host overridden to: {}:443", real_host);
-            }
+            // Note: We do NOT override the URI host/port when using a proxy tunnel.
+            // Previously this code set con->set_uri() to the real server hostname for SNI,
+            // but that caused websocketpp to connect to the real server instead of the
+            // local tunnel endpoint (127.0.0.1:port), breaking the proxy entirely.
+            //
+            // SNI is not needed here because:
+            // 1. The TLS handler uses verify_none when use_proxy=true (no cert verification)
+            // 2. Gate.io accepts connections with SNI=127.0.0.1 or no SNI
+            //
+            // The tunnel URL (wss://127.0.0.1:port) is used for both TCP connection and TLS.
 
             // 6. Connect and run
             client.connect(con);
