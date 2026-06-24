@@ -413,6 +413,12 @@ tbody tr:hover {
     overflow: auto;
 }
 
+/* === Order Book === */
+#panel-orderbook .panel-content {
+    max-height: 680px;
+    overflow: auto;
+}
+
 .kline-header {
     display: flex;
     align-items: center;
