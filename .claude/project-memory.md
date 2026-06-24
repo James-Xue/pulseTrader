@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-06-23
-> File size: 15950 chars / 20000 chars. Must recalculate and sync this line after updating this file.
+> File size: 17950 chars / 20000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -146,6 +146,26 @@
 - **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
 - **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
 - AGENTS.md updated with new naming + file naming rules. 547 tests all green.
+
+### WebUI Candlestick Chart (2026-06-23)
+- **Commit `2e5f831`**: Replaced K-line HTML table with TradingView Lightweight Charts v5 candlestick chart.
+- `frontend/lightweight-charts.standalone.production.js` — vendored standalone build (196KB)
+- `renderKline()` → dual-view: `renderKlineChart()` (candlestick + volume histogram) + `renderKlineTable()` (original OHLCV table)
+- Chart/Table toggle buttons (chart is default). Dark theme matching dashboard.
+- Real-time: incremental `update()` for same-bar price changes, `setData()` for new candles.
+- **Commit `c88acf3`**: Fixed v5 API — `addSeries(LightweightCharts.CandlestickSeries, opts)` instead of removed `addCandlestickSeries()`.
+
+### Fast Ctrl+C Shutdown (2026-06-23)
+- **Commit `0c1a7ed`**: Fixed 3 blocking points that caused 20-90s shutdown delays:
+  1. **DashboardState REST** — `curl_easy_perform` blocked up to 20s. Fix: `CURLOPT_XFERINFOFUNCTION` progress callback checks `m_abortRequested`; `DashboardState::stop()` calls `cancelRequests()` before join. Added 5s connect timeout.
+  2. **TaskQueue** — `HeartbeatScheduler::stop()` didn't stop TaskQueue (deferred to destructor, up to 90s). Fix: added public `TaskQueue::stop()`, called explicitly in `HeartbeatScheduler::stop()`.
+  3. **ProxyTunnel** — `handleConnection`'s `remote_sock` was stack-local, unreachable by `stop()`. Fix: tracked as `m_connectingSock` member, `stop()` closes it to unblock `asio::connect()`.
+- `GateRestClient`: custom move ops (atomic not default-movable), `cancelRequests()`, retry loop checks abort flag.
+- Shutdown: ~20s worst case → <1s typical.
+
+### vcpkg/Linux Build Compatibility (2026-06-23)
+- **Commit `a812333`**: Remote commit from hehao machine changed WebUI CMake to use vcpkg `unofficial-usockets`/`unofficial-uwebsockets` and websocketpp `get_io_service()`. Reverted 4 CMakeLists.txt + 2 source files to use vendored `third_party/` and `get_io_context()`.
+- Linux build (apt + vendored uWebSockets) confirmed working. 547 tests all green.
 
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.

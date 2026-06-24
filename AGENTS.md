@@ -22,21 +22,25 @@ L2 Logging (cross-cutting) · L9 WebUI (cross-cutting, read-only, optional)
 ## Build & Run
 
 ```bash
-# Configure (first time)
+# Configure with vcpkg (first time)
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+# Configure without vcpkg (Linux: apt + vendored uWebSockets)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
+      -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON
 
 # Build
 cmake --build build -j$(nproc)
 
-# Run tests
+# Run tests (547 tests)
 ctest --test-dir build --output-on-failure
 
 # Optional features
 cmake -B build -S . -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON -DPULSE_ENABLE_TOML=ON
 ```
 
-Dependencies are managed by **vcpkg** — never add system packages; always add to `vcpkg.json`.
+Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_party/`** (Linux alternative). On Linux, uWebSockets/uSockets are vendored in `third_party/`; do NOT add them to `vcpkg.json` if building without vcpkg.
 
 ---
 
@@ -119,7 +123,7 @@ All new code needs unit tests. Integration tests are required for any cross-laye
 2. **Don't add new exchange abstractions.** pulseTrader targets Gate.io only — depth of integration over breadth.
 3. **Don't put blocking I/O on the market data thread.** AI calls, file writes, and REST requests go on dedicated background threads.
 4. **Don't parse LLM responses as free text.** AI output must conform to the fixed JSON schema in `analysis_result.hpp`. Validation failure → discard, keep old params.
-5. **Don't add dependencies to `vcpkg.json` without checking the optional-feature flag.** New HTTP libraries, JSON parsers, etc. should reuse existing deps.
+5. **Don't add dependencies to `vcpkg.json` without checking the optional-feature flag.** New HTTP libraries, JSON parsers, etc. should reuse existing deps. Also note: Linux builds use apt + vendored `third_party/` — CMakeLists.txt changes for vcpkg targets will break Linux builds.
 
 ---
 
@@ -129,6 +133,7 @@ All new code needs unit tests. Integration tests are required for any cross-laye
 - `docs/highLevelArchitecture.md` — condensed visual overview
 - `docs/howItWorks.md` — narrative walkthrough
 - `docs/implementation-roadmap.md` — phased build order (L2→L1→L3→L8→L7→L6→L5+L4→L9)
+- `frontend/` — WebUI SPA (vanilla JS) with TradingView Lightweight Charts v5 for K-line candlestick chart
 
 When making architectural changes, update `architecture.md` to keep it as the source of truth.
 

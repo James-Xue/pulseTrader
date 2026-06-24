@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-503%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-547%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -13,9 +13,9 @@
 
 pulseTrader is a C++20 quantitative trading framework purpose-built for high-frequency scalping on Gate.io. It combines a low-latency market data pipeline with a periodic AI analysis cycle that ingests live social and news signals, calls a Large Language Model, and automatically nudges strategy parameters in response to changing market conditions — all without interrupting the hot WebSocket path.
 
-The framework ships three production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
+The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in ~1s via io_context stop + ProxyTunnel poll-based cleanup), WebUI with localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
+**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), WebUI with real-time TradingView candlestick chart, localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
 
 ---
 
@@ -43,7 +43,7 @@ For the full architecture document including module responsibilities, key files,
 
 - **5-minute AI heartbeat** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread.
 - **Real-time social signal ingestion** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed directly into each AI prompt.
-- **Three built-in scalping strategies** — `MomentumScalper` (EMA crossover), `OrderBookScalper` (bid/ask imbalance), and `MeanReversionScalper` (Bollinger Band reversion), each running on its own `std::jthread`.
+- **Four built-in scalping strategies** — `MomentumScalper` (EMA crossover), `OrderBookScalper` (bid/ask imbalance), `MeanReversionScalper` (Bollinger Band reversion), and `SuperTrendScalper` (ATR trend reversal), each running on its own `std::jthread`.
 - **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights updated after each AI cycle.
 - **Gate.io spot + futures integration** — Native REST (HMAC-SHA512 signed) and WebSocket channels for both spot and USDT perpetual futures, with EndpointRouter for market-type-aware routing, incremental order book updates, proxy tunnel support, and dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker).
 - **Testnet support** — `PULSE_NETWORK=testnet` env switch routes REST API to Gate.io testnet (`api-testnet.gateapi.io`) for virtual fund trading while using mainnet WebSocket for identical real-time market data. TOML `testnet = true` in `[exchange]` section for file-driven config. Validator rejects spot strategies in testnet mode (futures-only).
@@ -52,8 +52,8 @@ For the full architecture document including module responsibilities, key files,
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with real-time monitoring, tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
-- **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (~1s: SIGINT → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
+- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with real-time TradingView candlestick chart (Chart/Table toggle), tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
+- **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
 
 ---
 
@@ -69,6 +69,7 @@ For the full architecture document including module responsibilities, key files,
 | Async I/O / timers | asio (standalone) | ≥ 1.28 |
 | WebSocket | websocketpp | ≥ 0.8.2 |
 | WebUI server | uWebSockets | vendored |
+| Charting | TradingView Lightweight Charts | ≥ 5.0 |
 | Config | toml11 | ≥ 4.0 |
 | SQLite | SQLiteCpp | ≥ 3.3 |
 | Testing | GTest | ≥ 1.14 |
@@ -85,7 +86,7 @@ pulseTrader/
 │   └── pulsetrader/        # Trading engine entry point (main.cpp, 9-layer wiring)
 ├── cmake/                  # CMake helper modules
 ├── docs/                   # Architecture, operational guide, API documentation
-├── frontend/               # WebUI SPA (index.html, style.css, app.js)
+├── frontend/               # WebUI SPA (index.html, style.css, app.js, lightweight-charts)
 ├── src/
 │   ├── ai/                 # Layer 4 — AI analysis pipeline
 │   ├── app/                # Application-level helpers
@@ -96,7 +97,7 @@ pulseTrader/
 │   ├── logging/            # Layer 2 — spdlog async logging
 │   ├── market/             # Layer 3 — Market data pipeline
 │   ├── risk/               # Layer 7 — Risk management (6 modules)
-│   ├── strategy/           # Layer 6 — Strategy engine (3 strategies)
+│   ├── strategy/           # Layer 6 — Strategy engine (4 strategies)
 │   ├── trade_recorder/     # SQLite trade recording
 │   └── webui/              # Layer 9 — uWebSockets dashboard server
 ├── tests/
@@ -120,7 +121,7 @@ pulseTrader/
 ### Prerequisites
 
 - **CMake** ≥ 3.20
-- **vcpkg** (with `VCPKG_ROOT` environment variable set)
+- **vcpkg** (with `VCPKG_ROOT` environment variable set), **or** on Linux: apt-installed `libasio-dev`, `libwebsocketpp-dev`, `libsqlitecpp-dev` + vendored `third_party/uWebSockets`
 - A **C++20-capable compiler** (GCC ≥ 12, Clang ≥ 15, or MSVC ≥ 19.34)
 - A **Gate.io API key and secret** with spot trading permissions
 - An **OpenAI API key** (GPT-4o) or **Anthropic API key** (Claude) for the AI analysis layer *(optional)*
@@ -141,9 +142,27 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (503 tests)
+# 4. Run tests (547 tests)
 ctest --test-dir build --output-on-failure
 ```
+
+<details>
+<summary><strong>Linux build without vcpkg</strong> (apt + vendored uWebSockets)</summary>
+
+```bash
+# Install system dependencies
+sudo apt install libasio-dev libwebsocketpp-dev libsqlitecpp-dev \
+                 libcurl4-openssl-dev libssl-dev nlohmann-json3-dev \
+                 libspdlog-dev libfmt-dev libgtest-dev libtoml11-dev
+
+# Configure (no vcpkg toolchain file needed)
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON
+
+# Build
+cmake --build build -j$(nproc)
+```
+</details>
 
 Optional CMake flags:
 
@@ -201,7 +220,7 @@ cp trading.toml.example trading.toml
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 503 unit tests
+./run.sh test        # Run all 547 unit tests
 ```
 
 ---
