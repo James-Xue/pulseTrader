@@ -1,5 +1,7 @@
 # Kline Display Bug Analysis — 2026-06-21
 
+> ✅ **RESOLVED** (2026-06-23) — All 3 bugs fixed. K-line panel upgraded to TradingView Lightweight Charts v5 candlestick chart with Chart/Table toggle, volume histogram, and real-time incremental updates.
+
 ## Symptom
 
 WebUI K-line chart shows no candle data despite the trading engine running for hours

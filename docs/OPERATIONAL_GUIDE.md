@@ -2,7 +2,7 @@
 
 > This document is intended for operators, explaining how to advance pulseTrader from its current state to a production-ready trading system.
 >
-> Last updated: 2026-06-20 (Ctrl+C graceful shutdown fix + WebUI token cache + auth-free mode)
+> Last updated: 2026-06-23 (Candlestick chart + fast Ctrl+C shutdown + SuperTrendScalper)
 
 ---
 
@@ -31,12 +31,12 @@
 | L3 | Market Data | Market data hot path (latency-sensitive, dual market) | ✅ | 38 |
 | L4 | AI Analysis | Social/news → LLM → parameter tuning | ✅ | 43 |
 | L5 | Heartbeat | 5-minute AI clock, TaskQueue | ✅ | 7 |
-| L6 | Strategy | EMA crossover / order book imbalance / Bollinger mean reversion | ✅ | 59 |
+| L6 | Strategy | EMA crossover / order book imbalance / Bollinger mean reversion / SuperTrend ATR | ✅ | 66 |
 | L7 | Risk Management | Position management / drawdown protection / rate limiting / stop-loss/take-profit / futures leverage risk control | ✅ | 104 |
 | L8 | Execution | Order lifecycle management (dual market) | ✅ | 26 |
 | L9 | WebUI | uWebSockets dark-themed SPA monitoring dashboard | ✅ | 57 |
 
-**503 tests all passing** | `main` branch only | Milestones M1–M13 all achieved
+**547 tests all passing** | `main` branch only | Milestones M1–M13 all achieved
 
 ### Currently Available Commands
 
@@ -46,10 +46,10 @@
 ./run.sh rest      # Test Gate.io REST connection (public + private endpoints)
 ./run.sh ws        # Test WebSocket real-time market data + private channels
 ./run.sh market    # Test market data pipeline (WS → L3 components)
-./run.sh strategy  # Test strategy engine (simulated market data driving 3 strategies)
+./run.sh strategy  # Test strategy engine (simulated market data driving 4 strategies)
 ./run.sh ai        # Test AI Pipeline (--mock mode, no real LLM calls)
 ./run.sh webui     # Start WebUI monitoring dashboard (browser http://localhost:8080)
-./run.sh test      # Run all 503 unit tests
+./run.sh test      # Run all 547 unit tests
 ```
 
 ### Trading Main Program (Completed)
@@ -701,8 +701,8 @@ Check the following checklist item by item:
 ├─────────────────────────────────────────────────────────┤
 │  Start:   ./run.sh trade (auto-loads trading.toml)      │
 │  Monitor: ./run.sh webui → http://localhost:8080        │
-│  Stop:    Ctrl+C (~1s graceful shutdown)                │
-│  Test:    ./run.sh test (537 unit tests)                │
+│  Stop:    Ctrl+C (<1s graceful shutdown)                │
+│  Test:    ./run.sh test (547 unit tests)                │
 │  Logs:    tail -f logs/*.log                            │
 ├─────────────────────────────────────────────────────────┤
 │  .env:         PULSE_NETWORK / API Key / Proxy          │

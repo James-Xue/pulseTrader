@@ -1,7 +1,7 @@
 # WebUI K-line Chart Not Displaying — Root Cause Analysis and Fix Plan
 
 > **Date**: 2026-06-20
-> **Status**: Analysis complete, pending fix
+> **Status**: ✅ **RESOLVED** (2026-06-23) — K-line panel replaced with TradingView Lightweight Charts v5 candlestick chart with Chart/Table toggle. Data pipeline bugs fixed in separate commits.
 > **Frontend symptom**: K-line Chart panel shows "Waiting for candle data..."
 
 ## 1. Full Data Pipeline Trace
