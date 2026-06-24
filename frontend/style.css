@@ -409,8 +409,8 @@ tbody tr:hover {
 
 /* === K-line Chart === */
 #panel-kline .panel-content {
-    max-height: 360px;
-    overflow: visible;
+    max-height: 680px;
+    overflow: auto;
 }
 
 .kline-header {
