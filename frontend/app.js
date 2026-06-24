@@ -317,7 +317,7 @@
                 + '<button class="kline-toggle active" onclick="window._pulseKlineToggle(\'chart\')">Chart</button>'
                 + '<button class="kline-toggle" onclick="window._pulseKlineToggle(\'table\')">Table</button>'
                 + '</div></div>'
-                + '<div id="kline-chart-container" style="width:100%;height:280px;"></div>';
+                + '<div id="kline-chart-container" style="width:100%;height:600px;"></div>';
             setContent('kline-content', html);
 
             container = document.getElementById('kline-chart-container');

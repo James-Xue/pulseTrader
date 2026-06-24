@@ -61,6 +61,13 @@ WsUrlParts parseWsUrl(const std::string &url)
 
 std::string detectProxyUrl(const ExchangeConfig &config)
 {
+    // If proxyUrl was explicitly set in config (even to empty string), use it directly
+    if (config.proxyUrlExplicit)
+    {
+        return config.proxyUrl;  // Empty means "no proxy"
+    }
+
+    // Otherwise, fall back to environment variables
     if (!config.proxyUrl.empty())
     {
         return config.proxyUrl;
@@ -292,7 +299,7 @@ void ProxyTunnel::handleConnection(asio::ip::tcp::socket local_sock,
             return;
         }
 
-        PULSE_LOG_DEBUG("exchange", "WS proxy tunnel established to {}", target);
+        PULSE_LOG_INFO("exchange", "WS proxy tunnel established to {}", target);
 
         // Clear connecting socket — it's now tracked in m_relaySockets
         {
