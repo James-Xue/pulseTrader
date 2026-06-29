@@ -330,7 +330,8 @@
                 layout: {
                     background: { type: 'solid', color: '#1a1a2e' },
                     textColor: '#a0a0c0',
-                    fontSize: 11
+                    fontSize: 11,
+                    attributionLogo: false
                 },
                 grid: {
                     vertLines: { color: 'rgba(15, 52, 96, 0.4)' },
