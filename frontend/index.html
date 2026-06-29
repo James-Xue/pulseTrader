@@ -16,9 +16,28 @@
         <!-- Header -->
         <header>
             <h1>pulseTrader</h1>
-            <div id="connection-status" class="status-disconnected">
-                <span class="status-dot"></span>
-                <span id="status-text">Disconnected</span>
+            <div class="header-right">
+                <!-- Menu bar -->
+                <div id="menu-bar" class="menu-bar">
+                    <button id="menu-panels-btn" class="menu-btn">☰ Panels ▾</button>
+                    <div id="menu-panels-dropdown" class="menu-dropdown hidden">
+                        <label class="menu-item"><input type="checkbox" data-panel="order-book" checked> Order Book</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="kline" checked> K-Line Chart</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="positions" checked> Positions</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="orders" checked> Orders</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="metrics" checked> PnL &amp; Metrics</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="ai-analysis" checked> AI Analysis</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="strategies" checked> Strategies</label>
+                        <label class="menu-item"><input type="checkbox" data-panel="risk" checked> Risk Status</label>
+                        <div class="menu-divider"></div>
+                        <button id="menu-reset-btn" class="menu-reset-btn">↺ Reset Layout</button>
+                    </div>
+                </div>
+                <!-- Connection status -->
+                <div id="connection-status" class="status-disconnected">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Disconnected</span>
+                </div>
             </div>
         </header>
 
