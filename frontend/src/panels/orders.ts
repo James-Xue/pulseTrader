@@ -76,8 +76,8 @@ export class OrdersPanel extends BasePanel<'orders'> {
     protected update(data: Orders): void {
         if (!data) return;
 
-        const active = data.active_orders || [];
-        const fills = (data.recent_reports || []).slice(0, MAX_RECENT_FILLS);
+        const active = data.activeOrders || [];
+        const fills = (data.recentReports || []).slice(0, MAX_RECENT_FILLS);
 
         // Active orders
         if (this.activeEl) {

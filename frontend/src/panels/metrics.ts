@@ -36,10 +36,10 @@ export class MetricsPanel extends BasePanel<'metrics'> {
     const sharpeClass = data.sharpe_ratio >= 1 ? 'positive' : data.sharpe_ratio < 0 ? 'negative' : '';
     grid.appendChild(this.metricCard('Sharpe Ratio', fmt(data.sharpe_ratio), sharpeClass));
 
-    const ddClass = data.max_drawdown > 3 ? 'negative' : '';
-    grid.appendChild(this.metricCard('Max Drawdown', fmtPct(data.max_drawdown), ddClass));
+    const ddClass = data.maxDrawdown > 0.03 ? 'negative' : '';
+    grid.appendChild(this.metricCard('Max Drawdown', fmtPct(data.maxDrawdown), ddClass));
 
-    grid.appendChild(this.metricCard('Trade Count', String(data.trade_count), ''));
+    grid.appendChild(this.metricCard('Trade Count', String(data.tradeCount), ''));
 
     this.container.innerHTML = '';
     this.container.appendChild(grid);
