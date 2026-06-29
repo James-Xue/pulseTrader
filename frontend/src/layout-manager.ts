@@ -5,6 +5,7 @@
 
 import {
     GoldenLayout,
+    ContentItem,
     type LayoutConfig,
     type ComponentContainer,
     type RootItemConfig,
@@ -75,6 +76,55 @@ export class LayoutManager {
     destroy(): void {
         this.save();
         this.layout.destroy();
+    }
+
+    /** Check if a component type is currently visible in the layout. */
+    isComponentVisible(componentType: string): boolean {
+        return this.findComponentItem(componentType) !== null;
+    }
+
+    /** Show a component by adding it to the layout. */
+    showComponent(componentType: string, title: string): void {
+        if (this.isComponentVisible(componentType)) return;
+        this.layout.newComponent(componentType, undefined, title);
+    }
+
+    /** Hide a component by removing it from the layout. */
+    hideComponent(componentType: string): void {
+        const item = this.findComponentItem(componentType);
+        if (item) item.remove();
+    }
+
+    /** Get list of all currently visible component types. */
+    getVisibleComponents(): string[] {
+        const types: string[] = [];
+        this.walkTree((item) => {
+            if (ContentItem.isComponentItem(item)) {
+                types.push(item.componentType as string);
+            }
+        });
+        return types;
+    }
+
+    /** Walk the layout tree, calling visitor for each ContentItem. */
+    private walkTree(visitor: (item: ContentItem) => void, node?: ContentItem): void {
+        const root = node ?? this.layout.rootItem;
+        if (!root) return;
+        visitor(root);
+        for (const child of root.contentItems) {
+            this.walkTree(visitor, child);
+        }
+    }
+
+    /** Find a ComponentItem by its componentType string. */
+    private findComponentItem(componentType: string): ContentItem | null {
+        let found: ContentItem | null = null;
+        this.walkTree((item) => {
+            if (!found && ContentItem.isComponentItem(item) && item.componentType === componentType) {
+                found = item;
+            }
+        });
+        return found;
     }
 
     private getDefaultLayout(): LayoutConfig {

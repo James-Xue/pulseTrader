@@ -53,6 +53,86 @@ header h1 {
     letter-spacing: 1px;
 }
 
+/* === Header Right (menu + status) === */
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* === Menu Bar === */
+.menu-bar {
+    position: relative;
+}
+.menu-btn {
+    background: rgba(15,52,96,0.6);
+    border: 1px solid #0f3460;
+    color: #a0a0c0;
+    padding: 5px 14px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+.menu-btn:hover {
+    background: #0f3460;
+    color: #e0e0e0;
+}
+.menu-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 8px 0;
+    min-width: 180px;
+    z-index: 1000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.menu-dropdown.hidden { display: none; }
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-size: 0.85em;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.menu-item:hover {
+    background: rgba(15,52,96,0.5);
+}
+.menu-item input[type="checkbox"] {
+    accent-color: #2196f3;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+.menu-divider {
+    height: 1px;
+    background: #0f3460;
+    margin: 6px 0;
+}
+.menu-reset-btn {
+    display: block;
+    width: calc(100% - 16px);
+    margin: 4px 8px;
+    padding: 6px 12px;
+    background: rgba(33,150,243,0.15);
+    border: 1px solid rgba(33,150,243,0.3);
+    color: #2196f3;
+    border-radius: 4px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.menu-reset-btn:hover {
+    background: rgba(33,150,243,0.25);
+}
+
 /* === Connection Status === */
 #connection-status {
     display: flex;

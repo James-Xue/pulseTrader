@@ -101,15 +101,76 @@ class App {
         // Initialize layout (loads saved or default)
         this.layoutManager.init();
 
+        // --- Menu bar ---
+        this.setupMenuBar();
+
         // Save layout on close
         window.addEventListener('beforeunload', () => {
             this.layoutManager.save();
         });
+    }
 
-        // Resize layout on window resize
-        window.addEventListener('resize', () => {
-            // Golden Layout handles this internally with autoSize
+    /** Panel definitions for the menu: [componentType, title] */
+    private static readonly PANELS: [string, string][] = [
+        ['order-book', 'Order Book'],
+        ['kline', 'K-Line Chart'],
+        ['positions', 'Positions'],
+        ['orders', 'Orders'],
+        ['metrics', 'PnL & Metrics'],
+        ['ai-analysis', 'AI Analysis'],
+        ['strategies', 'Strategies'],
+        ['risk', 'Risk Status'],
+    ];
+
+    private setupMenuBar(): void {
+        const btn = document.getElementById('menu-panels-btn')!;
+        const dropdown = document.getElementById('menu-panels-dropdown')!;
+        const resetBtn = document.getElementById('menu-reset-btn')!;
+
+        // Toggle dropdown
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
         });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target as Node) && e.target !== btn) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // Panel visibility toggles
+        const checkboxes = dropdown.querySelectorAll<HTMLInputElement>('input[data-panel]');
+        checkboxes.forEach((cb) => {
+            cb.addEventListener('change', () => {
+                const panelType = cb.dataset.panel!;
+                const entry = App.PANELS.find(([type]) => type === panelType);
+                if (!entry) return;
+
+                if (cb.checked) {
+                    this.layoutManager.showComponent(entry[0], entry[1]);
+                } else {
+                    this.layoutManager.hideComponent(entry[0]);
+                }
+            });
+        });
+
+        // Reset layout button
+        resetBtn.addEventListener('click', () => {
+            this.layoutManager.resetLayout();
+            // Sync checkboxes to all-checked state
+            checkboxes.forEach((cb) => { cb.checked = true; });
+        });
+
+        // Sync checkbox state when layout changes (e.g., user closes a tab via GL's own X button)
+        // Poll visibility every 2 seconds to keep checkboxes in sync
+        setInterval(() => {
+            checkboxes.forEach((cb) => {
+                const panelType = cb.dataset.panel!;
+                cb.checked = this.layoutManager.isComponentVisible(panelType);
+            });
+        }, 2000);
     }
 }
 
