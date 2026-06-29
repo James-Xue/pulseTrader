@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-23
-> File size: 17950 chars / 20000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-06-29
+> File size: 20404 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -166,6 +166,34 @@
 ### vcpkg/Linux Build Compatibility (2026-06-23)
 - **Commit `a812333`**: Remote commit from hehao machine changed WebUI CMake to use vcpkg `unofficial-usockets`/`unofficial-uwebsockets` and websocketpp `get_io_service()`. Reverted 4 CMakeLists.txt + 2 source files to use vendored `third_party/` and `get_io_context()`.
 - Linux build (apt + vendored uWebSockets) confirmed working. 547 tests all green.
+
+### WebUI Frontend Migration: TypeScript + Vite + Golden Layout (2026-06-29)
+- **Commit `07bc084`**: Replaced monolithic vanilla JS (`app.js` ~790 lines) with modular TypeScript + Vite build pipeline.
+- **Tech stack**: TypeScript 5.5, Vite 6, `@genesis-community/golden-layout` v2.13.0, `lightweight-charts` v5 (npm)
+- **Directory structure**: `frontend/src/` with `main.ts`, `types.ts`, `ws-client.ts`, `data-store.ts`, `layout-manager.ts`, `utils.ts`, `panels/` (8 panels + account-bar), `styles/` (3 CSS files)
+- **Golden Layout**: Dockable/resizable/tabbed panels (VS Code style). Layout persistence via localStorage.
+- **Dev workflow**: `cd frontend && npm run dev` (port 5173, HMR, WS proxy to :8080) · `npm run build` → `frontend/dist/`
+- **Production**: C++ server serves `frontend/dist/` (path changed from `"frontend"` to `"frontend/dist"`)
+- **C++ MIME additions**: `.mjs`, `.wasm`, `.webp`, `.webmanifest` in `WebServer.cpp`
+- **Data flow**: WebSocket → `WsClient` → `DataStore` → field-level subscriptions → panels
+- 31 files changed, +3324/-1529. 547 C++ tests all green.
+
+### Panel Visibility Menu Bar (2026-06-29)
+- **Commit `e016ff3`**: Added "☰ Panels ▾" dropdown in header with 8 checkbox toggles + "↺ Reset Layout" button.
+- `LayoutManager` extended: `showComponent()`, `hideComponent()`, `isComponentVisible()`, `getVisibleComponents()`, `walkTree()`, `findComponentItem()`
+- Checkbox state synced every 2s via polling (handles GL's own close button)
+- Dropdown closes on outside click, styled to match dark theme
+
+### Tab Close Button Hidden (2026-06-29)
+- **Commit `0f1c934`**: `.lm_close_tab { display: none }` — redundant with GL's right-side controls
+
+### Field Name Mismatch Fix (2026-06-29)
+- **Commit `f636221`**: C++ backend sends mixed camelCase/snake_case JSON keys; TypeScript types assumed all snake_case.
+- Fixed in `types.ts` + panels: `active_orders`→`activeOrders`, `recent_reports`→`recentReports`, `max_drawdown`→`maxDrawdown`, `trade_count`→`tradeCount`, `halt_reason`→`haltReason`, `daily_drawdown`→`dailyDrawdown`, `open_position_count`→`openPositionCount`
+- Also fixed: Max Drawdown threshold `> 3` → `> 0.03` (backend sends fraction), Risk gauge `*100` for percentage
+
+### Known Issues
+- **Panel scrollbar** (low priority): `.panel-inner` with `overflow-y: auto` + `height: 100%` does not produce scrollbar in Golden Layout containers. Likely GL internal absolute positioning. Needs DevTools investigation.
 
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
