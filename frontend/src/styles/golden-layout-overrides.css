@@ -54,10 +54,7 @@
 }
 
 .lm_close_tab {
-    opacity: 0.5;
-}
-.lm_close_tab:hover {
-    opacity: 1;
+    display: none !important;
 }
 
 .lm_controls .lm_tabdropdown {
