@@ -1,0 +1,133 @@
+/* panels.css — Panel-specific styles */
+
+/* === Order Book === */
+.ob-bid { background: rgba(76,175,80,0.06); }
+.ob-ask { background: rgba(244,67,54,0.06); }
+.ob-bar { height: 4px; border-radius: 2px; margin-top: 2px; }
+.ob-bar-bid { background: rgba(76,175,80,0.4); }
+.ob-bar-ask { background: rgba(244,67,54,0.4); }
+.ob-spread {
+    text-align: center;
+    padding: 4px 8px;
+    color: #a0a0c0;
+    font-size: 0.85em;
+    border-top: 1px solid #0f3460;
+    border-bottom: 1px solid #0f3460;
+}
+.ob-symbol {
+    font-size: 0.8em;
+    color: #a0a0c0;
+    margin-bottom: 6px;
+}
+
+/* === K-line === */
+.kline-chart-container {
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+}
+
+/* === Strategy Cards === */
+.strategy-card {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+.strategy-card:last-child { margin-bottom: 0; }
+.strategy-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.strategy-name { font-weight: 600; font-size: 0.95em; }
+.strategy-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.8em;
+    color: #a0a0c0;
+}
+
+/* === Running Badge Pulse === */
+@keyframes pulse-green {
+    0%,100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.4); }
+    50% { box-shadow: 0 0 6px 2px rgba(76,175,80,0.6); }
+}
+.badge-running { animation: pulse-green 2s infinite; }
+
+/* === AI Panel === */
+.ai-sentiment { font-size: 1.2em; margin-bottom: 8px; }
+.ai-metric {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(15,52,96,0.4);
+}
+.ai-metric-label { color: #a0a0c0; }
+.ai-metric-value { font-weight: 600; }
+.direction-bar-container {
+    width: 100%; height: 12px;
+    background: linear-gradient(to right, #f44336 0%, #a0a0c0 50%, #4caf50 100%);
+    border-radius: 6px;
+    position: relative;
+    margin: 8px 0;
+}
+.direction-bar-marker {
+    width: 4px; height: 16px;
+    background: #fff;
+    border-radius: 2px;
+    position: absolute;
+    top: -2px;
+    transition: left 0.3s ease;
+}
+
+/* === Metrics Grid === */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.metric-card {
+    background: rgba(0,0,0,0.2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    text-align: center;
+}
+.metric-label {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #a0a0c0;
+    margin-bottom: 4px;
+}
+.metric-value {
+    font-size: 1.1em;
+    font-weight: 700;
+    font-family: 'JetBrains Mono','Fira Code','Consolas',monospace;
+}
+
+/* === Risk Panel === */
+.risk-section { margin-bottom: 12px; }
+.risk-section:last-child { margin-bottom: 0; }
+.risk-label {
+    font-size: 0.8em;
+    color: #a0a0c0;
+    margin-bottom: 4px;
+}
+.risk-value { font-weight: 600; }
+
+/* === Portfolio Summary === */
+.portfolio-summary {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #0f3460;
+    font-size: 0.85em;
+}
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+}
+.summary-label { color: #a0a0c0; }

@@ -1,0 +1,87 @@
+/* golden-layout-overrides.css — Dark theme overrides for Golden Layout */
+
+/* Use CSS variables to match pulseTrader dark theme */
+:root {
+    --gl-color-bg: #1a1a2e;
+    --gl-color-bg-panel: #16213e;
+    --gl-color-bg-header: #16213e;
+    --gl-color-bg-header-active: #0f3460;
+    --gl-color-text: #e0e0e0;
+    --gl-color-text-inactive: #a0a0c0;
+    --gl-color-border: #0f3460;
+    --gl-color-accent: #2196f3;
+    --gl-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --gl-font-size: 13px;
+    --gl-tab-height: 28px;
+    --gl-header-height: 28px;
+}
+
+/* Override GL defaults */
+.lm_goldenlayout {
+    background: var(--gl-color-bg) !important;
+}
+
+.lm_content {
+    background: var(--gl-color-bg-panel) !important;
+    border: 1px solid var(--gl-color-border) !important;
+    border-radius: 4px;
+}
+
+.lm_header {
+    background: var(--gl-color-bg-header) !important;
+    height: var(--gl-header-height) !important;
+}
+
+.lm_tab {
+    background: transparent !important;
+    color: var(--gl-color-text-inactive) !important;
+    font-family: var(--gl-font-family) !important;
+    font-size: var(--gl-font-size) !important;
+    padding: 0 12px !important;
+    height: var(--gl-tab-height) !important;
+    line-height: var(--gl-tab-height) !important;
+    margin: 0 !important;
+    border: none !important;
+}
+
+.lm_tab.lm_active {
+    background: var(--gl-color-bg-header-active) !important;
+    color: var(--gl-color-text) !important;
+}
+
+.lm_tab:hover {
+    background: rgba(15, 52, 96, 0.5) !important;
+}
+
+.lm_close_tab {
+    opacity: 0.5;
+}
+.lm_close_tab:hover {
+    opacity: 1;
+}
+
+.lm_controls .lm_tabdropdown {
+    color: var(--gl-color-text-inactive) !important;
+}
+
+.lm_splitter {
+    background: var(--gl-color-border) !important;
+    opacity: 1 !important;
+}
+
+.lm_splitter:hover {
+    background: var(--gl-color-accent) !important;
+}
+
+.lm_dragProxy .lm_content {
+    border-color: var(--gl-color-accent) !important;
+}
+
+/* Panel content inside GL containers */
+.lm_content .panel-inner {
+    padding: 12px;
+    overflow-y: auto;
+    height: 100%;
+    color: var(--gl-color-text);
+    font-size: 0.9em;
+}
