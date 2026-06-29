@@ -608,12 +608,16 @@ template void WebServer::serveStatic(uWS::HttpResponse<false> *, const std::stri
     if (".html" == ext)  { return "text/html"; }
     if (".css" == ext)   { return "text/css"; }
     if (".js" == ext)    { return "application/javascript"; }
+    if (".mjs" == ext)   { return "application/javascript"; }
     if (".json" == ext)  { return "application/json"; }
     if (".svg" == ext)   { return "image/svg+xml"; }
     if (".png" == ext)   { return "image/png"; }
     if (".ico" == ext)   { return "image/x-icon"; }
     if (".woff2" == ext) { return "font/woff2"; }
     if (".woff" == ext)  { return "font/woff"; }
+    if (".wasm" == ext)  { return "application/wasm"; }
+    if (".webp" == ext)  { return "image/webp"; }
+    if (".webmanifest" == ext) { return "application/manifest+json"; }
     if (".map" == ext)   { return "application/json"; }
     if (".txt" == ext)   { return "text/plain"; }
 

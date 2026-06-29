@@ -795,7 +795,7 @@ int main(int argc, char* argv[])
             ui_tracker, ai_pipeline, ui_rest, ui_spot_rest);
 
         web_server = std::make_unique<pulse::webui::WebServer>(
-            cfg.webui, *dashboard_state, "frontend");
+            cfg.webui, *dashboard_state, "frontend/dist");
 
         // Wire: dashboard snapshot → WS broadcast
         const auto& ws_ref = web_server->wsServer();

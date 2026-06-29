@@ -65,7 +65,7 @@ class WebServer
     ///   3. frontend_dir — Path to the directory containing static frontend files
     WebServer(const WebUiConfig &config,
               DashboardState &state,
-              const std::string &frontend_dir = "frontend");
+              const std::string &frontend_dir = "frontend/dist");
 
     /// Destructor — stops the server if still running.
     ~WebServer();

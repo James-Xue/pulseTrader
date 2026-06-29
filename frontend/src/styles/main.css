@@ -1,0 +1,176 @@
+/* main.css — Global dark trading theme */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* === App Layout === */
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* === Halt Banner === */
+.halt-banner {
+    background: #d32f2f;
+    color: #fff;
+    font-weight: 700;
+    padding: 10px 24px;
+    text-align: center;
+    font-size: 1em;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+.halt-banner.hidden { display: none; }
+
+/* === Header === */
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    flex-shrink: 0;
+}
+header h1 {
+    font-size: 1.3em;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1px;
+}
+
+/* === Connection Status === */
+#connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85em;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: rgba(0,0,0,0.3);
+}
+.status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.status-connected .status-dot { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+.status-connected #status-text { color: #4caf50; }
+.status-disconnected .status-dot { background: #f44336; box-shadow: 0 0 6px #f44336; }
+.status-disconnected #status-text { color: #f44336; }
+
+/* === Account Bar === */
+.account-bar {
+    display: flex;
+    gap: 24px;
+    padding: 8px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    font-size: 0.9em;
+    flex-shrink: 0;
+}
+.account-bar.hidden { display: none; }
+.account-group { display: flex; align-items: baseline; gap: 16px; }
+.account-group-label { color: #e0e0e0; font-weight: 700; font-size: 0.9em; margin-right: 4px; white-space: nowrap; }
+.account-item { display: flex; align-items: baseline; gap: 6px; }
+.account-label { color: #a0a0c0; font-size: 0.85em; }
+.account-value { font-family: 'SF Mono','Fira Code','Consolas',monospace; font-weight: 600; color: #e0e0e0; }
+.account-value.positive { color: #4caf50; }
+.account-value.negative { color: #f44336; }
+.account-divider { width: 1px; background: #0f3460; margin: 0 8px; align-self: stretch; }
+
+/* === Layout Container === */
+#layout-container {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* === Shared Table Styles === */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+thead th {
+    text-align: left;
+    color: #a0a0c0;
+    font-weight: 600;
+    padding: 6px 8px;
+    border-bottom: 1px solid #0f3460;
+    position: sticky;
+    top: 0;
+    background: #16213e;
+    z-index: 1;
+}
+tbody td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(15,52,96,0.4);
+}
+tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+tbody tr:hover { background: rgba(255,255,255,0.05); }
+
+/* === Monospace === */
+.mono {
+    font-family: 'JetBrains Mono','Fira Code','Cascadia Code','Consolas',monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* === Color Coding === */
+.positive, .buy-side { color: #4caf50; }
+.negative, .sell-side { color: #f44336; }
+
+/* === Badges === */
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.badge-green { background: rgba(76,175,80,0.2); color: #4caf50; }
+.badge-red { background: rgba(244,67,54,0.2); color: #f44336; }
+.badge-gray { background: rgba(160,160,192,0.2); color: #a0a0c0; }
+.badge-blue { background: rgba(33,150,243,0.2); color: #2196f3; }
+
+/* === Gauge Bars === */
+.gauge-container {
+    width: 100%; height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+.gauge-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+.gauge-fill-green { background: #4caf50; }
+.gauge-fill-yellow { background: #ffc107; }
+.gauge-fill-red { background: #f44336; }
+
+/* === Placeholder === */
+.placeholder {
+    color: #666680;
+    font-style: italic;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* === Scrollbar === */
+.panel-scroll::-webkit-scrollbar { width: 6px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+.panel-scroll::-webkit-scrollbar-thumb:hover { background: #1a4a8a; }

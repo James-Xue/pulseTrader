@@ -4,125 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>pulseTrader Dashboard</title>
-    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Halt banner: shown when risk.trading_halted is true -->
-    <div id="halt-banner" class="halt-banner hidden">
-        <strong>TRADING HALTED</strong>
-        <span id="halt-reason"></span>
-    </div>
-
-    <header>
-        <h1>pulseTrader</h1>
-        <div id="connection-status" class="status-disconnected">
-            <span class="status-dot"></span>
-            <span id="status-text">Disconnected</span>
+    <div id="app">
+        <!-- Halt banner -->
+        <div id="halt-banner" class="halt-banner hidden">
+            <strong>TRADING HALTED</strong>
+            <span id="halt-reason"></span>
         </div>
-    </header>
 
-    <!-- Account balance bar: exchange-reported equity (updated every 10s) -->
-    <div id="account-bar" class="account-bar hidden">
-        <span class="account-group">
-            <span class="account-group-label">📈 Futures</span>
-            <span class="account-item">
-                <span class="account-label">Total</span>
-                <span class="account-value" id="account-total">—</span>
+        <!-- Header -->
+        <header>
+            <h1>pulseTrader</h1>
+            <div id="connection-status" class="status-disconnected">
+                <span class="status-dot"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Account balance bar -->
+        <div id="account-bar" class="account-bar hidden">
+            <span class="account-group">
+                <span class="account-group-label">📈 Futures</span>
+                <span class="account-item">
+                    <span class="account-label">Total</span>
+                    <span class="account-value" id="account-total">—</span>
+                </span>
+                <span class="account-item">
+                    <span class="account-label">Available</span>
+                    <span class="account-value" id="account-available">—</span>
+                </span>
+                <span class="account-item">
+                    <span class="account-label">Unrealized PnL</span>
+                    <span class="account-value" id="account-pnl">—</span>
+                </span>
+                <span class="account-item">
+                    <span class="account-label">Margin Used</span>
+                    <span class="account-value" id="account-margin">—</span>
+                </span>
             </span>
-            <span class="account-item">
-                <span class="account-label">Available</span>
-                <span class="account-value" id="account-available">—</span>
+            <span class="account-divider"></span>
+            <span class="account-group">
+                <span class="account-group-label">💰 Spot</span>
+                <span class="account-item">
+                    <span class="account-label">Total</span>
+                    <span class="account-value" id="account-spot-total">—</span>
+                </span>
+                <span class="account-item">
+                    <span class="account-label">Available</span>
+                    <span class="account-value" id="account-spot-available">—</span>
+                </span>
             </span>
-            <span class="account-item">
-                <span class="account-label">Unrealized PnL</span>
-                <span class="account-value" id="account-pnl">—</span>
-            </span>
-            <span class="account-item">
-                <span class="account-label">Margin Used</span>
-                <span class="account-value" id="account-margin">—</span>
-            </span>
-        </span>
-        <span class="account-divider"></span>
-        <span class="account-group">
-            <span class="account-group-label">💰 Spot</span>
-            <span class="account-item">
-                <span class="account-label">Total</span>
-                <span class="account-value" id="account-spot-total">—</span>
-            </span>
-            <span class="account-item">
-                <span class="account-label">Available</span>
-                <span class="account-value" id="account-spot-available">—</span>
-            </span>
-        </span>
+        </div>
+
+        <!-- Golden Layout container -->
+        <div id="layout-container"></div>
     </div>
 
-    <main class="dashboard-grid">
-        <!-- Panel 1: Order Book -->
-        <section class="panel" id="panel-orderbook">
-            <h2>Order Book</h2>
-            <div class="panel-content" id="orderbook-content">
-                <p class="placeholder">Waiting for data...</p>
-            </div>
-        </section>
-
-        <!-- Panel 2: K-line Chart -->
-        <section class="panel" id="panel-kline">
-            <h2>K-line Chart</h2>
-            <div class="panel-content" id="kline-content">
-                <p class="placeholder">Waiting for data...</p>
-            </div>
-        </section>
-
-        <!-- Panel 3: Open Positions -->
-        <section class="panel" id="panel-positions">
-            <h2>Open Positions</h2>
-            <div class="panel-content" id="positions-content">
-                <p class="placeholder">No open positions</p>
-            </div>
-        </section>
-
-        <!-- Panel 4: Active Orders -->
-        <section class="panel" id="panel-orders">
-            <h2>Active Orders</h2>
-            <div class="panel-content" id="orders-content">
-                <p class="placeholder">No active orders</p>
-            </div>
-        </section>
-
-        <!-- Panel 5: PnL & Metrics -->
-        <section class="panel" id="panel-metrics">
-            <h2>PnL &amp; Metrics</h2>
-            <div class="panel-content" id="metrics-content">
-                <p class="placeholder">Metrics not yet available</p>
-            </div>
-        </section>
-
-        <!-- Panel 6: AI Analysis -->
-        <section class="panel" id="panel-ai">
-            <h2>AI Analysis</h2>
-            <div class="panel-content" id="ai-content">
-                <p class="placeholder">Awaiting first AI cycle...</p>
-            </div>
-        </section>
-
-        <!-- Panel 7: Strategies -->
-        <section class="panel" id="panel-strategies">
-            <h2>Strategies</h2>
-            <div class="panel-content" id="strategies-content">
-                <p class="placeholder">No strategies registered</p>
-            </div>
-        </section>
-
-        <!-- Panel 8: Risk Status -->
-        <section class="panel" id="panel-risk">
-            <h2>Risk Status</h2>
-            <div class="panel-content" id="risk-content">
-                <p class="placeholder">Waiting for data...</p>
-            </div>
-        </section>
-    </main>
-
-    <script src="lightweight-charts.standalone.production.js"></script>
-    <script src="app.js"></script>
+    <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
