@@ -45,7 +45,7 @@ export interface Position {
 }
 
 export interface PortfolioSummary {
-    open_position_count: number;
+    openPositionCount: number;
     total_notional: number;
     total_unrealized_pnl: number;
     net_exposure: number;
@@ -79,8 +79,8 @@ export interface ExecutionReport {
 }
 
 export interface Orders {
-    active_orders: Order[];
-    recent_reports: ExecutionReport[];
+    activeOrders: Order[];
+    recentReports: ExecutionReport[];
 }
 
 export interface Account {
@@ -104,8 +104,8 @@ export interface Metrics {
     win_rate: number;
     avg_win_loss_ratio: number;
     sharpe_ratio: number;
-    max_drawdown: number;
-    trade_count: number;
+    maxDrawdown: number;
+    tradeCount: number;
 }
 
 export interface ParamDelta {
@@ -141,13 +141,13 @@ export interface Strategies {
 
 export interface Risk {
     trading_halted: boolean;
-    halt_reason: number;
-    daily_drawdown: number;
-    max_drawdown: number;
+    haltReason: number;
+    dailyDrawdown: number;
+    maxDrawdown: number;
     rate_limiter_tokens: number;
     rate_limiter_exhausted: boolean;
     portfolio: PortfolioSummary | null;
-    open_position_count: number;
+    openPositionCount: number;
 }
 
 export interface DashboardSnapshot {

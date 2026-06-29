@@ -34,7 +34,7 @@ export class RiskPanel extends BasePanel<'risk'> {
     statusEl.className = 'risk-status';
     if (data.trading_halted) {
       statusEl.innerHTML = `<span class="risk-status-label">Trading:</span><span class="badge badge-red">HALTED</span>`;
-      const reason = HALT_REASONS[data.halt_reason] || '';
+      const reason = HALT_REASONS[data.haltReason] || '';
       if (reason) {
         const reasonEl = document.createElement('div');
         reasonEl.className = 'risk-halt-reason';
@@ -47,14 +47,14 @@ export class RiskPanel extends BasePanel<'risk'> {
     this.container.appendChild(statusEl);
 
     // Daily drawdown gauge
-    const dailyDdPct = data.max_drawdown > 0
-      ? (data.daily_drawdown / data.max_drawdown) * 100
+    const dailyDdPct = data.maxDrawdown > 0
+      ? (data.dailyDrawdown / data.maxDrawdown) * 100
       : 0;
-    this.container.appendChild(this.renderGauge('Daily Drawdown', dailyDdPct, fmtPct(data.daily_drawdown)));
+    this.container.appendChild(this.renderGauge('Daily Drawdown', dailyDdPct, fmtPct(data.dailyDrawdown)));
 
     // Max drawdown gauge
-    const maxDdPct = data.max_drawdown;
-    this.container.appendChild(this.renderGauge('Max Drawdown', maxDdPct, fmtPct(data.max_drawdown)));
+    const maxDdPct = data.maxDrawdown * 100;
+    this.container.appendChild(this.renderGauge('Max Drawdown', maxDdPct, fmtPct(data.maxDrawdown)));
 
     // Rate limiter
     const rateEl = document.createElement('div');
@@ -99,7 +99,7 @@ export class RiskPanel extends BasePanel<'risk'> {
 
     const positionsEl = document.createElement('div');
     positionsEl.className = 'risk-portfolio-item';
-    positionsEl.innerHTML = `<span class="risk-portfolio-label">Open Positions</span><span class="risk-portfolio-value">${portfolio.open_position_count}</span>`;
+    positionsEl.innerHTML = `<span class="risk-portfolio-label">Open Positions</span><span class="risk-portfolio-value">${portfolio.openPositionCount}</span>`;
     grid.appendChild(positionsEl);
 
     const notionalEl = document.createElement('div');

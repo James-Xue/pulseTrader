@@ -66,7 +66,7 @@ class App {
                     2: 'Peak-to-valley drawdown limit exceeded',
                     3: 'Manual halt',
                 };
-                reason.textContent = ' — ' + (reasons[risk.halt_reason] || `Unknown (code ${risk.halt_reason})`);
+                reason.textContent = ' — ' + (reasons[risk.haltReason] || `Unknown (code ${risk.haltReason})`);
                 banner.classList.remove('hidden');
             } else {
                 banner.classList.add('hidden');

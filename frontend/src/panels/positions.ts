@@ -94,7 +94,7 @@ export class PositionsPanel extends BasePanel<'positions'> {
             <div class="summary-grid">
                 <div class="summary-item">
                     <span class="summary-label">Positions</span>
-                    <span class="summary-value">${s.open_position_count}</span>
+                    <span class="summary-value">${s.openPositionCount}</span>
                 </div>
                 <div class="summary-item">
                     <span class="summary-label">Total Notional</span>
