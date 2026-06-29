@@ -15,7 +15,7 @@ pulseTrader is a C++20 quantitative trading framework purpose-built for high-fre
 
 The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), WebUI with real-time TradingView candlestick chart, localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
+**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), WebUI with TypeScript + Vite + Golden Layout dockable panels, real-time TradingView candlestick chart, localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
 
 ---
 
@@ -33,7 +33,7 @@ pulseTrader is organised into nine vertical layers, each with a single well-defi
 | 6 | Strategy Engine | L3, L5 | Multi-strategy manager, abstract base, signal aggregator |
 | 7 | Risk Management | L6 | Order gate, position limits, stops, drawdown circuit breaker |
 | 8 | Order Execution | L7, L1 | Order submission, WS + REST order tracking, execution reports |
-| 9 | WebUI | All | uWebSockets dark-theme SPA dashboard, tiered polling (200ms–5min) |
+| 9 | WebUI | All | uWebSockets server + TypeScript/Vite SPA dashboard with Golden Layout dockable panels, tiered polling (200ms–5min) |
 
 For the full architecture document including module responsibilities, key files, threading model, and design rationale, see [docs/architecture.md](docs/architecture.md).
 
@@ -52,7 +52,7 @@ For the full architecture document including module responsibilities, key files,
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with real-time TradingView candlestick chart (Chart/Table toggle), tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
+- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with TypeScript + Vite build pipeline, Golden Layout dockable panels (drag, resize, tab, save/restore layout), real-time TradingView candlestick chart (Chart/Table toggle), panel visibility menu bar with reset layout, tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
 - **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
 
 ---
@@ -70,6 +70,9 @@ For the full architecture document including module responsibilities, key files,
 | WebSocket | websocketpp | ≥ 0.8.2 |
 | WebUI server | uWebSockets | vendored |
 | Charting | TradingView Lightweight Charts | ≥ 5.0 |
+| Docking UI | Golden Layout | ≥ 2.13 |
+| Frontend language | TypeScript | ≥ 5.5 |
+| Frontend build | Vite | ≥ 6.0 |
 | Config | toml11 | ≥ 4.0 |
 | SQLite | SQLiteCpp | ≥ 3.3 |
 | Testing | GTest | ≥ 1.14 |
@@ -86,7 +89,12 @@ pulseTrader/
 │   └── pulsetrader/        # Trading engine entry point (main.cpp, 9-layer wiring)
 ├── cmake/                  # CMake helper modules
 ├── docs/                   # Architecture, operational guide, API documentation
-├── frontend/               # WebUI SPA (index.html, style.css, app.js, lightweight-charts)
+├── frontend/               # WebUI SPA (TypeScript + Vite + Golden Layout)
+│   ├── src/                #   TypeScript modules (panels, data store, layout manager)
+│   ├── index.html          #   SPA entry point
+│   ├── package.json        #   npm dependencies
+│   ├── vite.config.ts      #   Vite build config (dev proxy to :8080)
+│   └── dist/               #   Build output (served by C++ WebServer)
 ├── src/
 │   ├── ai/                 # Layer 4 — AI analysis pipeline
 │   ├── app/                # Application-level helpers
@@ -105,7 +113,8 @@ pulseTrader/
 │   └── integration/        # Integration tests
 ├── third_party/
 │   ├── uWebSockets/        # Vendored uWebSockets source
-│   └── uSockets/           # Vendored uSockets source
+│   ├── uSockets/           # Vendored uSockets source
+│   └── websocketpp/        # websocketpp (git submodule)
 ├── tools/                  # Standalone test programs (smoke tests)
 ├── CMakeLists.txt
 ├── run.sh                  # Convenience runner script
@@ -123,6 +132,7 @@ pulseTrader/
 - **CMake** ≥ 3.20
 - **vcpkg** (with `VCPKG_ROOT` environment variable set), **or** on Linux: apt-installed `libasio-dev`, `libwebsocketpp-dev`, `libsqlitecpp-dev` + vendored `third_party/uWebSockets`
 - A **C++20-capable compiler** (GCC ≥ 12, Clang ≥ 15, or MSVC ≥ 19.34)
+- **Node.js** ≥ 20 + **npm** (for building the WebUI frontend)
 - A **Gate.io API key and secret** with spot trading permissions
 - An **OpenAI API key** (GPT-4o) or **Anthropic API key** (Claude) for the AI analysis layer *(optional)*
 - An **X (Twitter) API v2 bearer token** for social signal ingestion *(optional)*
@@ -205,6 +215,9 @@ cp trading.toml.example trading.toml
 ### Run
 
 ```bash
+# Build the frontend (required before first run or after frontend changes)
+cd frontend && npm install && npm run build && cd ..
+
 # Start the trading engine (all 9 layers, auto-loads trading.toml if present)
 ./run.sh trade
 
@@ -221,6 +234,21 @@ cp trading.toml.example trading.toml
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
 ./run.sh test        # Run all 547 unit tests
+```
+
+### Frontend Development
+
+The WebUI frontend uses TypeScript + Vite with Golden Layout for dockable panels.
+
+```bash
+# One-time setup
+cd frontend && npm install
+
+# Development mode (HMR on :5173, proxies /ws to C++ backend on :8080)
+npm run dev
+
+# Production build (output to frontend/dist/, served by C++ server)
+npm run build
 ```
 
 ---
@@ -298,7 +326,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **Trading engine** — All 9 layers wired into a single runnable process
 - [x] **TOML configuration** — File-driven config with `from_env:` syntax and validation
 - [x] **SQLite trade recorder** — Persistent trade history with strategy tracking
-- [x] **WebUI dashboard** — Real-time uWebSockets monitoring SPA
+- [x] **WebUI dashboard** — TypeScript + Vite + Golden Layout dockable panels, real-time monitoring SPA
 - [x] **Futures support** — Gate.io USDT perpetual contracts (M10: market data, M11: risk/PnL, M12: execution + dual-market wiring)
 - [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
 - [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
