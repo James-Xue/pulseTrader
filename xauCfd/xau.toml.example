@@ -1,0 +1,76 @@
+# xau.toml.example — copy to xau.toml and edit
+
+[broker]
+# Gate.io TradFi CFD product. Symbol is XAUUSD.
+symbol       = "XAUUSD"
+# Per-order leverage; available: 20/50/100/200/500 (probe confirmed 500 works).
+leverage     = 500
+base_url     = "https://api.gateio.ws/api/v4"
+req_timeout_s = 5.0
+
+[credentials]
+# API key + secret live in macOS Keychain. Use tools/store_gate_creds.py
+# to set them. The daemon resolves via `from_env:` placeholders below.
+api_key      = "from_env:XAU_GATE_KEY"
+api_secret   = "from_env:XAU_GATE_SECRET"
+
+[connection]
+poll_interval_seconds = 1.0   # how often to poll the ticker
+
+[profile]
+window_bars = 200             # 200 × 10s = ~33 min rolling
+bar_seconds = 10              # synthetic bar width
+bin_usd     = 0.10            # $0.10 bins (10 price points)
+
+[strategy]
+top_n_levels      = 6         # keep top-N profile nodes
+ema_short         = 30
+ema_long          = 100
+trend_threshold_pct = 0.05    # |Δ| < this → RANGE
+confidence_full_pct  = 0.30   # confidence saturates at |Δ| >= this
+offset_min_pts    = 3         # BUY_LIMIT / SELL_LIMIT offset from level (min)
+offset_max_pts    = 5         # ... offset (max), uniform in [min, max]
+min_distance_pts  = 30        # skip levels within $0.30 of mid
+max_distance_pts  = 80        # skip levels beyond $0.80 of mid
+min_bars_for_plan = 100       # daemon warmup before first plan
+
+[daemon]
+dry_run           = true      # DEFAULT. Set false ONLY after reviewing the
+                              # log output of a dry-run session.
+log_json_path     = "logs/daemon.jsonl"
+log_level         = "INFO"
+
+[risk]
+# Lot sizing: cap = floor(equity * risk_pct / (sl_usd * 100)) / 100, then
+# weighted by confidence in [0.5*cap, 1.0*cap].
+#
+# NOTE (v1, 2026-08-11): per-order SL is COMPUTED (entry ± sl_usd) but NOT
+# yet sent to the broker — `place_pending(price_sl=...)` was rejected as
+# INVALID_ARGUMENT during probe. User's existing manual orders also have
+# price_sl='0.00'. SL will be wired via PUT update in v1.1 once the
+# endpoint shape is verified.
+#
+# Tuned for live test at equity ≈ $73 (broker min lot = 0.01, broker supports
+# fractional lots in 0.01 increments — verified 0.06 historical order on
+# 2026-08-11). At equity=$73:
+#   risk_pct=0.0025 → cap=0.00  (rejected — too conservative)
+#   risk_pct=0.0500 → cap=0.06  (matches observed manual lots)
+#   risk_pct=0.0660 → cap=0.08  (current — user's stated live-test target)
+#
+# Position margin: 0.08 lot × 100 oz × $4370 / 500 leverage = $69.92 (~96% of
+# equity). 1% adverse move = $349.60 ≈ 4.79× equity. Aggressive — Phase 1
+# live-test only, NOT safe for unattended operation.
+risk_pct    = 0.066
+sl_usd      = 0.60
+max_lot     = 0.10
+min_lot     = 0.01
+
+[killswitch]
+# Hard safety caps. Set to 0 to disable. Both are evaluated per-cycle.
+enabled              = true
+# Maximum concurrent open pendings (per symbol). Excess PLACE actions are
+# skipped with a killswitch_open_capped log event.
+max_open_positions    = 3
+# Maximum new orders placed in the last 60 minutes (in-memory counter).
+max_orders_per_hour   = 6
+# Phase 2: daily_loss_usd, consec_loss_limit, etc. — deferred.

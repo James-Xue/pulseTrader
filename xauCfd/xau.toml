@@ -1,0 +1,73 @@
+[broker]
+symbol       = "XAUUSD"
+leverage     = 500
+base_url     = "https://api.gateio.ws/api/v4"
+req_timeout_s = 5.0
+
+[credentials]
+api_key      = "from_env:XAU_GATE_KEY"
+api_secret   = "from_env:XAU_GATE_SECRET"
+
+[connection]
+poll_interval_seconds = 1.0
+
+[profile]
+window_bars = 200
+bar_seconds = 10
+bin_usd     = 0.20          # 2026-08-11: coarser bins — distinct levels in low-vol window
+
+[strategy]
+top_n_levels      = 8        # 2026-08-11: was 6; pull more candidates
+ema_short         = 15        # faster warmup for first live test
+ema_long          = 30        # ~5 min before first plan
+trend_threshold_pct = 0.05
+confidence_full_pct  = 0.30
+# Offset bounds in DOLLARS (user rule 2026-08-11: "挂单在 10s 承压线外部 2-5 的位置"):
+#   RANGE  → $3-$5 (mean-reversion needs breathing room)
+#   TREND  → $2-$3 (momentum pulls the order into fill)
+# Code converts $ → points (×100) at the planner boundary.
+offset_min_usd    = 2.0
+offset_max_usd    = 5.0
+# S/R level distance filter in DOLLARS (tuned 2026-08-11):
+#   min $2 below/above mid — current 30-min window only spans ~$3-15,
+#     so $15 was filtering out everything; $2 keeps near-touch S/R
+#   max $25 — drops far/stale levels (covers the window)
+min_distance_usd  = 2.0
+max_distance_usd  = 25.0
+min_bars_for_plan = 30
+
+[daemon]
+dry_run           = false     # LIVE MODE — orders will be placed
+log_json_path     = "logs/daemon.jsonl"
+log_level         = "INFO"
+
+[risk]
+# Half-position sizing (user rule 2026-08-11): lots in 0.03-0.04 range.
+# At equity=$83, sl=$0.60: risk_pct=0.029 → cap=0.04 lots, weighted 0.02-0.04.
+# Max loss per order = 0.04 × 100 × $0.60 = $2.40 ≈ 2.9% of equity.
+# Position margin: 0.04 lot × 100 × $4373 / 500 = $34.98 ≈ 42% of equity.
+risk_pct    = 0.029
+sl_usd      = 0.60
+max_lot     = 0.05            # hard cap below user's 0.04 ceiling + buffer
+min_lot     = 0.01
+# TP + momentum-TP (user rule 2026-08-11: 根据反弹动量决定是否止盈).
+# TP is broker-side (PUT /tradfi/positions/{id}); momentum closes via the
+# close endpoint if price reverses by `tp_usd` within `tp_window_s`.
+tp_usd            = 0.48       # momentum threshold in DOLLARS (0.8 × sl_usd)
+tp_window_s       = 60
+auto_close_orphans = true      # close positions whose side is not in plan
+
+[killswitch]
+enabled              = true
+# Half-position means tighter caps: 2 concurrent pendings max.
+max_open_positions    = 2
+# 12 PLACEs/hour (2026-08-11: was 4, churned every cycle; raised to allow
+# continuous re-planning while still capping true spam).
+max_orders_per_hour   = 12
+# Plan-match tolerance: if a live pending's price is within this many
+# points of a plan item, treat it as the SAME order (no cancel/place).
+# 2026-08-11: was 30, kept cancelling+replacing every cycle because
+# offset itself varies $3-$5 between cycles (level prices drift by $1+
+# as new bars shift the profile). 600 pts = $6 covers offset jitter
+# and prevents churn while still catching genuine level drift.
+price_tolerance_pts   = 600
