@@ -299,7 +299,7 @@ int main()
                          order_tracker, ai_pipeline);
 
     // 10. Create WebServer
-    WebServer server(webui_cfg, state, "frontend");
+    WebServer server(webui_cfg, state, "frontend/dist");
 
     // 11. Wire snapshot callback: DashboardState → WsServer
     //     NOTE: wsServer() returns const ref but pushSnapshot() is non-const.
