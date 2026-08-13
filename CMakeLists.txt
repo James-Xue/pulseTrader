@@ -44,8 +44,14 @@ find_package(toml11        CONFIG REQUIRED)
 
 # asio and websocketpp ship headers only; CONFIG mode may not be available
 # on all vcpkg triples — fall back to finding the include path manually.
+# asio include dir is hoisted so exchange and control targets share it.
 find_package(asio        CONFIG QUIET)
 find_package(websocketpp CONFIG QUIET)
+
+find_path(PULSE_ASIO_INCLUDE_DIR asio.hpp)
+if(NOT PULSE_ASIO_INCLUDE_DIR)
+    message(FATAL_ERROR "asio.hpp not found. Install via vcpkg or apt (libasio-dev).")
+endif()
 
 if(PULSE_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)

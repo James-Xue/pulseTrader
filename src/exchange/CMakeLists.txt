@@ -42,9 +42,8 @@ else()
         "websocketpp not found. Install via vcpkg or place headers in third_party/websocketpp/")
 endif()
 
-find_path(ASIO_INCLUDE_DIR asio.hpp)
-if(ASIO_INCLUDE_DIR)
-    target_include_directories(pulse_exchange PRIVATE ${ASIO_INCLUDE_DIR})
+if(PULSE_ASIO_INCLUDE_DIR)
+    target_include_directories(pulse_exchange PRIVATE ${PULSE_ASIO_INCLUDE_DIR})
 endif()
 
 # Suppress warnings from websocketpp third-party headers (C4127: constant conditional,
