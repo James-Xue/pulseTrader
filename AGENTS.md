@@ -37,7 +37,7 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 
 # Optional features
-cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON -DPULSE_ENABLE_TOML=ON
+cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON
 ```
 
 Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_party/`** (Linux alternative). On Linux, websocketpp is vendored in `third_party/`; do NOT add it to `vcpkg.json` if building without vcpkg.

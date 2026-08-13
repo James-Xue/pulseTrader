@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-06-29
-> File size: 20404 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-13
+> File size: 18129 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -15,28 +15,27 @@
 
 | L1 Exchange | L2 Logging | L3 Market Data | L4 AI Analysis | L5 Heartbeat |
 |---|---|---|---|---|
-| L6 Strategy | L7 Risk Mgmt | L8 Execution | L9 WebUI | — |
+| L6 Strategy | L7 Risk Mgmt | L8 Execution | L9 Control Plane | — |
 
 - Hot path (L1→L3→L6→L7→L8) vs AI background (L4→L5), bridged via `std::atomic`
-- WebUI: uWebSockets, `-DPULSE_ENABLE_WEBUI=ON`, localhost + bearer token
+- Control plane (L9, `headless` branch, replaces WebUI): JSON-RPC socket 127.0.0.1:8081 + embedded/remote REPL + stdio MCP server
 - Proxy: REST via `CURLOPT_PROXY`; WS via `ProxyTunnel` class
 - Credentials: `.env` (`GATE_API_KEY`/`GATE_API_SECRET`), gitignored
 
 ## Dependencies
 
 - Core: nlohmann-json, spdlog, fmt, curl, openssl, asio, websocketpp, gtest, toml11
-- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`), uwebsockets (`-DPULSE_ENABLE_WEBUI=ON`)
-- Vendored: uWebSockets + uSockets in `third_party/`
+- Optional: sqlitecpp (`-DPULSE_ENABLE_SQLITE=ON`)
+- Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **547 tests** (WEBUI + SQLITE): core 25 (+10 safe_parse_double) + config_loader 34 (+4 testnet URL) + config_validator 34 + logger 8 + exchange 66 (+7 proxy_tunnel) + market 46 (+8 feed_stats + kline JSON format) + execution 29 (+3 callback_safety) + risk 112 (+5 atomic_reserve) + strategy 59 + AI 43 + heartbeat 7 + webui 57 + trade_recorder 27 + supertrend_scalper 7
-- 513 without SQLITE · 475 without WEBUI or SQLITE
+- **583 tests all green** (CTest, `headless` branch): control plane 65 (CommandParser 17, JsonRpcServer 12, McpServer 11, OrderFlowTest 11, EngineServicesTest 10, ControlClient 4) + existing core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 
 ### Milestones
-- **M1–M5** ✅: Core pipeline → strategy → risk → AI → WebUI → trading engine
+- **M1–M5** ✅: Core pipeline → strategy → risk → AI → control plane → trading engine
 - **M6** ✅: TOML config (`--config trading.toml`, `from_env:` syntax)
 - **M7** ✅: SQLite trade recorder (17-col schema, 4 queries)
 - **M8** ✅: Futures config foundation (MarketType/MarginMode enums, 7xxx errors)
@@ -70,7 +69,6 @@
   - TOML `[exchange] testnet = true` overrides REST URL automatically
   - Config validator: rejects spot strategies in testnet mode (futures-only)
   - `run.sh`: auto-loads `trading.toml` if no `--config` specified
-  - WebUI null guard: uses futures feed/tracker when spot unavailable
   - SQLite: auto-creates `data/` directory for dbPath
   - `.env` structure: `GATE_MAINNET_*` / `GATE_TESTNET_*` key separation
   - 6 new tests (3 loader + 3 validator)
@@ -82,10 +80,6 @@
   3. `ProxyTunnel` relay threads: no longer `detach()`; `stop()` closes sockets then `join()`s all relay threads
   4. `run_io_loop()`: explicit `tunnel->stop()` + `tunnel.reset()` before function return (correct cleanup order)
   5. `WsInternal`: added `io_ctx_ptr` field, set after `init_asio()`, cleared after `client.run()` returns
-- **WebUI token caching** — `frontend/app.js`:
-  - `getToken()`: URL param → `localStorage('pulseToken')` → `prompt()`, cached on first entry
-  - Bootstrap: always `connect()` even with empty token (server skips auth when `authToken` is empty)
-  - `trading.toml`: `authToken = ""` for testnet dev mode (no auth prompt at all)
 - **Strategy warmup diagnostics** — kline-driven strategies now log progress during cold start:
   - `MomentumScalper` / `MeanReversionScalper` `on_tick()`: logs "Waiting for kline data" every 30s when no klines exist (WS not connected)
   - `on_kline()`: logs "Warming up: X/N candles accumulated" every 30s when insufficient data for EMA/BB computation
@@ -123,22 +117,14 @@
 - 5 new tests (FeedStats initialization/concurrency/delta calculation)
 - 537 tests all green
 
-### WebUI K-Line Chart Fix (2026-06-21)
-- **Bug #1 (Critical)**: `on_kline_update()` extracts contract name from `full_frame["contract"]`, but futures candlestick outer frame has no `contract` field — contract name is in `result["n"]` → 100% of futures K-line data silently dropped
-- **Bug #2 (High)**: K-line subscription payload order wrong `["BTC_USDT", "1m"]`; Gate.io requires `["1m", "BTC_USDT"]` (interval first)
-- **Bug #3 (Low)**: `poll_klines()` only pushes snapshot on `open_time` change (~every 60s); OHLCV changes in the current candle are not reflected to the frontend. Added `last_kline_close_` map to detect price changes
-- **Analysis doc**: `docs/kline-bug-analysis-2026-06-21.md`
-- 3 new tests (spot/futures kline JSON format + payload order)
-- 540 tests all green
+### WebUI History (removed 2026-08-13 on `headless` branch)
+K-line chart fixes (futures contract extraction, subscription payload order, live-candle updates), account balance top bar (DashboardState 10s REST polling), TradingView candlestick chart, TS+Vite+GoldenLayout migration, panel visibility menu, tab-close hidden, camelCase field-name fixes, token caching, panel scrollbar issue — all superseded by the control plane; see git history.
 
-### Account Balance Display (2026-06-21)
+### Account Balance (2026-06-21, still relevant)
 - **AccountBalance struct**: total, available, unrealised_pnl, position_margin, order_margin, currency
 - **REST parsing**: `GateRestClient::get_futures_account_balance()` — parses Gate.io futures account JSON (all values as strings → safe_parse_double)
-- **DashboardState**: 10-second REST polling for account balance, stored in `AccountSnapshot`
-- **WebUI top status bar**: Total / Available / Unrealized PnL / Margin Used (dark theme, 10s refresh)
 - **Heartbeat log**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
 - `Result<T>` is `std::variant<T, PulseError>` — use `ok()` / `value()` / `error()`, not `has_value()`
-- 547 tests all green
 
 ### Naming Convention Refactoring (2026-06-23)
 - **Commit `cd8a4d5`**: Functions/methods snake_case → camelCase (~210 renames), member variables `trailing_underscore_` → `m_camelCase` prefix (~47 classes). 137 files, ±3271 lines. Exempt: `to_json`/`from_json` (ADL), TEST_F names, pure-data struct fields.
@@ -146,14 +132,6 @@
 - **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
 - **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
 - AGENTS.md updated with new naming + file naming rules. 547 tests all green.
-
-### WebUI Candlestick Chart (2026-06-23)
-- **Commit `2e5f831`**: Replaced K-line HTML table with TradingView Lightweight Charts v5 candlestick chart.
-- `frontend/lightweight-charts.standalone.production.js` — vendored standalone build (196KB)
-- `renderKline()` → dual-view: `renderKlineChart()` (candlestick + volume histogram) + `renderKlineTable()` (original OHLCV table)
-- Chart/Table toggle buttons (chart is default). Dark theme matching dashboard.
-- Real-time: incremental `update()` for same-bar price changes, `setData()` for new candles.
-- **Commit `c88acf3`**: Fixed v5 API — `addSeries(LightweightCharts.CandlestickSeries, opts)` instead of removed `addCandlestickSeries()`.
 
 ### Fast Ctrl+C Shutdown (2026-06-23)
 - **Commit `0c1a7ed`**: Fixed 3 blocking points that caused 20-90s shutdown delays:
@@ -167,43 +145,25 @@
 - **Commit `a812333`**: Remote commit from hehao machine changed WebUI CMake to use vcpkg `unofficial-usockets`/`unofficial-uwebsockets` and websocketpp `get_io_service()`. Reverted 4 CMakeLists.txt + 2 source files to use vendored `third_party/` and `get_io_context()`.
 - Linux build (apt + vendored uWebSockets) confirmed working. 547 tests all green.
 
-### WebUI Frontend Migration: TypeScript + Vite + Golden Layout (2026-06-29)
-- **Commit `07bc084`**: Replaced monolithic vanilla JS (`app.js` ~790 lines) with modular TypeScript + Vite build pipeline.
-- **Tech stack**: TypeScript 5.5, Vite 6, `@genesis-community/golden-layout` v2.13.0, `lightweight-charts` v5 (npm)
-- **Directory structure**: `frontend/src/` with `main.ts`, `types.ts`, `ws-client.ts`, `data-store.ts`, `layout-manager.ts`, `utils.ts`, `panels/` (8 panels + account-bar), `styles/` (3 CSS files)
-- **Golden Layout**: Dockable/resizable/tabbed panels (VS Code style). Layout persistence via localStorage.
-- **Dev workflow**: `cd frontend && npm run dev` (port 5173, HMR, WS proxy to :8080) · `npm run build` → `frontend/dist/`
-- **Production**: C++ server serves `frontend/dist/` (path changed from `"frontend"` to `"frontend/dist"`)
-- **C++ MIME additions**: `.mjs`, `.wasm`, `.webp`, `.webmanifest` in `WebServer.cpp`
-- **Data flow**: WebSocket → `WsClient` → `DataStore` → field-level subscriptions → panels
-- 31 files changed, +3324/-1529. 547 C++ tests all green.
-
-### Panel Visibility Menu Bar (2026-06-29)
-- **Commit `e016ff3`**: Added "☰ Panels ▾" dropdown in header with 8 checkbox toggles + "↺ Reset Layout" button.
-- `LayoutManager` extended: `showComponent()`, `hideComponent()`, `isComponentVisible()`, `getVisibleComponents()`, `walkTree()`, `findComponentItem()`
-- Checkbox state synced every 2s via polling (handles GL's own close button)
-- Dropdown closes on outside click, styled to match dark theme
-
-### Tab Close Button Hidden (2026-06-29)
-- **Commit `0f1c934`**: `.lm_close_tab { display: none }` — redundant with GL's right-side controls
-
-### Field Name Mismatch Fix (2026-06-29)
-- **Commit `f636221`**: C++ backend sends mixed camelCase/snake_case JSON keys; TypeScript types assumed all snake_case.
-- Fixed in `types.ts` + panels: `active_orders`→`activeOrders`, `recent_reports`→`recentReports`, `max_drawdown`→`maxDrawdown`, `trade_count`→`tradeCount`, `halt_reason`→`haltReason`, `daily_drawdown`→`dailyDrawdown`, `open_position_count`→`openPositionCount`
-- Also fixed: Max Drawdown threshold `> 3` → `> 0.03` (backend sends fraction), Risk gauge `*100` for percentage
-
-### Known Issues
-- **Panel scrollbar** (low priority): `.panel-inner` with `overflow-y: auto` + `height: 100%` does not produce scrollbar in Golden Layout containers. Likely GL internal absolute positioning. Needs DevTools investigation.
-
 ### Next Steps
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
 - ✅ #5 OrderTracker Callback Under Write Lock — "collect inside lock, execute outside lock" pattern: `completion_callback_` in `process_order_update()` and `poll_order_status()` called after unique_lock is released. `set_completion_callback()` protected by lock. Added `test_simulate_ws_update()` / `test_try_shared_lock()` test interfaces. 3 new tests.
 - ✅ #6 ProxyTunnel Extraction — 373 lines of network code extracted from `gate_ws_client.cpp` into `proxy_tunnel.hpp/.cpp`. Fixed 2 hidden bugs: (1) `handle_connection` thread changed from `.detach()` to joinable; (2) relay socket/thread registration merged into a single lock_guard scope. Removed 58 lines of dead code (SSL relay overloads). 7 new tests.
 - Run testnet for 1 week, collect strategy performance data
 - Verify signal quality and PnL in virtual fund environment
-- WebUI: http://127.0.0.1:8080 for real-time monitoring
+- Control plane: `./run.sh cli` (REPL) / embedded REPL in `trade` / `./run.sh mcp` for real-time monitoring and control
 
 Then: P&L analysis → small capital live trading → production hardening
+
+## Control Plane (L9, `headless` branch)
+
+- **Single binary** `apps/pulsetrader/pulsetrader`, subcommands: `trade` (default; engine + control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over control socket), `mcp` (stdio MCP server bridging to control socket; auto-loads trading.toml)
+- **Control socket**: TCP 127.0.0.1:8081, newline-delimited JSON-RPC 2.0; `[control]` toml (enabled/bindAddress/port), env `PULSE_CONTROL_PORT`
+- **Security**: binds localhost-only, no auth — never expose. MCP mode forces file-only logging (stdout = protocol). REST calls serialized via shared mutex in EngineServices
+- **16 methods** (method name = MCP tool name): get_status · get_account · get_positions · get_orders · list_strategies · get_strategy_params · set_strategy_param · open_order · close_position · cancel_order · halt_trading · resume_trading · get_risk · get_market · pause_strategy · resume_strategy
+- **REPL commands**: status · account|balance · positions · orders · strategies · params <id> · set <id> <param> <value> · open <sym> <buy|sell> <qty> [--type market|limit|post_only] [--price P] [--market spot|futures] [--leverage N] [--reduce-only] [--client-id S] · close <position_id> [qty] [price] · cancel <order_id> · halt · resume · pause <id> · resume-strategy <id> · risk · market <sym> [--levels N] [--klines N] · help · quit
+- **New capabilities**: per-strategy runtime pause (`StrategyManager::setPaused`), manual trading halt (`halt_trading`/`resume_trading`), live atomic param get/set; order flow unified in `OrderFlowExecutor` (shared by signal aggregator + manual orders)
+- **src/control/**: JsonRpcServer · CommandParser · McpServer · ControlClient · EngineServices · OrderFlowExecutor
 
 ## Config Structure
 
@@ -219,7 +179,7 @@ PulseConfig
 │   ├── StopLossConfig  (mode, fixed_pct, trailing_pct, max_hold_seconds)
 │   └── TakeProfitConfig (targets_pct[], fractions[])
 ├── AiConfig         (backend, model, apiKey, heartbeatIntervalSec)
-├── WebuiConfig      (enabled, bindAddress, port, authToken)
+├── ControlConfig    (enabled, bindAddress, port) — `[control]` TOML, PULSE_CONTROL_PORT env
 ├── SqliteConfig     (enabled, dbPath)
 └── symbols[]
 ```
@@ -235,12 +195,12 @@ PulseConfig
 | 5xxx | Config |
 | 6xxx | Trade Recorder |
 | 7xxx | Futures (leverage, margin, liquidation, funding, contract) |
-| 9xxx | Internal / WebUI |
+| 9xxx | Internal / Control plane (91xx) |
 
 ## Operational Setup
 
-- **Branch**: only `main` exists
-- **run.sh**: `./run.sh {trade|rest|ws|market|strategy|ai|webui|test}`
+- **Branch**: `main` + `headless` (WebUI removed; control plane added)
+- **run.sh**: `./run.sh {trade|cli|mcp|rest|ws|market|strategy|ai|test}`
 - **run.sh trade**: auto-loads `trading.toml` if no `--config` specified
 - **.env**: `PULSE_NETWORK` (mainnet/testnet), `GATE_MAINNET_*`, `GATE_TESTNET_*`, `HTTPS_PROXY`
 - **Git proxy**: `http.proxy` / `https.proxy` = `http://127.0.0.1:7897`
