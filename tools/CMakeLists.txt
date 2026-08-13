@@ -82,3 +82,14 @@ target_link_libraries(test_balance_diag
 )
 
 
+
+add_executable(test_control_smoke
+    test_control_smoke.cpp
+)
+
+target_link_libraries(test_control_smoke
+    PRIVATE
+        pulse::control
+        pulse::core
+        pulse::logging
+)

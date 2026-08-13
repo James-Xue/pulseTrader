@@ -29,6 +29,8 @@ usage() {
     echo "Usage: $0 {trade|cli|mcp|rest|ws|market|strategy|ai|test} [args...]"
     echo ""
     echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
+    echo "  cli [--config <path>]   Attach REPL to running engine"
+    echo "  mcp [--config <path>]   Run stdio MCP server (bridges to engine)"
     echo "  rest      Test Gate.io REST API"
     echo "  ws        Test Gate.io WebSocket"
     echo "  market    Test market data pipeline"
@@ -65,6 +67,14 @@ case "$1" in
     market)
         echo "=== Market Data Pipeline ==="
         "$BUILD_DIR/tools/test_market_feed"
+        ;;
+    cli)
+        echo "=== Control CLI (attach to running engine) ==="
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" cli --config trading.toml
+        ;;
+    mcp)
+        echo "=== MCP stdio server ==="
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
         ;;
     strategy)
         echo "=== Strategy Engine ==="

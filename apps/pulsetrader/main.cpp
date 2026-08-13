@@ -39,6 +39,12 @@
 #include "strategy/scalping/SuperTrendScalper.hpp"
 #include "ai/AiPipeline.hpp"
 #include "heartbeat/HeartbeatScheduler.hpp"
+#include "control/CommandParser.hpp"
+#include "control/ControlClient.hpp"
+#include "control/EngineServices.hpp"
+#include "control/JsonRpcServer.hpp"
+#include "control/McpServer.hpp"
+#include "control/OrderFlowExecutor.hpp"
 
 #include <fmt/ranges.h>
 
@@ -48,6 +54,7 @@
 #endif
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -59,6 +66,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <poll.h>
+#include <unistd.h>
 
 // ---------------------------------------------------------------------------
 // Global stop flag — set by SIGINT / SIGTERM handler
@@ -249,7 +259,8 @@ static void logSystemHeartbeat(
     const pulse::strategy::StrategyManager& strategy_mgr,
     const pulse::risk::PositionManager& position_mgr,
     pulse::exchange::GateRestClient* rest_client,
-    pulse::exchange::GateRestClient* spot_rest_client = nullptr)
+    pulse::exchange::GateRestClient* spot_rest_client,
+    std::mutex& rest_mutex)
 {
     // --- Uptime formatting ---
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
@@ -366,6 +377,8 @@ static void logSystemHeartbeat(
         << portfolio.total_notional << " USDT)";
 
     // Account balance (fetched via REST, cached).
+    // REST clients are not thread-safe — serialize with the control plane.
+    std::lock_guard rest_lock(rest_mutex);
     if (nullptr != rest_client)
     {
         auto bal_result = rest_client->getFuturesAccountBalance();
@@ -410,7 +423,7 @@ static void logSystemHeartbeat(
 // ===========================================================================
 // main
 // ===========================================================================
-int main(int argc, char* argv[])
+static int runTrade(int argc, char* argv[])
 {
     using pulse::MarketType;
     using pulse::MarginMode;
@@ -771,255 +784,42 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     // 10. Wire: aggregator output → risk check → execute → track
     // ------------------------------------------------------------------
-    // Reservation tracking: maps order_id → reservation_id for TOCTOU-safe
-    // notional reservation. Cancelled on order failure, consumed on fill.
-    std::mutex reservation_mutex;
-    std::unordered_map<std::string, std::uint64_t> order_reservations;
+    // Shared REST serialization mutex (GateRestClient is not thread-safe;
+    // heartbeat balance queries and control-plane REST calls share it).
+    std::mutex rest_mutex;
+
+    // Order flow executor: owns the reservation map and the full
+    // risk-gated execution flow (aggregator + manual CLI/MCP paths).
+    pulse::control::ExecutorOrderPlacer spot_placer_impl(*spot_executor);
+    pulse::control::ExecutorOrderPlacer futures_placer_impl(*futures_executor);
+    pulse::control::OrderFlowExecutor order_flow(
+        cfg.strategy,
+        risk_mgr,
+        position_mgr,
+        drawdownGuard,
+        spot_executor ? &spot_placer_impl : nullptr,
+        futures_executor ? &futures_placer_impl : nullptr,
+        spot_tracker.get(),
+        futures_tracker.get(),
+        rest_mutex
+#ifdef PULSE_ENABLE_SQLITE
+        , trade_recorder.get()
+#endif
+    );
 
     aggregator.setOutputCallback(
-        [&](const pulse::strategy::TradingSignal& sig)
+        [&order_flow](const pulse::strategy::TradingSignal& sig)
         {
-            using namespace pulse;
-
-            // Skip Flat signals.
-            if (strategy::SignalType::Flat == sig.type)
-            {
-                return;
-            }
-
-            auto log_app = logging::Logger::get("app");
-
-            // Build order request from signal.
-            Side side = (strategy::SignalType::Buy == sig.type)
-                        ? Side::Buy : Side::Sell;
-
-            execution::OrderRequest req;
-            req.symbol   = sig.symbol;
-            req.side     = side;
-            req.type     = OrderType::Market;
-            req.price    = sig.price;
-            req.market_type = sig.market_type;
-
-            // Find strategy config for leverage/quantity settings.
-            // Signal aggregator uses strategy_id "signal_aggregator" which won't
-            // match any instance name — fall back to first strategy on the same symbol.
-            req.quantity = 0.001;
-            bool matched = false;
-            for (const auto& inst : cfg.strategy.strategies)
-            {
-                if (inst.name == sig.strategy_id)
-                {
-                    req.quantity = inst.order_quantity;
-                    req.market_type = inst.market_type;
-                    req.leverage = inst.leverage;
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched)
-            {
-                // Fallback: use first enabled strategy for this symbol.
-                for (const auto& inst : cfg.strategy.strategies)
-                {
-                    if (inst.enabled && inst.symbol == sig.symbol)
-                    {
-                        req.quantity = inst.order_quantity;
-                        req.market_type = inst.market_type;
-                        req.leverage = inst.leverage;
-                        break;
-                    }
-                }
-            }
-
-            // For futures: convert quantity to contract_size (integer contracts).
-            if (MarketType::Futures == req.market_type && 0 == req.contract_size)
-            {
-                req.contract_size = static_cast<int>(std::max(1.0, std::round(req.quantity)));
-            }
-
-            // Risk evaluation.
-            auto eval = risk_mgr.evaluateOrder(req);
-            if (risk::RiskDecision::Rejected == eval.decision)
-            {
-                log_app->warn("Signal REJECTED [{}] {} {} @ {:.2f} — {}",
-                              sig.strategy_id,
-                              sig.symbol,
-                              (Side::Buy == side) ? "BUY" : "SELL",
-                              sig.price,
-                              eval.reason_message);
-                return;
-            }
-
-            // Apply risk-modified quantity.
-            if (risk::RiskDecision::Modified == eval.decision)
-            {
-                req.quantity = eval.approved_qty;
-                log_app->info("Signal MODIFIED: qty reduced to {:.6f}",
-                              eval.approved_qty);
-            }
-
-            log_app->info("Placing {} order: {} {:.6f} {} @ ~{:.2f} "
-                          "(conf={:.2f}, reason={})",
-                          (Side::Buy == side) ? "BUY" : "SELL",
-                          sig.strategy_id,
-                          req.quantity,
-                          req.symbol,
-                          sig.price,
-                          sig.confidence,
-                          sig.reason);
-
-            // Place order via REST.
-            auto* exec_ptr = (MarketType::Futures == req.market_type && futures_executor)
-                ? futures_executor.get() : spot_executor.get();
-            auto* track_ptr = (MarketType::Futures == req.market_type && futures_tracker)
-                ? futures_tracker.get() : spot_tracker.get();
-
-            if (!exec_ptr)
-            {
-                log_app->error("No executor for market_type={} — order aborted",
-                               static_cast<int>(req.market_type));
-                if (eval.reservation_id > 0)
-                {
-                    risk_mgr.positionManager().cancelReservation(eval.reservation_id);
-                }
-                return;
-            }
-
-            auto result = exec_ptr->placeOrder(req);
-            if (!ok(result))
-            {
-                auto err = error(result);
-                log_app->error("Order FAILED: {} (code={})",
-                               err.message, static_cast<int>(err.code));
-                // Cancel the notional reservation since the order failed.
-                if (eval.reservation_id > 0)
-                {
-                    position_mgr.cancelReservation(eval.reservation_id);
-                }
-                return;
-            }
-
-            auto& resp = value(result);
-            log_app->info("Order PLACED: id={} status={}",
-                          resp.order_id,
-                          static_cast<int>(resp.status));
-
-            // Store reservation_id for the completion handler to consume.
-            if (eval.reservation_id > 0)
-            {
-                std::lock_guard lock(reservation_mutex);
-                order_reservations[resp.order_id] = eval.reservation_id;
-            }
-
-            // Track order lifecycle via WS + REST polling fallback.
-            if (track_ptr)
-            {
-                track_ptr->trackOrder(resp.order_id, req.symbol,
-                                        req.side, req.type,
-                                        req.quantity, sig.price,
-                                        sig.strategy_id);
-            }
+            order_flow.onSignal(sig);
         });
 
-    // ------------------------------------------------------------------
-    // 11. Wire: order completion → update position manager + log
-    // ------------------------------------------------------------------
-    // Shared completion handler for both spot and futures trackers.
-    auto completion_handler = [&](const pulse::execution::ExecutionReport& report)
-    {
-            auto log_app = pulse::logging::Logger::get("app");
-
-            log_app->info("Order COMPLETED: id={} {} {} {:.6f} @ {:.2f} "
-                          "fees={:.4f} slippage={:.2f}bps latency={}ms",
-                          report.order_id,
-                          report.symbol,
-                          (pulse::Side::Buy == report.side) ? "BUY" : "SELL",
-                          report.filled_qty,
-                          report.avg_fill_price,
-                          report.fees,
-                          report.slippage_bps,
-                          report.latency.count());
-
-            // Update position manager and compute realized PnL.
-            double pnl = 0.0;
-            if (pulse::Side::Buy == report.side)
-            {
-                // Consume the notional reservation (if any) before opening.
-                {
-                    std::lock_guard lock(reservation_mutex);
-                    auto it = order_reservations.find(report.order_id);
-                    if (it != order_reservations.end())
-                    {
-                        position_mgr.consumeReservation(it->second);
-                        order_reservations.erase(it);
-                    }
-                }
-
-                auto open_result = position_mgr.openPosition(
-                    report.symbol,
-                    report.side,
-                    report.filled_qty,
-                    report.avg_fill_price,
-                    report.client_order_id);
-                if (!pulse::ok(open_result))
-                {
-                    log_app->warn("Failed to open position: {}",
-                                  pulse::error(open_result).message);
-                }
-            }
-            else
-            {
-                // Consume the notional reservation for sell orders too.
-                {
-                    std::lock_guard lock(reservation_mutex);
-                    auto it = order_reservations.find(report.order_id);
-                    if (it != order_reservations.end())
-                    {
-                        position_mgr.consumeReservation(it->second);
-                        order_reservations.erase(it);
-                    }
-                }
-
-                // For sells, try to close matching positions.
-                auto positions = position_mgr.getPositionsBySymbol(
-                    report.symbol);
-                for (const auto& pos : positions)
-                {
-                    auto close_result = position_mgr.closePosition(
-                            pos.position_id, report.filled_qty,
-                            report.avg_fill_price);
-                    if (close_result.has_value())
-                    {
-                        pnl += close_result.value();
-                        log_app->info("Closed position {} (realized PnL: {:.4f})",
-                                      pos.position_id, close_result.value());
-                    }
-                    else
-                    {
-                        log_app->warn("Failed to close position {}",
-                                      pos.position_id);
-                    }
-                }
-            }
-
-            // Update drawdown guard with realized PnL.
-            drawdownGuard.recordPnl(pnl);
-
-            // Record trade in SQLite (if enabled).
-#ifdef PULSE_ENABLE_SQLITE
-            if (trade_recorder)
-            {
-                auto rec_result = trade_recorder->recordTrade(
-                    report, pnl, report.client_order_id);
-
-                if (!pulse::ok(rec_result))
-                {
-                    log_app->warn("Trade recorder INSERT failed: {}",
-                                  pulse::error(rec_result).message);
-                }
-            }
-#endif
-    };
+    // Completion handler: consume reservation → open/close position →
+    // drawdown PnL → SQLite record.
+    auto completion_handler =
+        [&order_flow](const pulse::execution::ExecutionReport& report)
+        {
+            order_flow.onOrderComplete(report);
+        };
 
     if (spot_tracker)
     {
@@ -1028,6 +828,37 @@ int main(int argc, char* argv[])
     if (futures_tracker)
     {
         futures_tracker->setCompletionCallback(completion_handler);
+    }
+
+
+    // ------------------------------------------------------------------
+    // 11b. Control plane: EngineServices + JSON-RPC control socket
+    // ------------------------------------------------------------------
+    const auto engine_start_ref = std::chrono::steady_clock::now();
+    pulse::control::EngineServices services(
+        "0.1.0",
+        engine_start_ref,
+        cfg,
+        strategy_mgr,
+        risk_mgr,
+        position_mgr,
+        spot_feed.get(),
+        futures_feed.get(),
+        spot_rest.get(),
+        futures_rest.get(),
+        spot_tracker.get(),
+        futures_tracker.get(),
+        order_flow,
+        rest_mutex);
+
+    // The registry is copied into the server; the local copy is used by
+    // the embedded REPL (both dispatch to the same EngineServices).
+    auto control_registry = pulse::control::makeMethodRegistry(services);
+    std::unique_ptr<pulse::control::JsonRpcServer> control_server;
+    if (cfg.control.enabled)
+    {
+        control_server = std::make_unique<pulse::control::JsonRpcServer>(
+            cfg.control.bindAddress, cfg.control.port, control_registry);
     }
 
     // ------------------------------------------------------------------
@@ -1075,6 +906,17 @@ int main(int argc, char* argv[])
         log->info("[L5] Heartbeat scheduler started");
     }
 
+    // Control plane: start JSON-RPC control socket.
+    if (control_server)
+    {
+        if (!control_server->start())
+        {
+            log->warn("[L9] Control socket failed to bind {}:{} — "
+                      "continuing without remote control",
+                      cfg.control.bindAddress, cfg.control.port);
+        }
+    }
+
     // ------------------------------------------------------------------
     // 14. Main loop — wait for stop signal with periodic heartbeat
     // ------------------------------------------------------------------
@@ -1088,9 +930,103 @@ int main(int argc, char* argv[])
     constexpr int kHeartbeatIntervalTicks = 300;
     int heartbeat_counter = 0;
 
+    // Embedded REPL: enabled when stdin is a TTY. Commands dispatch
+    // directly to EngineServices in-process (no socket round-trip).
+    bool repl_enabled = isatty(STDIN_FILENO);
+    std::string repl_buffer;
+    if (repl_enabled)
+    {
+        std::cout << "pulseTrader interactive mode — type 'help' for commands.\n";
+        std::cout << "pulse> " << std::flush;
+    }
+
     while (!g_stop_requested.load(std::memory_order_acquire))
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        if (repl_enabled)
+        {
+            // Poll stdin with a 200ms timeout (EINTR-safe).
+            struct pollfd pfd{ STDIN_FILENO, POLLIN, 0 };
+            int rc = ::poll(&pfd, 1, 200);
+            if (rc > 0 && (pfd.revents & POLLIN))
+            {
+                char buf[512];
+                const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
+                if (n > 0)
+                {
+                    repl_buffer.append(buf, static_cast<std::size_t>(n));
+                    std::size_t newline;
+                    while ((newline = repl_buffer.find('\n'))
+                           != std::string::npos)
+                    {
+                        std::string line = repl_buffer.substr(0, newline);
+                        repl_buffer.erase(0, newline + 1);
+                        while (!line.empty() && '\r' == line.back())
+                        {
+                            line.pop_back();
+                        }
+
+                        if (!line.empty())
+                        {
+                            if ("quit" == line || "exit" == line)
+                            {
+                                // REPL exits; engine keeps running.
+                                std::cout << "(REPL exited — engine continues. "
+                                             "Ctrl+C to stop the engine)\n";
+                            }
+                            else if ("help" == line || "?" == line)
+                            {
+                                std::cout << pulse::control::replHelp();
+                            }
+                            else if (auto cmd = pulse::control::parseCommandLine(line))
+                            {
+                                const auto it = control_registry.find(cmd->method);
+                                if (control_registry.end() == it)
+                                {
+                                    std::cout << "Unknown command. "
+                                                 "Type 'help'.\n";
+                                }
+                                else
+                                {
+                                    const auto result = it->second(cmd->params);
+                                    if (pulse::ok(result))
+                                    {
+                                        std::cout << pulse::control::formatResponse(
+                                            cmd->method, pulse::value(result));
+                                    }
+                                    else
+                                    {
+                                        std::cout << "Error: "
+                                                  << pulse::error(result).message
+                                                  << "\n";
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                std::cout << "Unknown command. Type 'help'.\n";
+                            }
+                        }
+                        std::cout << "pulse> " << std::flush;
+                    }
+                }
+                else if (0 == n)
+                {
+                    // EOF (Ctrl+D) — exit the REPL only.
+                    std::cout << "\n(EOF — REPL exited, engine continues. "
+                                 "Ctrl+C to stop)\n";
+                    repl_enabled = false;
+                }
+            }
+            else if (rc < 0 && EINTR != errno)
+            {
+                // poll error — fall back to sleeping.
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        }
+        else
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
 
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)
         {
@@ -1104,7 +1040,8 @@ int main(int argc, char* argv[])
                 strategy_mgr,
                 position_mgr,
                 futures_rest ? futures_rest.get() : spot_rest.get(),
-                spot_rest ? spot_rest.get() : nullptr);
+                spot_rest ? spot_rest.get() : nullptr,
+                rest_mutex);
         }
     }
 
@@ -1113,6 +1050,13 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     log->info("──────────────────────────────────────────────────");
     log->info("Shutdown signal received. Stopping trading engine...");
+
+    // L9: Control plane (stop before layers so remote clients drop cleanly)
+    if (control_server)
+    {
+        control_server->stop();
+        log->info("[L9] Control socket stopped");
+    }
 
     // L5: Heartbeat
     if (heartbeat)
@@ -1158,4 +1102,219 @@ int main(int argc, char* argv[])
     pulse::logging::Logger::shutdown();
 
     return 0;
+}
+
+// ===========================================================================
+// Subcommand dispatch — trade (default) | cli | mcp
+// ===========================================================================
+
+namespace
+{
+
+/// Shared arg parsing for cli/mcp: --config, --host, --port, --help.
+struct ClientArgs
+{
+    std::string config_path;
+    std::string host;
+    std::string port_str;
+};
+
+bool parseClientArgs(int argc, char *argv[], ClientArgs &out)
+{
+    for (int i = 0; i < argc; ++i)
+    {
+        std::string arg(argv[i]);
+        if ("--help" == arg || "-h" == arg)
+        {
+            return false;
+        }
+        if ("--config" == arg && i + 1 < argc)
+        {
+            out.config_path = argv[++i];
+        }
+        else if ("--host" == arg && i + 1 < argc)
+        {
+            out.host = argv[++i];
+        }
+        else if ("--port" == arg && i + 1 < argc)
+        {
+            out.port_str = argv[++i];
+        }
+        else
+        {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Load control endpoint from config (with optional CLI overrides).
+pulse::PulseConfig loadControlConfig(const ClientArgs &args)
+{
+    pulse::PulseConfig cfg;
+    if (!args.config_path.empty())
+    {
+        auto result = pulse::loadConfigFile(args.config_path);
+        if (pulse::ok(result))
+        {
+            cfg = pulse::value(result);
+        }
+        else
+        {
+            std::cerr << "Config error: " << pulse::error(result).message << "\n";
+        }
+    }
+    else
+    {
+        cfg = buildDefaultConfig();
+    }
+    if (!args.host.empty())
+    {
+        cfg.control.bindAddress = args.host;
+    }
+    if (!args.port_str.empty())
+    {
+        cfg.control.port = static_cast<std::uint16_t>(
+            std::stoi(args.port_str));
+    }
+    return cfg;
+}
+
+/// Interactive REPL loop over a ControlClient (remote attach).
+int runCliRepl(pulse::control::ControlClient &client)
+{
+    std::cout << "Connected to pulseTrader engine at "
+              << "control socket (type 'help' for commands, 'quit' to exit)\n";
+    std::cout << "pulse> " << std::flush;
+
+    std::string line;
+    while (std::getline(std::cin, line))
+    {
+        if (line.empty())
+        {
+            std::cout << "pulse> " << std::flush;
+            continue;
+        }
+        if ("quit" == line || "exit" == line)
+        {
+            break;
+        }
+        if ("help" == line || "?" == line)
+        {
+            std::cout << pulse::control::replHelp();
+            std::cout << "pulse> " << std::flush;
+            continue;
+        }
+
+        auto cmd = pulse::control::parseCommandLine(line);
+        if (!cmd.has_value())
+        {
+            std::cout << "Unknown command. Type 'help'.\n";
+            std::cout << "pulse> " << std::flush;
+            continue;
+        }
+
+        auto resp = client.call(cmd->method, cmd->params);
+        if (pulse::ok(resp))
+        {
+            std::cout << pulse::control::formatResponse(cmd->method,
+                                                        pulse::value(resp));
+        }
+        else
+        {
+            std::cerr << "Error: " << pulse::error(resp).message << "\n";
+        }
+        std::cout << "pulse> " << std::flush;
+    }
+    return 0;
+}
+
+} // anonymous namespace
+
+/// `pulsetrader cli` — attach to a running engine's control socket.
+int runCli(int argc, char *argv[])
+{
+    ClientArgs args;
+    if (!parseClientArgs(argc, argv, args))
+    {
+        std::cerr << "Usage: pulsetrader cli [--config trading.toml] "
+                     "[--host HOST] [--port PORT]\n";
+        return 1;
+    }
+
+    const auto cfg = loadControlConfig(args);
+
+    pulse::control::ControlClient client;
+    if (!client.connect(cfg.control.bindAddress, cfg.control.port))
+    {
+        std::cerr << "Error: cannot reach engine control socket at "
+                  << cfg.control.bindAddress << ":" << cfg.control.port
+                  << " — is the trading engine running?\n";
+        return 1;
+    }
+
+    return runCliRepl(client);
+}
+
+/// `pulsetrader mcp` — stdio MCP server bridging to the control socket.
+int runMcp(int argc, char *argv[])
+{
+    ClientArgs args;
+    if (!parseClientArgs(argc, argv, args))
+    {
+        std::cerr << "Usage: pulsetrader mcp [--config trading.toml] "
+                     "[--host HOST] [--port PORT]\n";
+        return 1;
+    }
+
+    const auto cfg = loadControlConfig(args);
+
+    // Stdio hygiene: MCP protocol owns stdout — console logging would
+    // corrupt the stream, so force file-only logging BEFORE init.
+    pulse::PulseConfig mcp_cfg = cfg;
+    mcp_cfg.log.toConsole = false;
+    pulse::logging::Logger::init(mcp_cfg.log);
+
+    auto client = std::make_shared<pulse::control::ControlClient>();
+    // Connect lazily: initialize/tools/list work even if the engine is
+    // down; tools/call surface the unreachable error.
+    client->connect(mcp_cfg.control.bindAddress, mcp_cfg.control.port, 1000);
+
+    pulse::control::McpServer::Backend backend =
+        [client](const std::string &method, const nlohmann::json &params)
+        {
+            return client->call(method, params);
+        };
+
+    pulse::control::McpServer server(backend);
+    server.run(std::cin, std::cout);
+
+    pulse::logging::Logger::shutdown();
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    std::string subcommand = "trade";
+    if (argc > 1)
+    {
+        const std::string first(argv[1]);
+        if ("trade" == first || "cli" == first || "mcp" == first)
+        {
+            subcommand = first;
+            ++argv;
+            --argc;
+        }
+    }
+
+    if ("cli" == subcommand)
+    {
+        return runCli(argc, argv);
+    }
+    if ("mcp" == subcommand)
+    {
+        return runMcp(argc, argv);
+    }
+    return runTrade(argc, argv);
 }
