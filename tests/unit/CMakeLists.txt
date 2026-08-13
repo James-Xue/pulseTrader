@@ -9,6 +9,7 @@ add_subdirectory(strategy)
 add_subdirectory(risk)
 add_subdirectory(ai)
 add_subdirectory(heartbeat)
+add_subdirectory(control)
 
 if(PULSE_ENABLE_SQLITE)
     add_subdirectory(trade_recorder)

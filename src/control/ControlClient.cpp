@@ -51,6 +51,9 @@ bool ControlClient::connect(const std::string &host, std::uint16_t port,
                                 const asio::ip::tcp::endpoint &)
                             {
                                 connected = !err;
+                                // Cancel the pending timeout so run()
+                                // returns as soon as connect resolves.
+                                timer.cancel();
                             });
         m_ioCtx->restart();
         m_ioCtx->run();

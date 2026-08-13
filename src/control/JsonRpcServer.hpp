@@ -68,7 +68,7 @@ class JsonRpcServer
 
   private:
     void acceptLoop();
-    void handleSession(asio::ip::tcp::socket sock);
+    void handleSession(std::shared_ptr<asio::ip::tcp::socket> sock);
 
     std::string m_bindAddress;
     std::uint16_t m_port;
@@ -81,6 +81,7 @@ class JsonRpcServer
 
     std::mutex m_sessionMutex;
     std::vector<std::thread> m_sessions;
+    std::vector<std::shared_ptr<asio::ip::tcp::socket>> m_sessionSockets;
 };
 
 /// Build the full 16-method registry from an EngineServices instance.

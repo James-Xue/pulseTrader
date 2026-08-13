@@ -192,3 +192,58 @@ TEST(DrawdownGuard, RecordPnlAccumulatesPerStrategy)
     // But recordPnl should not crash and should accumulate correctly.
     EXPECT_FALSE(guard.isHalted());
 }
+
+// ---------------------------------------------------------------------------
+// Manual halt (CLI/MCP circuit-breaker override)
+// ---------------------------------------------------------------------------
+
+TEST(DrawdownGuard, ManualHaltSetsHaltState)
+{
+    DrawdownGuard guard(make_config());
+    guard.manualHalt();
+    EXPECT_TRUE(guard.isHalted());
+    EXPECT_EQ(ErrorCode::ManualHalt, guard.haltReason());
+}
+
+TEST(DrawdownGuard, ManualHaltWithCustomReason)
+{
+    DrawdownGuard guard(make_config());
+    guard.manualHalt(ErrorCode::StopLossTriggered);
+    EXPECT_TRUE(guard.isHalted());
+    EXPECT_EQ(ErrorCode::StopLossTriggered, guard.haltReason());
+}
+
+TEST(DrawdownGuard, ClearHaltResumesAfterManualHalt)
+{
+    DrawdownGuard guard(make_config());
+    guard.manualHalt();
+    guard.clearHalt();
+    EXPECT_FALSE(guard.isHalted());
+    EXPECT_EQ(ErrorCode::Ok, guard.haltReason());
+}
+
+TEST(DrawdownGuard, RecordPnlDoesNotClearManualHalt)
+{
+    DrawdownGuard guard(make_config());
+    guard.updateEquity(1000.0);
+    guard.manualHalt();
+    guard.recordPnl(50.0);
+    EXPECT_TRUE(guard.isHalted());
+    EXPECT_EQ(ErrorCode::ManualHalt, guard.haltReason());
+}
+
+TEST(DrawdownGuard, ManualHaltOverridesAfterClear)
+{
+    DrawdownGuard guard(make_config());
+    guard.updateEquity(1000.0);
+    // Trigger an automatic drawdown halt first.
+    guard.updateEquity(900.0); // 10% peak-to-valley > 5% threshold
+    EXPECT_TRUE(guard.isHalted());
+    guard.clearHalt();
+    EXPECT_FALSE(guard.isHalted());
+
+    // Manual halt works after clearing.
+    guard.manualHalt();
+    EXPECT_TRUE(guard.isHalted());
+    EXPECT_EQ(ErrorCode::ManualHalt, guard.haltReason());
+}

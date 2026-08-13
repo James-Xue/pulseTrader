@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 #include <string>
 
 // Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
@@ -41,8 +42,8 @@ class TempToml
   public:
     explicit TempToml(const std::string &content)
         : path_(std::filesystem::temp_directory_path()
-                / ("pulsetrader_test_" + std::to_string(counter_++)
-                   + ".toml"))
+                / ("pulsetrader_test_" + std::to_string(::getpid())
+                   + "_" + std::to_string(counter_++) + ".toml"))
     {
         std::ofstream ofs(path_);
         ofs << content;

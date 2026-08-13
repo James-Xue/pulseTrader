@@ -57,6 +57,19 @@ OrderFlowExecutor::OrderFlowExecutor(
     , m_tradeRecorder{ trade_recorder }
 #endif
 {
+    // Wire completion callbacks — the class owns the completion logic.
+    if (m_spotTracker)
+    {
+        m_spotTracker->setCompletionCallback(
+            [this](const execution::ExecutionReport &report)
+            { onOrderComplete(report); });
+    }
+    if (m_futuresTracker)
+    {
+        m_futuresTracker->setCompletionCallback(
+            [this](const execution::ExecutionReport &report)
+            { onOrderComplete(report); });
+    }
 }
 
 execution::OrderRequest
@@ -169,7 +182,11 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
     auto eval = m_riskMgr.evaluateOrder(req);
     if (risk::RiskDecision::Rejected == eval.decision)
     {
-        return PulseError{ ErrorCode::OrderRejected, eval.reason_message };
+        // Preserve the actual risk reason code (halt, limit hit, ...)
+        // instead of flattening everything to OrderRejected.
+        const auto code = (ErrorCode::Ok != eval.reason_code)
+                              ? eval.reason_code : ErrorCode::OrderRejected;
+        return PulseError{ code, eval.reason_message };
     }
 
     // 2. Apply risk-modified quantity.

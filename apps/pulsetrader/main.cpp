@@ -813,22 +813,8 @@ static int runTrade(int argc, char* argv[])
             order_flow.onSignal(sig);
         });
 
-    // Completion handler: consume reservation → open/close position →
-    // drawdown PnL → SQLite record.
-    auto completion_handler =
-        [&order_flow](const pulse::execution::ExecutionReport& report)
-        {
-            order_flow.onOrderComplete(report);
-        };
-
-    if (spot_tracker)
-    {
-        spot_tracker->setCompletionCallback(completion_handler);
-    }
-    if (futures_tracker)
-    {
-        futures_tracker->setCompletionCallback(completion_handler);
-    }
+    // Completion callbacks are wired by OrderFlowExecutor's constructor
+    // (consume reservation → open/close position → drawdown PnL → SQLite).
 
 
     // ------------------------------------------------------------------

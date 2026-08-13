@@ -13,6 +13,8 @@
 #include <asio/streambuf.hpp>
 #include <asio/write.hpp>
 
+#include <poll.h>
+
 #include <iostream>
 
 namespace pulse::control
@@ -190,6 +192,12 @@ bool JsonRpcServer::start()
         return false;
     }
 
+    // If port 0 was requested, report the actual ephemeral port.
+    if (0 == m_port)
+    {
+        m_port = m_acceptor.local_endpoint().port();
+    }
+
     m_running.store(true, std::memory_order_release);
     m_acceptThread = std::thread(&JsonRpcServer::acceptLoop, this);
 
@@ -220,6 +228,25 @@ void JsonRpcServer::stop()
         m_acceptThread.join();
     }
 
+    // Close active session sockets to unblock their read loops.
+    {
+        std::lock_guard lock(m_sessionMutex);
+        for (auto &sock : m_sessionSockets)
+        {
+            try
+            {
+                // shutdown() wakes a blocking recv in the session thread;
+                // close() alone is not guaranteed to.
+                sock->shutdown(asio::ip::tcp::socket::shutdown_both);
+                sock->close();
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+        m_sessionSockets.clear();
+    }
+
     std::lock_guard lock(m_sessionMutex);
     for (auto &t : m_sessions)
     {
@@ -233,16 +260,36 @@ void JsonRpcServer::stop()
 
 void JsonRpcServer::acceptLoop()
 {
+    // Non-blocking acceptor + poll() so stop() can interrupt the loop
+    // (blocking accept() cannot be woken by close() from another thread).
+    m_acceptor.non_blocking(true);
+
     while (m_running.load(std::memory_order_acquire))
     {
         try
         {
             auto sock = std::make_shared<asio::ip::tcp::socket>(m_ioCtx);
-            m_acceptor.accept(*sock);
+            asio::error_code ec;
+            m_acceptor.accept(*sock, ec);
+            if (ec)
+            {
+                if (asio::error::would_block == ec)
+                {
+                    // No pending connection — poll briefly, then re-check.
+                    struct pollfd pfd{ m_acceptor.native_handle(), POLLIN, 0 };
+                    ::poll(&pfd, 1, 200);
+                    continue;
+                }
+                // Acceptor closed during stop() — exit the loop.
+                break;
+            }
 
             std::lock_guard lock(m_sessionMutex);
-            m_sessions.emplace_back(&JsonRpcServer::handleSession, this,
-                                    std::move(*sock));
+            // Both the session thread and m_sessionSockets share the same
+            // socket object so stop() can close it to unblock the read loop.
+            m_sessions.emplace_back([this, sock]
+                                    { handleSession(sock); });
+            m_sessionSockets.push_back(sock);
             // Detach is not used — threads are joined in stop().
             // Sessions with finished work are cleaned up opportunistically.
             if (m_sessions.size() > 32)
@@ -262,14 +309,14 @@ void JsonRpcServer::acceptLoop()
     }
 }
 
-void JsonRpcServer::handleSession(asio::ip::tcp::socket sock)
+void JsonRpcServer::handleSession(std::shared_ptr<asio::ip::tcp::socket> sock)
 {
     try
     {
         asio::streambuf buffer;
         while (m_running.load(std::memory_order_acquire))
         {
-            std::size_t n = asio::read_until(sock, buffer, '\n');
+            std::size_t n = asio::read_until(*sock, buffer, '\n');
             if (0 == n)
             {
                 break;
@@ -294,7 +341,7 @@ void JsonRpcServer::handleSession(asio::ip::tcp::socket sock)
             const std::string response = dispatchLine(line, m_registry);
             if (!response.empty())
             {
-                asio::write(sock, asio::buffer(response + "\n"));
+                asio::write(*sock, asio::buffer(response + "\n"));
             }
         }
     }
@@ -305,7 +352,7 @@ void JsonRpcServer::handleSession(asio::ip::tcp::socket sock)
 
     try
     {
-        sock.close();
+        sock->close();
     }
     catch (const std::exception &)
     {
