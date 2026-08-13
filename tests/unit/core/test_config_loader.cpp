@@ -428,26 +428,22 @@ poll_interval_ms = 500
     EXPECT_FALSE(strat.strategies[2].enabled);
 }
 
-TEST(ConfigLoader, ParseWebui_AllFields)
+TEST(ConfigLoader, ParseControl_AllFields)
 {
     TempToml tmp(R"(
-[webui]
+[control]
 enabled = true
 bindAddress = "0.0.0.0"
-port = 9090
-authToken = "mytoken"
-maxClients = 8
+port = 9091
 )");
 
     auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
-    const auto &web = value(result).webui;
-    EXPECT_TRUE(web.enabled);
-    EXPECT_EQ("0.0.0.0", web.bindAddress);
-    EXPECT_EQ(9090, web.port);
-    EXPECT_EQ("mytoken", web.authToken);
-    EXPECT_EQ(8u, web.maxClients);
+    const auto &ctrl = value(result).control;
+    EXPECT_TRUE(ctrl.enabled);
+    EXPECT_EQ("0.0.0.0", ctrl.bindAddress);
+    EXPECT_EQ(9091, ctrl.port);
 }
 
 TEST(ConfigLoader, ParseTwitter_AndNews)
@@ -531,8 +527,9 @@ apiSecret = "s"
     // Risk defaults preserved.
     EXPECT_DOUBLE_EQ(1000.0, cfg.risk.maxPositionNotional);
     EXPECT_EQ(5, cfg.risk.maxOpenPositions);
-    // WebUI defaults preserved.
-    EXPECT_FALSE(cfg.webui.enabled);
+    // Control defaults preserved.
+    EXPECT_TRUE(cfg.control.enabled);
+    EXPECT_EQ(8081, cfg.control.port);
     // AI defaults preserved.
     EXPECT_EQ("claude", cfg.ai.backend);
 }

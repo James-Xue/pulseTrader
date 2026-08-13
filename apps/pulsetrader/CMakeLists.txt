@@ -19,23 +19,6 @@ target_link_libraries(pulsetrader
         pulse::core
 )
 
-if(PULSE_ENABLE_WEBUI)
-    target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_WEBUI=1)
-
-    target_include_directories(pulsetrader
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets
-    )
-
-    target_link_libraries(pulsetrader
-        PRIVATE
-            pulse::webui
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
-            z
-    )
-endif()
-
 if(PULSE_ENABLE_SQLITE)
     target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_SQLITE=1)
     target_link_libraries(pulsetrader PRIVATE pulse::trade_recorder)

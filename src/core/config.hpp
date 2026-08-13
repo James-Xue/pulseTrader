@@ -216,20 +216,17 @@ struct LogConfig
 };
 
 // ---------------------------------------------------------------------------
-// WebUiConfig — Optional WebUI server (requires -DPULSE_ENABLE_WEBUI=ON)
+// ControlConfig — JSON-RPC control socket (CLI/MCP control plane)
 //
 // Security model:
 //   1. Bind to localhost only by default (no external access)
-//   2. Require a bearer token for all endpoints
-//   3. Validate the Host header to prevent DNS rebinding attacks
+//   2. Newline-delimited JSON-RPC 2.0 over TCP
 // ---------------------------------------------------------------------------
-struct WebUiConfig
+struct ControlConfig
 {
-    bool enabled = false;
+    bool enabled = true;                   ///< Enable TCP control socket.
     std::string bindAddress = "127.0.0.1"; ///< Localhost only by default.
-    std::uint16_t port = 8080;             ///< HTTP/WebSocket listen port.
-    std::string authToken;                 ///< Bearer token for all endpoints.
-    std::uint32_t maxClients = 4;          ///< Max concurrent WebSocket clients.
+    std::uint16_t port = 8081;             ///< Control socket listen port.
 };
 
 // ---------------------------------------------------------------------------
@@ -296,7 +293,7 @@ struct PulseConfig
     RiskConfig risk;
     StrategyConfig strategy;
     LogConfig log;
-    WebUiConfig webui;
+    ControlConfig control;              ///< JSON-RPC control socket.
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.

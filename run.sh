@@ -8,7 +8,6 @@
 #   ./run.sh market     Test market data pipeline
 #   ./run.sh strategy   Test strategy engine
 #   ./run.sh ai         Test AI Pipeline (--mock mode)
-#   ./run.sh webui      Start WebUI server
 #   ./run.sh test       Run all unit tests
 
 set -euo pipefail
@@ -27,7 +26,7 @@ fi
 BUILD_DIR="build"
 
 usage() {
-    echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test} [args...]"
+    echo "Usage: $0 {trade|cli|mcp|rest|ws|market|strategy|ai|test} [args...]"
     echo ""
     echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
     echo "  rest      Test Gate.io REST API"
@@ -35,7 +34,6 @@ usage() {
     echo "  market    Test market data pipeline"
     echo "  strategy  Test strategy engine"
     echo "  ai        Test AI Pipeline (mock)"
-    echo "  webui     Start WebUI server"
     echo "  test      Run all unit tests"
     exit 1
 }
@@ -75,10 +73,6 @@ case "$1" in
     ai)
         echo "=== AI Pipeline (mock) ==="
         "$BUILD_DIR/tools/test_ai_pipeline" --mock
-        ;;
-    webui)
-        echo "=== WebUI Server ==="
-        "$BUILD_DIR/tools/test_webui_server"
         ;;
     test)
         echo "=== Running all unit tests ==="

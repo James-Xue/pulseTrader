@@ -43,6 +43,7 @@ struct StrategySnapshot
     std::string symbol;           ///< Trading pair.
     bool enabled;                 ///< Whether the strategy is configured as enabled.
     bool running;                 ///< Whether the strategy thread is currently active.
+    bool paused;                  ///< Whether the strategy is manually paused (ticks skipped).
     std::uint32_t poll_interval_ms; ///< Poll interval.
 
     StrategySnapshot()
@@ -51,6 +52,7 @@ struct StrategySnapshot
         , symbol{}
         , enabled{ false }
         , running{ false }
+        , paused{ false }
         , poll_interval_ms{ 0 }
     {
     }

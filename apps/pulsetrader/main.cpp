@@ -9,7 +9,7 @@
 //   L6 Strategy  → multi-strategy orchestration + signal aggregation
 //   L7 Risk      → position/drawdown/rate-limit gate
 //   L8 Execution → order placement + lifecycle tracking
-//   L9 WebUI     → optional real-time dashboard
+//   L9 Control   → JSON-RPC control socket (CLI/MCP)
 //
 // Usage:
 //   pulsetrader                          Start with default config + .env credentials
@@ -42,10 +42,6 @@
 
 #include <fmt/ranges.h>
 
-#ifdef PULSE_ENABLE_WEBUI
-#include "webui/DashboardState.hpp"
-#include "webui/WebServer.hpp"
-#endif
 
 #ifdef PULSE_ENABLE_SQLITE
 #include "trade_recorder/TradeRecorder.hpp"
@@ -96,8 +92,7 @@ static void printUsage(const char* prog)
         << "  GATE_API_KEY      Gate.io API key (required without --config)\n"
         << "  GATE_API_SECRET   Gate.io API secret (required without --config)\n"
         << "  HTTPS_PROXY       HTTP proxy for REST + WebSocket\n"
-        << "  PULSE_WEBUI_PORT  WebUI listen port (default: 8080)\n"
-        << "  PULSE_WEBUI_TOKEN WebUI bearer token (default: pulsetrader)\n\n"
+        << "  PULSE_CONTROL_PORT Control socket port (default: 8081)\n\n"
         << "TOML config (--config):\n"
         << "  Use from_env:VAR_NAME syntax to read sensitive values from env.\n"
         << "  Example: apiKey = \"from_env:GATE_API_KEY\"\n"
@@ -194,13 +189,11 @@ static pulse::PulseConfig buildDefaultConfig()
     cfg.ai.heartbeatIntervalSec = 0;  // Disabled until AI key is provided.
     cfg.ai.requestTimeoutMs     = 30'000;
 
-    // L9: WebUI
-    cfg.webui.enabled      = true;
-    cfg.webui.bindAddress  = "127.0.0.1";
-    cfg.webui.port         = static_cast<std::uint16_t>(
-        std::stoi(envOr("PULSE_WEBUI_PORT", "8080")));
-    cfg.webui.authToken    = envOr("PULSE_WEBUI_TOKEN", "pulsetrader");
-    cfg.webui.maxClients   = 4;
+    // Control plane: JSON-RPC control socket.
+    cfg.control.enabled     = true;
+    cfg.control.bindAddress = "127.0.0.1";
+    cfg.control.port        = static_cast<std::uint16_t>(
+        std::stoi(envOr("PULSE_CONTROL_PORT", "8081")));
 
     return cfg;
 }
@@ -589,7 +582,7 @@ int main(int argc, char* argv[])
     }
 
     // Spot REST client for balance queries (always created when credentials
-    // exist, even without spot strategies — needed for WebUI balance display).
+    // exist, even without spot strategies — needed for CLI/MCP balance queries).
     if (!has_spot)
     {
         spot_rest = std::make_unique<pulse::exchange::GateRestClient>(
@@ -774,43 +767,6 @@ int main(int argc, char* argv[])
     {
         log->info("[L4/L5] AI pipeline disabled (no API key or interval=0)");
     }
-
-    // ------------------------------------------------------------------
-    // 9. L9: WebUI (optional)
-    // ------------------------------------------------------------------
-#ifdef PULSE_ENABLE_WEBUI
-    std::unique_ptr<pulse::webui::DashboardState> dashboard_state;
-    std::unique_ptr<pulse::webui::WebServer>      web_server;
-
-    if (cfg.webui.enabled)
-    {
-        // Pick whichever market feed/tracker/rest is available.
-        auto& ui_feed    = spot_feed    ? *spot_feed    : *futures_feed;
-        auto& ui_tracker = spot_tracker ? *spot_tracker : *futures_tracker;
-        auto* ui_rest    = futures_rest ? futures_rest.get() : spot_rest.get();
-        auto* ui_spot_rest = spot_rest ? spot_rest.get() : nullptr;
-
-        dashboard_state = std::make_unique<pulse::webui::DashboardState>(
-            cfg.webui, ui_feed, strategy_mgr, risk_mgr,
-            ui_tracker, ai_pipeline, ui_rest, ui_spot_rest);
-
-        web_server = std::make_unique<pulse::webui::WebServer>(
-            cfg.webui, *dashboard_state, "frontend/dist");
-
-        // Wire: dashboard snapshot → WS broadcast
-        const auto& ws_ref = web_server->wsServer();
-        dashboard_state->setSnapshotCallback(
-            [&ws_ref](std::shared_ptr<const pulse::webui::DashboardSnapshot> snap)
-            {
-                // WsServer::pushSnapshot is const-safe for broadcasting.
-                const_cast<pulse::webui::WsServer&>(ws_ref).pushSnapshot(snap);
-            });
-
-        log->info("[L9] WebUI: http://{}:{}", cfg.webui.bindAddress, cfg.webui.port);
-    }
-#else
-    log->info("[L9] WebUI disabled (compile with -DPULSE_ENABLE_WEBUI=ON)");
-#endif
 
     // ------------------------------------------------------------------
     // 10. Wire: aggregator output → risk check → execute → track
@@ -1119,26 +1075,6 @@ int main(int argc, char* argv[])
         log->info("[L5] Heartbeat scheduler started");
     }
 
-    // L9: Start WebUI.
-#ifdef PULSE_ENABLE_WEBUI
-    if (dashboard_state)
-    {
-        dashboard_state->start();
-    }
-    if (web_server)
-    {
-        if (web_server->start())
-        {
-            log->info("[L9] WebUI server listening on port {}",
-                      web_server->port());
-        }
-        else
-        {
-            log->warn("[L9] WebUI server failed to start");
-        }
-    }
-#endif
-
     // ------------------------------------------------------------------
     // 14. Main loop — wait for stop signal with periodic heartbeat
     // ------------------------------------------------------------------
@@ -1177,19 +1113,6 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------------
     log->info("──────────────────────────────────────────────────");
     log->info("Shutdown signal received. Stopping trading engine...");
-
-    // L9: WebUI
-#ifdef PULSE_ENABLE_WEBUI
-    if (web_server)
-    {
-        web_server->stop();
-        log->info("[L9] WebUI server stopped");
-    }
-    if (dashboard_state)
-    {
-        dashboard_state->stop();
-    }
-#endif
 
     // L5: Heartbeat
     if (heartbeat)

@@ -10,10 +10,6 @@ add_subdirectory(risk)
 add_subdirectory(execution)
 add_subdirectory(logging)
 
-if(PULSE_ENABLE_WEBUI)
-    add_subdirectory(webui)
-endif()
-
 if(PULSE_ENABLE_SQLITE)
     add_subdirectory(trade_recorder)
 endif()

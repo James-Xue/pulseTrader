@@ -26,7 +26,7 @@ namespace pulse
 //   6xxx   : trade recorder (SQLite)
 //   7xxx   : futures-specific (leverage, margin, liquidation)
 //   9xxx   : internal / programming errors
-//   91xx   : WebUI server errors
+//   91xx   : control plane (JSON-RPC / MCP)
 // ---------------------------------------------------------------------------
 enum class ErrorCode : std::uint32_t
 {
@@ -57,6 +57,7 @@ enum class ErrorCode : std::uint32_t
     StopLossTriggered = 3004,  ///< Position closed by stop-loss engine.
     TakeProfitTriggered = 3005, ///< Position partially/fully closed by take-profit engine.
     SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
+    ManualHalt = 3007,         ///< Trading halted manually via CLI/MCP.
 
     // AI (4xxx)
     AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.
@@ -88,13 +89,12 @@ enum class ErrorCode : std::uint32_t
     FuturesFundingError = 7004,       ///< Funding rate settlement error.
     FuturesContractNotFound = 7005,   ///< Requested futures contract does not exist.
 
-    // WebUI (91xx)
-    WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.
-    WebUiAuthFailed = 9101,     ///< Bearer token authentication rejected.
-    WebUiHostInvalid = 9102,    ///< Host header validation failed (DNS rebinding attempt).
-    WebUiClientLimit = 9103,    ///< WebSocket client limit reached.
-    WebUiSnapshotError = 9104,  ///< Failed to assemble dashboard snapshot.
-    WebUiStaticNotFound = 9105, ///< Requested static file not found.
+    // Control plane (91xx)
+    ControlBindFailed = 9100,      ///< Failed to bind control socket to address/port.
+    ControlInvalidRequest = 9101,  ///< JSON-RPC request malformed.
+    ControlMethodNotFound = 9102,  ///< Unknown JSON-RPC method.
+    ControlProtocolError = 9103,   ///< JSON-RPC/MCP protocol violation.
+    ControlEngineUnreachable = 9104, ///< Control socket cannot reach the engine.
 
     // Internal (9xxx)
     InternalError = 9000,

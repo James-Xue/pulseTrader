@@ -652,24 +652,19 @@ PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
     return {};
 }
 
-PulseError parseWebui(const toml::value &root, WebUiConfig &out)
+PulseError parseControl(const toml::value &root, ControlConfig &out)
 {
-    if (!root.contains("webui"))
+    if (!root.contains("control"))
     {
         return {};
     }
 
-    const auto &sec = root.at("webui");
+    const auto &sec = root.at("control");
 
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.bindAddress = toml::find_or(sec, "bindAddress", out.bindAddress);
     out.port = static_cast<std::uint16_t>(
         toml::find_or(sec, "port", static_cast<int>(out.port)));
-    out.authToken = toml::find_or(sec, "authToken", out.authToken);
-    out.maxClients =
-        static_cast<std::uint32_t>(
-            toml::find_or(sec, "maxClients",
-                          static_cast<int>(out.maxClients)));
 
     return {};
 }
@@ -788,7 +783,7 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
         return err;
     }
 
-    err = parseWebui(root, cfg.webui);
+    err = parseControl(root, cfg.control);
 
     if (ErrorCode::Ok != err.code)
     {
