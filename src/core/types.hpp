@@ -126,6 +126,54 @@ struct AccountBalance
     return Side::Buy == s ? Side::Sell : Side::Buy;
 }
 
+/// Parse "buy"/"sell" (case-insensitive) into Side. Nullopt on bad input.
+[[nodiscard]] inline std::optional<Side> parseSide(std::string_view sv) noexcept
+{
+    if ("buy" == sv || "BUY" == sv)
+    {
+        return Side::Buy;
+    }
+    if ("sell" == sv || "SELL" == sv)
+    {
+        return Side::Sell;
+    }
+    return std::nullopt;
+}
+
+/// Parse "market"/"limit"/"post_only" (case-insensitive) into OrderType.
+/// Nullopt on bad input.
+[[nodiscard]] inline std::optional<OrderType> parseOrderType(std::string_view sv) noexcept
+{
+    if ("market" == sv || "MARKET" == sv)
+    {
+        return OrderType::Market;
+    }
+    if ("limit" == sv || "LIMIT" == sv)
+    {
+        return OrderType::Limit;
+    }
+    if ("post_only" == sv || "POST_ONLY" == sv)
+    {
+        return OrderType::PostOnly;
+    }
+    return std::nullopt;
+}
+
+/// Parse "spot"/"futures" (case-insensitive) into MarketType.
+/// Nullopt on bad input.
+[[nodiscard]] inline std::optional<MarketType> parseMarketType(std::string_view sv) noexcept
+{
+    if ("spot" == sv || "SPOT" == sv)
+    {
+        return MarketType::Spot;
+    }
+    if ("futures" == sv || "FUTURES" == sv)
+    {
+        return MarketType::Futures;
+    }
+    return std::nullopt;
+}
+
 /// Convert MarketType to a human-readable string.
 [[nodiscard]] constexpr const char* toString(MarketType mt) noexcept
 {

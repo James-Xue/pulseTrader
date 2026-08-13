@@ -123,7 +123,27 @@ class StrategyManager
     /// Used by the AI pipeline (HeartbeatScheduler → ParamAdvisor) to write
     /// parameter deltas directly to each strategy's own StrategyParams.
     /// Must be called after all strategies are registered (before or after start()).
+    ///
+    /// NOTE: HeartbeatScheduler move-consumes the returned vector — the
+    /// control plane must use paramsByName() instead.
     [[nodiscard]] std::vector<StrategyParams *> allParams();
+
+    /// Pause or resume a single strategy by instance ID.
+    ///
+    /// While paused, the strategy thread stays alive but skips all ticks.
+    /// Returns false if no strategy matches the ID.
+    ///
+    /// Parameters:
+    ///   1. id      — the strategy instance ID (e.g. "momentum_scalper_BTC_USDT")
+    ///   2. paused  — true to pause, false to resume
+    [[nodiscard]] bool setPaused(const std::string &id, bool paused);
+
+    /// Look up a strategy's params by instance ID (single-pointer lookup).
+    ///
+    /// Thread-safe: params are atomic-backed. Returns nullptr if the ID
+    /// does not match any registered strategy. Preferred over allParams()
+    /// for control-plane access.
+    [[nodiscard]] StrategyParams *paramsByName(const std::string &id) const;
 
   private:
     std::vector<std::unique_ptr<StrategyBase>> m_strategies;

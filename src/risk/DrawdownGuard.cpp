@@ -173,4 +173,13 @@ void DrawdownGuard::clearHalt()
     PULSE_LOG_INFO("risk", "Trading halt cleared manually");
 }
 
+void DrawdownGuard::manualHalt(ErrorCode reason)
+{
+    m_halted.store(true, std::memory_order_release);
+    m_haltReason.store(reason, std::memory_order_release);
+
+    PULSE_LOG_WARN("risk", "Trading halted manually (reason={})",
+                   static_cast<int>(reason));
+}
+
 } // namespace pulse::risk

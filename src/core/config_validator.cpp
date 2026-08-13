@@ -307,6 +307,25 @@ PulseError validateConfig(const PulseConfig &cfg)
         }
     }
 
+    // -----------------------------------------------------------------------
+    // 11. Control plane config (only validate when enabled)
+    // -----------------------------------------------------------------------
+    if (cfg.control.enabled)
+    {
+        if (0 == cfg.control.port)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.port must be in [1, 65535] (got "
+                                  + std::to_string(cfg.control.port) + ")"};
+        }
+        if (cfg.control.bindAddress.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.bindAddress must not be empty when "
+                              "control.enabled is true"};
+        }
+    }
+
     return {}; // All checks passed.
 }
 

@@ -34,6 +34,11 @@ std::atomic<bool> &StrategyBase::active()
     return m_active;
 }
 
+std::atomic<bool> &StrategyBase::paused()
+{
+    return m_paused;
+}
+
 void StrategyBase::emitSignal(const TradingSignal &signal)
 {
     // 1. Drop if no callback is registered.
@@ -153,6 +158,7 @@ std::vector<StrategySnapshot> StrategyManager::snapshot() const
         snap.symbol = s->context().config.symbol;
         snap.enabled = s->context().config.enabled;
         snap.running = s->active().load(std::memory_order_acquire);
+        snap.paused = s->paused().load(std::memory_order_acquire);
         snap.poll_interval_ms = s->context().config.poll_interval_ms;
         result.push_back(std::move(snap));
     }
@@ -168,6 +174,31 @@ std::vector<StrategyParams *> StrategyManager::allParams()
         result.push_back(&s->params());
     }
     return result;
+}
+
+bool StrategyManager::setPaused(const std::string &id, bool paused)
+{
+    for (const auto &s : m_strategies)
+    {
+        if (s->id() == id)
+        {
+            s->paused().store(paused, std::memory_order_release);
+            return true;
+        }
+    }
+    return false;
+}
+
+StrategyParams *StrategyManager::paramsByName(const std::string &id) const
+{
+    for (const auto &s : m_strategies)
+    {
+        if (s->id() == id)
+        {
+            return &s->params();
+        }
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +217,13 @@ void StrategyManager::strategyLoop(StrategyBase &strategy, std::stop_token stoke
 
     while (!stoken.stop_requested() && strategy.active().load(std::memory_order_acquire))
     {
+        // Skip ticks while manually paused (thread stays alive).
+        if (strategy.paused().load(std::memory_order_acquire))
+        {
+            std::this_thread::sleep_for(poll_interval);
+            continue;
+        }
+
         auto *feed = strategy.context().market_feed;
         if (nullptr == feed)
         {

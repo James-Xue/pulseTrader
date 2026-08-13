@@ -88,6 +88,10 @@ class StrategyBase
     /// Atomic flag for cooperative stop (checked by strategy thread).
     [[nodiscard]] std::atomic<bool> &active();
 
+    /// Atomic pause flag — while set, the strategy loop skips ticks
+    /// (thread stays alive). Set via StrategyManager::setPaused().
+    [[nodiscard]] std::atomic<bool> &paused();
+
   protected:
     /// Emit a trading signal to the registered callback.
     ///
@@ -101,6 +105,7 @@ class StrategyBase
     StrategyContext m_context;   ///< Injected dependencies (market, risk, execution).
     SignalCallback m_signalCallback; ///< Where emitted signals are forwarded.
     std::atomic<bool> m_active{ false }; ///< Cooperative stop flag.
+    std::atomic<bool> m_paused{ false }; ///< Manual pause flag (ticks skipped).
 };
 
 } // namespace pulse::strategy

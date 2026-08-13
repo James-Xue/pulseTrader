@@ -77,6 +77,15 @@ class DrawdownGuard
     /// Resets m_halted flag and m_haltReason to Ok.
     void clearHalt();
 
+    /// Manually halt trading (circuit-breaker override via CLI/MCP).
+    ///
+    /// Sets the halt flag without touching PnL/equity bookkeeping —
+    /// a pure operator override. Resume with clearHalt().
+    ///
+    /// Parameters:
+    ///   1. reason — halt reason (default: ErrorCode::ManualHalt)
+    void manualHalt(ErrorCode reason = ErrorCode::ManualHalt);
+
   private:
     RiskConfig m_config;
     mutable std::shared_mutex m_mutex;
