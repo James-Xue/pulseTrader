@@ -2,7 +2,7 @@
 
 > This document is intended for operators, explaining how to advance pulseTrader from its current state to a production-ready trading system.
 >
-> Last updated: 2026-06-23 (Candlestick chart + fast Ctrl+C shutdown + SuperTrendScalper)
+> Last updated: 2026-08-13 (Control plane replaces WebUI: CLI REPL + MCP server + JSON-RPC control socket)
 
 ---
 
@@ -34,9 +34,9 @@
 | L6 | Strategy | EMA crossover / order book imbalance / Bollinger mean reversion / SuperTrend ATR | ✅ | 66 |
 | L7 | Risk Management | Position management / drawdown protection / rate limiting / stop-loss/take-profit / futures leverage risk control | ✅ | 104 |
 | L8 | Execution | Order lifecycle management (dual market) | ✅ | 26 |
-| L9 | WebUI | uWebSockets dark-themed SPA monitoring dashboard | ✅ | 57 |
+| L9 | Control Plane | JSON-RPC control socket (127.0.0.1:8081) + CLI REPL + stdio MCP server | ✅ | 65 |
 
-**547 tests all passing** | `main` branch only | Milestones M1–M13 all achieved
+**583 tests all passing** | `headless` branch (WebUI removed, replaced by the control plane) | Milestones M1–M13 all achieved
 
 ### Currently Available Commands
 
@@ -48,20 +48,21 @@
 ./run.sh market    # Test market data pipeline (WS → L3 components)
 ./run.sh strategy  # Test strategy engine (simulated market data driving 4 strategies)
 ./run.sh ai        # Test AI Pipeline (--mock mode, no real LLM calls)
-./run.sh webui     # Start WebUI monitoring dashboard (browser http://localhost:8080)
-./run.sh test      # Run all 547 unit tests
+./run.sh cli       # Attach interactive REPL to a running engine (control socket)
+./run.sh mcp       # Run stdio MCP server (bridges to the engine's control socket)
+./run.sh test      # Run all 583 unit tests
 ```
 
 ### Trading Main Program (Completed)
 
 `apps/pulsetrader/main.cpp` (~630 lines) chains all 9 layers into a complete trading system:
 
-- **Construction order**: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
-- **Signal flow**: StrategyManager → SignalAggregator → app callback (risk check → OrderExecutor → OrderTracker)
+- **Construction order**: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 Control Plane
+- **Signal flow**: StrategyManager → SignalAggregator → app callback (risk check → OrderFlowExecutor → OrderTracker). Manual orders opened via the control plane share the same `OrderFlowExecutor`
 - **Order completion callback**: OrderTracker → PositionManager open/close + DrawdownGuard PnL update
-- **Graceful shutdown**: SIGINT/SIGTERM → atomic stop flag → reverse-order shutdown (WebUI → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger)
+- **Graceful shutdown**: SIGINT/SIGTERM → atomic stop flag → reverse-order shutdown (Control Plane → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger)
 - **Strategy factory**: `create_strategy()` creates concrete strategy classes based on configured names (MomentumScalper / OrderBookScalper / MeanReversionScalper)
-- **Default config**: 2 strategies running on BTC_USDT, AI disabled, WebUI listening on :8080, credentials read from `.env`
+- **Default config**: 2 strategies running on BTC_USDT, AI disabled, control socket on 127.0.0.1:8081, credentials read from `.env`
 
 All existing commands are smoke test tools; `./run.sh trade` is the sole production-grade trade executor.
 
@@ -87,7 +88,7 @@ All existing commands are smoke test tools; `./run.sh trade` is the sole product
 |--------|-------------|------------------|
 | **Backtesting System** | Validate whether strategies are truly profitable using historical K-line data (currently no backtesting capability at all) | 1–2 days |
 | **Paper Trading Mode** | Gate.io testnet or local simulated matching, validate end-to-end flow | 4–6h |
-| **P&L Dashboard** | WebUI profit/loss statistics panel (daily/weekly/monthly P&L, win rate, profit/loss ratio) | 3–4h |
+| **P&L Dashboard** | Profit/loss statistics view (daily/weekly/monthly P&L, win rate, profit/loss ratio) on the control plane | 3–4h |
 
 ### Nice to Have (P2)
 
@@ -198,7 +199,7 @@ GATE_TESTNET_API_SECRET=your_testnet_secret
 
 HTTPS_PROXY=http://127.0.0.1:7897
 HTTP_PROXY=http://127.0.0.1:7897
-PULSE_WEBUI_TOKEN=your_webui_token
+PULSE_CONTROL_PORT=8081
 EOF
 
 # 5. Confirm .env is gitignored (already is)
@@ -282,21 +283,16 @@ apiKey = "from_env:OPENAI_API_KEY"
 heartbeatIntervalSec = 300           # AI analysis every 5 minutes
 requestTimeoutMs = 30000
 
-# --- WebUI Configuration ---
-[webui]
+# --- Control Plane Configuration ---
+[control]
 enabled = true
-bindAddress = "127.0.0.1"
-port = 8080
-authToken = ""                         # Empty string = no authentication (recommended for dev/testnet)
-                                       # For production, set a token or read from .env:
-                                       # authToken = "from_env:PULSE_WEBUI_TOKEN"
-maxClients = 4
+bindAddress = "127.0.0.1"              # Localhost only — do NOT expose to the network
+port = 8081                            # JSON-RPC control socket (env override: PULSE_CONTROL_PORT)
 ```
 
-> **WebUI Authentication Notes**:
-> - `authToken = ""` → no authentication, browser access works directly (suitable for testnet development)
-> - `authToken = "xxx"` → first visit shows an input dialog; after entering, cached in localStorage, no re-entry on refresh
-> - Can also bypass the dialog via URL parameter: `http://localhost:8080/?token=xxx`
+> **Control Socket Security Model**:
+> - The control socket binds to **127.0.0.1 only** by default and has **no authentication** — anyone who can reach the port can place orders. Keep `bindAddress = "127.0.0.1"`; never bind to `0.0.0.0` or a public interface.
+> - It speaks newline-delimited JSON-RPC 2.0 over TCP. Prefer the built-in `cli` REPL or the `mcp` server over raw socket access.
 
 ### 4.3 Start Trading
 
@@ -314,7 +310,7 @@ maxClients = 4
 #   - mean_reversion_scalper on ETH_USDT (500ms poll)
 # [INFO] Risk Manager: max notional 500 USDT, daily DD limit 2%
 # [INFO] AI Pipeline: heartbeat every 300s, next run in 5min
-# [INFO] WebUI: http://127.0.0.1:8080
+# [INFO] Control socket: 127.0.0.1:8081 (JSON-RPC, REPL + MCP)
 # [INFO] Trading engine started. Press Ctrl+C to stop.
 #
 # Approximately 60 seconds after startup, the system begins printing a heartbeat log line every 60 seconds:
@@ -323,11 +319,52 @@ maxClients = 4
 
 ### 4.4 Monitor Operation
 
-```bash
-# Terminal 2: Open WebUI
-# Browse to http://127.0.0.1:8080 (WebUI already configured in trading.toml)
+The WebUI was removed on the `headless` branch — monitoring and control now go through the **control plane**:
 
-# Or view logs directly
+```bash
+# Terminal 2: attach the remote REPL to the running engine (control socket)
+./run.sh cli
+
+# Or: if you started ./run.sh trade from an interactive terminal, an embedded
+# REPL is already active there (stdin is a TTY) — type 'help' for commands.
+```
+
+**REPL command reference** (`help` inside the REPL):
+
+| Command | Action |
+|---|---|
+| `status` | Engine status (uptime, feeds, halted) |
+| `account` \| `balance` | Spot + futures balance |
+| `positions` | Open positions + portfolio |
+| `orders` | Active orders + recent reports |
+| `strategies` | Registered strategies |
+| `params <id>` | Strategy params |
+| `set <id> <param> <value>` | Set strategy param (e.g. `set mom min_confidence 0.7`) |
+| `open <sym> <buy\|sell> <qty> [--type market\|limit\|post_only] [--price P] [--market spot\|futures] [--leverage N] [--reduce-only] [--client-id S]` | Open an order |
+| `close <position_id> [qty] [price]` | Close a position |
+| `cancel <order_id>` | Cancel an open order |
+| `halt` / `resume` | Halt / resume all trading |
+| `pause <id>` / `resume-strategy <id>` | Pause / resume a single strategy |
+| `risk` | Risk snapshot (drawdown, rate limiter) |
+| `market <sym> [--levels N] [--klines N] [--market spot\|futures]` | Market snapshot |
+| `help` / `quit` / `exit` | Help / leave the REPL |
+
+**Control-plane methods (= MCP tool names, 16 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`. REPL commands map 1:1 to these methods over the control socket.
+
+**MCP usage** — the `mcp` subcommand exposes the 16 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+
+```bash
+claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml
+```
+
+**MCP troubleshooting**:
+- The trading engine must be running for `tools/call` to work (each call is forwarded over the control socket). `initialize` and `tools/list` work offline.
+- Logs go to `logs/` as usual. In MCP mode stdout is reserved for the protocol stream, so console logging is forced off (`toConsole = false`) — diagnose MCP problems via `logs/*.log`, not stdout.
+- `./run.sh cli` reports "cannot reach engine control socket" when the engine is down — start `./run.sh trade` first.
+
+Or view logs directly:
+
+```bash
 tail -f logs/system.log      # System heartbeat (every 60s: market data rates, WS status, strategies, positions)
 tail -f logs/strategy.log    # Strategy signals + warm-up progress
 tail -f logs/exchange.log    # WS connection status
@@ -358,7 +395,7 @@ tail -f logs/ai.log          # AI analysis results
 ```bash
 # Graceful shutdown: Ctrl+C or send SIGTERM
 # Main program stops each layer in reverse order:
-#   1. L9: Stop WebUI server
+#   1. L9: Stop control plane (control socket, REPL)
 #   2. L6: Stop strategy engine (no new signals generated)
 #   3. L3: Stop market data subscriptions (WS unsubscribes channels)
 #   4. L1: Stop WS event loop (io_context::stop)
@@ -490,6 +527,7 @@ Tiered take-profit allows you to:
 - ✅ Use sub-accounts to isolate risk
 - ✅ IP whitelist restricts API access
 - ✅ `.env` file is gitignored
+- ✅ Control socket binds to **127.0.0.1 only** (no auth — never expose to the network)
 - ⚠️ Current configuration uses **mainnet** (not testnet) — real money
 
 ---
@@ -670,8 +708,8 @@ cat logs/strategy.log   # Abnormal signals?
 cat logs/risk.log       # Risk control triggered?
 cat logs/execution.log  # Order placement failures?
 
-# 6. WebUI
-# Open browser to http://127.0.0.1:8080 to view real-time status
+# 6. Control plane
+./run.sh cli    # Attach REPL — status / positions / risk / market to view real-time state
 ```
 
 ### Q7: No orders placed after startup?
@@ -700,9 +738,10 @@ Check the following checklist item by item:
 │              pulseTrader Operations Quick Reference      │
 ├─────────────────────────────────────────────────────────┤
 │  Start:   ./run.sh trade (auto-loads trading.toml)      │
-│  Monitor: ./run.sh webui → http://localhost:8080        │
+│  Monitor: ./run.sh cli (REPL) or embedded REPL in trade │
+│  MCP:     ./run.sh mcp — LLM clients via control socket │
 │  Stop:    Ctrl+C (<1s graceful shutdown)                │
-│  Test:    ./run.sh test (547 unit tests)                │
+│  Test:    ./run.sh test (583 unit tests)                │
 │  Logs:    tail -f logs/*.log                            │
 ├─────────────────────────────────────────────────────────┤
 │  .env:         PULSE_NETWORK / API Key / Proxy          │

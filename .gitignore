@@ -1,5 +1,6 @@
 #Compile Dir
 build
+build_headless/
 
 # Prerequisites
 *.d
@@ -64,6 +65,7 @@ Testing/
 
 # Local config files
 trading.toml
+trading.testnet.toml
 
 # SQLite database
 data/

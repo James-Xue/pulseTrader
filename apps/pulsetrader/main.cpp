@@ -433,7 +433,7 @@ static int runTrade(int argc, char* argv[])
     // ------------------------------------------------------------------
     std::string config_path;
 
-    for (int i = 1; i < argc; ++i)
+    for (int i = 0; i < argc; ++i)
     {
         std::string arg(argv[i]);
 
@@ -790,15 +790,26 @@ static int runTrade(int argc, char* argv[])
 
     // Order flow executor: owns the reservation map and the full
     // risk-gated execution flow (aggregator + manual CLI/MCP paths).
-    pulse::control::ExecutorOrderPlacer spot_placer_impl(*spot_executor);
-    pulse::control::ExecutorOrderPlacer futures_placer_impl(*futures_executor);
+    // Placers are constructed only for markets that have an executor.
+    std::unique_ptr<pulse::control::ExecutorOrderPlacer> spot_placer_impl;
+    std::unique_ptr<pulse::control::ExecutorOrderPlacer> futures_placer_impl;
+    if (spot_executor)
+    {
+        spot_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
+            *spot_executor);
+    }
+    if (futures_executor)
+    {
+        futures_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
+            *futures_executor);
+    }
     pulse::control::OrderFlowExecutor order_flow(
         cfg.strategy,
         risk_mgr,
         position_mgr,
         drawdownGuard,
-        spot_executor ? &spot_placer_impl : nullptr,
-        futures_executor ? &futures_placer_impl : nullptr,
+        spot_placer_impl ? spot_placer_impl.get() : nullptr,
+        futures_placer_impl ? futures_placer_impl.get() : nullptr,
         spot_tracker.get(),
         futures_tracker.get(),
         rest_mutex
@@ -1282,6 +1293,9 @@ int runMcp(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
+    // Strip the program name; subcommand consumers also strip the
+    // subcommand token itself (both runTrade and cli/mcp parsers
+    // iterate argv from index 0).
     std::string subcommand = "trade";
     if (argc > 1)
     {
@@ -1289,9 +1303,19 @@ int main(int argc, char *argv[])
         if ("trade" == first || "cli" == first || "mcp" == first)
         {
             subcommand = first;
-            ++argv;
-            --argc;
+            argv += 2;
+            argc -= 2;
         }
+        else
+        {
+            argv += 1;
+            argc -= 1;
+        }
+    }
+    else
+    {
+        argv += 1;
+        argc -= 1;
     }
 
     if ("cli" == subcommand)
