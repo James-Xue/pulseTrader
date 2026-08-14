@@ -36,18 +36,16 @@ nlohmann::json textContent(const std::string &text, bool is_error)
     };
 }
 
-nlohmann::json stringParam(const std::string &name, bool required,
+/// A JSON-Schema property entry for a string parameter. Required-ness is
+/// expressed by the schema-level "required" array, never a per-property
+/// boolean (an invalid "required": true is rejected by API schema validators).
+nlohmann::json stringParam(const std::string &name,
                            const std::string &description)
 {
-    nlohmann::json p{
+    return nlohmann::json{
         { "type", "string" },
         { "description", description },
     };
-    if (required)
-    {
-        p["required"] = true;
-    }
-    return p;
 }
 
 } // anonymous namespace
@@ -102,7 +100,7 @@ nlohmann::json McpServer::toolDefinitions()
     add("get_strategy_params",
         "Read one strategy's live params (order_quantity, min_confidence, etc.).",
         nlohmann::json{
-            { "strategy_id", stringParam("strategy_id", true,
+            { "strategy_id", stringParam("strategy_id",
                                          "Strategy instance ID") },
         },
         { "strategy_id" });
@@ -113,9 +111,9 @@ nlohmann::json McpServer::toolDefinitions()
         "ob_imbalance_threshold, ob_depth, supertrend_period, "
         "supertrend_multiplier, cooldown_seconds, stop_loss_pct, take_profit_pct.",
         nlohmann::json{
-            { "strategy_id", stringParam("strategy_id", true,
+            { "strategy_id", stringParam("strategy_id",
                                          "Strategy instance ID") },
-            { "param", stringParam("param", true, "Param name") },
+            { "param", stringParam("param", "Param name") },
             { "value", nlohmann::json{
                   { "type", "number" },
                   { "description", "New value" } } },
@@ -126,8 +124,8 @@ nlohmann::json McpServer::toolDefinitions()
         "Place an order through the full risk gate "
         "(evaluateOrder → reservation → execute → track).",
         nlohmann::json{
-            { "symbol", stringParam("symbol", true, "Trading pair (e.g. BTC_USDT)") },
-            { "side", stringParam("side", true, "\"buy\" or \"sell\"") },
+            { "symbol", stringParam("symbol", "Trading pair (e.g. BTC_USDT)") },
+            { "side", stringParam("side", "\"buy\" or \"sell\"") },
             { "quantity", nlohmann::json{
                   { "type", "number" },
                   { "description", "Order quantity" } } },
@@ -148,8 +146,8 @@ nlohmann::json McpServer::toolDefinitions()
             { "reduce_only", nlohmann::json{
                   { "type", "boolean" },
                   { "description", "Reduce-only (futures)" } } },
-            { "client_order_id", stringParam("client_order_id", false,
-                                             "Client-assigned order ID") },
+            { "client_order_id", stringParam("client_order_id",
+                                            "Client-assigned order ID") },
         },
         { "symbol", "side", "quantity" });
 
@@ -157,7 +155,7 @@ nlohmann::json McpServer::toolDefinitions()
         "Close an open position via a risk-gated market (or limit) order. "
         "Returns the order id; realized PnL appears via get_orders afterwards.",
         nlohmann::json{
-            { "position_id", stringParam("position_id", true,
+            { "position_id", stringParam("position_id",
                                          "Position ID (e.g. BTC_USDT_Buy_1)") },
             { "quantity", nlohmann::json{
                   { "type", "number" },
@@ -171,7 +169,7 @@ nlohmann::json McpServer::toolDefinitions()
     add("cancel_order",
         "Cancel an open order by exchange order ID.",
         nlohmann::json{
-            { "order_id", stringParam("order_id", true, "Exchange order ID") },
+            { "order_id", stringParam("order_id", "Exchange order ID") },
         },
         { "order_id" });
 
@@ -190,7 +188,7 @@ nlohmann::json McpServer::toolDefinitions()
     add("get_market",
         "Live market data for a symbol: ticker, top-of-book, klines.",
         nlohmann::json{
-            { "symbol", stringParam("symbol", true, "Trading pair (e.g. BTC_USDT)") },
+            { "symbol", stringParam("symbol", "Trading pair (e.g. BTC_USDT)") },
             { "book_levels", nlohmann::json{
                   { "type", "number" },
                   { "description", "Order book depth (default 5)" } } },
@@ -206,7 +204,7 @@ nlohmann::json McpServer::toolDefinitions()
     add("pause_strategy",
         "Pause a strategy by instance ID (thread stays alive, ticks skipped).",
         nlohmann::json{
-            { "strategy_id", stringParam("strategy_id", true,
+            { "strategy_id", stringParam("strategy_id",
                                          "Strategy instance ID") },
         },
         { "strategy_id" });
@@ -214,7 +212,7 @@ nlohmann::json McpServer::toolDefinitions()
     add("resume_strategy",
         "Resume a paused strategy by instance ID.",
         nlohmann::json{
-            { "strategy_id", stringParam("strategy_id", true,
+            { "strategy_id", stringParam("strategy_id",
                                          "Strategy instance ID") },
         },
         { "strategy_id" });

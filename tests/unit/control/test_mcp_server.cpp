@@ -178,5 +178,13 @@ TEST(McpServer, ToolDefinitionsAllHaveSchemas)
         const auto &schema = tool["inputSchema"];
         EXPECT_EQ("object", schema["type"]);
         EXPECT_TRUE(schema["properties"].is_object());
+        for (const auto &prop : schema["properties"].items())
+        {
+            // Required-ness lives in the schema-level "required" array only;
+            // a per-property boolean "required": true is rejected by API
+            // schema validators ("true is not of type array").
+            EXPECT_TRUE(prop.value().contains("type"));
+            EXPECT_FALSE(prop.value().contains("required"));
+        }
     }
 }

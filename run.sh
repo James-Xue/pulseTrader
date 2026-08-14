@@ -23,7 +23,9 @@ else
     echo "   Create .env with GATE_API_KEY and GATE_API_SECRET"
 fi
 
-BUILD_DIR="build"
+# Prefer the headless build if present (stale `build/` predates subcommand argv fix)
+BUILD_DIR="build_headless"
+[ -d "$BUILD_DIR" ] || BUILD_DIR="build"
 
 usage() {
     echo "Usage: $0 {trade|cli|mcp|rest|ws|market|strategy|ai|test} [args...]"
