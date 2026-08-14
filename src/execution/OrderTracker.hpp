@@ -109,11 +109,27 @@ class OrderTracker
     /// Returns the updated status, or PulseError on failure.
     [[nodiscard]] Result<OrderStatus> pollOrderStatus(const std::string &order_id);
 
+    /// Poll every tracked order's status via REST (reconcile fallback).
+    ///
+    /// Catches fills that arrived before the WS private-channel subscription
+    /// was established (market orders can fill within the same millisecond).
+    /// Individual failures are logged and tolerated; terminal orders emit
+    /// completion reports through the normal path.
+    void reconcileAll();
+
     /// Check if an order status is terminal (Filled or Cancelled).
     [[nodiscard]] static bool isTerminalStatus(OrderStatus status);
 
     /// Parse order status string from Gate.io API.
     [[nodiscard]] static OrderStatus parseStatus(const std::string &status_str);
+
+    /// Parse a futures order status from Gate.io API (status + finish_as).
+    ///
+    /// Futures uses status="open"/"finished" plus a separate finish_as
+    /// ("filled"/"cancelled"/"reduce_only"/"position_closed") that decides
+    /// the terminal outcome — status alone is ambiguous for a finished order.
+    [[nodiscard]] static OrderStatus parseFuturesStatus(const std::string &status,
+                                                        const std::string &finish_as);
 
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
@@ -176,6 +192,10 @@ class OrderTracker
 
     /// Parse WS order update event and update tracked order state.
     void processOrderUpdate(const nlohmann::json &event);
+
+    /// Apply a Gate.io order object (WS event result or REST response) to a
+    /// tracked order. Handles both spot and futures field layouts.
+    void applyOrderUpdate(const nlohmann::json &update, TrackedOrder &order);
 
     /// Generate ExecutionReport when order reaches terminal state.
     [[nodiscard]] ExecutionReport generateReport(const TrackedOrder &order, Timestamp fill_time) const;

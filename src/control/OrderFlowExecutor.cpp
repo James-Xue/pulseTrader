@@ -254,6 +254,21 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
                             order_req.quantity,
                             order_req.price,
                             order_req.client_order_id);
+
+        // Market orders fill within the same millisecond — usually BEFORE the
+        // WS private-channel subscription in trackOrder() is established, so
+        // no fill event ever arrives. Compensate with an immediate REST poll
+        // so the fill lands in PositionManager right away instead of staying
+        // Pending until a later reconcile.
+        if (OrderStatus::Filled == resp.status)
+        {
+            auto poll = tracker->pollOrderStatus(resp.order_id);
+            if (!ok(poll))
+            {
+                log_app->warn("Order {} filled on exchange but status poll failed: {}",
+                              resp.order_id, error(poll).message);
+            }
+        }
     }
 
     return result;

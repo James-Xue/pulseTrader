@@ -6,9 +6,53 @@
 #include "logging/Logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace pulse::execution
 {
+
+namespace
+{
+
+/// Parse a JSON number-or-string field (Gate.io mixes both types across
+/// spot/futures responses — futures uses numeric size/left, spot uses
+/// string-typed filled_total/avg_deal_price).
+double jsonNumOrStr(const nlohmann::json &update, const char *key, double fallback)
+{
+    if (!update.contains(key))
+    {
+        return fallback;
+    }
+    const auto &v = update[key];
+    if (v.is_number())
+    {
+        return v.get<double>();
+    }
+    if (v.is_string())
+    {
+        try
+        {
+            return std::stod(v.get<std::string>());
+        }
+        catch (const std::exception &)
+        {
+            return fallback;
+        }
+    }
+    return fallback;
+}
+
+/// Normalize an order id — futures ids are integers, spot ids are strings.
+std::string orderIdToString(const nlohmann::json &id_value)
+{
+    if (id_value.is_number())
+    {
+        return std::to_string(id_value.get<std::int64_t>());
+    }
+    return id_value.get<std::string>();
+}
+
+} // anonymous namespace
 
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
@@ -116,40 +160,20 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
 
     const auto &resp = value(result);
 
-    // Parse status
-    const std::string status_str = resp.value("status", "");
-    const OrderStatus new_status = parseStatus(status_str);
-
     // Prepare callback data under lock, invoke outside lock to avoid
     // lock-ordering coupling with downstream mutexes (PositionManager, etc.)
     std::optional<ExecutionReport> completed_report;
     CompletionCallback callback_copy;
 
     // Update tracked order
+    OrderStatus new_status = OrderStatus::Pending;
     {
         std::unique_lock<std::shared_mutex> write_lock(m_mutex);
         auto it = m_trackedOrders.find(order_id);
         if (it != m_trackedOrders.end())
         {
-            it->second.status = new_status;
-            it->second.last_update_time = now();
-
-            // Parse fill details if available
-            if (resp.contains("filled_total"))
-            {
-                auto val = safeParseDouble(resp["filled_total"].get<std::string>());
-                if (val.has_value()) { it->second.filled_qty = val.value(); }
-            }
-            if (resp.contains("avg_deal_price"))
-            {
-                auto val = safeParseDouble(resp["avg_deal_price"].get<std::string>());
-                if (val.has_value()) { it->second.avg_fill_price = val.value(); }
-            }
-            if (resp.contains("fee"))
-            {
-                auto val = safeParseDouble(resp["fee"].get<std::string>());
-                if (val.has_value()) { it->second.fees = val.value(); }
-            }
+            applyOrderUpdate(resp, it->second);
+            new_status = it->second.status;
 
             // Check if terminal state — collect report + callback under lock
             if (isTerminalStatus(new_status))
@@ -161,6 +185,13 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
                 m_trackedOrders.erase(it);
             }
         }
+        else
+        {
+            // Not tracked (e.g. reconciled after removal) — derive from
+            // the response alone so callers still get a correct status.
+            new_status = parseFuturesStatus(resp.value("status", ""),
+                                            resp.value("finish_as", ""));
+        }
     } // write_lock released
 
     // Invoke callback outside lock — no lock-ordering coupling
@@ -170,6 +201,31 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
     }
 
     return new_status;
+}
+
+void OrderTracker::reconcileAll()
+{
+    // Snapshot tracked ids under a shared lock, then poll each — pollOrderStatus
+    // takes the write lock itself and may erase terminal orders mid-iteration.
+    std::vector<std::string> order_ids;
+    {
+        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+        order_ids.reserve(m_trackedOrders.size());
+        for (const auto &[id, order] : m_trackedOrders)
+        {
+            order_ids.push_back(id);
+        }
+    }
+
+    for (const auto &order_id : order_ids)
+    {
+        auto result = pollOrderStatus(order_id);
+        if (!ok(result))
+        {
+            PULSE_LOG_DEBUG("execution", "reconcile order {} failed: {}",
+                order_id, error(result).message);
+        }
+    }
 }
 
 void OrderTracker::onOrderUpdate(const nlohmann::json &event)
@@ -204,11 +260,11 @@ void OrderTracker::processOrderUpdate(const nlohmann::json &update)
         return;
     }
 
-    const std::string order_id = update["id"].get<std::string>();
-    const std::string status_str = update.value("status", "");
-    const OrderStatus new_status = parseStatus(status_str);
+    // Futures ids arrive as integers — normalize before lookup.
+    const std::string order_id = orderIdToString(update["id"]);
 
-    PULSE_LOG_DEBUG("execution", "Order update: {} -> {}", order_id, status_str);
+    PULSE_LOG_DEBUG("execution", "Order update: {} status={} finish_as={}",
+        order_id, update.value("status", ""), update.value("finish_as", ""));
 
     // Prepare callback data under lock, invoke outside lock to avoid
     // lock-ordering coupling with downstream mutexes (PositionManager, etc.)
@@ -223,35 +279,16 @@ void OrderTracker::processOrderUpdate(const nlohmann::json &update)
             return; // Not tracking this order
         }
 
-        // Update order state
-        it->second.status = new_status;
-        it->second.last_update_time = now();
-
-        // Parse fill details
-        if (update.contains("filled_total"))
-        {
-            auto val = safeParseDouble(update["filled_total"].get<std::string>());
-            if (val.has_value()) { it->second.filled_qty = val.value(); }
-        }
-        if (update.contains("avg_deal_price"))
-        {
-            auto val = safeParseDouble(update["avg_deal_price"].get<std::string>());
-            if (val.has_value()) { it->second.avg_fill_price = val.value(); }
-        }
-        if (update.contains("fee"))
-        {
-            auto val = safeParseDouble(update["fee"].get<std::string>());
-            if (val.has_value()) { it->second.fees = val.value(); }
-        }
+        applyOrderUpdate(update, it->second);
 
         // Check if terminal state — collect report + callback under lock
-        if (isTerminalStatus(new_status))
+        if (isTerminalStatus(it->second.status))
         {
             completed_report = generateReport(it->second, now());
             m_completedReports[order_id] = *completed_report;
 
-            PULSE_LOG_INFO("execution", "Order completed: {} {} filled_qty={} avg_price={} slippage={}bps",
-                order_id, status_str, completed_report->filled_qty,
+            PULSE_LOG_INFO("execution", "Order completed: {} status={} filled_qty={} avg_price={} slippage={}bps",
+                order_id, update.value("status", ""), completed_report->filled_qty,
                 completed_report->avg_fill_price, completed_report->slippage_bps);
 
             callback_copy = m_completionCallback;
@@ -264,6 +301,41 @@ void OrderTracker::processOrderUpdate(const nlohmann::json &update)
     {
         callback_copy(*completed_report);
     }
+}
+
+void OrderTracker::applyOrderUpdate(const nlohmann::json &update, TrackedOrder &order)
+{
+    const std::string status_str = update.value("status", "");
+    const std::string finish_as  = update.value("finish_as", "");
+    order.status = parseFuturesStatus(status_str, finish_as);
+    order.last_update_time = now();
+
+    // Futures: signed contract counts (size/left) + fill price.
+    // size=1 left=0 -> fully filled 1 contract; size=-1 left=1 -> 0 filled.
+    if (update.contains("size") && update.contains("left"))
+    {
+        const double filled = std::abs(jsonNumOrStr(update, "size", 0.0))
+                            - std::abs(jsonNumOrStr(update, "left", 0.0));
+        order.filled_qty = (filled > 0.0) ? filled : 0.0;
+
+        const double fill_price = jsonNumOrStr(update, "fill_price", 0.0);
+        if (fill_price > 0.0)
+        {
+            order.avg_fill_price = fill_price;
+        }
+    }
+
+    // Spot: string-typed fill fields (absent on futures responses).
+    if (update.contains("filled_total"))
+    {
+        order.filled_qty = jsonNumOrStr(update, "filled_total", order.filled_qty);
+    }
+    if (update.contains("avg_deal_price"))
+    {
+        order.avg_fill_price = jsonNumOrStr(update, "avg_deal_price", order.avg_fill_price);
+    }
+
+    order.fees = jsonNumOrStr(update, "fee", order.fees);
 }
 
 ExecutionReport OrderTracker::generateReport(const TrackedOrder &order, Timestamp fill_time) const
@@ -299,7 +371,7 @@ OrderStatus OrderTracker::parseStatus(const std::string &status_str)
     {
         return OrderStatus::Open;
     }
-    if ("closed" == status_str)
+    if ("closed" == status_str || "finished" == status_str)
     {
         return OrderStatus::Filled;
     }
@@ -308,6 +380,30 @@ OrderStatus OrderTracker::parseStatus(const std::string &status_str)
         return OrderStatus::Cancelled;
     }
     return OrderStatus::Pending;
+}
+
+OrderStatus OrderTracker::parseFuturesStatus(const std::string &status,
+                                             const std::string &finish_as)
+{
+    if ("filled" == finish_as)
+    {
+        return OrderStatus::Filled;
+    }
+    if ("cancelled" == finish_as || "reduce_only" == finish_as
+        || "position_closed" == finish_as)
+    {
+        return OrderStatus::Cancelled;
+    }
+    if ("open" == finish_as || "open" == status)
+    {
+        return OrderStatus::Open;
+    }
+    if ("finished" == status)
+    {
+        // Terminal but finish_as missing (defensive — Gate always sends it).
+        return OrderStatus::Filled;
+    }
+    return parseStatus(status);
 }
 
 std::vector<OrderSnapshot> OrderTracker::activeOrders() const

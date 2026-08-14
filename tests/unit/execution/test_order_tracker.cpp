@@ -324,3 +324,139 @@ TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
     EXPECT_DOUBLE_EQ(reports[0].filled_qty, 2.0);
     EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 3002.0);
 }
+
+// ---------------------------------------------------------------------------
+// Futures order tracking — Gate.io futures format regression tests
+//
+// Futures WS events differ from spot in three ways that previously broke
+// tracking (bug: fills never surfaced, orders stayed Pending forever):
+//   1. "id" arrives as a NUMBER, not a string — get<std::string>() threw.
+//   2. status is "open"/"finished" with the outcome in finish_as.
+//   3. fills use size/left/fill_price instead of filled_total/avg_deal_price.
+// ---------------------------------------------------------------------------
+
+TEST(OrderTracker, ParseFuturesStatusDecidesOutcomeFromFinishAs)
+{
+    // Working states.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("open", "open"), OrderStatus::Open);
+
+    // Terminal states — finish_as decides the outcome.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "filled"), OrderStatus::Filled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "cancelled"), OrderStatus::Cancelled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "reduce_only"), OrderStatus::Cancelled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "position_closed"), OrderStatus::Cancelled);
+
+    // Defensive: finished without finish_as still resolves terminal.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", ""), OrderStatus::Filled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("", ""), OrderStatus::Pending);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesFillWithNumericIdGeneratesReport)
+{
+    // Regression: numeric futures order id + finished/filled status must
+    // produce a completion report (previously threw on id.get<string>()).
+    tracker_->trackOrder("36028834465653841", "BTC_USDT", Side::Buy, OrderType::Market,
+                          1.0, 0.0);
+
+    bool callback_called = false;
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&callback_called, &captured](const ExecutionReport &report)
+        {
+            callback_called = true;
+            captured = report;
+        });
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 36028834465653841; // numeric id (futures)
+    ws_event["status"] = "finished";
+    ws_event["finish_as"] = "filled";
+    ws_event["size"] = 1;
+    ws_event["left"] = 0;
+    ws_event["fill_price"] = "63072.2";
+    ws_event["fee"] = 0.00048;
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    EXPECT_TRUE(callback_called);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    EXPECT_EQ(captured.order_id, "36028834465653841");
+    EXPECT_EQ(captured.final_status, OrderStatus::Filled);
+
+    const auto reports = tracker_->recentReports(1);
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports[0].order_id, "36028834465653841");
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 1.0);
+    EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 63072.2);
+    EXPECT_DOUBLE_EQ(reports[0].fees, 0.00048);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesOpenEventWithNumericIdStaysOpen)
+{
+    // Regression: an open futures order (numeric id) must update the tracked
+    // order without throwing and remain in activeOrders().
+    tracker_->trackOrder("223191759398", "BTC_USDT", Side::Sell, OrderType::Limit,
+                          1.0, 50000.0);
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 223191759398; // numeric id (futures)
+    ws_event["status"] = "open";
+    ws_event["finish_as"] = "open";
+    ws_event["size"] = -1; // sell direction
+    ws_event["left"] = 1;  // nothing filled yet
+    ws_event["fill_price"] = "0";
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(orders.size(), 1u);
+    EXPECT_EQ(orders[0].status, OrderStatus::Open);
+    EXPECT_DOUBLE_EQ(orders[0].filled_qty, 0.0);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesPartialFillComputesFilledFromSizeLeft)
+{
+    // size/left are signed contract counts: a sell of 3 with 2 left has
+    // filled 1 contract — filled_qty must be derived, not read from a
+    // spot-style field that futures never sends.
+    tracker_->trackOrder("777", "BTC_USDT", Side::Sell, OrderType::Limit, 3.0, 50000.0);
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 777;
+    ws_event["status"] = "open";
+    ws_event["finish_as"] = "open";
+    ws_event["size"] = -3;
+    ws_event["left"] = -2;
+    ws_event["fill_price"] = "50010.0";
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(orders.size(), 1u);
+    EXPECT_EQ(orders[0].status, OrderStatus::Open);
+    EXPECT_DOUBLE_EQ(orders[0].filled_qty, 1.0);
+
+    // Complete the fill: left -> 0, finish_as -> filled.
+    nlohmann::json filled_event;
+    filled_event["id"] = 777;
+    filled_event["status"] = "finished";
+    filled_event["finish_as"] = "filled";
+    filled_event["size"] = -3;
+    filled_event["left"] = 0;
+    filled_event["fill_price"] = "50010.0";
+
+    bool callback_called = false;
+    tracker_->setCompletionCallback([&callback_called](const ExecutionReport &)
+    {
+        callback_called = true;
+    });
+
+    tracker_->testSimulateWsUpdate(filled_event);
+
+    EXPECT_TRUE(callback_called);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    const auto reports = tracker_->recentReports(1);
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 3.0);
+    EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 50010.0);
+}

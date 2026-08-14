@@ -197,6 +197,17 @@ nlohmann::json EngineServices::account()
 
 nlohmann::json EngineServices::positions() const
 {
+    // Reconcile first so fills that missed the WS private channel (market
+    // orders fill instantly, before the subscription exists) surface as
+    // positions before the snapshot is taken.
+    if (m_spotTracker)
+    {
+        m_spotTracker->reconcileAll();
+    }
+    if (m_futuresTracker)
+    {
+        m_futuresTracker->reconcileAll();
+    }
     nlohmann::json j;
     j["positions"] = m_positionMgr.getAllPositions();
     j["portfolio"] = m_positionMgr.portfolioSummary();
@@ -205,6 +216,16 @@ nlohmann::json EngineServices::positions() const
 
 nlohmann::json EngineServices::orders() const
 {
+    // Same reconcile as positions(): present tracked orders' real state
+    // instead of a stale Pending from before the WS subscription existed.
+    if (m_spotTracker)
+    {
+        m_spotTracker->reconcileAll();
+    }
+    if (m_futuresTracker)
+    {
+        m_futuresTracker->reconcileAll();
+    }
     nlohmann::json j;
     std::vector<execution::OrderSnapshot> active;
     std::vector<execution::ExecutionReport> reports;
