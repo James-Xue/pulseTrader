@@ -47,6 +47,13 @@ class IOrderPlacer
 
     /// Cancel an order by exchange order ID.
     [[nodiscard]] virtual bool cancel(const std::string &order_id) = 0;
+
+    /// Ensure futures leverage matches the request before an order is placed.
+    /// Gate.io applies leverage at the position level, not per order — the
+    /// account's current setting (possibly 200x) silently applies otherwise.
+    /// Spot placers implement as a no-op.
+    [[nodiscard]] virtual Result<nlohmann::json>
+    setLeverage(const std::string &contract, double leverage) = 0;
 };
 
 /// IOrderPlacer backed by a real OrderExecutor.
@@ -62,6 +69,9 @@ class ExecutorOrderPlacer final : public IOrderPlacer
     place(const execution::OrderRequest &req) override;
 
     [[nodiscard]] bool cancel(const std::string &order_id) override;
+
+    [[nodiscard]] Result<nlohmann::json>
+    setLeverage(const std::string &contract, double leverage) override;
 
   private:
     execution::OrderExecutor &m_exec;

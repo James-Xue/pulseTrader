@@ -35,6 +35,10 @@ class FakePlacer : public IOrderPlacer
         return resp;
     }
     bool cancel(const std::string &) override { return true; }
+    Result<nlohmann::json> setLeverage(const std::string &, double) override
+    {
+        return nlohmann::json{ { "ok", true } };
+    }
 };
 
 } // anonymous namespace

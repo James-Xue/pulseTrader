@@ -72,7 +72,7 @@ TEST(OrderRequest, FuturesFieldsDefaultSpot)
 {
     OrderRequest req;
     EXPECT_EQ(MarketType::Spot, req.market_type);
-    EXPECT_DOUBLE_EQ(1.0, req.leverage);
+    EXPECT_DOUBLE_EQ(0.0, req.leverage); // 0 = do not manage leverage
     EXPECT_FALSE(req.reduce_only);
     EXPECT_EQ(0, req.contract_size);
 }
@@ -108,7 +108,7 @@ TEST(OrderRequest, SpotDefaultsBackwardCompatible)
 
     // All futures fields at defaults — spot behavior unchanged.
     EXPECT_EQ(MarketType::Spot, req.market_type);
-    EXPECT_DOUBLE_EQ(1.0, req.leverage);
+    EXPECT_DOUBLE_EQ(0.0, req.leverage); // 0 = do not manage leverage
     EXPECT_FALSE(req.reduce_only);
     EXPECT_EQ(0, req.contract_size);
 }

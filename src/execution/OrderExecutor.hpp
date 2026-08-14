@@ -10,7 +10,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace pulse::execution
 {
@@ -42,7 +44,7 @@ struct OrderRequest
         , price{ 0.0 }
         , client_order_id{}
         , market_type{ MarketType::Spot }
-        , leverage{ 1.0 }
+        , leverage{ 0.0 }   ///< 0 = do not manage leverage (no API call)
         , reduce_only{ false }
         , contract_size{ 0 }
     {
@@ -95,9 +97,26 @@ class OrderExecutor
     /// Returns true on success, false on failure (check logs for details).
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
+    /// Set futures leverage for a contract before placing orders.
+    ///
+    /// Gate.io applies leverage at the position level, not per order — this
+    /// must be called explicitly or the account's current setting (which may
+    /// be 200x) silently applies. Cached per (contract, leverage) so repeated
+    /// orders only hit the API once.
+    ///
+    /// Parameters:
+    ///   1. contract — futures contract (e.g. "BTC_USDT")
+    ///   2. leverage — leverage multiple (e.g. 10 for 10x cross margin)
+    [[nodiscard]] Result<nlohmann::json> setLeverage(const std::string &contract,
+                                                     double leverage);
+
   private:
     exchange::GateRestClient &m_restClient;
     MarketType m_marketType;
+
+    /// Cache of the last successfully applied leverage per contract.
+    std::mutex m_leverageMutex;
+    std::unordered_map<std::string, double> m_leverageCache;
 
     /// Build Gate.io order JSON body from OrderRequest.
     ///

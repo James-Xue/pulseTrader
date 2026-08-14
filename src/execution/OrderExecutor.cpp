@@ -71,6 +71,36 @@ bool OrderExecutor::cancelOrder(const std::string &order_id)
     return true;
 }
 
+Result<nlohmann::json> OrderExecutor::setLeverage(const std::string &contract,
+                                                  double leverage)
+{
+    // Cache hit: this contract already runs at the requested leverage —
+    // skip the API call (orders fire every ~500ms per strategy).
+    {
+        std::lock_guard lock(m_leverageMutex);
+        const auto it = m_leverageCache.find(contract);
+        if (it != m_leverageCache.end() && it->second == leverage)
+        {
+            return nlohmann::json{ { "ok", true } };
+        }
+    }
+
+    auto result = m_restClient.setFuturesLeverage(contract, leverage);
+    if (!ok(result))
+    {
+        PULSE_LOG_ERROR("execution", "Failed to set {} leverage to {}x: {}",
+            contract, leverage, error(result).message);
+        return result;
+    }
+
+    {
+        std::lock_guard lock(m_leverageMutex);
+        m_leverageCache[contract] = leverage;
+    }
+    PULSE_LOG_INFO("execution", "Futures leverage set: {} {}x", contract, leverage);
+    return result;
+}
+
 nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
 {
     nlohmann::json body;

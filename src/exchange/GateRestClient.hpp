@@ -146,6 +146,20 @@ class GateRestClient
     /// Returns the order object with current status.
     [[nodiscard]] Result<nlohmann::json> getFuturesOrder(const std::string &order_id);
 
+    /// Set futures position leverage for a contract (dual/hedge mode).
+    ///
+    /// Gate.io applies leverage at the position level, NOT per order — a
+    /// new order silently inherits the account's current setting unless
+    /// this is called first. Cross margin semantics (engine default):
+    /// leverage="0" selects cross margin, cross_leverage_limit carries the
+    /// multiple. Uses the dual_comp (hedge mode) endpoint.
+    ///
+    /// Parameters:
+    ///   1. contract — futures contract (e.g. "BTC_USDT")
+    ///   2. leverage — leverage multiple (e.g. 10 for 10x cross margin)
+    [[nodiscard]] Result<nlohmann::json> setFuturesLeverage(const std::string &contract,
+                                                            double leverage);
+
     // -----------------------------------------------------------------------
     // Generic request (for future expansion)
     // -----------------------------------------------------------------------

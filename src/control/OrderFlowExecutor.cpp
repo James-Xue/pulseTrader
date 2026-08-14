@@ -25,6 +25,12 @@ bool ExecutorOrderPlacer::cancel(const std::string &order_id)
     return m_exec.cancelOrder(order_id);
 }
 
+Result<nlohmann::json> ExecutorOrderPlacer::setLeverage(const std::string &contract,
+                                                        double leverage)
+{
+    return m_exec.setLeverage(contract, leverage);
+}
+
 // ---------------------------------------------------------------------------
 // OrderFlowExecutor
 // ---------------------------------------------------------------------------
@@ -220,7 +226,27 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
     }
 
     // 4. Place order via REST (serialized with heartbeat/other callers).
+    //    Futures leverage is applied first, in the same critical section —
+    //    Gate.io sets leverage at the position level, not per order, so the
+    //    account's current setting (e.g. 200x) would silently apply instead
+    //    of the strategy's configured multiple.
     std::lock_guard rest_lock(m_restMutex);
+    if (MarketType::Futures == order_req.market_type && order_req.leverage > 0.0)
+    {
+        auto lev = placer->setLeverage(order_req.symbol, order_req.leverage);
+        if (!ok(lev))
+        {
+            const auto err = error(lev);
+            if (eval.reservation_id > 0)
+            {
+                m_positionMgr.cancelReservation(eval.reservation_id);
+            }
+            return PulseError{ err.code,
+                               "Leverage setup failed for " + order_req.symbol
+                                   + ": " + err.message };
+        }
+    }
+
     auto result = placer->place(order_req);
     if (!ok(result))
     {

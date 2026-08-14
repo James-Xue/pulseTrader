@@ -440,4 +440,21 @@ Result<nlohmann::json> GateRestClient::getFuturesOrder(const std::string &order_
     return request("GET", EndpointRouter::orderPath(MarketType::Futures, order_id));
 }
 
+Result<nlohmann::json> GateRestClient::setFuturesLeverage(const std::string &contract,
+                                                          double leverage)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot set futures leverage"};
+    }
+
+    // Hedge-mode endpoint; parameters go in the QUERY STRING (not body).
+    // Cross margin: leverage=0 selects cross, cross_leverage_limit = multiple.
+    const std::string path = "/api/v4/futures/usdt/dual_comp/positions/"
+                           + contract + "/leverage";
+    const std::string query = "leverage=0&cross_leverage_limit="
+                            + std::to_string(static_cast<long long>(std::llround(leverage)));
+    return request("POST", path, query);
+}
+
 } // namespace pulse::exchange

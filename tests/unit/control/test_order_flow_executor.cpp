@@ -35,6 +35,10 @@ class FakeOrderPlacer : public IOrderPlacer
   public:
     int place_count{ 0 };
     int cancel_count{ 0 };
+    int leverage_count{ 0 };
+    std::string last_leverage_contract;
+    double last_leverage_value{ 0.0 };
+    bool fail_leverage{ false };
     std::vector<OrderRequest> placed;
     std::optional<Result<OrderResponse>> scripted_result;
 
@@ -60,6 +64,19 @@ class FakeOrderPlacer : public IOrderPlacer
         ++cancel_count;
         return true;
     }
+
+    Result<nlohmann::json> setLeverage(const std::string &contract,
+                                       double leverage) override
+    {
+        ++leverage_count;
+        last_leverage_contract = contract;
+        last_leverage_value = leverage;
+        if (fail_leverage)
+        {
+            return PulseError{ ErrorCode::HttpError, "leverage api down" };
+        }
+        return nlohmann::json{ { "ok", true } };
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -81,10 +98,11 @@ class OrderFlowTest : public ::testing::Test
                                                   *m_drawdownGuard,
                                                   *m_rateLimiter);
 
+        m_spotPlacer = std::make_unique<FakeOrderPlacer>();
         m_placer = std::make_unique<FakeOrderPlacer>();
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-            nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+            m_spotPlacer.get(), m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
     }
 
     void completeOrder(const std::string &order_id, Side side,
@@ -122,6 +140,7 @@ class OrderFlowTest : public ::testing::Test
     std::unique_ptr<DrawdownGuard> m_drawdownGuard;
     std::unique_ptr<OrderRateLimiter> m_rateLimiter;
     std::unique_ptr<RiskManager> m_riskMgr;
+    std::unique_ptr<FakeOrderPlacer> m_spotPlacer;
     std::unique_ptr<FakeOrderPlacer> m_placer;
     std::unique_ptr<OrderFlowExecutor> m_flow;
     std::mutex m_restMutex;
@@ -237,15 +256,22 @@ TEST_F(OrderFlowTest, PlaceFailureCancelsReservation)
 
 TEST_F(OrderFlowTest, NoExecutorForMarketTypeFails)
 {
+    // A flow constructed without placers must abort the order instead of
+    // dereferencing a null placer.
+    auto no_placer_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, nullptr, nullptr, m_tracker.get(), m_restMutex, nullptr);
+
     OrderRequest req;
     req.symbol = "BTC_USDT";
     req.side = Side::Buy;
     req.type = OrderType::Market;
     req.quantity = 1.0;
-    req.market_type = MarketType::Spot; // spot placer is nullptr in fixture
+    req.market_type = MarketType::Spot;
 
-    auto result = m_flow->placeOrder(req);
+    auto result = no_placer_flow->placeOrder(req);
     ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InternalError, error(result).code);
 }
 
 TEST_F(OrderFlowTest, FillOpensPositionAndConsumesReservation)
@@ -374,4 +400,88 @@ TEST_F(OrderFlowTest, CancelOrderProbesTracker)
     // Untracked order id → false.
     EXPECT_FALSE(m_flow->cancelOrder("not_tracked"));
     EXPECT_EQ(1, m_placer->cancel_count);
+}
+
+TEST_F(OrderFlowTest, FuturesOrderSetsLeverageBeforePlace)
+{
+    // Futures orders must apply the requested leverage BEFORE placement —
+    // Gate.io sets leverage at the position level, not per order, so the
+    // account's current setting would silently apply otherwise.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    EXPECT_EQ(1, m_placer->leverage_count);
+    EXPECT_EQ("BTC_USDT", m_placer->last_leverage_contract);
+    EXPECT_DOUBLE_EQ(10.0, m_placer->last_leverage_value);
+    EXPECT_EQ(1, m_placer->place_count); // order still placed after leverage OK
+}
+
+TEST_F(OrderFlowTest, FuturesOrderSkipsLeverageWhenUnset)
+{
+    // leverage == 0 (default) means "don't manage leverage" — no API call.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    // req.leverage left at default 0.0
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    EXPECT_EQ(0, m_placer->leverage_count);
+    EXPECT_EQ(1, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, SpotOrderSkipsLeverage)
+{
+    // Leverage is futures-only — spot orders never touch the leverage API,
+    // even when a leverage value is present on the request.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.001;
+    req.market_type = MarketType::Spot;
+    req.leverage = 10.0;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    EXPECT_EQ(0, m_spotPlacer->leverage_count);
+    EXPECT_EQ(1, m_spotPlacer->place_count);
+    EXPECT_EQ(0, m_placer->leverage_count);
+}
+
+TEST_F(OrderFlowTest, LeverageFailureAbortsOrder)
+{
+    // If the leverage API call fails, the order must NOT be placed — trading
+    // at the account's stale leverage (e.g. 200x) would violate the strategy
+    // config silently.
+    m_placer->fail_leverage = true;
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::HttpError, error(result).code);
+    EXPECT_EQ(0, m_placer->place_count); // aborted before placement
+    EXPECT_TRUE(m_tracker->activeOrders().empty());
 }
