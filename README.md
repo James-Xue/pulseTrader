@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-583%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-595%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -311,6 +311,17 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 | M11 | Futures risk & PnL (leverage, margin, liquidation) | ✅ |
 | M12 | Futures execution + dual-market wiring | ✅ |
 | M13 | Testnet support — `PULSE_NETWORK` env switch, testnet URL override, validator guard | ✅ |
+| M14 | Risk-gate hardening — single-evaluation order flow (kills the 3002 reject loop + reservation leak), futures contract-multiplier notional (quanto), symmetric long/short fill tracking | ✅ |
+
+---
+
+## Recent Changes (2026-08-14)
+
+- **Risk-gate single evaluation** — `OrderFlowExecutor` used to re-evaluate an order inside placement; a `Modified` (quantity-capped) order was then rejected against its own notional reservation, permanently exhausting the symbol budget (3002 reject loop). Evaluation now happens exactly once and the reservation is passed into placement — capped orders place correctly and failed placements release the reservation.
+- **Futures contract-multiplier notional** — risk evaluation treats a 1-contract futures order as 1 base-currency unit (1 BTC_USDT contract ≈ 6.29 USDT was sized as 1 BTC ≈ 62.9k USDT). `OrderRequest.quanto_multiplier` is now populated from the contract registry fetched at startup (`SymbolRegistry`, 919 contracts loaded), so notional = qty × price × quanto.
+- **Symmetric fill tracking** — a SELL fill with no long to close now opens a tracked short position (previously shorts were never recorded, leaving the risk gate blind to real short exposure); fills close opposite-direction positions first, then open the remainder.
+- **Verification** — 595 tests green (591 + 4 new regressions). Live mainnet verification: signals now pass the risk gate with correct 6.29 USDT notional at full 1-contract quantity; the remaining blocker was an API-key permission (`futures write`), resolved by the product pivot below.
+- **Product pivot: CFD (TradFi)** — trading direction moved from BTC_USDT perpetual futures to Gate.io's traditional-finance CFD product (gold, `XAUUSD`). The TradFi API was researched end-to-end and verified live against the account (symbols, tickers, contract specs, CFD account `mt5_uid 2017864`, 81.86 USD balance). See [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md) for the full API survey and the implementation plan. The futures engine remains operational but is halted pending the CFD integration.
 
 ---
 
@@ -322,6 +333,8 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **Control plane** — CLI REPL (embedded + remote `cli`), stdio MCP server, and JSON-RPC control socket (replaces the WebUI on the `headless` branch)
 - [x] **Futures support** — Gate.io USDT perpetual contracts (M10: market data, M11: risk/PnL, M12: execution + dual-market wiring)
 - [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
+- [x] **Risk-gate hardening** — single-evaluation order flow, futures quanto notional, symmetric fill tracking (M14, 2026-08-14)
+- [ ] **CFD (TradFi) support** — Gate.io traditional-finance CFDs (gold `XAUUSD` etc.). API researched and account verified live (2026-08-14); phased implementation plan in [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md)
 - [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
 - [ ] **Paper trading mode** — Full dry-run simulation with live market data but no real order submission
 - [ ] **P&L reporting** — Control-plane views with daily/weekly/monthly P&L, win rate, and profit factor

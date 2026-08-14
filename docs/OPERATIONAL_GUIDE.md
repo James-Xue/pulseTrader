@@ -2,7 +2,7 @@
 
 > This document is intended for operators, explaining how to advance pulseTrader from its current state to a production-ready trading system.
 >
-> Last updated: 2026-08-13 (Control plane replaces WebUI: CLI REPL + MCP server + JSON-RPC control socket)
+> Last updated: 2026-08-14 (M14 risk-gate hardening; product direction moved to CFD/TradFi gold)
 
 ---
 
@@ -17,6 +17,7 @@
 7. [Profitability Analysis](#7-profitability-analysis)
 8. [Risk Warnings](#8-risk-warnings)
 9. [FAQ](#9-faq)
+10. [CFD (TradFi) — 黄金 CFD 实盘](#10-cfd-tradfi--黄金-cfd-实盘)
 
 ---
 
@@ -36,7 +37,13 @@
 | L8 | Execution | Order lifecycle management (dual market) | ✅ | 26 |
 | L9 | Control Plane | JSON-RPC control socket (127.0.0.1:8081) + CLI REPL + stdio MCP server | ✅ | 65 |
 
-**583 tests all passing** | `headless` branch (WebUI removed, replaced by the control plane) | Milestones M1–M13 all achieved
+**595 tests all passing** | `headless` branch (WebUI removed, replaced by the control plane) | Milestones M1–M14 all achieved
+
+> **2026-08-14 update** — Risk-gate hardening (M14): single-evaluation order flow
+> (fixed the 3002 reject loop + reservation leak), futures contract-multiplier
+> notional (`quanto_multiplier` from the startup contract registry), and
+> symmetric long/short fill tracking. Product direction: **CFD (TradFi) gold**
+> — see [CFD_TRADFI.md](CFD_TRADFI.md) and §10 below.
 
 ### Currently Available Commands
 
@@ -50,7 +57,7 @@
 ./run.sh ai        # Test AI Pipeline (--mock mode, no real LLM calls)
 ./run.sh cli       # Attach interactive REPL to a running engine (control socket)
 ./run.sh mcp       # Run stdio MCP server (bridges to the engine's control socket)
-./run.sh test      # Run all 583 unit tests
+./run.sh test      # Run all 595 unit tests
 ```
 
 ### Trading Main Program (Completed)
@@ -756,3 +763,34 @@ Check the following checklist item by item:
 │  ⚠️  Testnet first, then small capital live trading     │
 └─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 10. CFD (TradFi) — 黄金 CFD 实盘
+
+> 自 2026-08-14 起，实盘方向从 BTC_USDT 永续合约转向 Gate.io 传统金融 CFD（黄金 `XAUUSD`）。
+> API 调研与账户验证已完成（见 [CFD_TRADFI.md](CFD_TRADFI.md)），引擎扩展实施中。
+
+### 10.1 当前账户状态（主账户，2026-08-14 实测）
+
+| 项目 | 值 |
+|---|---|
+| CFD 账户 | 已注册，`mt5_uid = 2017864` |
+| 余额 / 净值 | **81.86 USD**（无持仓） |
+| XAUUSD | 现货报价 ~4348 USD/oz，1 手 = 100 oz，最小 0.01 手 |
+| 杠杆 | 可选 20 / 50 / 100 / 200 / 500 |
+| API key 权限 | **CFD** 已勾选（futures 权限与 CFD 无关——两者是独立产品） |
+
+### 10.2 操作要点
+
+1. **资金划转**：USDT → CFD 账户走 `POST /api/v4/tradfi/transactions`
+   （`asset=USDT`、`type=deposit`）；CFD 账户以 **USD** 结算
+2. **行情**：CFD 无 WebSocket，靠 REST 轮询 ticker + 1m klines（实施中）
+3. **策略兼容**：momentum / mean_reversion / supertrend（K 线驱动）可用；
+   orderbook_scalper 无盘口数据，不可用
+4. **下单语义**：volume 按「手」（0.01 步进），side `1=卖 / 2=买`，
+   市价 `price_type=market`，限价 `price_type=trigger`
+5. **风控**：名义价值 = volume × 100 × 价格；保证金 = 名义价值 / 杠杆；
+   0.01 手 ≈ 4348 USD 名义 ≈ 8.7 USD 保证金（500× 下）
+6. **未实施前手动验证**：可用任意 REST 客户端（签名方式同 `gate_auth.hpp`）
+   调 `/tradfi/orders` 小额测试；实施后走 CLI/MCP `open` 命令

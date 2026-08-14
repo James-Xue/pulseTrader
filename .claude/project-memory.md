@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-13
-> File size: 18129 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-14
+> File size: 20309 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,7 +32,8 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **583 tests all green** (CTest, `headless` branch): control plane 65 (CommandParser 17, JsonRpcServer 12, McpServer 11, OrderFlowTest 11, EngineServicesTest 10, ControlClient 4) + existing core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **595 tests all green** (CTest, `headless` branch): control plane 69 (CommandParser 17, JsonRpcServer 12, McpServer 11, OrderFlowTest 15, EngineServicesTest 10, ControlClient 4) + existing core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- OrderFlowTest 2026-08-14 regressions: OnSignalModifiedOrderIsPlaced, OnSignalModifiedFailureReleasesReservation, FuturesQuantoKeepsFullContractQuantity, SellFillOpensShortWhenNoLong
 
 ### Milestones
 - **M1–M5** ✅: Core pipeline → strategy → risk → AI → control plane → trading engine
@@ -149,11 +150,19 @@ K-line chart fixes (futures contract extraction, subscription payload order, liv
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
 - ✅ #5 OrderTracker Callback Under Write Lock — "collect inside lock, execute outside lock" pattern: `completion_callback_` in `process_order_update()` and `poll_order_status()` called after unique_lock is released. `set_completion_callback()` protected by lock. Added `test_simulate_ws_update()` / `test_try_shared_lock()` test interfaces. 3 new tests.
 - ✅ #6 ProxyTunnel Extraction — 373 lines of network code extracted from `gate_ws_client.cpp` into `proxy_tunnel.hpp/.cpp`. Fixed 2 hidden bugs: (1) `handle_connection` thread changed from `.detach()` to joinable; (2) relay socket/thread registration merged into a single lock_guard scope. Removed 58 lines of dead code (SSL relay overloads). 7 new tests.
-- Run testnet for 1 week, collect strategy performance data
-- Verify signal quality and PnL in virtual fund environment
-- Control plane: `./run.sh cli` (REPL) / embedded REPL in `trade` / `./run.sh mcp` for real-time monitoring and control
+- ✅ #7 Risk-gate single evaluation (M14, 2026-08-14) — `onSignal` passes its eval into `placeOrder(req, eval)`; the 1-arg overload evaluates once. Kills the 3002 reject loop (Modified orders were rejected against their own reservation) and the reservation leak.
+- ✅ #8 Futures quanto notional (M14) — `OrderRequest.quanto_multiplier`; `reserveNotional(qty, price, quanto)`; `SymbolRegistry` (919 futures contracts) fetched at startup in main.cpp and injected via `setSymbolRegistry()`; reserved notional clamped to budget (kills the 1-ULP overflow deadlock).
+- ✅ #9 Symmetric fill tracking (M14) — fills close opposite-direction positions first, then open the remainder (SELL fill with no long now opens a tracked short). `m_reservations` stores `ReservationEntry{reservation_id, request}` so fills open positions with the correct market type/leverage/quanto.
 
-Then: P&L analysis → small capital live trading → production hardening
+### M14 + CFD Direction (2026-08-14)
+- **Product pivot**: trading direction moved from BTC_USDT perpetual futures to **Gate.io TradFi/CFD gold (`XAUUSD`)** — see `docs/CFD_TRADFI.md` (full API survey + phased implementation plan) and OPERATIONAL_GUIDE §10.
+- **Verified live**: CFD account registered (`mt5_uid 2017864`), balance 81.86 USD, XAUUSD ~4348 USD/oz, 1 lot = 100 oz, min 0.01 lot, leverage 20–500; API key **CFD permission works** (futures permission is a separate product — the 403 on `/futures/*` is expected and irrelevant to CFD).
+- **Engine state**: mainnet engine (PID started 2026-08-14 16:50) runs the M14 binary; trading **halted** (control-plane `halt_trading`) pending the CFD integration. MCP server may need `/mcp` reconnect after engine restarts.
+- **CFD integration phases** (from `docs/CFD_TRADFI.md`): L1+L8 tradfi paths/order CRUD → L3 REST ticker+kline feed (no WS for CFD) → L7 notional = volume×100×price, margin/leverage → control plane + trading.toml (`market_type="cfd"`, XAUUSD) → tests.
+- **Strategy compatibility for CFD**: momentum / mean_reversion / supertrend (kline-driven) OK; orderbook_scalper not usable (no order-book channel).
+- **Logging note**: when launched via nohup the engine writes logs to stdout (run.sh console sink); `logs/app.log` may not receive the new run's lines.
+
+Then: CFD integration (phases above) → manual 0.01-lot verification → small-capital live trading → production hardening
 
 ## Control Plane (L9, `headless` branch)
 
