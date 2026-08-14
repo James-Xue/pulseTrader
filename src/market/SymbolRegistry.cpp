@@ -90,6 +90,12 @@ std::optional<SymbolInfo> SymbolRegistry::get(const Symbol &symbol) const
     return it->second;
 }
 
+void SymbolRegistry::upsert(const SymbolInfo &info)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_symbols[info.symbol] = info;
+}
+
 bool SymbolRegistry::validateOrder(const Symbol &symbol, Price price, Quantity qty) const
 {
     const auto info_opt = get(symbol);

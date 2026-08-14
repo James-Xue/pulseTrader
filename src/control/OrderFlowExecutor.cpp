@@ -34,6 +34,24 @@ Result<nlohmann::json> ExecutorOrderPlacer::setLeverage(const std::string &contr
 // ---------------------------------------------------------------------------
 // OrderFlowExecutor
 // ---------------------------------------------------------------------------
+void OrderFlowExecutor::setSymbolRegistry(
+    std::shared_ptr<const market::SymbolRegistry> registry)
+{
+    m_registry = std::move(registry);
+}
+
+double OrderFlowExecutor::quantoMultiplierFor(const Symbol &symbol) const
+{
+    if (m_registry)
+    {
+        if (const auto info = m_registry->get(symbol))
+        {
+            return info->quanto_multiplier;
+        }
+    }
+    return 1.0;   // Unknown/spot: 1 unit = 1 base-currency unit.
+}
+
 OrderFlowExecutor::OrderFlowExecutor(
     const StrategyConfig &strategy_cfg,
     risk::RiskManager &risk_mgr,
@@ -87,6 +105,11 @@ OrderFlowExecutor::buildRequestFromSignal(const strategy::TradingSignal &sig) co
     req.type        = OrderType::Market;
     req.price       = sig.price;
     req.market_type = sig.market_type;
+    // Futures qty is in contracts: the risk gate must compute notional as
+    // qty * price * quanto_multiplier, or a 1-contract order (≈6 USDT for
+    // BTC_USDT) is treated as 1 BTC (≈63k USDT) and capped to a sub-contract
+    // size that the exchange then rejects.
+    req.quanto_multiplier = quantoMultiplierFor(sig.symbol);
 
     // Find strategy config for leverage/quantity settings.
     // Signal aggregator uses strategy_id "signal_aggregator" which won't
@@ -170,7 +193,10 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
                   sig.confidence,
                   sig.reason);
 
-    auto result = placeOrder(req);
+    // Pass the evaluation down: placeOrder must NOT re-evaluate, or the
+    // caller's own reservation (created above) is double-counted and every
+    // Modified order is rejected against its own budget.
+    auto result = placeOrder(req, eval);
     if (!ok(result))
     {
         log_app->error("Signal order FAILED: {} (code={})",
@@ -182,9 +208,9 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
 Result<execution::OrderResponse>
 OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
 {
-    auto log_app = logging::Logger::get("app");
-
-    // 1. Risk evaluation (reserves notional budget atomically).
+    // Evaluate exactly once, then place using that evaluation. Re-evaluating
+    // after a Modified result double-counts the caller's own reservation and
+    // rejects orders whose quantity was capped to the notional budget.
     auto eval = m_riskMgr.evaluateOrder(req);
     if (risk::RiskDecision::Rejected == eval.decision)
     {
@@ -194,17 +220,22 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
                               ? eval.reason_code : ErrorCode::OrderRejected;
         return PulseError{ code, eval.reason_message };
     }
+    return placeOrder(req, eval);
+}
+
+Result<execution::OrderResponse>
+OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
+                              const risk::RiskEvalResult &eval)
+{
+    auto log_app = logging::Logger::get("app");
 
     // 2. Apply risk-modified quantity.
-    if (risk::RiskDecision::Modified == eval.decision)
-    {
-        log_app->info("Order MODIFIED: qty reduced to {:.6f}",
-                      eval.approved_qty);
-    }
     auto order_req = req;
     if (risk::RiskDecision::Modified == eval.decision)
     {
         order_req.quantity = eval.approved_qty;
+        log_app->info("Order MODIFIED: qty reduced to {:.6f}",
+                      eval.approved_qty);
     }
 
     // 3. Pick placer/tracker by market type.
@@ -264,10 +295,12 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
                   static_cast<int>(resp.status));
 
     // 5. Record reservation for the completion handler to consume.
+    //    The placed request is stored too: on fill the position must open
+    //    with the same market type, leverage, and contract multiplier.
     if (eval.reservation_id > 0)
     {
         std::lock_guard lock(m_mutex);
-        m_reservations[resp.order_id] = eval.reservation_id;
+        m_reservations[resp.order_id] = ReservationEntry{ eval.reservation_id, order_req };
     }
 
     // 6. Track order lifecycle via WS + REST polling fallback.
@@ -341,50 +374,72 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
                   report.latency.count());
 
     // Consume the notional reservation (both buy and sell branches).
+    // The placed request is kept so the position opens with the same market
+    // type, leverage, and contract multiplier the order was risk-checked with.
+    ReservationEntry reservation;
     {
         std::lock_guard lock(m_mutex);
         auto it = m_reservations.find(report.order_id);
         if (it != m_reservations.end())
         {
-            m_positionMgr.consumeReservation(it->second);
+            reservation = it->second;
+            m_positionMgr.consumeReservation(it->second.reservation_id);
             m_reservations.erase(it);
         }
     }
 
     // Update position manager and compute realized PnL.
+    //
+    // A fill in direction D first closes opposite-direction positions
+    // (realized PnL), then opens the remaining quantity in direction D.
+    // The open-remainder branch matters for shorts: a SELL fill with no long
+    // to close must record the short, or the risk gate stays blind to real
+    // short exposure.
     double pnl = 0.0;
-    if (Side::Buy == report.side)
+    double remaining = report.filled_qty;
+    auto positions = m_positionMgr.getPositionsBySymbol(report.symbol);
+    for (const auto &pos : positions)
     {
+        if (pos.side == report.side)
+        {
+            continue;   // Same direction — not a close.
+        }
+        const double closed_qty = std::min(remaining, pos.quantity);
+        auto close_result = m_positionMgr.closePosition(
+            pos.position_id, closed_qty, report.avg_fill_price);
+        if (close_result.has_value())
+        {
+            pnl += close_result.value();
+            remaining -= closed_qty;
+            log_app->info("Closed position {} (realized PnL: {:.4f})",
+                          pos.position_id, close_result.value());
+        }
+        else
+        {
+            log_app->warn("Failed to close position {}", pos.position_id);
+        }
+    }
+
+    // Open the unfilled remainder in the fill direction (long or short).
+    if (remaining > 0.0)
+    {
+        const bool futures =
+            (MarketType::Futures == reservation.request.market_type);
         auto open_result = m_positionMgr.openPosition(
             report.symbol,
             report.side,
-            report.filled_qty,
+            remaining,
             report.avg_fill_price,
-            report.client_order_id);
+            report.client_order_id,
+            reservation.request.market_type,
+            futures ? reservation.request.leverage : 1.0,
+            MarginMode::Cross,
+            reservation.request.quanto_multiplier,
+            0.005);
         if (!ok(open_result))
         {
             log_app->warn("Failed to open position: {}",
                           error(open_result).message);
-        }
-    }
-    else
-    {
-        // For sells, try to close matching positions.
-        auto positions = m_positionMgr.getPositionsBySymbol(report.symbol);
-        for (const auto &pos : positions)
-        {
-            auto close_result = m_positionMgr.closePosition(
-                pos.position_id, report.filled_qty, report.avg_fill_price);
-            if (close_result.has_value())
-            {
-                pnl += close_result.value();
-                log_app->info("Closed position {} (realized PnL: {:.4f})",
-                              pos.position_id, close_result.value());
-            }
-            else
-            {
-                log_app->warn("Failed to close position {}", pos.position_id);
-            }
         }
     }
 

@@ -99,6 +99,12 @@ class SymbolRegistry
     /// Returns std::nullopt if the symbol is not in the registry.
     [[nodiscard]] std::optional<SymbolInfo> get(const Symbol &symbol) const;
 
+    /// Insert or replace metadata for a single instrument.
+    ///
+    /// Used by tests to inject contract multipliers without network access;
+    /// also useful for targeted runtime refresh of one symbol.
+    void upsert(const SymbolInfo &info);
+
     /// Validate order parameters against symbol metadata.
     ///
     /// Checks:

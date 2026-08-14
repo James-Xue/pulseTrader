@@ -15,12 +15,14 @@
 #include "core/config.hpp"
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
+#include "market/SymbolRegistry.hpp"
 #include "risk/DrawdownGuard.hpp"
 #include "risk/PositionManager.hpp"
 #include "risk/RiskManager.hpp"
 #include "strategy/signal_types.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -110,10 +112,23 @@ class OrderFlowExecutor
 #endif
     );
 
+    /// Attach instrument metadata (contract multipliers etc.). Fetched once at
+    /// startup from the exchange REST API and shared read-only afterwards.
+    /// Safe to call before any signal/manual order is processed.
+    void setSymbolRegistry(std::shared_ptr<const market::SymbolRegistry> registry);
+
+    /// Contract multiplier for a symbol (1.0 if unknown or spot).
+    [[nodiscard]] double quantoMultiplierFor(const Symbol &symbol) const;
+
     /// Signal-aggregator entry point (replaces the main.cpp lambda).
     void onSignal(const strategy::TradingSignal &sig);
 
     /// Full risk-gated flow for manual orders (REPL/CLI/MCP).
+    ///
+    /// Evaluates the order once, applies a Modified quantity, and places it.
+    /// Single-evaluation is important: re-evaluating inside the placement
+    /// step would double-count the caller's own notional reservation and
+    /// reject every order whose quantity was capped to the budget limit.
     [[nodiscard]] Result<execution::OrderResponse>
     placeOrder(const execution::OrderRequest &req);
 
@@ -125,9 +140,25 @@ class OrderFlowExecutor
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
   private:
+    /// Reservation bookkeeping: maps a placed exchange order_id to the
+    /// reservation that holds its notional budget, plus the request that was
+    /// placed (needed on fill to open the position with the correct market
+    /// type, leverage, and contract multiplier).
+    struct ReservationEntry
+    {
+        std::uint64_t reservation_id{ 0 };
+        execution::OrderRequest request;
+    };
+
     /// Build an OrderRequest from a strategy signal (quantity/leverage lookup).
     [[nodiscard]] execution::OrderRequest
     buildRequestFromSignal(const strategy::TradingSignal &sig) const;
+
+    /// Place an order using a pre-computed risk evaluation. Does NOT
+    /// re-evaluate — the reservation from `eval` already holds the budget.
+    [[nodiscard]] Result<execution::OrderResponse>
+    placeOrder(const execution::OrderRequest &req,
+               const risk::RiskEvalResult &eval);
 
     StrategyConfig m_strategyCfg;
     risk::RiskManager &m_riskMgr;
@@ -138,12 +169,13 @@ class OrderFlowExecutor
     execution::OrderTracker *m_spotTracker;
     execution::OrderTracker *m_futuresTracker;
     std::mutex &m_restMutex;
+    std::shared_ptr<const market::SymbolRegistry> m_registry;
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *m_tradeRecorder;
 #endif
 
     std::mutex m_mutex;   ///< Guards m_reservations.
-    std::unordered_map<std::string, std::uint64_t> m_reservations;
+    std::unordered_map<std::string, ReservationEntry> m_reservations;
 };
 
 } // namespace pulse::control

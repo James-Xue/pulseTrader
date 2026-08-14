@@ -454,7 +454,7 @@ int PositionManager::openPositionCount() const
 // ---------------------------------------------------------------------------
 
 NotionalReservation PositionManager::reserveNotional(
-    const Symbol &symbol, Quantity qty, Price price)
+    const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -463,13 +463,18 @@ NotionalReservation PositionManager::reserveNotional(
     //
     // The reserved notional is added to m_pendingReservations, so subsequent
     // reserveNotional() calls see it and won't double-spend.
+    //
+    // Notional = qty * price * quanto_multiplier. Futures qty is in contracts
+    // (e.g. 1 BTC_USDT contract = 0.0001 BTC), so the contract multiplier
+    // converts to true notional value; spot uses quanto_multiplier = 1.0.
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     NotionalReservation res;
     res.reservation_id = m_nextReservationId++;
 
-    const double proposed_notional = qty * price;
+    const double notional_per_unit = price * quanto_multiplier;
+    const double proposed_notional = qty * notional_per_unit;
 
     // Compute current totals under the lock.
     double total_notional = 0.0;
@@ -525,15 +530,20 @@ NotionalReservation PositionManager::reserveNotional(
         const double remaining_sym = m_config.maxSymbolNotional - sym_notional;
         const double budget = std::min(remaining_pos, remaining_sym);
 
-        if (budget > 0.0 && price > 0.0)
+        if (budget > 0.0 && notional_per_unit > 0.0)
         {
-            const double reduced_qty = budget / price;
+            const double reduced_qty = budget / notional_per_unit;
             if (reduced_qty > 0.0 && reduced_qty < qty)
             {
                 res.approved = true;
                 res.decision = RiskDecision::Modified;
                 res.approved_qty = reduced_qty;
-                res.reserved_notional = reduced_qty * price;
+                // Clamp to the granted budget: qty * price * quanto can exceed
+                // the limit by one ULP of floating point, which previously made
+                // subsequent reserveNotional() calls see a negative remaining
+                // budget and reject every later order (3002 reject loop).
+                res.reserved_notional = std::min(
+                    reduced_qty * notional_per_unit, budget);
                 res.reason_code = ErrorCode::Ok;
                 res.reason_message = "Quantity reduced to fit position limit";
             }

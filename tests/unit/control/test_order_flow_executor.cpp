@@ -8,6 +8,7 @@
 #include "execution/OrderTracker.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
+#include "market/SymbolRegistry.hpp"
 #include "risk/DrawdownGuard.hpp"
 #include "risk/OrderRateLimiter.hpp"
 #include "risk/PositionManager.hpp"
@@ -118,6 +119,22 @@ class OrderFlowTest : public ::testing::Test
             { "avg_deal_price", std::to_string(price) },
             { "fee", "0.1" },
         });
+    }
+
+    /// Rebuild the risk stack with tight 500/300 limits (trading.toml values)
+    /// so Modified (capped) orders are exercised.
+    void rebuildTightStack()
+    {
+        m_riskCfg.maxPositionNotional = 500.0;
+        m_riskCfg.maxSymbolNotional = 300.0;
+        m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+        m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+        m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+        m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                                  *m_drawdownGuard, *m_rateLimiter);
+        m_flow = std::make_unique<OrderFlowExecutor>(
+            m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+            nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
     }
 
     ExchangeConfig m_config;
@@ -484,4 +501,154 @@ TEST_F(OrderFlowTest, LeverageFailureAbortsOrder)
     EXPECT_EQ(ErrorCode::HttpError, error(result).code);
     EXPECT_EQ(0, m_placer->place_count); // aborted before placement
     EXPECT_TRUE(m_tracker->activeOrders().empty());
+}
+
+// ---------------------------------------------------------------------------
+// Regression tests: single-evaluation flow + futures contract multipliers
+// ---------------------------------------------------------------------------
+
+// A signal whose quantity exceeds the notional budget is Modified (capped)
+// by risk evaluation; the order must still be PLACED with the reduced
+// quantity. Before the fix, placeOrder() re-evaluated the reduced order and
+// rejected it against its own reservation — every signal ended in the 3002
+// "Position notional limit reached" reject loop.
+TEST_F(OrderFlowTest, OnSignalModifiedOrderIsPlaced)
+{
+    rebuildTightStack();
+
+    StrategyInstanceConfig inst;
+    inst.name = "momentum_scalper";
+    inst.symbol = "BTC_USDT";
+    inst.market_type = MarketType::Futures;
+    inst.order_quantity = 1.0;
+    inst.leverage = 10.0;
+    inst.enabled = true;
+    m_strategyCfg.strategies.push_back(inst);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+
+    TradingSignal sig;
+    sig.type = SignalType::Sell;
+    sig.symbol = "BTC_USDT";
+    sig.price = 65000.0;
+    sig.strategy_id = "signal_aggregator";
+    sig.market_type = MarketType::Futures;
+    sig.confidence = 0.9;
+
+    m_flow->onSignal(sig);
+    ASSERT_EQ(1, m_placer->place_count) << "Modified signal order must be placed";
+    // Placed with the risk-capped quantity (not the full 1.0).
+    EXPECT_GT(m_placer->placed[0].quantity, 0.0);
+    EXPECT_LT(m_placer->placed[0].quantity, 1.0);
+}
+
+// When a Modified order fails to place (exchange error), its reservation must
+// be released so subsequent signals can still place. Before the fix the
+// leaked reservation permanently exhausted the symbol budget, rejecting every
+// later signal with 3002.
+TEST_F(OrderFlowTest, OnSignalModifiedFailureReleasesReservation)
+{
+    rebuildTightStack();
+
+    StrategyInstanceConfig inst;
+    inst.name = "momentum_scalper";
+    inst.symbol = "BTC_USDT";
+    inst.market_type = MarketType::Futures;
+    inst.order_quantity = 1.0;
+    inst.leverage = 10.0;
+    inst.enabled = true;
+    m_strategyCfg.strategies.push_back(inst);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+
+    TradingSignal sig;
+    sig.type = SignalType::Buy;
+    sig.symbol = "BTC_USDT";
+    sig.price = 65000.0;
+    sig.strategy_id = "signal_aggregator";
+    sig.market_type = MarketType::Futures;
+    sig.confidence = 0.9;
+
+    // First signal: exchange rejects the placement.
+    m_placer->scripted_result = PulseError{ ErrorCode::ExchangeError, "gate down" };
+    m_flow->onSignal(sig);
+    ASSERT_EQ(1, m_placer->place_count);
+
+    // Second signal: the released budget must allow placement.
+    m_flow->onSignal(sig);
+    ASSERT_EQ(2, m_placer->place_count) << "reservation must be released after failure";
+}
+
+// With contract metadata injected, a 1-contract futures order is evaluated at
+// its true notional (1 contract * price * 0.0001 = ~6.5 USDT for BTC_USDT)
+// and placed at the FULL quantity. Before the fix, 1 contract was treated as
+// 1 BTC (~65k USDT), capped to a sub-contract size, and the exchange would
+// reject the invalid size.
+TEST_F(OrderFlowTest, FuturesQuantoKeepsFullContractQuantity)
+{
+    rebuildTightStack();
+
+    auto registry = std::make_shared<market::SymbolRegistry>(
+        *m_restClient, MarketType::Futures);
+    market::SymbolInfo info;
+    info.symbol = "BTC_USDT";
+    info.market_type = MarketType::Futures;
+    info.quanto_multiplier = 0.0001;
+    registry->upsert(info);
+    m_flow->setSymbolRegistry(registry);
+
+    StrategyInstanceConfig inst;
+    inst.name = "momentum_scalper";
+    inst.symbol = "BTC_USDT";
+    inst.market_type = MarketType::Futures;
+    inst.order_quantity = 1.0;
+    inst.leverage = 10.0;
+    inst.enabled = true;
+    m_strategyCfg.strategies.push_back(inst);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+    m_flow->setSymbolRegistry(registry);
+
+    TradingSignal sig;
+    sig.type = SignalType::Buy;
+    sig.symbol = "BTC_USDT";
+    sig.price = 65000.0;
+    sig.strategy_id = "signal_aggregator";
+    sig.market_type = MarketType::Futures;
+    sig.confidence = 0.9;
+
+    m_flow->onSignal(sig);
+    ASSERT_EQ(1, m_placer->place_count);
+    EXPECT_DOUBLE_EQ(1.0, m_placer->placed[0].quantity)
+        << "1 contract fits within the budget at true notional";
+}
+
+// A SELL fill with no matching long must OPEN a short position. Before the
+// fix, sells only closed longs — shorts were never recorded, leaving the risk
+// gate blind to real short exposure.
+TEST_F(OrderFlowTest, SellFillOpensShortWhenNoLong)
+{
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Sell;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1, m_placer->place_count);
+
+    completeOrder("fake_1", Side::Sell, 1.0, 65000.0);
+
+    const auto positions = m_positionMgr->getPositionsBySymbol("BTC_USDT");
+    ASSERT_EQ(1, positions.size());
+    EXPECT_EQ(Side::Sell, positions[0].side);
+    EXPECT_DOUBLE_EQ(1.0, positions[0].quantity);
+    EXPECT_EQ(MarketType::Futures, positions[0].market_type);
+    EXPECT_DOUBLE_EQ(10.0, positions[0].leverage);
 }

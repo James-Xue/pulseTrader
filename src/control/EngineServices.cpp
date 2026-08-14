@@ -402,6 +402,10 @@ EngineServices::openOrder(const nlohmann::json &params)
         req.client_order_id = params["client_order_id"].get<std::string>();
     }
 
+    // Futures qty is in contracts — the risk gate needs the contract
+    // multiplier to compute true notional value.
+    req.quanto_multiplier = m_orderFlow.quantoMultiplierFor(req.symbol);
+
     return m_orderFlow.placeOrder(req);
 }
 

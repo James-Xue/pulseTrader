@@ -169,8 +169,14 @@ class PositionManager
     /// Returns a NotionalReservation with a unique reservation_id.
     /// The caller must later call consumeReservation() (on fill) or
     /// cancelReservation() (on failure) to release the budget.
+    ///
+    /// Notional = qty * price * quanto_multiplier; for spot, quanto=1.0 so
+    /// this reduces to qty * price. Futures qty is in contracts, so the
+    /// contract multiplier (e.g. 0.0001 BTC per BTC_USDT contract) must be
+    /// passed to compute the true notional value.
     [[nodiscard]] NotionalReservation reserveNotional(
-        const Symbol &symbol, Quantity qty, Price price);
+        const Symbol &symbol, Quantity qty, Price price,
+        double quanto_multiplier = 1.0);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.

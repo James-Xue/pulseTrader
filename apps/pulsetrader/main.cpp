@@ -22,6 +22,7 @@
 #include "core/config_validator.hpp"
 #include "core/types.hpp"
 #include "exchange/GateRestClient.hpp"
+#include "market/SymbolRegistry.hpp"
 #include "exchange/GateWsClient.hpp"
 #include "logging/Logger.hpp"
 #include "market/MarketFeed.hpp"
@@ -817,6 +818,27 @@ static int runTrade(int argc, char* argv[])
         , trade_recorder.get()
 #endif
     );
+
+    // Instrument metadata (contract multipliers) — fetched once at startup so
+    // the risk gate computes futures notional correctly: qty is in contracts,
+    // so notional = qty * price * quanto_multiplier (1 BTC_USDT contract =
+    // 0.0001 BTC). Without it, a 1-contract order would be treated as 1 BTC.
+    if (futures_rest)
+    {
+        auto symbol_registry = std::make_shared<pulse::market::SymbolRegistry>(
+            *futures_rest, pulse::MarketType::Futures);
+        if (symbol_registry->loadFromRest())
+        {
+            log->info("[L1] Symbol metadata loaded ({} futures contracts)",
+                      symbol_registry->size());
+            order_flow.setSymbolRegistry(symbol_registry);
+        }
+        else
+        {
+            log->warn("[L1] Symbol metadata load failed — futures notional "
+                      "falls back to qty x price (contracts treated as units)");
+        }
+    }
 
     aggregator.setOutputCallback(
         [&order_flow](const pulse::strategy::TradingSignal& sig)

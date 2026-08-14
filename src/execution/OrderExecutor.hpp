@@ -34,6 +34,7 @@ struct OrderRequest
     double leverage;            ///< Leverage multiplier (futures only, default 1.0).
     bool reduce_only;           ///< Reduce-only flag (futures only, default false).
     int contract_size;          ///< Order size in contracts (futures only, 0 = use quantity).
+    double quanto_multiplier;   ///< Contract multiplier (e.g. 0.0001 = 1 contract = 0.0001 BTC).
 
     /// Default constructor.
     OrderRequest()
@@ -47,6 +48,7 @@ struct OrderRequest
         , leverage{ 0.0 }   ///< 0 = do not manage leverage (no API call)
         , reduce_only{ false }
         , contract_size{ 0 }
+        , quanto_multiplier{ 1.0 }
     {
     }
 };

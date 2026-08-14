@@ -74,8 +74,11 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
     }
 
     // 3. Atomic check + reserve — single lock, no TOCTOU gaps.
+    //    Futures notional = qty * price * quanto_multiplier (qty is in
+    //    contracts); spot passes quanto_multiplier = 1.0 so the math is
+    //    unchanged for spot orders.
     const auto reservation = m_positionManager.reserveNotional(
-        order.symbol, order.quantity, order.price);
+        order.symbol, order.quantity, order.price, order.quanto_multiplier);
 
     result.decision = reservation.decision;
     result.approved_qty = reservation.approved_qty;
