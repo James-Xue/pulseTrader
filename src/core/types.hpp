@@ -88,11 +88,13 @@ enum class OrderStatus : std::uint8_t
     Rejected,        ///< Rejected by exchange or risk engine — terminal state.
 };
 
-/// Market type discriminator: Spot or Futures (USDT-settled perpetual).
+/// Market type discriminator: Spot, Futures (USDT-settled perpetual) or
+/// TradFi CFD (e.g. XAUUSD gold; REST-only market data, lots, USD settlement).
 enum class MarketType : std::uint8_t
 {
     Spot,    ///< Spot trading — currency pairs like BTC_USDT.
     Futures, ///< Perpetual futures — contracts like BTC_USDT (USDT-settled).
+    Cfd,     ///< TradFi CFD — symbols like XAUUSD (volume in lots).
 };
 
 /// Margin mode for futures positions.
@@ -159,7 +161,7 @@ struct AccountBalance
     return std::nullopt;
 }
 
-/// Parse "spot"/"futures" (case-insensitive) into MarketType.
+/// Parse "spot"/"futures"/"cfd" (case-insensitive) into MarketType.
 /// Nullopt on bad input.
 [[nodiscard]] inline std::optional<MarketType> parseMarketType(std::string_view sv) noexcept
 {
@@ -170,6 +172,10 @@ struct AccountBalance
     if ("futures" == sv || "FUTURES" == sv)
     {
         return MarketType::Futures;
+    }
+    if ("cfd" == sv || "CFD" == sv)
+    {
+        return MarketType::Cfd;
     }
     return std::nullopt;
 }
@@ -183,6 +189,8 @@ struct AccountBalance
         return "spot";
     case MarketType::Futures:
         return "futures";
+    case MarketType::Cfd:
+        return "cfd";
     }
     return "unknown";
 }

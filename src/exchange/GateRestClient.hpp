@@ -146,6 +146,60 @@ class GateRestClient
     /// Returns the order object with current status.
     [[nodiscard]] Result<nlohmann::json> getFuturesOrder(const std::string &order_id);
 
+    // -----------------------------------------------------------------------
+    // TradFi (CFD) endpoints — /api/v4/tradfi/*, MT5 account, USD settlement
+    // -----------------------------------------------------------------------
+
+    /// GET /api/v4/tradfi/symbols — list all CFD symbols (public).
+    [[nodiscard]] Result<nlohmann::json> getCfdSymbols();
+
+    /// GET /api/v4/tradfi/symbols/{symbol}/tickers — per-symbol CFD ticker (public).
+    [[nodiscard]] Result<nlohmann::json> getCfdTicker(const std::string &symbol);
+
+    /// GET /api/v4/tradfi/symbols/{symbol}/klines — per-symbol CFD klines.
+    ///
+    /// Query: kline_type=1m&limit=N (max 500). Times are Unix seconds.
+    [[nodiscard]] Result<nlohmann::json> getCfdKlines(const std::string &symbol, int limit = 500);
+
+    /// GET /api/v4/tradfi/symbols/detail?symbols={sym} — contract specs.
+    ///
+    /// Requires auth. Returns contract_volume, min/max/step_order_volume,
+    /// leverage/leverages[], price_precision, settlement_currency.
+    [[nodiscard]] Result<nlohmann::json> getCfdSymbolsDetail(const std::vector<std::string> &symbols);
+
+    /// GET /api/v4/tradfi/users/assets — CFD account balance (USD).
+    ///
+    /// Returns equity, balance, margin, margin_free, unrealized_pnl, storage, outable.
+    [[nodiscard]] Result<nlohmann::json> getCfdAssets();
+
+    /// POST /api/v4/tradfi/transactions — transfer funds between the main
+    /// account and the CFD (MT5) account.
+    ///
+    /// asset: "USDT" only. change: amount (≤2 decimals). type: "deposit"
+    /// (main → CFD) or "withdraw" (CFD → main).
+    [[nodiscard]] Result<nlohmann::json> postCfdTransfer(const std::string &asset,
+                                                         const std::string &change,
+                                                         const std::string &type);
+
+    /// GET /api/v4/tradfi/positions — active CFD positions.
+    [[nodiscard]] Result<nlohmann::json> getCfdPositions();
+
+    /// POST /api/v4/tradfi/positions/{position_id}/close — close a CFD position.
+    ///
+    /// close_type: 1 = partial (close_volume required), 2 = full.
+    [[nodiscard]] Result<nlohmann::json> postCfdPositionClose(const std::string &position_id,
+                                                              int close_type,
+                                                              double close_volume = 0.0);
+
+    /// POST /api/v4/tradfi/orders — place a CFD order (MT5-style body).
+    [[nodiscard]] Result<nlohmann::json> postCfdOrder(const nlohmann::json &body);
+
+    /// GET /api/v4/tradfi/orders/{order_id} — query a CFD order.
+    [[nodiscard]] Result<nlohmann::json> getCfdOrder(const std::string &order_id);
+
+    /// DELETE /api/v4/tradfi/orders/{order_id} — cancel a CFD order.
+    [[nodiscard]] Result<nlohmann::json> cancelCfdOrder(const std::string &order_id);
+
     /// Set futures position leverage for a contract (dual/hedge mode).
     ///
     /// Gate.io applies leverage at the position level, NOT per order — a

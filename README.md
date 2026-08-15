@@ -312,8 +312,18 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 | M12 | Futures execution + dual-market wiring | ✅ |
 | M13 | Testnet support — `PULSE_NETWORK` env switch, testnet URL override, validator guard | ✅ |
 | M14 | Risk-gate hardening — single-evaluation order flow (kills the 3002 reject loop + reservation leak), futures contract-multiplier notional (quanto), symmetric long/short fill tracking | ✅ |
+| M15 | Dual-direction trading (CFD gold + crypto futures, runtime-switchable) — `MarketType::Cfd`, TradFi REST paths, MT5 order schema verified live | 🚧 in progress |
 
 ---
+
+## Recent Changes (2026-08-15)
+
+- **Dual-direction trading (M15, in progress)** — the engine is moving toward two runtime-switchable trading directions: TradFi CFD gold (`XAUUSD`) and crypto futures (`BTC_USDT`), with a single active direction at any time (the other direction's strategies pause and its open orders cancel on switch; positions stay open until manually closed). Landed so far:
+  - `MarketType::Cfd` as a third market type with parsers (`parseMarketType`, TOML loader), config plumbing (`active_market` startup direction, `risk.max_leverage` widened 125 → 500 for the CFD leverage ladder, testnet rejects CFD, orderbook_scalper rejected on CFD), error codes `71xx` (CFD) + `InactiveMarket 3008`
+  - Exchange/execution foundation: `EndpointRouter` `/api/v4/tradfi/*` path builders, `GateRestClient` 10 TradFi methods (symbols/tickers/klines/detail/assets/positions/orders/close/transfer), `OrderExecutor::buildOrderBody` refactored to a static unit-testable function with the MT5-style CFD body (`side` 2=buy/1=sell, `volume` in lots, `price_type` market/trigger), `OrderTracker` REST-poll-only mode (`enable_ws=false` — CFD has no private WS channel)
+  - Live-API probe (`tools/test_gate_rest --tradfi`, 2026-08-15): **MT5-style order schema confirmed** (spot-style variant rejected with `INVALID_ARGUMENT`); responses wrap under `data` / `data.list`; order objects carry `order_id`/`state`/`finished`/`time_setup`; contract spec verified (`contract_volume 100`, min/step 0.01, max 15, leverages 20–500); CFD account balance withdrawn to 0.00 (two leftover 08-14 probe orders could not be cancelled while the market was closed — `NOT_IN_TRADE` — retry after reopen)
+  - Remaining: L3 REST polling feed, L7 `evaluateCfdOrder`, control-plane `switch_direction`, main.cpp wiring, tests
+- **Verification** — 595 tests still green.
 
 ## Recent Changes (2026-08-14)
 
@@ -334,7 +344,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **Futures support** — Gate.io USDT perpetual contracts (M10: market data, M11: risk/PnL, M12: execution + dual-market wiring)
 - [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
 - [x] **Risk-gate hardening** — single-evaluation order flow, futures quanto notional, symmetric fill tracking (M14, 2026-08-14)
-- [ ] **CFD (TradFi) support** — Gate.io traditional-finance CFDs (gold `XAUUSD` etc.). API researched and account verified live (2026-08-14); phased implementation plan in [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md)
+- [ ] **Dual-direction trading (M15)** — CFD (TradFi gold `XAUUSD`) + crypto futures as runtime-switchable directions. MarketType/config/exchange/execution foundation + live-API probe done (2026-08-15); L3 REST polling feed, L7 CFD risk, control-plane `switch_direction`, main.cpp wiring, tests pending. Phased plan in [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md)
 - [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
 - [ ] **Paper trading mode** — Full dry-run simulation with live market data but no real order submission
 - [ ] **P&L reporting** — Control-plane views with daily/weekly/monthly P&L, win rate, and profit factor

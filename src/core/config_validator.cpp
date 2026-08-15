@@ -88,11 +88,11 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.maxSymbolNotional must be > 0"};
     }
 
-    // Futures-specific risk limits.
-    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 125.0)
+    // Futures-specific risk limits (CFD leverage ladder goes up to 500).
+    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 500.0)
     {
         return PulseError{ErrorCode::ConfigValidationError,
-                          "risk.max_leverage must be in [1.0, 125.0]"};
+                          "risk.max_leverage must be in [1.0, 500.0]"};
     }
 
     if (cfg.risk.max_margin_used < 0.0 || cfg.risk.max_margin_used > 1.0)
@@ -223,14 +223,31 @@ PulseError validateConfig(const PulseConfig &cfg)
                     + std::to_string(cfg.risk.max_leverage) + ")"};
         }
 
-        // Testnet only supports futures — spot has no testnet endpoint.
-        if (cfg.exchange.testnet && MarketType::Spot == s.market_type)
+        // Testnet only supports futures — spot has no testnet endpoint and
+        // CFD (TradFi) has no testnet sandbox.
+        if (cfg.exchange.testnet
+            && (MarketType::Spot == s.market_type
+                || MarketType::Cfd == s.market_type))
         {
             return PulseError{
                 ErrorCode::ConfigValidationError,
-                prefix + ".market_type \"spot\" is not supported in testnet "
-                    "mode (Gate.io testnet is futures-only). "
+                prefix + ".market_type \"" + toString(s.market_type)
+                    + "\" is not supported in testnet "
+                    "mode (Gate.io testnet is futures-only; CFD has no "
+                    "testnet sandbox). "
                     "Set market_type = \"futures\" or testnet = false."};
+        }
+
+        // OrderBookScalper needs the WS order-book channel — CFD has none.
+        if ("orderbook_scalper" == s.name && MarketType::Cfd == s.market_type)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix
+                    + " strategy \"orderbook_scalper\" cannot run on "
+                      "market_type \"cfd\" (CFD has no order-book channel). "
+                      "Use momentum_scalper, mean_reversion_scalper or "
+                      "supertrend_scalper."};
         }
     }
 

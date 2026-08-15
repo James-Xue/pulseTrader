@@ -58,11 +58,12 @@ using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
 
 OrderTracker::OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
-                           MarketType market_type)
+                           MarketType market_type, bool enable_ws)
     : m_wsClient{ ws_client }
     , m_restClient{ rest_client }
     , m_marketType{ market_type }
     , m_wsSubscribed{ false }
+    , m_enableWs{ enable_ws }
 {
 }
 
@@ -77,8 +78,9 @@ void OrderTracker::trackOrder(const std::string &order_id,
     PULSE_LOG_INFO("execution", "Tracking order: {} {} {} {}", order_id, symbol, requested_qty,
         side == Side::Buy ? "buy" : "sell");
 
-    // Subscribe to WS private channel if not already done
-    if (!m_wsSubscribed)
+    // Subscribe to WS private channel if not already done (skipped for
+    // REST-poll-only markets like TradFi CFD — no private WS channel exists).
+    if (!m_wsSubscribed && m_enableWs)
     {
         const std::string orders_channel = EndpointRouter::wsChannel(m_marketType, "orders");
         m_wsClient.subscribePrivate(orders_channel,

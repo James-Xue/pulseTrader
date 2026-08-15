@@ -58,6 +58,7 @@ enum class ErrorCode : std::uint32_t
     TakeProfitTriggered = 3005, ///< Position partially/fully closed by take-profit engine.
     SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
     ManualHalt = 3007,         ///< Trading halted manually via CLI/MCP.
+    InactiveMarket = 3008,     ///< Order market_type is not the active trading direction.
 
     // AI (4xxx)
     AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.
@@ -88,6 +89,11 @@ enum class ErrorCode : std::uint32_t
     FuturesLiquidation = 7003,        ///< Position was liquidated by the exchange.
     FuturesFundingError = 7004,       ///< Funding rate settlement error.
     FuturesContractNotFound = 7005,   ///< Requested futures contract does not exist.
+
+    // TradFi CFD (71xx)
+    CfdLeverageExceeded = 7101,   ///< CFD leverage exceeds max_leverage or the account's available ladder.
+    CfdMarginInsufficient = 7102, ///< Not enough CFD margin (USD) to open/maintain position.
+    CfdContractNotFound = 7103,   ///< Requested CFD symbol has no contract spec.
 
     // Control plane (91xx)
     ControlBindFailed = 9100,      ///< Failed to bind control socket to address/port.

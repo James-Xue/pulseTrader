@@ -20,6 +20,8 @@ std::string EndpointRouter::restPrefix(MarketType mt)
         return "/api/v4/spot";
     case MarketType::Futures:
         return "/api/v4/futures/usdt";
+    case MarketType::Cfd:
+        return "/api/v4/tradfi";
     }
     return "/api/v4/spot";
 }
@@ -35,6 +37,8 @@ std::string EndpointRouter::wsPrefix(MarketType mt)
         return "spot";
     case MarketType::Futures:
         return "futures";
+    case MarketType::Cfd:
+        return "cfd"; // No WS channels exist for TradFi — defensive only.
     }
     return "spot";
 }
@@ -77,6 +81,8 @@ std::string EndpointRouter::selectWsUrl(const ExchangeConfig &cfg, MarketType mt
         return cfg.wsUrl;
     case MarketType::Futures:
         return cfg.futuresWsUrl;
+    case MarketType::Cfd:
+        return cfg.wsUrl; // Unused — CFD has no WebSocket market data.
     }
     return cfg.wsUrl;
 }
@@ -103,6 +109,8 @@ std::string EndpointRouter::contractsPath(MarketType mt)
         return "/api/v4/spot/currency_pairs";
     case MarketType::Futures:
         return "/api/v4/futures/usdt/contracts";
+    case MarketType::Cfd:
+        return "/api/v4/tradfi/symbols";
     }
     return "/api/v4/spot/currency_pairs";
 }
@@ -114,6 +122,10 @@ std::string EndpointRouter::tickersPath(MarketType mt)
 
 std::string EndpointRouter::accountsPath(MarketType mt)
 {
+    if (MarketType::Cfd == mt)
+    {
+        return "/api/v4/tradfi/users/assets"; // TradFi balances live under /users/, not /accounts.
+    }
     return restPrefix(mt) + "/accounts";
 }
 
@@ -144,8 +156,48 @@ std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contr
         return ""; // Not applicable for spot.
     case MarketType::Futures:
         return "/api/v4/futures/usdt/positions/" + contract + "/leverage";
+    case MarketType::Cfd:
+        return ""; // CFD leverage is account-level, not per-position.
     }
     return "";
+}
+
+// ---------------------------------------------------------------------------
+// TradFi (CFD) specific endpoint builders
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::cfdSymbolsPath()
+{
+    return "/api/v4/tradfi/symbols";
+}
+
+std::string EndpointRouter::cfdSymbolsDetailPath()
+{
+    return "/api/v4/tradfi/symbols/detail";
+}
+
+std::string EndpointRouter::cfdTickerPath(const std::string &symbol)
+{
+    return "/api/v4/tradfi/symbols/" + symbol + "/tickers";
+}
+
+std::string EndpointRouter::cfdKlinesPath(const std::string &symbol)
+{
+    return "/api/v4/tradfi/symbols/" + symbol + "/klines";
+}
+
+std::string EndpointRouter::cfdAssetsPath()
+{
+    return "/api/v4/tradfi/users/assets";
+}
+
+std::string EndpointRouter::cfdPositionsPath()
+{
+    return "/api/v4/tradfi/positions";
+}
+
+std::string EndpointRouter::cfdPositionClosePath(const std::string &position_id)
+{
+    return "/api/v4/tradfi/positions/" + position_id + "/close";
 }
 
 } // namespace pulse::exchange

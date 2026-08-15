@@ -67,8 +67,11 @@ class OrderTracker
     /// Construct an OrderTracker with WS and REST clients.
     ///
     /// market_type selects which WS channel and REST paths to use.
+    /// enable_ws=false (TradFi CFD has no private WS channel) makes the
+    /// tracker REST-poll-only: trackOrder skips the WS subscription and all
+    /// status comes from pollOrderStatus / reconcileAll.
     OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
-                 MarketType market_type = MarketType::Spot);
+                 MarketType market_type = MarketType::Spot, bool enable_ws = true);
 
     /// Start tracking an order.
     ///
@@ -185,7 +188,8 @@ class OrderTracker
     std::unordered_map<std::string, TrackedOrder> m_trackedOrders;
     std::unordered_map<std::string, ExecutionReport> m_completedReports;
     CompletionCallback m_completionCallback;
-    bool m_wsSubscribed; ///< Whether we've subscribed to spot.orders channel.
+    bool m_wsSubscribed; ///< Whether we've subscribed to the orders channel.
+    bool m_enableWs;     ///< False = REST-poll-only (TradFi CFD has no WS channel).
 
     /// WS callback for spot.orders channel events.
     void onOrderUpdate(const nlohmann::json &event);

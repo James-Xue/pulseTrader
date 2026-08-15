@@ -162,10 +162,16 @@ PulseError parseMarketType(const std::string &str, MarketType &out)
         out = MarketType::Futures;
         return {};
     }
+    if ("cfd" == str)
+    {
+        out = MarketType::Cfd;
+        return {};
+    }
 
     return PulseError{
         ErrorCode::ConfigInvalidValue,
-        "market_type must be \"spot\" or \"futures\", got \"" + str + "\""};
+        "market_type must be \"spot\", \"futures\" or \"cfd\", got \""
+            + str + "\""};
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +808,18 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     {
         std::string mt_str = toml::find<std::string>(root, "default_market_type");
         err = parseMarketType(mt_str, cfg.default_market_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    // Top-level active_market — the single trading direction active at startup.
+    if (root.contains("active_market"))
+    {
+        std::string am_str = toml::find<std::string>(root, "active_market");
+        err = parseMarketType(am_str, cfg.active_market);
 
         if (ErrorCode::Ok != err.code)
         {

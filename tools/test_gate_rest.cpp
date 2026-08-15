@@ -9,19 +9,30 @@
 //   # With API credentials (for authenticated endpoints):
 //   GATE_API_KEY=xxx GATE_API_SECRET=yyy ./build/tools/test_gate_rest
 //
+//   # TradFi (CFD) live-API probe — verifies the order schema, field names
+//   # and close-endpoint shapes before the engine integration is finalised.
+//   # Places a SAFE trigger (limit) buy at 3000 that cannot fill, then
+//   # queries and cancels it. Requires an API key with the CFD permission:
+//   GATE_API_KEY=xxx GATE_API_SECRET=yyy ./build/tools/test_gate_rest --tradfi
+//
 // What it tests:
 //   1. GET /api/v4/spot/currencies       — public, no auth
 //   2. GET /api/v4/spot/currency_pairs   — public, no auth
 //   3. GET /api/v4/spot/tickers           — public, with query param
 //   4. GET /api/v4/spot/accounts          — private, requires API key + secret
+//   5. --tradfi: symbols/tickers/klines/detail/assets/orders + safe order probe
 
 #include "core/config.hpp"
 #include "core/PulseError.hpp"
+#include "exchange/EndpointRouter.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "logging/Logger.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <string>
+#include <thread>
 
 using namespace pulse;
 using namespace pulse::exchange;
@@ -43,10 +54,10 @@ void print_result(const std::string &label, const Result<nlohmann::json> &r)
         }
         std::cout << "\n";
 
-        // Print first 500 chars of the response for verification
+        // Print the first 2000 chars of the response for verification
         const std::string preview = json.dump(2);
-        std::cout << "       " << preview.substr(0, std::min(preview.size(), std::size_t{500}));
-        if (preview.size() > 500)
+        std::cout << "       " << preview.substr(0, std::min(preview.size(), std::size_t{2000}));
+        if (preview.size() > 2000)
         {
             std::cout << " ... (truncated)";
         }
@@ -60,8 +71,174 @@ void print_result(const std::string &label, const Result<nlohmann::json> &r)
     }
 }
 
-int main()
+// ---------------------------------------------------------------------------
+// TradFi (CFD) live-API probe — resolves the order schema for the engine
+// ---------------------------------------------------------------------------
+void probe_cfd(GateRestClient &client)
 {
+    std::cout << "=== TradFi (CFD) Probe ===\n\n";
+
+    // Public market data — field names for the feed parsers.
+    print_result("GET /tradfi/symbols (public)", client.getCfdSymbols());
+    print_result("GET /tradfi/symbols/XAUUSD/tickers (public)",
+                 client.getCfdTicker("XAUUSD"));
+    print_result("GET /tradfi/symbols/XAUUSD/klines?kline_type=1m&limit=3 (public)",
+                 client.getCfdKlines("XAUUSD", 3));
+
+    if (!client.hasCredentials())
+    {
+        std::cout << "[SKIP] authenticated CFD probes — no credentials\n\n";
+        return;
+    }
+
+    // Authenticated read probes — contract spec + balance field names.
+    print_result("GET /tradfi/symbols/detail?symbols=XAUUSD (auth)",
+                 client.getCfdSymbolsDetail({ "XAUUSD" }));
+    print_result("GET /tradfi/users/assets (auth)", client.getCfdAssets());
+    print_result("GET /tradfi/positions (auth)", client.getCfdPositions());
+    print_result("GET /tradfi/orders (auth)",
+                 client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd)));
+    print_result("GET /tradfi/transactions (auth)",
+                 client.request("GET", "/api/v4/tradfi/transactions"));
+
+    // SAFE order probe: trigger (limit) BUY at 3000 — the market is ~4348 so
+    // this cannot fill. Query it, then cancel it.
+    std::cout << "--- SAFE order probe (unfillable trigger buy @3000) ---\n\n";
+    nlohmann::json body;
+    body["symbol"]     = "XAUUSD";
+    body["side"]       = 2; // 2 = buy, 1 = sell (MT5 style)
+    body["volume"]     = "0.01";
+    body["price_type"] = "trigger";
+    body["price"]      = "3000";
+
+    auto placed = client.postCfdOrder(body);
+    print_result("POST /tradfi/orders (MT5-style trigger buy @3000)", placed);
+
+    if (ok(placed))
+    {
+        std::string order_id;
+        const auto &pj = value(placed);
+        if (pj.contains("id"))
+        {
+            if (pj["id"].is_number())
+            {
+                order_id = std::to_string(pj["id"].get<std::int64_t>());
+            }
+            else
+            {
+                order_id = pj["id"].get<std::string>();
+            }
+        }
+        std::cout << "       order id = " << order_id << "\n\n";
+
+        if (!order_id.empty())
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            print_result("GET /tradfi/orders/" + order_id, client.getCfdOrder(order_id));
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            print_result("DELETE /tradfi/orders/" + order_id,
+                         client.cancelCfdOrder(order_id));
+        }
+    }
+    else
+    {
+        // Fallback: retry with the spot-style variant (trading_session/tif/
+        // client_order_id) — resolves the MT5-vs-spot-style open question.
+        std::cout << "--- retrying with spot-style variant ---\n\n";
+        nlohmann::json body2;
+        body2["symbol"]          = "XAUUSD";
+        body2["side"]            = "buy";
+        body2["volume"]          = "0.01";
+        body2["price_type"]      = "limit";
+        body2["price"]           = "3000";
+        body2["trading_session"] = "All";
+        body2["time_in_force"]   = "day";
+        body2["client_order_id"] = "probe_1";
+        print_result("POST /tradfi/orders (spot-style limit buy @3000)",
+                     client.request("POST",
+                                    EndpointRouter::ordersPath(MarketType::Cfd),
+                                    "", body2.dump()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TradFi (CFD) cleanup — cancel all active orders and withdraw the full CFD
+// balance back to the main account. Used when the CFD direction is parked.
+// ---------------------------------------------------------------------------
+void probe_cfd_cleanup(GateRestClient &client)
+{
+    std::cout << "=== TradFi (CFD) Cleanup ===\n\n";
+
+    if (!client.hasCredentials())
+    {
+        std::cout << "[SKIP] no credentials\n\n";
+        return;
+    }
+
+    // 1. Cancel every active order.
+    auto orders = client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd));
+    if (ok(orders))
+    {
+        const auto &data = value(orders).value("data", nlohmann::json::object());
+        const auto &list = data.value("list", nlohmann::json::array());
+        if (list.is_array())
+        {
+            for (const auto &o : list)
+            {
+                std::string id;
+                if (o.contains("order_id"))
+                {
+                    if (o["order_id"].is_number())
+                    {
+                        id = std::to_string(o["order_id"].get<std::int64_t>());
+                    }
+                    else
+                    {
+                        id = o["order_id"].get<std::string>();
+                    }
+                }
+                if (!id.empty())
+                {
+                    print_result("DELETE /tradfi/orders/" + id + " (cleanup)",
+                                 client.cancelCfdOrder(id));
+                }
+            }
+        }
+    }
+
+    // 2. Withdraw the full withdrawable balance (outable) to the main account.
+    auto assets = client.getCfdAssets();
+    if (ok(assets))
+    {
+        const auto &data = value(assets).value("data", nlohmann::json::object());
+        const std::string outable = data.value("outable", "0");
+        const double amount = safeParseDouble(outable).value_or(0.0);
+        if (amount > 0.0)
+        {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.2f", amount);
+            print_result("POST /tradfi/transactions (withdraw "
+                             + std::string(buf) + " USDT -> main)",
+                         client.postCfdTransfer("USDT", buf, "withdraw"));
+        }
+        else
+        {
+            std::cout << "[SKIP] withdraw — CFD balance is zero\n\n";
+        }
+    }
+
+    // 3. Verify the final state.
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    print_result("GET /tradfi/orders (verify empty)",
+                 client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd)));
+    print_result("GET /tradfi/users/assets (verify zero)", client.getCfdAssets());
+}
+
+int main(int argc, char *argv[])
+{
+    const bool run_cfd = (argc > 1 && std::string("--tradfi") == argv[1]);
+    const bool run_cleanup = (argc > 1 && std::string("--tradfi-cleanup") == argv[1]);
+
     // 1. Initialise logging (console only, info level)
     LogConfig log_cfg;
     log_cfg.toConsole = true;
@@ -89,6 +266,22 @@ int main()
 
     // 3. Create client
     GateRestClient client(exchange_cfg);
+
+    if (run_cfd)
+    {
+        probe_cfd(client);
+        logging::Logger::shutdown();
+        std::cout << "Done.\n";
+        return 0;
+    }
+
+    if (run_cleanup)
+    {
+        probe_cfd_cleanup(client);
+        logging::Logger::shutdown();
+        std::cout << "Done.\n";
+        return 0;
+    }
 
     // 4. Test public endpoints
     std::cout << "=== Public Endpoints ===\n\n";

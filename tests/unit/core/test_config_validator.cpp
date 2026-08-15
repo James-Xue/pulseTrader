@@ -347,7 +347,7 @@ TEST(ConfigValidator, RejectsLeverageExceedingMaxLeverage)
 TEST(ConfigValidator, RejectsMaxLeverageOutOfRange)
 {
     auto cfg = valid_config();
-    cfg.risk.max_leverage = 200.0; // > 125.0
+    cfg.risk.max_leverage = 501.0; // > 500.0 (CFD ladder tops out at 500x)
     auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("max_leverage"));
@@ -371,10 +371,10 @@ TEST(ConfigValidator, AcceptsDefaultLeverageOne)
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
-TEST(ConfigValidator, AcceptsMaxLeverageBoundary125)
+TEST(ConfigValidator, AcceptsMaxLeverageBoundary500)
 {
     auto cfg = valid_config();
-    cfg.risk.max_leverage = 125.0; // boundary value
+    cfg.risk.max_leverage = 500.0; // boundary value (CFD ladder maximum)
     auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }

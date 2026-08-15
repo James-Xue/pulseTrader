@@ -22,11 +22,12 @@ namespace pulse::exchange
 {
 
 // ---------------------------------------------------------------------------
-// EndpointRouter — static routing functions for Gate.io spot and futures APIs
+// EndpointRouter — static routing functions for Gate.io spot, futures and TradFi APIs
 //
 // Gate.io API structure:
 //   Spot REST:    https://api.gateio.ws/api/v4/spot/...
 //   Futures REST: https://api.gateio.ws/api/v4/futures/usdt/...
+//   TradFi REST:  https://api.gateio.ws/api/v4/tradfi/... (CFD: no WebSocket)
 //   Spot WS:      wss://api.gateio.ws/ws/v4/     (channels: spot.tickers, spot.ping, ...)
 //   Futures WS:   wss://fx-ws.gateio.ws/v4/ws/usdt (channels: futures.tickers, futures.ping, ...)
 // ---------------------------------------------------------------------------
@@ -37,12 +38,14 @@ class EndpointRouter
     ///
     /// Spot:    "/api/v4/spot"
     /// Futures: "/api/v4/futures/usdt"
+    /// Cfd:     "/api/v4/tradfi"
     [[nodiscard]] static std::string restPrefix(MarketType mt);
 
     /// WebSocket channel name prefix for the given market type.
     ///
     /// Spot:    "spot"
     /// Futures: "futures"
+    /// Cfd:     "cfd" (no WS channels exist — defensive only)
     [[nodiscard]] static std::string wsPrefix(MarketType mt);
 
     /// Build a full WebSocket channel name: wsPrefix(mt) + "." + suffix.
@@ -97,25 +100,54 @@ class EndpointRouter
     ///
     /// Spot:    "/api/v4/spot/accounts"
     /// Futures: "/api/v4/futures/usdt/accounts"
+    /// Cfd:     "/api/v4/tradfi/users/assets"
     [[nodiscard]] static std::string accountsPath(MarketType mt);
 
     /// Path to place or list orders.
     ///
     /// Spot:    "/api/v4/spot/orders"
     /// Futures: "/api/v4/futures/usdt/orders"
+    /// Cfd:     "/api/v4/tradfi/orders"
     [[nodiscard]] static std::string ordersPath(MarketType mt);
 
     /// Path to get or cancel a specific order by ID.
     ///
     /// Spot:    "/api/v4/spot/orders/{order_id}"
     /// Futures: "/api/v4/futures/usdt/orders/{order_id}"
+    /// Cfd:     "/api/v4/tradfi/orders/{order_id}"
     [[nodiscard]] static std::string orderPath(MarketType mt, const std::string &order_id);
 
     /// Path to set position leverage (futures only).
     ///
     /// Futures: "/api/v4/futures/usdt/positions/{contract}/leverage"
     /// Spot:    returns empty string (not applicable).
+    /// Cfd:     returns empty string (leverage is account-level).
     [[nodiscard]] static std::string leveragePath(MarketType mt, const std::string &contract = "");
+
+    // -----------------------------------------------------------------------
+    // TradFi (CFD) specific endpoint builders — no WebSocket, distinct paths
+    // -----------------------------------------------------------------------
+
+    /// "/api/v4/tradfi/symbols" — public symbol list.
+    [[nodiscard]] static std::string cfdSymbolsPath();
+
+    /// "/api/v4/tradfi/symbols/detail" — contract specs (requires auth; query "symbols=XAUUSD").
+    [[nodiscard]] static std::string cfdSymbolsDetailPath();
+
+    /// "/api/v4/tradfi/symbols/{symbol}/tickers" — per-symbol ticker.
+    [[nodiscard]] static std::string cfdTickerPath(const std::string &symbol);
+
+    /// "/api/v4/tradfi/symbols/{symbol}/klines" — per-symbol klines.
+    [[nodiscard]] static std::string cfdKlinesPath(const std::string &symbol);
+
+    /// "/api/v4/tradfi/users/assets" — CFD account balance (USD).
+    [[nodiscard]] static std::string cfdAssetsPath();
+
+    /// "/api/v4/tradfi/positions" — active CFD positions.
+    [[nodiscard]] static std::string cfdPositionsPath();
+
+    /// "/api/v4/tradfi/positions/{position_id}/close" — close a CFD position.
+    [[nodiscard]] static std::string cfdPositionClosePath(const std::string &position_id);
 };
 
 } // namespace pulse::exchange

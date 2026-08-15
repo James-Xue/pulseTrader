@@ -297,6 +297,7 @@ struct PulseConfig
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
+    MarketType active_market = MarketType::Futures; ///< Single active trading direction at startup; runtime switch is ephemeral (restart returns here).
 };
 
 } // namespace pulse

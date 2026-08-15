@@ -33,7 +33,7 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
         req.price);
 
     // Build order body
-    const nlohmann::json body_json = buildOrderBody(req);
+    const nlohmann::json body_json = buildOrderBody(m_marketType, req);
     const std::string body = body_json.dump();
 
     // Submit order via REST (retry logic is in GateRestClient::request)
@@ -101,11 +101,13 @@ Result<nlohmann::json> OrderExecutor::setLeverage(const std::string &contract,
     return result;
 }
 
-nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
+nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &req)
 {
     nlohmann::json body;
 
-    if (MarketType::Futures == m_marketType)
+    switch (mt)
+    {
+    case MarketType::Futures:
     {
         // --- Futures order format ---
         body["contract"] = req.symbol;
@@ -132,8 +134,27 @@ nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
         }
 
         body["reduce_only"] = req.reduce_only;
+        break;
     }
-    else
+    case MarketType::Cfd:
+    {
+        // --- TradFi CFD order format (MT5 style) ---
+        // side: 2 = buy, 1 = sell; volume in lots (0.01 min for XAUUSD).
+        body["symbol"] = req.symbol;
+        body["side"] = (Side::Buy == req.side) ? 2 : 1;
+        body["volume"] = std::to_string(req.quantity);
+
+        // price_type: "market" for market orders, "trigger" for limit orders.
+        body["price_type"] = (OrderType::Market == req.type) ? "market" : "trigger";
+        if (OrderType::Market != req.type)
+        {
+            body["price"] = std::to_string(req.price);
+        }
+        // price_tp / price_sl (take-profit / stop-loss per order) are optional —
+        // left empty for now; the engine's own stop-loss engine covers exits.
+        break;
+    }
+    default:
     {
         // --- Spot order format (unchanged) ---
         body["currency_pair"] = req.symbol;
@@ -157,10 +178,12 @@ nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
         }
 
         body["amount"] = std::to_string(req.quantity);
+        break;
+    }
     }
 
-    // Optional client order ID (same format for both markets).
-    if (!req.client_order_id.empty())
+    // Optional client order ID (spot/futures only — the MT5 CFD schema has no text field).
+    if (!req.client_order_id.empty() && MarketType::Cfd != mt)
     {
         body["text"] = "t-" + req.client_order_id; // Gate.io prefix: "t-"
     }

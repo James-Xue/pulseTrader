@@ -344,6 +344,121 @@ Result<nlohmann::json> GateRestClient::request(
 }
 
 // ---------------------------------------------------------------------------
+// TradFi (CFD) endpoint wrappers
+// ---------------------------------------------------------------------------
+
+Result<nlohmann::json> GateRestClient::getCfdSymbols()
+{
+    return request("GET", EndpointRouter::cfdSymbolsPath());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdTicker(const std::string &symbol)
+{
+    return request("GET", EndpointRouter::cfdTickerPath(symbol));
+}
+
+Result<nlohmann::json> GateRestClient::getCfdKlines(const std::string &symbol, int limit)
+{
+    const std::string query = "kline_type=1m&limit=" + std::to_string(limit);
+    return request("GET", EndpointRouter::cfdKlinesPath(symbol), query);
+}
+
+Result<nlohmann::json> GateRestClient::getCfdSymbolsDetail(const std::vector<std::string> &symbols)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD contract details"};
+    }
+    std::string query = "symbols=";
+    for (std::size_t i = 0; i < symbols.size(); ++i)
+    {
+        if (i > 0)
+        {
+            query += ",";
+        }
+        query += symbols[i];
+    }
+    return request("GET", EndpointRouter::cfdSymbolsDetailPath(), query);
+}
+
+Result<nlohmann::json> GateRestClient::getCfdAssets()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD assets"};
+    }
+    return request("GET", EndpointRouter::cfdAssetsPath());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdPositions()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD positions"};
+    }
+    return request("GET", EndpointRouter::cfdPositionsPath());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdTransfer(const std::string &asset,
+                                                       const std::string &change,
+                                                       const std::string &type)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot transfer CFD funds"};
+    }
+    nlohmann::json body;
+    body["asset"]  = asset;
+    body["change"] = change;
+    body["type"]   = type;
+    return request("POST", "/api/v4/tradfi/transactions", "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdPositionClose(const std::string &position_id,
+                                                            int close_type,
+                                                            double close_volume)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot close CFD position"};
+    }
+    nlohmann::json body;
+    body["close_type"] = close_type;
+    if (1 == close_type)
+    {
+        body["close_volume"] = std::to_string(close_volume);
+    }
+    return request("POST", EndpointRouter::cfdPositionClosePath(position_id), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdOrder(const nlohmann::json &body)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place CFD order"};
+    }
+    return request("POST", EndpointRouter::ordersPath(MarketType::Cfd), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query CFD order"};
+    }
+    return request("GET", EndpointRouter::orderPath(MarketType::Cfd, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::cancelCfdOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel CFD order"};
+    }
+    return request("DELETE", EndpointRouter::orderPath(MarketType::Cfd, order_id));
+}
+
+// ---------------------------------------------------------------------------
 // Public endpoint wrappers
 // ---------------------------------------------------------------------------
 

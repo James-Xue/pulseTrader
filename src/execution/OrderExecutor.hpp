@@ -112,15 +112,8 @@ class OrderExecutor
     [[nodiscard]] Result<nlohmann::json> setLeverage(const std::string &contract,
                                                      double leverage);
 
-  private:
-    exchange::GateRestClient &m_restClient;
-    MarketType m_marketType;
-
-    /// Cache of the last successfully applied leverage per contract.
-    std::mutex m_leverageMutex;
-    std::unordered_map<std::string, double> m_leverageCache;
-
-    /// Build Gate.io order JSON body from OrderRequest.
+  public:
+    /// Build Gate.io order JSON body from OrderRequest (static, unit-testable).
     ///
     /// Spot format:
     /// {
@@ -140,12 +133,31 @@ class OrderExecutor
     ///   "tif": "gtc",
     ///   "reduce_only": false
     /// }
-    [[nodiscard]] nlohmann::json buildOrderBody(const OrderRequest &req) const;
+    ///
+    /// TradFi CFD format (MT5 style, volume in lots, side 2=buy / 1=sell):
+    /// {
+    ///   "symbol": "XAUUSD",
+    ///   "side": 2,
+    ///   "volume": "0.01",
+    ///   "price_type": "market" | "trigger",
+    ///   "price": "3000"            (trigger only)
+    /// }
+    [[nodiscard]] static nlohmann::json buildOrderBody(MarketType mt,
+                                                       const OrderRequest &req);
+
+  private:
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
+
+    /// Cache of the last successfully applied leverage per contract.
+    std::mutex m_leverageMutex;
+    std::unordered_map<std::string, double> m_leverageCache;
 
     /// Parse Gate.io order response JSON into OrderResponse.
     ///
     /// Spot:    "id" (string), "status" (open/closed/cancelled)
     /// Futures: "id" (integer), "status" (open/finished), "finish_as" (filled/cancelled)
+    /// Cfd:     "id" (number or string), "status" (open/finished/cancelled)
     [[nodiscard]] OrderResponse parseOrderResponse(const nlohmann::json &resp) const;
 };
 

@@ -168,3 +168,21 @@ USDT transferred into the CFD account (81.86 USD present), API key with the
 - Gate API v4 official docs: <https://www.gate.tr/docs/developers/apiv4/en/>
 - Official SDKs: <https://github.com/gate/gateapi-python> (`TradFiApi`), <https://github.com/gate/gateapi-nodejs>
 - Hummingbot Gate.io integration notes (API-key permissions): <https://hummingbot.org/exchanges/gate-io/>
+
+## Appendix: Live-API probe results (2026-08-15 15:35 CST)
+
+Verification run with `tools/test_gate_rest --tradfi` (signed requests, mainnet key):
+
+| Question | Result |
+|---|---|
+| Order schema | **MT5-style confirmed**: `{symbol, side: 2=buy/1=sell, volume, price_type: "market"\|"trigger", price}` passes parameter validation; the spot-style variant (`trading_session`/`time_in_force`/`client_order_id`) is rejected with `INVALID_ARGUMENT`. Safe trigger buy @3000 rejected only with `NOT_IN_TRADE` ("Market currently closed" — probe ran on a weekend). |
+| Response wrapper | All responses wrapped: `{"data": {...}}`; lists under `{"data": {"list": [...]}}` (`list` may be `null` when empty). |
+| Ticker fields | `data.last_price / bid_price / ask_price / highest_price / lowest_price / price_change` (all strings), `status`, `open_time`/`close_time`, `next_open_time`. |
+| Kline fields | `data.list[] = {o, h, l, c, t}` (strings, `t` Unix seconds). |
+| Contract detail | `data.list[] = {symbol, contract_volume: "100", min_order_volume: "0.01", max_order_volume: "15", step_order_volume: "0.01", price_precision: 2, leverage: "500", leverages: ["20","50","100","200","500"], settlement_currency: "USD", commission: "6", hedged_margin, trade_mode: "4"}`. |
+| Assets | `data.balance / equity / margin / margin_free / unrealized_pnl / storage / outable / mt5_uid` (strings). |
+| Order object | `data.list[] = {order_id: <int>, symbol, side, volume, price, price_type, price_sl, price_tp, leverage, state: 1, finished: 0, time_setup: <unix sec>, ...}` — field is **`order_id`** (not `id`); no `status` string; **`state` + `finished`** encode status; timestamp is **`time_setup`** (not `create_time`). |
+| Positions | `data.list` (`null` when empty) + `data.total`. |
+| Transactions | `data.list[] = {asset, change, balance, time, type: "deposit"\|"withdraw"}` — used to verify the 2026-08-15 cleanup. |
+| Order cancellation during market close | **Refused** with `NOT_IN_TRADE` ("Market currently closed") — cancels must be retried after the market reopens. |
+| Account cleanup (2026-08-15) | Two leftover trigger orders from the 08-14 manual verification (buy @4295 id 17511143, sell @4428 id 17471679) **cannot be cancelled while the market is closed** — retry `GATE_API_KEY=... GATE_API_SECRET=... ./build/tools/test_gate_rest --tradfi-cleanup` after the market opens. CFD balance was fully withdrawn (31.86 USD → 0.00; verified in transfer history). |
