@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-595%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-632%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -15,7 +15,7 @@ pulseTrader is a C++20 quantitative trading framework purpose-built for high-fre
 
 The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket.
+**Milestones M1–M14 achieved, M15 (dual-direction trading) in progress** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket.
 
 ---
 
@@ -52,7 +52,7 @@ For the full architecture document including module responsibilities, key files,
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 16 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`.
+- **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 17 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`.
 - **Runtime control** — Per-strategy pause/resume (`pause_strategy` / `resume_strategy`, atomic `setPaused`), manual trading halt (`halt_trading` / `resume_trading`), and live atomic strategy param get/set (`get_strategy_params` / `set_strategy_param`). Manual orders share the same `OrderFlowExecutor` as the signal aggregator.
 - **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
 
@@ -225,7 +225,7 @@ cp trading.toml.example trading.toml
 
 ### MCP Client Configuration
 
-The `mcp` subcommand serves the control plane's 16 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
+The `mcp` subcommand serves the control plane's 17 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
 
 ```bash
 # Claude Code
@@ -318,12 +318,14 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 
 ## Recent Changes (2026-08-15)
 
-- **Dual-direction trading (M15, in progress)** — the engine is moving toward two runtime-switchable trading directions: TradFi CFD gold (`XAUUSD`) and crypto futures (`BTC_USDT`), with a single active direction at any time (the other direction's strategies pause and its open orders cancel on switch; positions stay open until manually closed). Landed so far:
-  - `MarketType::Cfd` as a third market type with parsers (`parseMarketType`, TOML loader), config plumbing (`active_market` startup direction, `risk.max_leverage` widened 125 → 500 for the CFD leverage ladder, testnet rejects CFD, orderbook_scalper rejected on CFD), error codes `71xx` (CFD) + `InactiveMarket 3008`
-  - Exchange/execution foundation: `EndpointRouter` `/api/v4/tradfi/*` path builders, `GateRestClient` 10 TradFi methods (symbols/tickers/klines/detail/assets/positions/orders/close/transfer), `OrderExecutor::buildOrderBody` refactored to a static unit-testable function with the MT5-style CFD body (`side` 2=buy/1=sell, `volume` in lots, `price_type` market/trigger), `OrderTracker` REST-poll-only mode (`enable_ws=false` — CFD has no private WS channel)
-  - Live-API probe (`tools/test_gate_rest --tradfi`, 2026-08-15): **MT5-style order schema confirmed** (spot-style variant rejected with `INVALID_ARGUMENT`); responses wrap under `data` / `data.list`; order objects carry `order_id`/`state`/`finished`/`time_setup`; contract spec verified (`contract_volume 100`, min/step 0.01, max 15, leverages 20–500); CFD account balance withdrawn to 0.00 (two leftover 08-14 probe orders could not be cancelled while the market was closed — `NOT_IN_TRADE` — retry after reopen)
-  - Remaining: L3 REST polling feed, L7 `evaluateCfdOrder`, control-plane `switch_direction`, main.cpp wiring, tests
-- **Verification** — 595 tests still green.
+- **Dual-direction trading (M15)** — the engine now runs two runtime-switchable trading directions: TradFi CFD gold (`XAUUSD`) and crypto futures (`BTC_USDT`), with a **single active direction** at any time. Switching (`switch_direction` method / REPL `switch <futures|cfd>` / MCP tool) pauses the other direction's strategies ("策略停跑"), cancels its open orders ("挂单全撤"), and resumes the new direction's; open positions stay until manually closed. The switch is ephemeral — restart returns to `active_market` in trading.toml (**default `"futures"`: CFD never trades until explicitly switched**).
+  - `MarketType::Cfd` third market type (parsers, config plumbing, `active_market`, `risk.max_leverage` 125 → 500, testnet + orderbook_scalper rejected on CFD), error codes `71xx` + `InactiveMarket 3008`
+  - L1+L8: `EndpointRouter` `/api/v4/tradfi/*` paths; `GateRestClient` 11 TradFi methods (symbols/tickers/klines/detail/assets/positions/orders/close/transfer); `OrderExecutor::buildOrderBody` static + MT5-style CFD body (`side` 2=buy/1=sell, `volume` lots, `price_type` market/trigger); `OrderTracker` REST-poll-only mode (CFD has no private WS channel)
+  - L3: `MarketFeed` REST-poll mode for CFD (ticker ~1s, 1m klines ~60s with 500-candle backfill, dedupe by open_time, `std::jthread`); `SymbolRegistry` CFD branch (`/tradfi/symbols/detail` → `contract_volume` as the quanto slot, min/step/max volume, price precision) + `mergeFrom` combining futures + CFD specs into one lookup
+  - L7: `RiskManager::evaluateCfdOrder` — margin = volume × contract_volume × price / leverage (7101/7102); CFD positions close via the dedicated `/tradfi/positions/{id}/close` endpoint (not an order)
+  - L9: `switch_direction` (17th method/tool), `get_market` market_type-aware feed selection, `open_order` defaults to the active direction, `status()` reports `active_market`, heartbeat shows CFD feed + USD balance
+  - Live-API probe (`tools/test_gate_rest --tradfi`, 2026-08-15): **MT5-style order schema confirmed** (spot-style variant rejected `INVALID_ARGUMENT`); responses wrap under `data`/`data.list`; order fields `order_id`/`state`/`finished`/`time_setup`; contract spec verified (100 oz/lot, 0.01 min/step, 15 max, leverage 20–500); CFD balance withdrawn to 0.00 (two leftover 08-14 probe orders await cancellation after the market reopens — `NOT_IN_TRADE` during close)
+- **Verification** — 632 tests green (595 + 37 new M15 tests).
 
 ## Recent Changes (2026-08-14)
 

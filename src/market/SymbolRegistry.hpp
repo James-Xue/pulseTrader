@@ -89,10 +89,12 @@ class SymbolRegistry
     ///
     /// Spot:    GET /api/v4/spot/currency_pairs
     /// Futures: GET /api/v4/futures/usdt/contracts
+    /// Cfd:     GET /api/v4/tradfi/symbols/detail?symbols=... (requires auth) —
+    ///          the `symbols` list is mandatory for CFD and ignored otherwise.
     ///
     /// Replaces any existing data (safe to call multiple times for refresh).
     /// Returns true on success, false on network/parse error.
-    bool loadFromRest();
+    bool loadFromRest(const std::vector<Symbol> &symbols = {});
 
     /// Retrieve metadata for a symbol (read-only, thread-safe).
     ///
@@ -124,6 +126,34 @@ class SymbolRegistry
     /// Returns a vector of all registered symbol names.
     /// Thread-safe: takes shared read lock.
     [[nodiscard]] std::vector<Symbol> symbols() const;
+
+    /// Merge another registry's entries into this one (upsert per symbol).
+    ///
+    /// Used at startup to combine the futures registry (BTC_USDT contracts)
+    /// with the CFD registry (XAUUSD specs) into one shared lookup used by the
+    /// order flow for quanto_multiplier resolution.
+    void mergeFrom(const SymbolRegistry &other);
+
+    /// Parse a single TradFi CFD contract detail object into SymbolInfo.
+    ///
+    /// Public (unlike the spot/futures parsers) so the format mapping is
+    /// unit-testable without network access (M15).
+    ///
+    /// Gate.io format (probe-verified 2026-08-15):
+    /// {
+    ///   "symbol": "XAUUSD",
+    ///   "contract_volume": "100",
+    ///   "min_order_volume": "0.01",
+    ///   "max_order_volume": "15",
+    ///   "step_order_volume": "0.01",
+    ///   "price_precision": 2,
+    ///   "leverage": "500",
+    ///   "leverages": ["20", "50", "100", "200", "500"],
+    ///   "settlement_currency": "USD"
+    /// }
+    /// contract_volume plays the quanto_multiplier role in risk math
+    /// (notional = volume_lots * contract_volume * price).
+    [[nodiscard]] static std::optional<SymbolInfo> parseCfdDetail(const nlohmann::json &obj);
 
   private:
     exchange::GateRestClient &m_restClient;

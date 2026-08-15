@@ -189,6 +189,20 @@ bool StrategyManager::setPaused(const std::string &id, bool paused)
     return false;
 }
 
+int StrategyManager::setPausedByMarket(MarketType mt, bool paused)
+{
+    int affected = 0;
+    for (const auto &s : m_strategies)
+    {
+        if (s->context().config.market_type == mt)
+        {
+            s->paused().store(paused, std::memory_order_release);
+            ++affected;
+        }
+    }
+    return affected;
+}
+
 StrategyParams *StrategyManager::paramsByName(const std::string &id) const
 {
     for (const auto &s : m_strategies)

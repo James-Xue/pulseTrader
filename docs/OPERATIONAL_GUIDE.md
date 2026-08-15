@@ -358,7 +358,7 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 
 **Control-plane methods (= MCP tool names, 16 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`. REPL commands map 1:1 to these methods over the control socket.
 
-**MCP usage** — the `mcp` subcommand exposes the 16 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+**MCP usage** — the `mcp` subcommand exposes the 17 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
 
 ```bash
 claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml
@@ -769,7 +769,7 @@ Check the following checklist item by item:
 ## 10. CFD (TradFi) — 黄金 CFD 实盘
 
 > 自 2026-08-14 起，实盘方向从 BTC_USDT 永续合约转向 Gate.io 传统金融 CFD（黄金 `XAUUSD`）。
-> API 调研与账户验证已完成（见 [CFD_TRADFI.md](CFD_TRADFI.md)），引擎扩展实施中。
+> API 调研与账户验证已完成（见 [CFD_TRADFI.md](CFD_TRADFI.md)），引擎扩展已实施（M15）：`MarketType::Cfd`、REST 轮询行情、CFD 风控、方向切换（`switch_direction` / REPL `switch`）。**默认不实盘**——`trading.toml` 的 `active_market = "futures"` 下 CFD 策略保持暂停，`switch cfd` 后才激活。
 
 ### 10.1 当前账户状态（主账户，2026-08-14 实测）
 
@@ -785,7 +785,7 @@ Check the following checklist item by item:
 
 1. **资金划转**：USDT → CFD 账户走 `POST /api/v4/tradfi/transactions`
    （`asset=USDT`、`type=deposit`）；CFD 账户以 **USD** 结算
-2. **行情**：CFD 无 WebSocket，靠 REST 轮询 ticker + 1m klines（实施中）
+2. **行情**：CFD 无 WebSocket，靠 REST 轮询 ticker（~1s）+ 1m klines（~60s，首次立即回填 500 根）；`get_market XAUUSD` 可查
 3. **策略兼容**：momentum / mean_reversion / supertrend（K 线驱动）可用；
    orderbook_scalper 无盘口数据，不可用
 4. **下单语义**：volume 按「手」（0.01 步进），side `1=卖 / 2=买`，

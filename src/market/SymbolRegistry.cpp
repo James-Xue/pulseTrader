@@ -17,12 +17,39 @@ SymbolRegistry::SymbolRegistry(exchange::GateRestClient &rest_client, MarketType
 {
 }
 
-bool SymbolRegistry::loadFromRest()
+bool SymbolRegistry::loadFromRest(const std::vector<Symbol> &symbols)
 {
     // Fetch instruments based on market type.
     nlohmann::json instruments_json;
 
-    if (MarketType::Futures == m_marketType)
+    if (MarketType::Cfd == m_marketType)
+    {
+        // TradFi contract specs require the authenticated detail endpoint with
+        // the symbol list — the public /tradfi/symbols list has no specs.
+        if (symbols.empty())
+        {
+            PULSE_LOG_WARN("market",
+                           "CFD symbol registry needs an explicit symbol list — skipping load");
+            return false;
+        }
+        auto result = m_restClient.getCfdSymbolsDetail(symbols);
+        if (!pulse::ok(result))
+        {
+            PULSE_LOG_WARN("market", "Failed to fetch CFD symbol details: {}",
+                           pulse::error(result).message);
+            return false;
+        }
+        // Response is wrapped: {"data": {"list": [...]}} (list may be null).
+        const auto &root = pulse::value(result);
+        if (!root.contains("data") || !root["data"].is_object()
+            || !root["data"].contains("list") || !root["data"]["list"].is_array())
+        {
+            PULSE_LOG_WARN("market", "CFD symbol details response has no data.list");
+            return false;
+        }
+        instruments_json = root["data"]["list"];
+    }
+    else if (MarketType::Futures == m_marketType)
     {
         auto result = m_restClient.getFuturesContracts();
         if (!pulse::ok(result))
@@ -54,13 +81,17 @@ bool SymbolRegistry::loadFromRest()
     for (const auto &obj : instruments_json)
     {
         std::optional<SymbolInfo> info_opt;
-        if (MarketType::Futures == m_marketType)
+        switch (m_marketType)
         {
+        case MarketType::Futures:
             info_opt = parseFuturesContract(obj);
-        }
-        else
-        {
+            break;
+        case MarketType::Cfd:
+            info_opt = parseCfdDetail(obj);
+            break;
+        default:
             info_opt = parseCurrencyPair(obj);
+            break;
         }
 
         if (info_opt.has_value())
@@ -74,8 +105,7 @@ bool SymbolRegistry::loadFromRest()
     m_symbols = std::move(new_symbols);
 
     PULSE_LOG_INFO("market", "Loaded {} {} instruments from REST",
-                   m_symbols.size(),
-                   MarketType::Futures == m_marketType ? "futures" : "spot");
+                   m_symbols.size(), toString(m_marketType));
     return true;
 }
 
@@ -110,6 +140,48 @@ bool SymbolRegistry::validateOrder(const Symbol &symbol, Price price, Quantity q
     if (!info.trading_enabled)
     {
         return false;
+    }
+
+    // TradFi CFD validation — volume is in lots (0.01 min, 0.01 step).
+    if (MarketType::Cfd == info.market_type)
+    {
+        // Check minimum volume (stored in min_base_amount from min_order_volume).
+        if (info.min_base_amount > 0.0 && qty < info.min_base_amount)
+        {
+            return false;
+        }
+
+        // Check quantity is a multiple of the lot step (step_order_volume).
+        if (info.lot_size > 0.0)
+        {
+            const double qty_remainder = std::fmod(qty, info.lot_size);
+            const double tolerance = info.lot_size * 1e-6;
+            if (std::abs(qty_remainder) > tolerance
+                && std::abs(qty_remainder - info.lot_size) > tolerance)
+            {
+                return false;
+            }
+        }
+
+        // Check maximum volume (max_order_volume).
+        if (info.order_size_max > 0 && qty > info.order_size_max)
+        {
+            return false;
+        }
+
+        // Check price is a multiple of tick_size (with floating-point tolerance).
+        if (info.tick_size > 0.0 && price > 0.0)
+        {
+            const double price_remainder = std::fmod(price, info.tick_size);
+            const double tolerance = info.tick_size * 1e-6;
+            if (std::abs(price_remainder) > tolerance
+                && std::abs(price_remainder - info.tick_size) > tolerance)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Futures-specific validation.
@@ -191,6 +263,24 @@ bool SymbolRegistry::validateOrder(const Symbol &symbol, Price price, Quantity q
     }
 
     return true;
+}
+
+void SymbolRegistry::mergeFrom(const SymbolRegistry &other)
+{
+    const auto other_symbols = other.symbols();
+    if (other_symbols.empty())
+    {
+        return;
+    }
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    for (const auto &sym : other_symbols)
+    {
+        const auto info_opt = other.get(sym);
+        if (info_opt)
+        {
+            m_symbols[sym] = *info_opt;
+        }
+    }
 }
 
 std::size_t SymbolRegistry::size() const
@@ -331,6 +421,61 @@ std::optional<SymbolInfo> SymbolRegistry::parseFuturesContract(const nlohmann::j
     info.min_notional = 0.0;
     info.min_quote_amount = 0.0;
     info.min_base_amount = 0.0;
+
+    return info;
+}
+
+std::optional<SymbolInfo> SymbolRegistry::parseCfdDetail(const nlohmann::json &obj)
+{
+    // Gate.io TradFi contract detail format — see header comment.
+    // Required fields: symbol, contract_volume, price_precision.
+    if (!obj.contains("symbol") || !obj.contains("contract_volume"))
+    {
+        return std::nullopt;
+    }
+
+    SymbolInfo info;
+    info.symbol = obj["symbol"].get<std::string>();
+    info.market_type = MarketType::Cfd;
+    info.trading_enabled = true; // Returned details are tradable instruments.
+
+    // Contract volume (e.g. 100 oz per lot for XAUUSD) plays the
+    // quanto_multiplier role: notional = volume(lots) * contract_volume * price.
+    info.quanto_multiplier = safeParseDouble(obj["contract_volume"].get<std::string>()).value_or(1.0);
+
+    if (obj.contains("min_order_volume") && !obj["min_order_volume"].is_null())
+    {
+        info.min_base_amount = safeParseDouble(obj["min_order_volume"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("step_order_volume") && !obj["step_order_volume"].is_null())
+    {
+        info.lot_size = safeParseDouble(obj["step_order_volume"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("max_order_volume") && !obj["max_order_volume"].is_null())
+    {
+        info.order_size_max = static_cast<int>(
+            safeParseDouble(obj["max_order_volume"].get<std::string>()).value_or(0.0));
+    }
+
+    // Price precision is an integer decimal count (e.g. 2 → tick 0.01).
+    if (obj.contains("price_precision") && obj["price_precision"].is_number())
+    {
+        info.tick_size = std::pow(10.0, -obj["price_precision"].get<int>());
+    }
+
+    // Leverage ladder — the account may run any rung; take the maximum.
+    if (obj.contains("leverages") && obj["leverages"].is_array())
+    {
+        for (const auto &lev : obj["leverages"])
+        {
+            if (lev.is_string())
+            {
+                info.leverage_max = std::max(
+                    info.leverage_max,
+                    safeParseDouble(lev.get<std::string>()).value_or(0.0));
+            }
+        }
+    }
 
     return info;
 }

@@ -1,6 +1,9 @@
 # Gate.io CFD (TradFi) — API Survey & Integration Plan
 
-> Status: **researched & verified live** (2026-08-14) — implementation pending.
+> Status: **implemented** (M15, 2026-08-15) — `MarketType::Cfd` fully integrated
+> (exchange/execution paths, REST polling feed, risk, control plane, direction
+> switching); **live trading disabled by default** (`active_market = "futures"`).
+> API research was verified live on 2026-08-14.
 >
 > This document captures the complete API survey of Gate.io's traditional-finance
 > CFD product (gold, forex, indices) and the plan to extend pulseTrader with a

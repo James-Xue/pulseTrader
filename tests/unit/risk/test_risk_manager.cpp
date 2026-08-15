@@ -443,3 +443,69 @@ TEST_F(RiskManagerTest, ReserveNotional_CancelZeroIsNoOp)
     // No crash = success.
     SUCCEED();
 }
+
+// ---------------------------------------------------------------------------
+// TradFi CFD evaluation (M15)
+// ---------------------------------------------------------------------------
+
+TEST_F(RiskManagerTest, CfdLeverageExceedsMaxRejected)
+{
+    // max_leverage in the fixture config caps CFD at 500x (updated for the
+    // CFD ladder) — request 600x → CfdLeverageExceeded (7101).
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.price = 4348.0;
+    req.market_type = MarketType::Cfd;
+    req.quanto_multiplier = 100.0;
+
+    auto r = risk_manager_.evaluateCfdOrder(req, /*leverage=*/600.0,
+                                            /*equity=*/81.86);
+    EXPECT_EQ(RiskDecision::Rejected, r.decision);
+    EXPECT_EQ(ErrorCode::CfdLeverageExceeded, r.reason_code);
+}
+
+TEST_F(RiskManagerTest, CfdMarginIncludesContractVolume)
+{
+    // 0.01 lot XAUUSD = 0.01 * 100 * 4348 = 4,348 USD notional;
+    // margin at 500x = 8.70 USD. Equity 81.86, max_margin_used 0.5 →
+    // budget 40.93 → fits. RiskManager reads max_leverage by reference,
+    // so widening it here applies to the evaluation below.
+    m_config.max_leverage = 500.0;
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.price = 4348.0;
+    req.market_type = MarketType::Cfd;
+    req.quanto_multiplier = 100.0;
+
+    auto r = risk_manager_.evaluateCfdOrder(req, /*leverage=*/500.0,
+                                            /*equity=*/81.86);
+    // Delegates to evaluateOrder → position limits in the fixture config may
+    // modify/reject; the margin check itself must NOT reject with 7102.
+    EXPECT_NE(ErrorCode::CfdMarginInsufficient, r.reason_code);
+}
+
+TEST_F(RiskManagerTest, CfdMarginInsufficientRejected)
+{
+    // 6 lots = 6 * 100 * 4348 = 2,608,800 USD notional; margin at 500x =
+    // 5,217.6 USD >> 40.93 budget → CfdMarginInsufficient (7102).
+    m_config.max_leverage = 500.0;
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 6.0;
+    req.price = 4348.0;
+    req.market_type = MarketType::Cfd;
+    req.quanto_multiplier = 100.0;
+
+    auto r = risk_manager_.evaluateCfdOrder(req, /*leverage=*/500.0,
+                                            /*equity=*/81.86);
+    EXPECT_EQ(RiskDecision::Rejected, r.decision);
+    EXPECT_EQ(ErrorCode::CfdMarginInsufficient, r.reason_code);
+}

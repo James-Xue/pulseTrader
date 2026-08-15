@@ -214,7 +214,7 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
         return ParsedCommand{ "open_order", params };
     }
 
-    // --- market <symbol> [--levels N] [--klines N] [--market spot|futures] ---
+    // --- market <symbol> [--levels N] [--klines N] [--market spot|futures|cfd] ---
     if ("market" == cmd && tokens.size() >= 2)
     {
         nlohmann::json params{ { "symbol", tokens[1] } };
@@ -249,6 +249,17 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
             }
         }
         return ParsedCommand{ "get_market", params };
+    }
+
+    // --- switch <spot|futures|cfd> — activate one trading direction ---
+    if ("switch" == cmd && tokens.size() == 2)
+    {
+        if (!parseMarketType(tokens[1]).has_value())
+        {
+            return std::nullopt; // Clean rejection of an unknown direction.
+        }
+        return ParsedCommand{ "switch_direction",
+                              nlohmann::json{ { "direction", tokens[1] } } };
     }
 
     return std::nullopt; // unknown command
@@ -400,22 +411,24 @@ std::string replHelp()
 {
     return
         "Commands:\n"
-        "  status                 engine status (uptime, feeds, halted)\n"
-        "  account                spot + futures balance\n"
+        "  status                 engine status (uptime, feeds, halted, active_market)\n"
+        "  account                spot + futures + CFD balance\n"
         "  positions              open positions + portfolio\n"
         "  orders                 active orders + recent reports\n"
         "  strategies             registered strategies\n"
         "  params <id>            strategy params\n"
         "  set <id> <param> <v>   set strategy param (e.g. set mom min_confidence 0.7)\n"
         "  open <sym> <buy|sell> <qty> [--type market|limit|post_only]\n"
-        "                          [--price P] [--market spot|futures]\n"
+        "                          [--price P] [--market spot|futures|cfd]\n"
         "                          [--leverage N] [--reduce-only] [--client-id S]\n"
         "  close <position_id> [qty] [price]\n"
         "  cancel <order_id>      cancel an open order\n"
+        "  switch <spot|futures|cfd>  activate one trading direction (pauses the\n"
+        "                          other's strategies, cancels its open orders)\n"
         "  halt / resume          halt or resume all trading\n"
         "  pause <id> / resume-strategy <id>\n"
         "  risk                   risk snapshot (drawdown, rate limiter)\n"
-        "  market <sym> [--levels N] [--klines N] [--market spot|futures]\n"
+        "  market <sym> [--levels N] [--klines N] [--market spot|futures|cfd]\n"
         "  help / quit / exit\n";
 }
 

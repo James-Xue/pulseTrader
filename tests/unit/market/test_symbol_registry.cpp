@@ -173,3 +173,105 @@ TEST(SymbolRegistry, FuturesRegistryGetReturnsNullopt)
 // Note: Testing symbols() with populated data requires a live or mock REST
 // client (loadFromRest is the only public path to inject SymbolInfo).
 // Integration tests in tools/ will cover the populated case.
+
+// ---------------------------------------------------------------------------
+// M15: TradFi CFD symbol details
+// ---------------------------------------------------------------------------
+
+TEST(SymbolRegistry, ParseCfdDetailXAUUSD)
+{
+    const nlohmann::json detail = {
+        { "symbol", "XAUUSD" },
+        { "contract_volume", "100" },
+        { "min_order_volume", "0.01" },
+        { "max_order_volume", "15" },
+        { "step_order_volume", "0.01" },
+        { "price_precision", 2 },
+        { "leverage", "500" },
+        { "leverages", { "20", "50", "100", "200", "500" } },
+        { "settlement_currency", "USD" },
+    };
+
+    const auto info = SymbolRegistry::parseCfdDetail(detail);
+    ASSERT_TRUE(info.has_value());
+    EXPECT_EQ("XAUUSD", info->symbol);
+    EXPECT_EQ(MarketType::Cfd, info->market_type);
+    EXPECT_DOUBLE_EQ(100.0, info->quanto_multiplier); // contract_volume
+    EXPECT_DOUBLE_EQ(0.01, info->min_base_amount);    // min_order_volume
+    EXPECT_DOUBLE_EQ(0.01, info->lot_size);           // step_order_volume
+    EXPECT_EQ(15, info->order_size_max);              // max_order_volume
+    EXPECT_DOUBLE_EQ(0.01, info->tick_size);          // price_precision 2
+    EXPECT_DOUBLE_EQ(500.0, info->leverage_max);      // max of leverages[]
+}
+
+TEST(SymbolRegistry, ParseCfdDetailMissingRequiredFields)
+{
+    EXPECT_FALSE(SymbolRegistry::parseCfdDetail(nlohmann::json::object())
+                     .has_value());
+    EXPECT_FALSE(SymbolRegistry::parseCfdDetail(
+                     nlohmann::json{ { "symbol", "XAUUSD" } })
+                     .has_value());
+}
+
+TEST(SymbolRegistry, ValidateOrderCfd)
+{
+    // Registry with XAUUSD specs injected via upsert (no network).
+    ExchangeConfig cfg;
+    GateRestClient rest_client(cfg, MarketType::Cfd);
+    SymbolRegistry registry(rest_client, MarketType::Cfd);
+
+    SymbolInfo info;
+    info.symbol = "XAUUSD";
+    info.market_type = MarketType::Cfd;
+    info.quanto_multiplier = 100.0;
+    info.min_base_amount = 0.01;
+    info.lot_size = 0.01;
+    info.order_size_max = 15;
+    info.tick_size = 0.01;
+    info.trading_enabled = true;
+    registry.upsert(info);
+
+    // Valid: exactly min lot.
+    EXPECT_TRUE(registry.validateOrder("XAUUSD", 4348.0, 0.01));
+    // Valid: 2 lots, price with 2 decimals.
+    EXPECT_TRUE(registry.validateOrder("XAUUSD", 4348.50, 2.0));
+    // Below min lot.
+    EXPECT_FALSE(registry.validateOrder("XAUUSD", 4348.0, 0.005));
+    // Not a multiple of the 0.01 step.
+    EXPECT_FALSE(registry.validateOrder("XAUUSD", 4348.0, 0.015));
+    // Above max volume.
+    EXPECT_FALSE(registry.validateOrder("XAUUSD", 4348.0, 15.01));
+    // Price not a multiple of tick.
+    EXPECT_FALSE(registry.validateOrder("XAUUSD", 4348.005, 0.01));
+}
+
+TEST(SymbolRegistry, MergeFromCombinesRegistries)
+{
+    ExchangeConfig cfg;
+    GateRestClient rest_client(cfg, MarketType::Futures);
+    SymbolRegistry futures_reg(rest_client, MarketType::Futures);
+    SymbolRegistry cfd_reg(rest_client, MarketType::Cfd);
+
+    SymbolInfo btc;
+    btc.symbol = "BTC_USDT";
+    btc.market_type = MarketType::Futures;
+    btc.quanto_multiplier = 0.0001;
+    futures_reg.upsert(btc);
+
+    SymbolInfo xau;
+    xau.symbol = "XAUUSD";
+    xau.market_type = MarketType::Cfd;
+    xau.quanto_multiplier = 100.0;
+    cfd_reg.upsert(xau);
+
+    futures_reg.mergeFrom(cfd_reg);
+
+    EXPECT_EQ(2, futures_reg.size());
+    const auto merged_btc = futures_reg.get("BTC_USDT");
+    ASSERT_TRUE(merged_btc.has_value());
+    EXPECT_DOUBLE_EQ(0.0001, merged_btc->quanto_multiplier);
+    const auto merged_xau = futures_reg.get("XAUUSD");
+    ASSERT_TRUE(merged_xau.has_value());
+    EXPECT_DOUBLE_EQ(100.0, merged_xau->quanto_multiplier);
+    EXPECT_EQ(MarketType::Cfd, merged_xau->market_type);
+}

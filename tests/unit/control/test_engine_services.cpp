@@ -59,12 +59,14 @@ class EngineServicesTest : public ::testing::Test
         m_placer = std::make_unique<FakePlacer>();
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-            m_placer.get(), nullptr, nullptr, nullptr, m_restMutex, nullptr);
+            m_placer.get(), nullptr, nullptr,
+            nullptr, nullptr, nullptr, m_restMutex, nullptr);
 
         m_services = std::make_unique<EngineServices>(
             "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
-            nullptr, nullptr, m_restClient.get(), nullptr,
-            nullptr, nullptr, *m_flow, m_restMutex);
+            nullptr, nullptr, nullptr,
+            m_restClient.get(), nullptr, nullptr,
+            nullptr, nullptr, nullptr, *m_flow, m_restMutex);
     }
 
     ExchangeConfig m_config;
@@ -148,7 +150,9 @@ TEST_F(EngineServicesTest, OpenOrderRequiresValidParams)
     });
     ASSERT_FALSE(ok(result));
 
-    // Valid request → placed via fake placer.
+    // Valid request → placed via fake placer. The spot direction must be
+    // active (default is futures) or the direction gate rejects the order.
+    m_flow->setActiveMarket(MarketType::Spot);
     result = m_services->openOrder(nlohmann::json{
         { "symbol", "BTC_USDT" },
         { "side", "buy" },
@@ -169,5 +173,75 @@ TEST_F(EngineServicesTest, ClosePositionUnknownFails)
 TEST_F(EngineServicesTest, MarketNoFeedReturnsError)
 {
     const auto j = m_services->market("BTC_USDT", 5, 0);
+    EXPECT_TRUE(j.contains("error"));
+}
+
+// ---------------------------------------------------------------------------
+// Direction switch tests (M15)
+// ---------------------------------------------------------------------------
+
+TEST_F(EngineServicesTest, StatusReportsActiveMarket)
+{
+    const auto j = m_services->status();
+    EXPECT_EQ("futures", j["active_market"].get<std::string>());
+}
+
+TEST_F(EngineServicesTest, SwitchDirectionToUnconfiguredCfdFails)
+{
+    // CFD infra is not wired in this fixture — the switch must be refused
+    // instead of leaving the engine in a half-switched state.
+    const auto j = m_services->switchDirection("cfd");
+    EXPECT_TRUE(j.contains("error"));
+    EXPECT_EQ("futures", m_flow->activeMarket() == MarketType::Futures
+                             ? "futures" : "other");
+}
+
+TEST_F(EngineServicesTest, SwitchDirectionRejectsUnknownDirection)
+{
+    const auto j = m_services->switchDirection("options");
+    EXPECT_TRUE(j.contains("error"));
+}
+
+TEST_F(EngineServicesTest, SwitchDirectionToSpotSwitchesState)
+{
+    // This fixture wires only the spot REST client, so spot is switchable.
+    const auto j = m_services->switchDirection("spot");
+    ASSERT_FALSE(j.contains("error")) << j.dump();
+    EXPECT_EQ("futures", j["switched_from"].get<std::string>());
+    EXPECT_EQ("spot", j["switched_to"].get<std::string>());
+    EXPECT_EQ(MarketType::Spot, m_flow->activeMarket());
+}
+
+TEST_F(EngineServicesTest, SwitchDirectionNoopKeepsState)
+{
+    // A second switch to the same direction is a no-op returning status JSON.
+    const auto j1 = m_services->switchDirection("spot");
+    ASSERT_FALSE(j1.contains("error")) << j1.dump();
+    const auto j2 = m_services->switchDirection("spot");
+    ASSERT_FALSE(j2.contains("error")) << j2.dump();
+    EXPECT_EQ("spot", j2["switched_to"].get<std::string>());
+    EXPECT_EQ(0, j2["cancelled_orders"].get<int>());
+}
+
+TEST_F(EngineServicesTest, OpenOrderDefaultsToActiveMarket)
+{
+    // market_type omitted → the active direction (futures) is used, so the
+    // futures FakePlacer receives the order.
+    auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 1.0 },
+    });
+    // The futures placer is null in this fixture — expect the no-executor
+    // error, NOT an InactiveMarket gate rejection (proves defaulting worked).
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(ErrorCode::InactiveMarket, error(result).code);
+}
+
+TEST_F(EngineServicesTest, MarketSelectsFeedByMarketType)
+{
+    // No feeds wired — explicit cfd market_type must still produce a feed
+    // lookup result (error) rather than crashing.
+    const auto j = m_services->market("XAUUSD", 5, 0, "cfd");
     EXPECT_TRUE(j.contains("error"));
 }

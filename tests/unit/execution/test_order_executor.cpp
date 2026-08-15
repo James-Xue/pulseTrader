@@ -52,17 +52,74 @@ TEST(OrderResponse, DefaultConstruction)
 // OrderExecutor (requires REST client — tested via integration tests)
 // ---------------------------------------------------------------------------
 
-// Note: buildOrderBody() and parseOrderResponse() are private methods.
-// Full OrderExecutor testing requires a real or mock GateRestClient.
-// These tests would be integration tests in tools/test_execution.cpp.
+// buildOrderBody() is a public static since M15 — the order body formats are
+// unit-tested here without any network.
 
-// Placeholder for future mock-based unit tests:
-// TEST(OrderExecutor, BuildOrderBodyLimitBuy)
-// TEST(OrderExecutor, BuildOrderBodyMarketSell)
-// TEST(OrderExecutor, BuildOrderBodyPostOnly)
-// TEST(OrderExecutor, ParseOrderResponseOpen)
-// TEST(OrderExecutor, ParseOrderResponseClosed)
-// TEST(OrderExecutor, ParseOrderResponseCancelled)
+TEST(OrderExecutor, BuildOrderBodyCfdMarketBuy)
+{
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Cfd, req);
+    EXPECT_EQ("XAUUSD", body["symbol"].get<std::string>());
+    EXPECT_EQ(2, body["side"].get<int>());       // 2 = buy
+    EXPECT_EQ("0.010000", body["volume"].get<std::string>());
+    EXPECT_EQ("market", body["price_type"].get<std::string>());
+    EXPECT_FALSE(body.contains("price"));
+    EXPECT_FALSE(body.contains("contract"));
+    EXPECT_FALSE(body.contains("size"));
+}
+
+TEST(OrderExecutor, BuildOrderBodyCfdLimitSell)
+{
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Sell;
+    req.type = OrderType::Limit;
+    req.quantity = 0.01;
+    req.price = 4400.0;
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Cfd, req);
+    EXPECT_EQ(1, body["side"].get<int>());       // 1 = sell
+    EXPECT_EQ("trigger", body["price_type"].get<std::string>());
+    EXPECT_EQ("4400.000000", body["price"].get<std::string>());
+}
+
+TEST(OrderExecutor, BuildOrderBodyCfdOmitsClientText)
+{
+    // The MT5-style CFD schema has no "text" field — client ids are skipped.
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.client_order_id = "abc";
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Cfd, req);
+    EXPECT_FALSE(body.contains("text"));
+}
+
+TEST(OrderExecutor, BuildOrderBodyFuturesRegression)
+{
+    // Futures body must be unchanged after the static refactor (M15).
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Sell;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.contract_size = 1;
+    req.reduce_only = true;
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Futures, req);
+    EXPECT_EQ("BTC_USDT", body["contract"].get<std::string>());
+    EXPECT_EQ(-1, body["size"].get<int>());
+    EXPECT_EQ("0", body["price"].get<std::string>());
+    EXPECT_EQ("ioc", body["tif"].get<std::string>());
+    EXPECT_TRUE(body["reduce_only"].get<bool>());
+}
 
 // ---------------------------------------------------------------------------
 // M12: Futures-specific OrderRequest tests

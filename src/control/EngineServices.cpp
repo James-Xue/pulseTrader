@@ -106,10 +106,13 @@ EngineServices::EngineServices(
     risk::PositionManager &position_mgr,
     market::MarketFeed *spot_feed,
     market::MarketFeed *futures_feed,
+    market::MarketFeed *cfd_feed,
     exchange::GateRestClient *spot_rest,
     exchange::GateRestClient *futures_rest,
+    exchange::GateRestClient *cfd_rest,
     execution::OrderTracker *spot_tracker,
     execution::OrderTracker *futures_tracker,
+    execution::OrderTracker *cfd_tracker,
     OrderFlowExecutor &order_flow,
     std::mutex &rest_mutex)
     : m_version{ std::move(version) }
@@ -120,13 +123,29 @@ EngineServices::EngineServices(
     , m_positionMgr{ position_mgr }
     , m_spotFeed{ spot_feed }
     , m_futuresFeed{ futures_feed }
+    , m_cfdFeed{ cfd_feed }
     , m_spotRest{ spot_rest }
     , m_futuresRest{ futures_rest }
+    , m_cfdRest{ cfd_rest }
     , m_spotTracker{ spot_tracker }
     , m_futuresTracker{ futures_tracker }
+    , m_cfdTracker{ cfd_tracker }
     , m_orderFlow{ order_flow }
     , m_restMutex{ rest_mutex }
 {
+}
+
+market::MarketFeed *EngineServices::feedFor(MarketType mt) const
+{
+    switch (mt)
+    {
+    case MarketType::Futures:
+        return m_futuresFeed;
+    case MarketType::Cfd:
+        return m_cfdFeed;
+    default:
+        return m_spotFeed;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +165,7 @@ nlohmann::json EngineServices::status() const
     j["strategies_total"] = m_strategyMgr.strategyCount();
     j["open_positions"] = m_positionMgr.openPositionCount();
     j["trading_halted"] = m_riskMgr.isTradingHalted();
+    j["active_market"] = toString(m_orderFlow.activeMarket());
 
     if (m_spotFeed)
     {
@@ -154,6 +174,10 @@ nlohmann::json EngineServices::status() const
     if (m_futuresFeed)
     {
         j["feed_futures"] = m_futuresFeed->stats();
+    }
+    if (m_cfdFeed)
+    {
+        j["feed_cfd"] = m_cfdFeed->stats();
     }
     return j;
 }
@@ -192,6 +216,23 @@ nlohmann::json EngineServices::account()
         }
     }
 
+    // TradFi CFD account (USD settlement, MT5 account).
+    if (m_cfdRest)
+    {
+        auto cfd = m_cfdRest->getCfdAssets();
+        if (ok(cfd))
+        {
+            const auto &data = value(cfd).value("data", nlohmann::json::object());
+            j["cfd"] = {
+                { "total",    safeParseDouble(data.value("equity", "0")).value_or(0.0) },
+                { "available", safeParseDouble(data.value("margin_free", "0")).value_or(0.0) },
+                { "margin",   safeParseDouble(data.value("margin", "0")).value_or(0.0) },
+                { "unrealised_pnl", safeParseDouble(data.value("unrealized_pnl", "0")).value_or(0.0) },
+                { "currency", "USD" },
+            };
+        }
+    }
+
     return j;
 }
 
@@ -207,6 +248,10 @@ nlohmann::json EngineServices::positions() const
     if (m_futuresTracker)
     {
         m_futuresTracker->reconcileAll();
+    }
+    if (m_cfdTracker)
+    {
+        m_cfdTracker->reconcileAll();
     }
     nlohmann::json j;
     j["positions"] = m_positionMgr.getAllPositions();
@@ -226,6 +271,10 @@ nlohmann::json EngineServices::orders() const
     {
         m_futuresTracker->reconcileAll();
     }
+    if (m_cfdTracker)
+    {
+        m_cfdTracker->reconcileAll();
+    }
     nlohmann::json j;
     std::vector<execution::OrderSnapshot> active;
     std::vector<execution::ExecutionReport> reports;
@@ -241,6 +290,13 @@ nlohmann::json EngineServices::orders() const
         auto a = m_futuresTracker->activeOrders();
         active.insert(active.end(), a.begin(), a.end());
         auto r = m_futuresTracker->recentReports(20);
+        reports.insert(reports.end(), r.begin(), r.end());
+    }
+    if (m_cfdTracker)
+    {
+        auto a = m_cfdTracker->activeOrders();
+        active.insert(active.end(), a.begin(), a.end());
+        auto r = m_cfdTracker->recentReports(20);
         reports.insert(reports.end(), r.begin(), r.end());
     }
     j["activeOrders"] = active;
@@ -289,13 +345,33 @@ nlohmann::json EngineServices::risk() const
 
 nlohmann::json EngineServices::market(const std::string &symbol,
                                       int book_levels,
-                                      int klines) const
+                                      int klines,
+                                      const std::string &market_type) const
 {
     nlohmann::json j;
     j["symbol"] = symbol;
 
-    // Pick feed: futures by default for futures strategies, else spot.
-    auto *feed = m_futuresFeed ? m_futuresFeed : m_spotFeed;
+    // Pick feed: explicit market_type wins; else the active direction;
+    // else futures by default for futures strategies, else spot.
+    market::MarketFeed *feed = nullptr;
+    if (!market_type.empty())
+    {
+        const auto mt = parseMarketType(market_type);
+        if (!mt.has_value())
+        {
+            j["error"] = "market_type must be spot/futures/cfd";
+            return j;
+        }
+        feed = feedFor(*mt);
+    }
+    else
+    {
+        feed = feedFor(m_orderFlow.activeMarket());
+        if (nullptr == feed)
+        {
+            feed = m_futuresFeed ? m_futuresFeed : m_spotFeed;
+        }
+    }
     if (nullptr == feed)
     {
         j["error"] = "no market feed available";
@@ -385,9 +461,15 @@ EngineServices::openOrder(const nlohmann::json &params)
         if (!mt.has_value())
         {
             return PulseError{ ErrorCode::ControlInvalidRequest,
-                               "open_order: market_type must be spot/futures" };
+                               "open_order: market_type must be spot/futures/cfd" };
         }
         req.market_type = *mt;
+    }
+    else
+    {
+        // Omitted market_type defaults to the active trading direction —
+        // otherwise the default (Spot) is rejected by the direction gate.
+        req.market_type = m_orderFlow.activeMarket();
     }
     if (params.contains("leverage"))
     {
@@ -433,6 +515,47 @@ EngineServices::closePosition(const nlohmann::json &params)
     }
     const auto &pos = *pos_opt;
 
+    // TradFi CFD positions close via the dedicated close endpoint, not an
+    // order: POST /tradfi/positions/{id}/close (close_type 2 = full,
+    // 1 = partial with close_volume). The close does not emit an order fill,
+    // so PositionManager is updated locally and the realized PnL feeds the
+    // drawdown guard directly.
+    if (MarketType::Cfd == pos.market_type)
+    {
+        if (nullptr == m_cfdRest)
+        {
+            return PulseError{ ErrorCode::InternalError,
+                               "close_position: CFD infrastructure not configured" };
+        }
+        const double close_qty = params.value("quantity", pos.quantity);
+        const int close_type = (close_qty >= pos.quantity - 1e-9) ? 2 : 1;
+        Result<nlohmann::json> res;
+        {
+            std::lock_guard lock(m_restMutex);
+            res = m_cfdRest->postCfdPositionClose(position_id, close_type, close_qty);
+        }
+        if (!ok(res))
+        {
+            return PulseError{ error(res).code,
+                               "CFD close failed for " + position_id + ": "
+                                   + error(res).message };
+        }
+        // Local bookkeeping: exit at the latest known price (best effort).
+        const double exit_price = pos.current_price > 0.0
+                                      ? pos.current_price : pos.entry_price;
+        const auto pnl = m_positionMgr.closePosition(
+            position_id, close_qty, exit_price);
+        if (pnl.has_value())
+        {
+            m_riskMgr.drawdownGuard().recordPnl(pnl.value());
+        }
+        execution::OrderResponse resp;
+        resp.order_id = position_id;
+        resp.status = OrderStatus::Filled;
+        resp.submit_time = now();
+        return resp;
+    }
+
     // Build a reduce/sell order through the full risk gate.
     execution::OrderRequest req;
     req.symbol        = pos.symbol;
@@ -450,6 +573,75 @@ EngineServices::closePosition(const nlohmann::json &params)
     }
 
     return m_orderFlow.placeOrder(req);
+}
+
+nlohmann::json EngineServices::switchDirection(const std::string &direction)
+{
+    const auto mt = parseMarketType(direction);
+    nlohmann::json j;
+    if (!mt.has_value())
+    {
+        j["error"] = "switch_direction: direction must be spot/futures/cfd";
+        return j;
+    }
+    const MarketType target = *mt;
+
+    // Infrastructure check — a direction that is not wired cannot activate.
+    switch (target)
+    {
+    case MarketType::Cfd:
+        if (nullptr == m_cfdRest || nullptr == m_cfdFeed || nullptr == m_cfdTracker)
+        {
+            j["error"] = "switch_direction: CFD not configured (add a "
+                         "market_type=\"cfd\" strategy instance)";
+            return j;
+        }
+        break;
+    case MarketType::Futures:
+        if (nullptr == m_futuresRest || nullptr == m_futuresTracker)
+        {
+            j["error"] = "switch_direction: futures not configured";
+            return j;
+        }
+        break;
+    default:
+        if (nullptr == m_spotRest)
+        {
+            j["error"] = "switch_direction: spot not configured";
+            return j;
+        }
+        break;
+    }
+
+    const MarketType old = m_orderFlow.activeMarket();
+    if (old == target)
+    {
+        auto s = status();
+        s["switched_from"] = toString(old);
+        s["switched_to"] = toString(target);
+        s["cancelled_orders"] = 0;
+        return s;
+    }
+
+    // Serialize with all REST traffic: the gate closes first so no order for
+    // the old direction can slip in during the pause/cancel sequence.
+    std::lock_guard lock(m_restMutex);
+
+    // 1. Close the gate for the new direction (atomic — rejects everything else).
+    m_orderFlow.setActiveMarket(target);
+    // 2. Strategies: pause the old direction ("策略停跑"), resume the new one.
+    const int paused = m_strategyMgr.setPausedByMarket(old, true);
+    const int resumed = m_strategyMgr.setPausedByMarket(target, false);
+    // 3. Cancel the old direction's open orders ("挂单全撤").
+    const int cancelled = m_orderFlow.cancelAllOpenOrders(old);
+
+    auto s = status();
+    s["switched_from"] = toString(old);
+    s["switched_to"] = toString(target);
+    s["strategies_paused"] = paused;
+    s["strategies_resumed"] = resumed;
+    s["cancelled_orders"] = cancelled;
+    return s;
 }
 
 bool EngineServices::cancelOrder(const std::string &order_id)

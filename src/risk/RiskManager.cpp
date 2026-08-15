@@ -139,6 +139,59 @@ RiskEvalResult RiskManager::evaluateFuturesOrder(
 }
 
 // ---------------------------------------------------------------------------
+// TradFi CFD order evaluation
+// ---------------------------------------------------------------------------
+
+RiskEvalResult RiskManager::evaluateCfdOrder(
+    const execution::OrderRequest &order, double leverage, double equity)
+{
+    RiskEvalResult result;
+
+    // 1. Check leverage limit (CFD ladder: 20 / 50 / 100 / 200 / 500).
+    if (leverage > m_config.max_leverage)
+    {
+        PULSE_LOG_WARN("risk",
+            "CFD order rejected: leverage {:.1f}x exceeds max {:.1f}x",
+            leverage, m_config.max_leverage);
+
+        result.decision = RiskDecision::Rejected;
+        result.approved_qty = 0.0;
+        result.reason_code = ErrorCode::CfdLeverageExceeded;
+        result.reason_message = "Leverage exceeds maximum allowed for CFD";
+        return result;
+    }
+
+    // 2. Check margin sufficiency.
+    // Margin = volume(lots) * contract_volume * price / leverage.
+    // order.quanto_multiplier carries the contract volume (100 for XAUUSD).
+    const double proposed_margin =
+        order.quantity * order.quanto_multiplier * order.price / leverage;
+    const auto summary = m_positionManager.portfolioSummary();
+    const double total_margin_after = summary.total_margin_used + proposed_margin;
+    const double max_margin = equity * m_config.max_margin_used;
+
+    if (total_margin_after > max_margin)
+    {
+        PULSE_LOG_WARN("risk",
+            "CFD order rejected: margin {:.2f} + proposed {:.2f} exceeds {:.2f} "
+            "({:.1f}% of equity {:.2f})",
+            summary.total_margin_used, proposed_margin, max_margin,
+            m_config.max_margin_used * 100, equity);
+
+        result.decision = RiskDecision::Rejected;
+        result.approved_qty = 0.0;
+        result.reason_code = ErrorCode::CfdMarginInsufficient;
+        result.reason_message = "Insufficient margin for CFD position";
+        return result;
+    }
+
+    // 3. Delegate to standard evaluateOrder() for drawdown/rate/position limits.
+    //    reserveNotional uses order.quanto_multiplier, so CFD notional =
+    //    volume * contract_volume * price — identical to the margin math above.
+    return evaluateOrder(order);
+}
+
+// ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
 

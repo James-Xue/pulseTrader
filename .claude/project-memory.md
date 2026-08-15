@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-14
-> File size: 20309 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-15
+> File size: 21635 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,7 +32,8 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **595 tests all green** (CTest, `headless` branch): control plane 69 (CommandParser 17, JsonRpcServer 12, McpServer 11, OrderFlowTest 15, EngineServicesTest 10, ControlClient 4) + existing core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **632 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
 - OrderFlowTest 2026-08-14 regressions: OnSignalModifiedOrderIsPlaced, OnSignalModifiedFailureReleasesReservation, FuturesQuantoKeepsFullContractQuantity, SellFillOpensShortWhenNoLong
 
 ### Milestones
@@ -154,15 +155,15 @@ K-line chart fixes (futures contract extraction, subscription payload order, liv
 - ✅ #8 Futures quanto notional (M14) — `OrderRequest.quanto_multiplier`; `reserveNotional(qty, price, quanto)`; `SymbolRegistry` (919 futures contracts) fetched at startup in main.cpp and injected via `setSymbolRegistry()`; reserved notional clamped to budget (kills the 1-ULP overflow deadlock).
 - ✅ #9 Symmetric fill tracking (M14) — fills close opposite-direction positions first, then open the remainder (SELL fill with no long now opens a tracked short). `m_reservations` stores `ReservationEntry{reservation_id, request}` so fills open positions with the correct market type/leverage/quanto.
 
-### M14 + CFD Direction (2026-08-14)
+### M14 + CFD Direction (2026-08-14) → M15 Dual-Direction Trading (2026-08-15, done)
 - **Product pivot**: trading direction moved from BTC_USDT perpetual futures to **Gate.io TradFi/CFD gold (`XAUUSD`)** — see `docs/CFD_TRADFI.md` (full API survey + phased implementation plan) and OPERATIONAL_GUIDE §10.
-- **Verified live**: CFD account registered (`mt5_uid 2017864`), balance 81.86 USD, XAUUSD ~4348 USD/oz, 1 lot = 100 oz, min 0.01 lot, leverage 20–500; API key **CFD permission works** (futures permission is a separate product — the 403 on `/futures/*` is expected and irrelevant to CFD).
-- **Engine state**: mainnet engine (PID started 2026-08-14 16:50) runs the M14 binary; trading **halted** (control-plane `halt_trading`) pending the CFD integration. MCP server may need `/mcp` reconnect after engine restarts.
-- **CFD integration phases** (from `docs/CFD_TRADFI.md`): L1+L8 tradfi paths/order CRUD → L3 REST ticker+kline feed (no WS for CFD) → L7 notional = volume×100×price, margin/leverage → control plane + trading.toml (`market_type="cfd"`, XAUUSD) → tests.
-- **Strategy compatibility for CFD**: momentum / mean_reversion / supertrend (kline-driven) OK; orderbook_scalper not usable (no order-book channel).
-- **Logging note**: when launched via nohup the engine writes logs to stdout (run.sh console sink); `logs/app.log` may not receive the new run's lines.
+- **Verified live**: CFD account registered (`mt5_uid 2017864`), XAUUSD ~4348 USD/oz, 1 lot = 100 oz, min 0.01 lot, leverage 20–500; API key **CFD permission works** (futures permission is a separate product — the 403 on `/futures/*` is expected and irrelevant to CFD).
+- **M15 implemented (2026-08-15, 632 tests green)**: `MarketType::Cfd` + config (`active_market`, max_leverage→500); EndpointRouter `/api/v4/tradfi/*`; GateRestClient 11 TradFi methods; OrderExecutor static `buildOrderBody` (MT5 schema, live-verified); OrderTracker REST-poll mode; MarketFeed REST-poll loop (ticker 1s / klines 60s, backfill 500, dedupe); SymbolRegistry CFD branch + `mergeFrom`; `RiskManager::evaluateCfdOrder` (7101/7102, margin includes contract_volume); CFD close via `/tradfi/positions/{id}/close`; **direction switching**: `switch_direction` method/REPL `switch`/MCP tool (17 methods) — pauses old direction's strategies, cancels its open orders, positions stay open; gate in OrderFlowExecutor (`InactiveMarket 3008`, `reduce_only` exempt); `open_order` defaults to active direction; `get_market` market_type-aware; status shows `active_market`; heartbeat has cfd feed + USD balance.
+- **Engine state**: rebuilt engine required before next run (kills stale mcp bridge first, see below). trading.toml has `active_market = "futures"` (default, safe) + a momentum XAUUSD CFD instance (enabled but paused at startup). **CFD never trades until `switch cfd`**.
+- **Strategy compatibility for CFD**: momentum / mean_reversion / supertrend (kline-driven) OK; orderbook_scalper not usable (no order-book channel; validator rejects it on cfd).
+- **Operational notes**: ① CFD account balance was withdrawn to 0.00 on 2026-08-15 (user intent); two leftover trigger orders from the 08-14 manual verification (buy@4295 id 17511143, sell@4428 id 17471679) could NOT be cancelled while the market was closed (`NOT_IN_TRADE`) — retry `tools/test_gate_rest --tradfi-cleanup` after the market reopens (~08-17). ② 16→17: MCP tool count, JsonRpcServer registry, AGENTS.md/README/OPERATIONAL_GUIDE all updated. ③ nohup logging: stdout only (run.sh console sink); `logs/app.log` may not receive the new run's lines.
 
-Then: CFD integration (phases above) → manual 0.01-lot verification → small-capital live trading → production hardening
+Then: rebuild + restart engine → live verification (`get_status` active_market=futures, `get_market XAUUSD` works, `open_order` cfd rejected with 3008, `switch cfd` pauses futures + cancels orders) → manual 0.01-lot verification → small-capital live trading → production hardening
 
 ## Control Plane (L9, `headless` branch)
 

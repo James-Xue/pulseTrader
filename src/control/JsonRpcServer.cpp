@@ -360,7 +360,7 @@ void JsonRpcServer::handleSession(std::shared_ptr<asio::ip::tcp::socket> sock)
 }
 
 // ---------------------------------------------------------------------------
-// makeMethodRegistry — the 16 control-plane methods bound to EngineServices
+// makeMethodRegistry — the 17 control-plane methods bound to EngineServices
 // (method names double as MCP tool names)
 // ---------------------------------------------------------------------------
 MethodRegistry makeMethodRegistry(EngineServices &services)
@@ -434,7 +434,19 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
         }
         const int levels = params.value("book_levels", 5);
         const int klines = params.value("klines", 0);
-        return RpcResult{ services.market(symbol, levels, klines) };
+        const auto market_type = params.value("market_type", "");
+        return RpcResult{ services.market(symbol, levels, klines, market_type) };
+    };
+    reg["switch_direction"] = [&services](const nlohmann::json &params)
+    {
+        const auto direction = params.value("direction", "");
+        if (direction.empty())
+        {
+            return RpcResult{ PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "switch_direction: direction is required (spot/futures/cfd)" } };
+        }
+        return RpcResult{ services.switchDirection(direction) };
     };
 
     // --- Commands ---

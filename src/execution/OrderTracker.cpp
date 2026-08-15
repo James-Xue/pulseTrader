@@ -57,7 +57,7 @@ std::string orderIdToString(const nlohmann::json &id_value)
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
 
-OrderTracker::OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
+OrderTracker::OrderTracker(exchange::GateWsClient *ws_client, exchange::GateRestClient &rest_client,
                            MarketType market_type, bool enable_ws)
     : m_wsClient{ ws_client }
     , m_restClient{ rest_client }
@@ -80,10 +80,10 @@ void OrderTracker::trackOrder(const std::string &order_id,
 
     // Subscribe to WS private channel if not already done (skipped for
     // REST-poll-only markets like TradFi CFD — no private WS channel exists).
-    if (!m_wsSubscribed && m_enableWs)
+    if (!m_wsSubscribed && m_enableWs && nullptr != m_wsClient)
     {
         const std::string orders_channel = EndpointRouter::wsChannel(m_marketType, "orders");
-        m_wsClient.subscribePrivate(orders_channel,
+        m_wsClient->subscribePrivate(orders_channel,
             {},
             [this](const nlohmann::json &result, const nlohmann::json & /*full_frame*/)
             { onOrderUpdate(result); });

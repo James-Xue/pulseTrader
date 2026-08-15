@@ -138,8 +138,8 @@ nlohmann::json McpServer::toolDefinitions()
                   { "description", "Limit price (required for limit/post_only)" } } },
             { "market_type", nlohmann::json{
                   { "type", "string" },
-                  { "enum", nlohmann::json::array({ "spot", "futures" }) },
-                  { "description", "Default: futures if futures strategies exist" } } },
+                  { "enum", nlohmann::json::array({ "spot", "futures", "cfd" }) },
+                  { "description", "Default: the active trading direction" } } },
             { "leverage", nlohmann::json{
                   { "type", "number" },
                   { "description", "Futures leverage" } } },
@@ -197,9 +197,21 @@ nlohmann::json McpServer::toolDefinitions()
                   { "description", "Number of klines to return (0 = none)" } } },
             { "market_type", nlohmann::json{
                   { "type", "string" },
-                  { "enum", nlohmann::json::array({ "spot", "futures" }) } } },
+                  { "enum", nlohmann::json::array({ "spot", "futures", "cfd" }) } } },
         },
         { "symbol" });
+
+    add("switch_direction",
+        "Switch the single active trading direction. Pauses the other "
+        "direction's strategies and cancels its open orders; open positions "
+        "remain (close manually). Restart returns to config active_market.",
+        nlohmann::json{
+            { "direction", nlohmann::json{
+                  { "type", "string" },
+                  { "enum", nlohmann::json::array({ "spot", "futures", "cfd" }) },
+                  { "description", "Direction to activate" } } },
+        },
+        { "direction" });
 
     add("pause_strategy",
         "Pause a strategy by instance ID (thread stays alive, ticks skipped).",

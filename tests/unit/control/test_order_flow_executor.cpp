@@ -90,8 +90,10 @@ class OrderFlowTest : public ::testing::Test
     {
         m_wsClient = std::make_unique<GateWsClient>(m_config);
         m_restClient = std::make_unique<GateRestClient>(m_config);
-        m_tracker = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient,
+        m_tracker = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient,
                                                    MarketType::Futures);
+        m_cfdTracker = std::make_unique<OrderTracker>(nullptr, *m_restClient,
+                                                      MarketType::Cfd, /*enable_ws=*/false);
         m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
         m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
         m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
@@ -101,9 +103,11 @@ class OrderFlowTest : public ::testing::Test
 
         m_spotPlacer = std::make_unique<FakeOrderPlacer>();
         m_placer = std::make_unique<FakeOrderPlacer>();
+        m_cfdPlacer = std::make_unique<FakeOrderPlacer>();
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-            m_spotPlacer.get(), m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+            m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+            nullptr, m_tracker.get(), m_cfdTracker.get(), m_restMutex, nullptr);
     }
 
     void completeOrder(const std::string &order_id, Side side,
@@ -134,7 +138,8 @@ class OrderFlowTest : public ::testing::Test
                                                   *m_drawdownGuard, *m_rateLimiter);
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-            nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+            nullptr, m_placer.get(), nullptr,
+            nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
     }
 
     ExchangeConfig m_config;
@@ -153,12 +158,14 @@ class OrderFlowTest : public ::testing::Test
     std::unique_ptr<GateWsClient> m_wsClient;
     std::unique_ptr<GateRestClient> m_restClient;
     std::unique_ptr<OrderTracker> m_tracker;
+    std::unique_ptr<OrderTracker> m_cfdTracker;
     std::unique_ptr<PositionManager> m_positionMgr;
     std::unique_ptr<DrawdownGuard> m_drawdownGuard;
     std::unique_ptr<OrderRateLimiter> m_rateLimiter;
     std::unique_ptr<RiskManager> m_riskMgr;
     std::unique_ptr<FakeOrderPlacer> m_spotPlacer;
     std::unique_ptr<FakeOrderPlacer> m_placer;
+    std::unique_ptr<FakeOrderPlacer> m_cfdPlacer;
     std::unique_ptr<OrderFlowExecutor> m_flow;
     std::mutex m_restMutex;
 };
@@ -234,7 +241,8 @@ TEST_F(OrderFlowTest, ModifiedOrderUsesApprovedQty)
                                               *m_drawdownGuard, *m_rateLimiter);
     m_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
 
     OrderRequest req;
     req.symbol = "BTC_USDT";
@@ -274,10 +282,13 @@ TEST_F(OrderFlowTest, PlaceFailureCancelsReservation)
 TEST_F(OrderFlowTest, NoExecutorForMarketTypeFails)
 {
     // A flow constructed without placers must abort the order instead of
-    // dereferencing a null placer.
+    // dereferencing a null placer. The spot direction must be active first —
+    // otherwise the direction gate rejects the order before the placer check.
     auto no_placer_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, nullptr, nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, nullptr, nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
+    no_placer_flow->setActiveMarket(MarketType::Spot);
 
     OrderRequest req;
     req.symbol = "BTC_USDT";
@@ -382,7 +393,8 @@ TEST_F(OrderFlowTest, OnSignalUsesStrategyConfigQuantity)
 
     m_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
 
     TradingSignal sig;
     sig.type = SignalType::Buy;
@@ -464,6 +476,8 @@ TEST_F(OrderFlowTest, SpotOrderSkipsLeverage)
 {
     // Leverage is futures-only — spot orders never touch the leverage API,
     // even when a leverage value is present on the request.
+    // Activate the spot direction first (default is futures).
+    m_flow->setActiveMarket(MarketType::Spot);
     OrderRequest req;
     req.symbol = "BTC_USDT";
     req.side = Side::Buy;
@@ -526,7 +540,8 @@ TEST_F(OrderFlowTest, OnSignalModifiedOrderIsPlaced)
     m_strategyCfg.strategies.push_back(inst);
     m_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
 
     TradingSignal sig;
     sig.type = SignalType::Sell;
@@ -561,7 +576,8 @@ TEST_F(OrderFlowTest, OnSignalModifiedFailureReleasesReservation)
     m_strategyCfg.strategies.push_back(inst);
     m_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
 
     TradingSignal sig;
     sig.type = SignalType::Buy;
@@ -609,7 +625,8 @@ TEST_F(OrderFlowTest, FuturesQuantoKeepsFullContractQuantity)
     m_strategyCfg.strategies.push_back(inst);
     m_flow = std::make_unique<OrderFlowExecutor>(
         m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-        nullptr, m_placer.get(), nullptr, m_tracker.get(), m_restMutex, nullptr);
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_tracker.get(), nullptr, m_restMutex, nullptr);
     m_flow->setSymbolRegistry(registry);
 
     TradingSignal sig;
@@ -651,4 +668,123 @@ TEST_F(OrderFlowTest, SellFillOpensShortWhenNoLong)
     EXPECT_DOUBLE_EQ(1.0, positions[0].quantity);
     EXPECT_EQ(MarketType::Futures, positions[0].market_type);
     EXPECT_DOUBLE_EQ(10.0, positions[0].leverage);
+}
+
+// ---------------------------------------------------------------------------
+// Direction gate tests (M15 — single active trading direction)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, GateRejectsInactiveMarketOrder)
+{
+    // Default active market is futures — a CFD order must be rejected at the
+    // gate without touching the CFD placer.
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InactiveMarket, error(result).code);
+    EXPECT_EQ(0, m_cfdPlacer->place_count);
+}
+
+TEST_F(OrderFlowTest, SwitchActiveMarketAllowsCfdAndRejectsFutures)
+{
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest cfd_req;
+    cfd_req.symbol = "XAUUSD";
+    cfd_req.side = Side::Buy;
+    cfd_req.type = OrderType::Market;
+    cfd_req.quantity = 0.01;
+    cfd_req.market_type = MarketType::Cfd;
+    cfd_req.leverage = 500.0;
+    cfd_req.quanto_multiplier = 100.0;
+
+    auto result = m_flow->placeOrder(cfd_req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_cfdPlacer->place_count);
+    EXPECT_EQ(0, m_placer->place_count);
+
+    // Futures now inactive — rejected at the gate.
+    OrderRequest futures_req;
+    futures_req.symbol = "BTC_USDT";
+    futures_req.side = Side::Buy;
+    futures_req.type = OrderType::Market;
+    futures_req.quantity = 1.0;
+    futures_req.market_type = MarketType::Futures;
+    futures_req.leverage = 10.0;
+
+    result = m_flow->placeOrder(futures_req);
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InactiveMarket, error(result).code);
+    EXPECT_EQ(0, m_placer->place_count); // futures placer never touched
+}
+
+TEST_F(OrderFlowTest, ReduceOnlyExemptFromDirectionGate)
+{
+    // After switching to CFD, closing an old futures position (reduce_only)
+    // must still pass the gate.
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Sell;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.reduce_only = true;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, SignalFromInactiveMarketIsSkipped)
+{
+    // A signal for the inactive direction must be dropped without consuming
+    // rate-limiter tokens or reaching the placer.
+    pulse::strategy::TradingSignal sig;
+    sig.symbol = "XAUUSD";
+    sig.market_type = MarketType::Cfd;
+    sig.type = pulse::strategy::SignalType::Buy;
+    sig.price = 4348.0;
+    sig.confidence = 0.9;
+    sig.strategy_id = "momentum_scalper";
+    sig.reason = "test";
+
+    m_flow->onSignal(sig);
+    EXPECT_EQ(0, m_cfdPlacer->place_count);
+    EXPECT_EQ(0, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, CancelAllOpenOrdersSweepsMarket)
+{
+    // Track a futures order, then sweep — the cancel must reach the placer.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Limit;
+    req.quantity = 1.0;
+    req.price = 60000.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1, m_placer->place_count);
+
+    m_tracker->trackOrder("fake_1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                          1.0, 60000.0);
+
+    std::lock_guard lock(m_restMutex);
+    const int cancelled = m_flow->cancelAllOpenOrders(MarketType::Futures);
+    EXPECT_GE(cancelled, 1);
+    EXPECT_GE(m_placer->cancel_count, 1);
 }

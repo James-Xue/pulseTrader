@@ -151,3 +151,33 @@ TEST(CommandParser, HelpTextMentionsOpenCommand)
     EXPECT_NE(std::string::npos, replHelp().find("open"));
     EXPECT_NE(std::string::npos, replHelp().find("halt"));
 }
+
+TEST(CommandParser, SwitchDirectionCommand)
+{
+    const auto cmd = parseCommandLine("switch cfd");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("switch_direction", cmd->method);
+    EXPECT_EQ("cfd", cmd->params["direction"].get<std::string>());
+}
+
+TEST(CommandParser, SwitchDirectionRejectsUnknown)
+{
+    EXPECT_FALSE(parseCommandLine("switch options").has_value());
+}
+
+TEST(CommandParser, OpenOrderWithCfdMarketFlag)
+{
+    const auto cmd = parseCommandLine("open XAUUSD buy 0.01 --market cfd --leverage 500");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("open_order", cmd->method);
+    EXPECT_EQ("cfd", cmd->params["market_type"].get<std::string>());
+    EXPECT_EQ(500.0, cmd->params["leverage"].get<double>());
+}
+
+TEST(CommandParser, MarketCommandWithCfdFlag)
+{
+    const auto cmd = parseCommandLine("market XAUUSD --klines 20 --market cfd");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("get_market", cmd->method);
+    EXPECT_EQ("cfd", cmd->params["market_type"].get<std::string>());
+}

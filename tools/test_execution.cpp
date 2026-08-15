@@ -96,7 +96,7 @@ int main()
     ws_client.start();
 
     // 6. Create MarketFeed to get current mid-price
-    MarketFeed feed(ws_client, rest_client);
+    MarketFeed feed(&ws_client, rest_client);
     std::cout << "[INFO] Starting MarketFeed for BTC_USDT..." << std::endl;
     feed.start({ "BTC_USDT" });
 
@@ -119,7 +119,7 @@ int main()
 
     // 7. Create OrderExecutor and OrderTracker
     OrderExecutor executor(rest_client);
-    OrderTracker tracker(ws_client, rest_client);
+    OrderTracker tracker(&ws_client, rest_client);
 
     // 8. Set completion callback
     std::atomic<bool> order_completed{ false };

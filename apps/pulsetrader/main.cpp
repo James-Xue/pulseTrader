@@ -255,12 +255,14 @@ static void logSystemHeartbeat(
     std::chrono::steady_clock::time_point start_time,
     const pulse::market::MarketFeed* spot_feed,
     const pulse::market::MarketFeed* futures_feed,
+    const pulse::market::MarketFeed* cfd_feed,
     const pulse::exchange::GateWsClient* spot_ws,
     const pulse::exchange::GateWsClient* futures_ws,
     const pulse::strategy::StrategyManager& strategy_mgr,
     const pulse::risk::PositionManager& position_mgr,
     pulse::exchange::GateRestClient* rest_client,
     pulse::exchange::GateRestClient* spot_rest_client,
+    pulse::exchange::GateRestClient* cfd_rest_client,
     std::mutex& rest_mutex)
 {
     // --- Uptime formatting ---
@@ -292,6 +294,7 @@ static void logSystemHeartbeat(
     // These are only accessed from the main thread, so no race.
     static pulse::market::FeedStats prev_spot    = { 0, 0, 0 };
     static pulse::market::FeedStats prev_futures = { 0, 0, 0 };
+    static pulse::market::FeedStats prev_cfd     = { 0, 0, 0 };
     static bool first_call = true;
 
     // Format a market feed section: "100 tick/s  10 kline/s  80 ob/s"
@@ -363,6 +366,13 @@ static void logSystemHeartbeat(
         format_feed(futures_feed, prev_futures, msg);
     }
 
+    // CFD section (REST poll feed; orderbook count is always 0).
+    if (nullptr != cfd_feed)
+    {
+        msg << " | cfd ";
+        format_feed(cfd_feed, prev_cfd, msg);
+    }
+
     // WS status.
     msg << " | ws spot=" << ws_label(spot_ws)
         << " futures=" << ws_label(futures_ws);
@@ -413,6 +423,20 @@ static void logSystemHeartbeat(
                     break;
                 }
             }
+        }
+    }
+
+    // CFD account balance (USD, MT5 account).
+    if (nullptr != cfd_rest_client)
+    {
+        auto cfd_result = cfd_rest_client->getCfdAssets();
+        if (ok(cfd_result))
+        {
+            const auto &data = value(cfd_result).value("data", nlohmann::json::object());
+            const double equity = pulse::safeParseDouble(data.value("equity", "0")).value_or(0.0);
+            const double free   = pulse::safeParseDouble(data.value("margin_free", "0")).value_or(0.0);
+            msg << " | cfd " << std::fixed << std::setprecision(2)
+                << equity << " USD (avail " << free << ")";
         }
     }
 
@@ -552,19 +576,29 @@ static int runTrade(int argc, char* argv[])
     }
 
     // ------------------------------------------------------------------
-    // 3. L1: Exchange clients (dual-market support)
+    // 3. L1: Exchange clients (tri-market support: spot / futures / CFD)
     // ------------------------------------------------------------------
+    // Shared REST serialization mutex (GateRestClient is not thread-safe;
+    // heartbeat balance queries, control-plane REST calls and the CFD poll
+    // thread all share it). Declared early — the CFD feed needs it.
+    std::mutex rest_mutex;
+
     // Detect which market types are needed by enabled strategies.
     bool has_spot = false;
     bool has_futures = false;
+    bool has_cfd = false;
     for (const auto& inst : cfg.strategy.strategies)
     {
         if (!inst.enabled) { continue; }
-        if (MarketType::Futures == inst.market_type) has_futures = true;
-        else { has_spot = true; }
+        switch (inst.market_type)
+        {
+        case MarketType::Futures: has_futures = true; break;
+        case MarketType::Cfd:     has_cfd = true;     break;
+        default:                  has_spot = true;    break;
+        }
     }
     // Default to spot if no strategies configured (backward compatibility).
-    if (!has_spot && !has_futures) has_spot = true;
+    if (!has_spot && !has_futures && !has_cfd) has_spot = true;
 
     // Spot infrastructure.
     std::unique_ptr<pulse::exchange::GateRestClient> spot_rest;
@@ -580,6 +614,12 @@ static int runTrade(int argc, char* argv[])
     std::unique_ptr<pulse::execution::OrderExecutor>  futures_executor;
     std::unique_ptr<pulse::execution::OrderTracker>   futures_tracker;
 
+    // TradFi CFD infrastructure (REST-only — no WebSocket client at all).
+    std::unique_ptr<pulse::exchange::GateRestClient> cfd_rest;
+    std::unique_ptr<pulse::market::MarketFeed>       cfd_feed;
+    std::unique_ptr<pulse::execution::OrderExecutor>  cfd_executor;
+    std::unique_ptr<pulse::execution::OrderTracker>   cfd_tracker;
+
     if (has_spot)
     {
         spot_rest = std::make_unique<pulse::exchange::GateRestClient>(
@@ -587,11 +627,11 @@ static int runTrade(int argc, char* argv[])
         spot_ws = std::make_unique<pulse::exchange::GateWsClient>(
             cfg.exchange, MarketType::Spot);
         spot_feed = std::make_unique<pulse::market::MarketFeed>(
-            *spot_ws, *spot_rest, MarketType::Spot);
+            spot_ws.get(), *spot_rest, MarketType::Spot);
         spot_executor = std::make_unique<pulse::execution::OrderExecutor>(
             *spot_rest, MarketType::Spot);
         spot_tracker = std::make_unique<pulse::execution::OrderTracker>(
-            *spot_ws, *spot_rest, MarketType::Spot);
+            spot_ws.get(), *spot_rest, MarketType::Spot);
         log->info("[L1] Spot exchange clients created");
     }
 
@@ -611,19 +651,35 @@ static int runTrade(int argc, char* argv[])
         futures_ws = std::make_unique<pulse::exchange::GateWsClient>(
             cfg.exchange, MarketType::Futures);
         futures_feed = std::make_unique<pulse::market::MarketFeed>(
-            *futures_ws, *futures_rest, MarketType::Futures);
+            futures_ws.get(), *futures_rest, MarketType::Futures);
         futures_executor = std::make_unique<pulse::execution::OrderExecutor>(
             *futures_rest, MarketType::Futures);
         futures_tracker = std::make_unique<pulse::execution::OrderTracker>(
-            *futures_ws, *futures_rest, MarketType::Futures);
+            futures_ws.get(), *futures_rest, MarketType::Futures);
         log->info("[L1] Futures exchange clients created");
+    }
+
+    if (has_cfd)
+    {
+        cfd_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Cfd);
+        // REST-poll feed: no WS client, shared rest_mutex for poll requests.
+        cfd_feed = std::make_unique<pulse::market::MarketFeed>(
+            nullptr, *cfd_rest, MarketType::Cfd, &rest_mutex);
+        cfd_executor = std::make_unique<pulse::execution::OrderExecutor>(
+            *cfd_rest, MarketType::Cfd);
+        cfd_tracker = std::make_unique<pulse::execution::OrderTracker>(
+            nullptr, *cfd_rest, MarketType::Cfd, /*enable_ws=*/false);
+        log->info("[L1] TradFi CFD exchange clients created (REST poll mode)");
     }
 
     // ------------------------------------------------------------------
     // 4. L3: Market Data (per-market feeds already created above)
     // ------------------------------------------------------------------
-    log->info("[L3] Market feed(s) ready (spot={}, futures={})",
-              has_spot ? "yes" : "no", has_futures ? "yes" : "no");
+    log->info("[L3] Market feed(s) ready (spot={}, futures={}, cfd={})",
+              has_spot ? "yes" : "no",
+              has_futures ? "yes" : "no",
+              has_cfd ? "yes" : "no");
 
     // ------------------------------------------------------------------
     // 5. L7: Risk Management
@@ -704,21 +760,26 @@ static int runTrade(int argc, char* argv[])
         pulse::market::MarketFeed* feed_ptr = nullptr;
         pulse::execution::OrderExecutor* exec_ptr = nullptr;
 
-        if (MarketType::Futures == inst_cfg.market_type && futures_feed)
+        switch (inst_cfg.market_type)
         {
+        case pulse::MarketType::Futures:
             feed_ptr = futures_feed.get();
             exec_ptr = futures_executor.get();
-        }
-        else if (spot_feed)
-        {
+            break;
+        case pulse::MarketType::Cfd:
+            feed_ptr = cfd_feed.get();
+            exec_ptr = cfd_executor.get();
+            break;
+        default:
             feed_ptr = spot_feed.get();
             exec_ptr = spot_executor.get();
+            break;
         }
 
         if (!feed_ptr || !exec_ptr)
         {
             log->warn("No {} infrastructure available for strategy '{}', skipping",
-                      MarketType::Futures == inst_cfg.market_type ? "futures" : "spot",
+                      pulse::toString(inst_cfg.market_type),
                       inst_cfg.name);
             continue;
         }
@@ -736,7 +797,7 @@ static int runTrade(int argc, char* argv[])
         log->info("[L6] Registered strategy: {} on {} (qty={}, conf={:.2f}, market={})",
                   inst_cfg.name, inst_cfg.symbol,
                   inst_cfg.order_quantity, inst_cfg.min_confidence,
-                  MarketType::Futures == inst_cfg.market_type ? "futures" : "spot");
+                  pulse::toString(inst_cfg.market_type));
 
         strategy_mgr.registerStrategy(std::move(strat));
     }
@@ -785,15 +846,12 @@ static int runTrade(int argc, char* argv[])
     // ------------------------------------------------------------------
     // 10. Wire: aggregator output → risk check → execute → track
     // ------------------------------------------------------------------
-    // Shared REST serialization mutex (GateRestClient is not thread-safe;
-    // heartbeat balance queries and control-plane REST calls share it).
-    std::mutex rest_mutex;
-
     // Order flow executor: owns the reservation map and the full
     // risk-gated execution flow (aggregator + manual CLI/MCP paths).
     // Placers are constructed only for markets that have an executor.
     std::unique_ptr<pulse::control::ExecutorOrderPlacer> spot_placer_impl;
     std::unique_ptr<pulse::control::ExecutorOrderPlacer> futures_placer_impl;
+    std::unique_ptr<pulse::control::ExecutorOrderPlacer> cfd_placer_impl;
     if (spot_executor)
     {
         spot_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
@@ -804,6 +862,11 @@ static int runTrade(int argc, char* argv[])
         futures_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
             *futures_executor);
     }
+    if (cfd_executor)
+    {
+        cfd_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
+            *cfd_executor);
+    }
     pulse::control::OrderFlowExecutor order_flow(
         cfg.strategy,
         risk_mgr,
@@ -811,8 +874,10 @@ static int runTrade(int argc, char* argv[])
         drawdownGuard,
         spot_placer_impl ? spot_placer_impl.get() : nullptr,
         futures_placer_impl ? futures_placer_impl.get() : nullptr,
+        cfd_placer_impl ? cfd_placer_impl.get() : nullptr,
         spot_tracker.get(),
         futures_tracker.get(),
+        cfd_tracker.get(),
         rest_mutex
 #ifdef PULSE_ENABLE_SQLITE
         , trade_recorder.get()
@@ -823,21 +888,49 @@ static int runTrade(int argc, char* argv[])
     // the risk gate computes futures notional correctly: qty is in contracts,
     // so notional = qty * price * quanto_multiplier (1 BTC_USDT contract =
     // 0.0001 BTC). Without it, a 1-contract order would be treated as 1 BTC.
+    // The CFD registry (contract_volume per symbol) merges into the same
+    // shared lookup: XAUUSD's 100 oz/lot plays the same multiplier role.
+    std::shared_ptr<pulse::market::SymbolRegistry> symbol_registry;
     if (futures_rest)
     {
-        auto symbol_registry = std::make_shared<pulse::market::SymbolRegistry>(
+        symbol_registry = std::make_shared<pulse::market::SymbolRegistry>(
             *futures_rest, pulse::MarketType::Futures);
         if (symbol_registry->loadFromRest())
         {
             log->info("[L1] Symbol metadata loaded ({} futures contracts)",
                       symbol_registry->size());
-            order_flow.setSymbolRegistry(symbol_registry);
         }
         else
         {
             log->warn("[L1] Symbol metadata load failed — futures notional "
                       "falls back to qty x price (contracts treated as units)");
         }
+    }
+    if (cfd_rest)
+    {
+        pulse::market::SymbolRegistry cfd_registry(*cfd_rest,
+                                                   pulse::MarketType::Cfd);
+        if (cfd_registry.loadFromRest(cfg.symbols))
+        {
+            log->info("[L1] CFD symbol metadata loaded ({} symbols)",
+                      cfd_registry.size());
+            if (!symbol_registry)
+            {
+                symbol_registry = std::make_shared<pulse::market::SymbolRegistry>(
+                    futures_rest ? *futures_rest : *cfd_rest,
+                    pulse::MarketType::Futures);
+            }
+            symbol_registry->mergeFrom(cfd_registry);
+        }
+        else
+        {
+            log->warn("[L1] CFD symbol metadata load failed — CFD notional "
+                      "falls back to qty x price (lots treated as units)");
+        }
+    }
+    if (symbol_registry)
+    {
+        order_flow.setSymbolRegistry(symbol_registry);
     }
 
     aggregator.setOutputCallback(
@@ -863,10 +956,13 @@ static int runTrade(int argc, char* argv[])
         position_mgr,
         spot_feed.get(),
         futures_feed.get(),
+        cfd_feed.get(),
         spot_rest.get(),
         futures_rest.get(),
+        cfd_rest.get(),
         spot_tracker.get(),
         futures_tracker.get(),
+        cfd_tracker.get(),
         order_flow,
         rest_mutex);
 
@@ -887,6 +983,26 @@ static int runTrade(int argc, char* argv[])
     std::signal(SIGTERM, signalHandler);
 
     // ------------------------------------------------------------------
+    // 12b. Direction gate — activate the configured default direction.
+    // ------------------------------------------------------------------
+    // The active direction comes from `active_market` (default "futures" —
+    // "暂时只做合约方向"). Every other direction's strategies pause so they
+    // cannot trade until switch_direction activates them; the order-flow
+    // gate in OrderFlowExecutor is the second, independent guarantee.
+    order_flow.setActiveMarket(cfg.active_market);
+    const int resumed_at_start = strategy_mgr.setPausedByMarket(cfg.active_market, false);
+    int paused_at_start = 0;
+    for (const auto& inst_cfg : cfg.strategy.strategies)
+    {
+        if (inst_cfg.enabled && inst_cfg.market_type != cfg.active_market)
+        {
+            paused_at_start += strategy_mgr.setPausedByMarket(inst_cfg.market_type, true);
+        }
+    }
+    log->info("[L6] Active trading direction: {} ({} resumed, {} paused until switched)",
+              pulse::toString(cfg.active_market), resumed_at_start, paused_at_start);
+
+    // ------------------------------------------------------------------
     // 13. Start all layers
     // ------------------------------------------------------------------
     log->info("Starting trading engine...");
@@ -904,6 +1020,8 @@ static int runTrade(int argc, char* argv[])
     }
 
     // L3: Subscribe to market data channels.
+    // The CFD feed's REST poll thread starts regardless of the active
+    // direction — switching to CFD must be instant (no warm-up wait).
     if (spot_feed)
     {
         spot_feed->start(cfg.symbols);
@@ -911,6 +1029,10 @@ static int runTrade(int argc, char* argv[])
     if (futures_feed)
     {
         futures_feed->start(cfg.symbols);
+    }
+    if (cfd_feed)
+    {
+        cfd_feed->start(cfg.symbols);
     }
     log->info("[L3] Market feed(s) started for {} symbol(s)", cfg.symbols.size());
 
@@ -1054,12 +1176,14 @@ static int runTrade(int argc, char* argv[])
                 engine_start,
                 spot_feed.get(),
                 futures_feed.get(),
+                cfd_feed.get(),
                 spot_ws.get(),
                 futures_ws.get(),
                 strategy_mgr,
                 position_mgr,
                 futures_rest ? futures_rest.get() : spot_rest.get(),
                 spot_rest ? spot_rest.get() : nullptr,
+                cfd_rest ? cfd_rest.get() : nullptr,
                 rest_mutex);
         }
     }
@@ -1089,9 +1213,10 @@ static int runTrade(int argc, char* argv[])
     strategy_mgr.stop();
     log->info("[L6] Strategy threads stopped");
 
-    // L3: Market feeds
+    // L3: Market feeds (cfd feed joins its REST poll thread)
     if (futures_feed) { futures_feed->stop(); }
     if (spot_feed) { spot_feed->stop(); }
+    if (cfd_feed) { cfd_feed->stop(); }
     log->info("[L3] Market feed(s) stopped");
 
     // L1: WebSockets

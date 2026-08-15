@@ -13,8 +13,14 @@
 symbols = ["BTC_USDT", "ETH_USDT"]
 
 # ── 默认市场类型（可选，默认 spot）──────────────────────────────────
-# 策略未指定 market_type 时使用此值。可选: "spot" | "futures"
+# 策略未指定 market_type 时使用此值。可选: "spot" | "futures" | "cfd"
 # default_market_type = "spot"
+
+# ── 活跃交易方向（可选，默认 futures）────────────────────────────────
+# 单活跃方向模型：任一时刻只有一个方向（futures / cfd）真实交易。
+# 另一方向的策略启动即暂停、切换时撤单；重启后回到此配置值。
+# 运行时切换: REPL `switch <futures|cfd>` 或 MCP switch_direction。
+# active_market = "futures"
 
 # ── 交易所 ────────────────────────────────────────────────────────────
 [exchange]
@@ -97,7 +103,7 @@ maxDailyDrawdown    = 0.02         # 日亏 ≥ 2% 停止开仓
 maxDrawdown         = 0.05         # 总回撤 ≥ 5% 全部停止
 maxOrdersPerSec     = 5            # 每秒最大下单数
 maxSymbolNotional   = 300          # 单币种最大持仓（USDT）
-max_leverage        = 10.0         # 合约最大杠杆倍数（1.0–125.0）
+max_leverage        = 10.0         # 最大杠杆倍数（1.0–500.0；CFD 杠杆阶梯 20/50/100/200/500）
 max_margin_used     = 0.5          # 保证金占总资产最大比例（0.0–1.0）
 
 [risk.stop_loss]

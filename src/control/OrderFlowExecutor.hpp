@@ -21,6 +21,7 @@
 #include "risk/RiskManager.hpp"
 #include "strategy/signal_types.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -92,18 +93,22 @@ class OrderFlowExecutor
     ///   4. drawdown_guard  — realized-PnL sink
     ///   5. spot_placer     — spot order placement (nullable if no spot)
     ///   6. futures_placer  — futures order placement (nullable if no futures)
-    ///   7. spot_tracker    — spot order tracker (nullable)
-    ///   8. futures_tracker — futures order tracker (nullable)
-    ///   9. rest_mutex      — shared serialization for non-thread-safe REST
-    ///  10. trade_recorder  — SQLite recorder (nullable; only when PULSE_ENABLE_SQLITE)
+    ///   7. cfd_placer      — TradFi CFD order placement (nullable if no CFD)
+    ///   8. spot_tracker    — spot order tracker (nullable)
+    ///   9. futures_tracker — futures order tracker (nullable)
+    ///  10. cfd_tracker     — CFD order tracker (nullable)
+    ///  11. rest_mutex      — shared serialization for non-thread-safe REST
+    ///  12. trade_recorder  — SQLite recorder (nullable; only when PULSE_ENABLE_SQLITE)
     OrderFlowExecutor(const StrategyConfig &strategy_cfg,
                       risk::RiskManager &risk_mgr,
                       risk::PositionManager &position_mgr,
                       risk::DrawdownGuard &drawdown_guard,
                       IOrderPlacer *spot_placer,
                       IOrderPlacer *futures_placer,
+                      IOrderPlacer *cfd_placer,
                       execution::OrderTracker *spot_tracker,
                       execution::OrderTracker *futures_tracker,
+                      execution::OrderTracker *cfd_tracker,
                       std::mutex &rest_mutex,
 #ifdef PULSE_ENABLE_SQLITE
                       trade_recorder::TradeRecorder *trade_recorder
@@ -135,9 +140,29 @@ class OrderFlowExecutor
     /// Order-completion entry point (wired to both trackers).
     void onOrderComplete(const execution::ExecutionReport &report);
 
-    /// Cancel an open order; probes futures tracker first, then spot.
+    /// Cancel an open order; probes cfd tracker first, then futures, then spot.
     /// Must be called with the shared rest_mutex held.
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
+
+    // --- Single active trading direction (runtime-switchable) ---
+    //
+    // Only the active market's orders pass the gate: strategy signals and
+    // manual orders for any other market are rejected with InactiveMarket
+    // (3008). reduce_only orders are exempt so old-direction positions stay
+    // closeable after a switch.
+
+    /// Set the active trading direction (atomic, lock-free).
+    void setActiveMarket(MarketType mt);
+
+    /// Read the active trading direction.
+    [[nodiscard]] MarketType activeMarket() const;
+
+    /// Cancel every open order of the given market (reconcile + cancel sweep).
+    ///
+    /// Bounded to 3 reconcile→cancel passes to catch orders that arrive
+    /// concurrently with the switch. Must be called with the shared rest_mutex
+    /// held. Returns the number of orders cancelled.
+    [[nodiscard]] int cancelAllOpenOrders(MarketType mt);
 
   private:
     /// Reservation bookkeeping: maps a placed exchange order_id to the
@@ -166,9 +191,12 @@ class OrderFlowExecutor
     risk::DrawdownGuard &m_drawdownGuard;
     IOrderPlacer *m_spotPlacer;
     IOrderPlacer *m_futuresPlacer;
+    IOrderPlacer *m_cfdPlacer;
     execution::OrderTracker *m_spotTracker;
     execution::OrderTracker *m_futuresTracker;
+    execution::OrderTracker *m_cfdTracker;
     std::mutex &m_restMutex;
+    std::atomic<MarketType> m_activeMarket{ MarketType::Futures };
     std::shared_ptr<const market::SymbolRegistry> m_registry;
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *m_tradeRecorder;

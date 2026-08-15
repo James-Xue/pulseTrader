@@ -11,22 +11,24 @@ namespace pulse::market
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
 
-MarketFeed::MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
-                       MarketType market_type)
+MarketFeed::MarketFeed(exchange::GateWsClient *ws_client, exchange::GateRestClient &rest_client,
+                       MarketType market_type, std::mutex *rest_mutex)
     : m_wsClient{ ws_client }
     , m_restClient{ rest_client }
     , m_marketType{ market_type }
+    , m_restMutex{ rest_mutex }
     , m_symbolRegistry{ rest_client, market_type }
 {
 }
 
 void MarketFeed::start(const std::vector<Symbol> &symbols)
 {
-    const std::string mt_label = MarketType::Futures == m_marketType ? "futures" : "spot";
+    const std::string mt_label = toString(m_marketType);
     PULSE_LOG_INFO("market", "Starting {} MarketFeed for {} symbols", mt_label, symbols.size());
 
-    // 1. Load symbol metadata from REST.
-    if (!m_symbolRegistry.loadFromRest())
+    // 1. Load symbol metadata from REST (CFD requires the symbol list for the
+    //    authenticated /tradfi/symbols/detail query).
+    if (!m_symbolRegistry.loadFromRest(symbols))
     {
         PULSE_LOG_WARN("market", "Failed to load symbol registry — continuing without metadata");
     }
@@ -37,14 +39,30 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         m_klineBuffers.try_emplace(symbol, 500);
     }
 
-    // 3. Subscribe to WebSocket channels (market-type-aware).
     m_subscribedSymbols = symbols;
+
+    // 3a. TradFi CFD: no WebSocket channel — run the REST polling loop instead.
+    if (MarketType::Cfd == m_marketType)
+    {
+        m_pollThread = std::jthread([this](std::stop_token st) { pollLoop(std::move(st)); });
+        PULSE_LOG_INFO("market", "cfd MarketFeed started — REST poll thread for {} symbols",
+                       symbols.size());
+        return;
+    }
+
+    // 3b. Subscribe to WebSocket channels (market-type-aware).
+    if (nullptr == m_wsClient)
+    {
+        PULSE_LOG_ERROR("market", "{} MarketFeed: ws_client is null for a WS-based market",
+                        mt_label);
+        return;
+    }
 
     const std::string tickers_ch = EndpointRouter::wsChannel(m_marketType, "tickers");
     const std::string candlesticks_ch = EndpointRouter::wsChannel(m_marketType, "candlesticks");
 
     // Tickers: real-time price updates.
-    m_wsClient.subscribe(tickers_ch,
+    m_wsClient->subscribe(tickers_ch,
         symbols,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { onTickerUpdate(result, full_frame); });
@@ -57,7 +75,7 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     for (const auto &symbol : symbols)
     {
         std::vector<std::string> ob_payload = { symbol, "100ms", "20" };
-        m_wsClient.subscribe(orderbook_update_ch,
+        m_wsClient->subscribe(orderbook_update_ch,
             ob_payload,
             [this](const nlohmann::json &result, const nlohmann::json &full_frame)
             { onOrderbookUpdate(result, full_frame); });
@@ -72,7 +90,7 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         kline_payload.push_back(symbol);
     }
 
-    m_wsClient.subscribe(candlesticks_ch,
+    m_wsClient->subscribe(candlesticks_ch,
         kline_payload,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { onKlineUpdate(result, full_frame); });
@@ -83,10 +101,26 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
 
 void MarketFeed::stop()
 {
-    PULSE_LOG_INFO("market", "Stopping MarketFeed");
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "tickers"));
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "order_book_update"));
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "candlesticks"));
+    PULSE_LOG_INFO("market", "Stopping {} MarketFeed", toString(m_marketType));
+
+    // TradFi CFD: stop and join the REST poll thread.
+    if (MarketType::Cfd == m_marketType)
+    {
+        if (m_pollThread.joinable())
+        {
+            m_pollThread.request_stop();
+            m_pollThread.join();
+        }
+        m_subscribedSymbols.clear();
+        return;
+    }
+
+    if (nullptr != m_wsClient)
+    {
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "tickers"));
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "order_book_update"));
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "candlesticks"));
+    }
     m_subscribedSymbols.clear();
 }
 
@@ -452,6 +486,210 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         // Spot format: single candle object.
         process_candle(result);
     }
+}
+
+// ---------------------------------------------------------------------------
+// TradFi CFD — REST polling mode
+// ---------------------------------------------------------------------------
+
+std::optional<Ticker> MarketFeed::parseCfdTicker(const nlohmann::json &obj,
+                                                 const Symbol &symbol)
+{
+    if (!obj.is_object() || !obj.contains("last_price"))
+    {
+        return std::nullopt;
+    }
+
+    Ticker ticker;
+    ticker.symbol = symbol;
+    ticker.last   = safeParseDouble(obj["last_price"].get<std::string>()).value_or(0.0);
+    if (ticker.last <= 0.0)
+    {
+        return std::nullopt;
+    }
+
+    if (obj.contains("bid_price") && obj["bid_price"].is_string())
+    {
+        ticker.bid = safeParseDouble(obj["bid_price"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("ask_price") && obj["ask_price"].is_string())
+    {
+        ticker.ask = safeParseDouble(obj["ask_price"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("price_change") && obj["price_change"].is_string())
+    {
+        ticker.change_pct = safeParseDouble(obj["price_change"].get<std::string>()).value_or(0.0);
+    }
+    // TradFi tickers carry no 24h volume — leave volume_24h at 0.
+    ticker.timestamp = 0;
+    return ticker;
+}
+
+std::optional<Kline> MarketFeed::parseCfdKline(const nlohmann::json &obj)
+{
+    if (!obj.is_object() || !obj.contains("t")
+        || !obj.contains("o") || !obj.contains("h")
+        || !obj.contains("l") || !obj.contains("c"))
+    {
+        return std::nullopt;
+    }
+
+    Kline kline;
+    kline.open_time = obj["t"].is_string()
+        ? std::stoll(obj["t"].get<std::string>()) * 1000
+        : obj["t"].get<std::int64_t>() * 1000; // Unix seconds → ms.
+    kline.close_time = kline.open_time + 60000; // 1m interval.
+
+    auto open  = safeParseDouble(obj["o"].get<std::string>());
+    auto high  = safeParseDouble(obj["h"].get<std::string>());
+    auto low   = safeParseDouble(obj["l"].get<std::string>());
+    auto close = safeParseDouble(obj["c"].get<std::string>());
+    if (!open || !high || !low || !close)
+    {
+        return std::nullopt;
+    }
+
+    kline.open  = open.value();
+    kline.high  = high.value();
+    kline.low   = low.value();
+    kline.close = close.value();
+    kline.volume = 0.0; // TradFi klines carry no volume field.
+    kline.closed = true;
+    return kline;
+}
+
+void MarketFeed::pollLoop(std::stop_token stoken)
+{
+    PULSE_LOG_INFO("market", "CFD poll loop started");
+
+    // Poll the REST API exactly once per minute for klines; the first fetch
+    // happens immediately (backfill of up to 500 candles = KlineBuffer capacity).
+    const auto start_time = std::chrono::steady_clock::now();
+    auto last_kline_poll = start_time - std::chrono::minutes(1);
+
+    const auto fetch_ticker = [this, &stoken](const Symbol &symbol)
+    {
+        Result<nlohmann::json> res;
+        if (m_restMutex)
+        {
+            std::lock_guard lock(*m_restMutex);
+            res = m_restClient.getCfdTicker(symbol);
+        }
+        else
+        {
+            res = m_restClient.getCfdTicker(symbol);
+        }
+        if (stoken.stop_requested())
+        {
+            return;
+        }
+        if (!ok(res))
+        {
+            PULSE_LOG_WARN("market", "CFD ticker poll failed for {}: {}",
+                           symbol, error(res).message);
+            return;
+        }
+        const auto &j = value(res);
+        if (!j.contains("data") || !j["data"].is_object())
+        {
+            return;
+        }
+        auto ticker_opt = parseCfdTicker(j["data"], symbol);
+        if (ticker_opt)
+        {
+            m_tickerCache.update(ticker_opt->symbol, *ticker_opt);
+            m_tickerCount.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    const auto fetch_klines = [this, &stoken](const Symbol &symbol)
+    {
+        Result<nlohmann::json> res;
+        if (m_restMutex)
+        {
+            std::lock_guard lock(*m_restMutex);
+            res = m_restClient.getCfdKlines(symbol, 500);
+        }
+        else
+        {
+            res = m_restClient.getCfdKlines(symbol, 500);
+        }
+        if (stoken.stop_requested())
+        {
+            return;
+        }
+        if (!ok(res))
+        {
+            PULSE_LOG_WARN("market", "CFD kline poll failed for {}: {}",
+                           symbol, error(res).message);
+            return;
+        }
+        const auto &j = value(res);
+        if (!j.contains("data") || !j["data"].is_object()
+            || !j["data"].contains("list") || !j["data"]["list"].is_array())
+        {
+            return;
+        }
+        auto &buffer = getKlineBuffer(symbol);
+        const auto latest_opt = buffer.latest();
+        const std::int64_t newest_known = latest_opt ? latest_opt->open_time : 0;
+        for (const auto &candle : j["data"]["list"])
+        {
+            auto kline_opt = parseCfdKline(candle);
+            if (!kline_opt)
+            {
+                continue;
+            }
+            // KlineBuffer::push does not dedupe — skip candles we already have.
+            if (kline_opt->open_time <= newest_known)
+            {
+                continue;
+            }
+            buffer.push(*kline_opt);
+            m_klineCount.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    while (!stoken.stop_requested())
+    {
+        // Ticker: ~1s cadence.
+        for (const auto &symbol : m_subscribedSymbols)
+        {
+            fetch_ticker(symbol);
+            if (stoken.stop_requested())
+            {
+                break;
+            }
+        }
+        if (stoken.stop_requested())
+        {
+            break;
+        }
+
+        // Klines: ~60s cadence.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_kline_poll >= std::chrono::minutes(1))
+        {
+            for (const auto &symbol : m_subscribedSymbols)
+            {
+                fetch_klines(symbol);
+                if (stoken.stop_requested())
+                {
+                    break;
+                }
+            }
+            last_kline_poll = std::chrono::steady_clock::now();
+        }
+
+        // Sleep in short chunks so stop() stays responsive; the mutex is held
+        // only per-request above, never during this wait.
+        for (int i = 0; i < 4 && !stoken.stop_requested(); ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+    }
+
+    PULSE_LOG_INFO("market", "CFD poll loop stopped");
 }
 
 } // namespace pulse::market

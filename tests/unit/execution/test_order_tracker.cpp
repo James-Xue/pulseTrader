@@ -97,7 +97,7 @@ class OrderTrackerSnapshotTest : public ::testing::Test
         ExchangeConfig config;
         m_wsClient = std::make_unique<GateWsClient>(config);
         m_restClient = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient);
     }
 
     std::unique_ptr<GateWsClient> m_wsClient;
@@ -199,7 +199,7 @@ class OrderTrackerCallbackTest : public ::testing::Test
         ExchangeConfig config;
         m_wsClient = std::make_unique<GateWsClient>(config);
         m_restClient = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient);
     }
 
     std::unique_ptr<GateWsClient> m_wsClient;

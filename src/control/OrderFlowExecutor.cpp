@@ -59,8 +59,10 @@ OrderFlowExecutor::OrderFlowExecutor(
     risk::DrawdownGuard &drawdown_guard,
     IOrderPlacer *spot_placer,
     IOrderPlacer *futures_placer,
+    IOrderPlacer *cfd_placer,
     execution::OrderTracker *spot_tracker,
     execution::OrderTracker *futures_tracker,
+    execution::OrderTracker *cfd_tracker,
     std::mutex &rest_mutex,
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *trade_recorder
@@ -74,8 +76,10 @@ OrderFlowExecutor::OrderFlowExecutor(
     , m_drawdownGuard{ drawdown_guard }
     , m_spotPlacer{ spot_placer }
     , m_futuresPlacer{ futures_placer }
+    , m_cfdPlacer{ cfd_placer }
     , m_spotTracker{ spot_tracker }
     , m_futuresTracker{ futures_tracker }
+    , m_cfdTracker{ cfd_tracker }
     , m_restMutex{ rest_mutex }
 #ifdef PULSE_ENABLE_SQLITE
     , m_tradeRecorder{ trade_recorder }
@@ -94,6 +98,22 @@ OrderFlowExecutor::OrderFlowExecutor(
             [this](const execution::ExecutionReport &report)
             { onOrderComplete(report); });
     }
+    if (m_cfdTracker)
+    {
+        m_cfdTracker->setCompletionCallback(
+            [this](const execution::ExecutionReport &report)
+            { onOrderComplete(report); });
+    }
+}
+
+void OrderFlowExecutor::setActiveMarket(MarketType mt)
+{
+    m_activeMarket.store(mt, std::memory_order_relaxed);
+}
+
+MarketType OrderFlowExecutor::activeMarket() const
+{
+    return m_activeMarket.load(std::memory_order_acquire);
 }
 
 execution::OrderRequest
@@ -160,6 +180,22 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
         return;
     }
 
+    // Direction gate: only the active market's signals may trade.
+    // Skipped BEFORE risk evaluation so gated signals burn no rate-limiter
+    // tokens and create no reservations.
+    const MarketType active = m_activeMarket.load(std::memory_order_acquire);
+    if (sig.market_type != active)
+    {
+        log_app->info("Signal SKIPPED [{}] {} {} — market {} not active "
+                      "(active: {})",
+                      sig.strategy_id,
+                      sig.symbol,
+                      (strategy::SignalType::Buy == sig.type) ? "BUY" : "SELL",
+                      toString(sig.market_type),
+                      toString(active));
+        return;
+    }
+
     auto req = buildRequestFromSignal(sig);
 
     // Risk evaluation.
@@ -208,6 +244,17 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
 Result<execution::OrderResponse>
 OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
 {
+    // Direction gate (manual orders): reject non-active markets unless the
+    // order is reduce_only (closing old-direction positions stays possible).
+    const MarketType active = m_activeMarket.load(std::memory_order_acquire);
+    if (req.market_type != active && !req.reduce_only)
+    {
+        return PulseError{ ErrorCode::InactiveMarket,
+                           "order market_type=" + std::string(toString(req.market_type))
+                               + " is not the active direction (active="
+                               + toString(active) + ")" };
+    }
+
     // Evaluate exactly once, then place using that evaluation. Re-evaluating
     // after a Modified result double-counts the caller's own reservation and
     // rejects orders whose quantity was capped to the notional budget.
@@ -239,10 +286,21 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
     }
 
     // 3. Pick placer/tracker by market type.
-    auto *placer  = (MarketType::Futures == order_req.market_type)
-                        ? m_futuresPlacer : m_spotPlacer;
-    auto *tracker = (MarketType::Futures == order_req.market_type)
-                        ? m_futuresTracker : m_spotTracker;
+    IOrderPlacer *placer = m_spotPlacer;
+    execution::OrderTracker *tracker = m_spotTracker;
+    switch (order_req.market_type)
+    {
+    case MarketType::Futures:
+        placer  = m_futuresPlacer;
+        tracker = m_futuresTracker;
+        break;
+    case MarketType::Cfd:
+        placer  = m_cfdPlacer;
+        tracker = m_cfdTracker;
+        break;
+    default:
+        break; // Spot.
+    }
 
     if (nullptr == placer)
     {
@@ -340,7 +398,14 @@ bool OrderFlowExecutor::cancelOrder(const std::string &order_id)
         return false;
     }
 
-    // Order IDs are unique per market — probe futures first, then spot.
+    // Order IDs are unique per market — probe cfd, then futures, then spot.
+    if (m_cfdTracker && m_cfdPlacer)
+    {
+        if (m_cfdTracker->getStatus(order_id).has_value())
+        {
+            return m_cfdPlacer->cancel(order_id);
+        }
+    }
     if (m_futuresTracker && m_futuresPlacer)
     {
         if (m_futuresTracker->getStatus(order_id).has_value())
@@ -356,6 +421,57 @@ bool OrderFlowExecutor::cancelOrder(const std::string &order_id)
         }
     }
     return false;
+}
+
+int OrderFlowExecutor::cancelAllOpenOrders(MarketType mt)
+{
+    execution::OrderTracker *tracker = m_spotTracker;
+    IOrderPlacer *placer = m_spotPlacer;
+    switch (mt)
+    {
+    case MarketType::Futures:
+        tracker = m_futuresTracker;
+        placer  = m_futuresPlacer;
+        break;
+    case MarketType::Cfd:
+        tracker = m_cfdTracker;
+        placer  = m_cfdPlacer;
+        break;
+    default:
+        break; // Spot.
+    }
+
+    if (nullptr == tracker || nullptr == placer)
+    {
+        return 0;
+    }
+
+    auto log_app = logging::Logger::get("app");
+    int cancelled = 0;
+
+    // Bounded sweep: reconcile → cancel → recheck. The direction gate already
+    // closed before this runs, but a signal may have been mid-flight when the
+    // switch happened — a couple of passes closes the race.
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        tracker->reconcileAll();
+        const auto active = tracker->activeOrders();
+        if (active.empty())
+        {
+            break;
+        }
+        for (const auto &order : active)
+        {
+            if (placer->cancel(order.order_id))
+            {
+                ++cancelled;
+            }
+        }
+    }
+
+    log_app->info("Direction switch: cancelled {} {} open orders",
+                  cancelled, toString(mt));
+    return cancelled;
 }
 
 void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report)
@@ -423,16 +539,19 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
     // Open the unfilled remainder in the fill direction (long or short).
     if (remaining > 0.0)
     {
-        const bool futures =
-            (MarketType::Futures == reservation.request.market_type);
+        // Leverage-backed markets (futures + CFD) record the requested
+        // leverage on the position for margin/PnL math; spot uses 1.0.
+        const MarketType mt = reservation.request.market_type;
+        const bool leverage_market =
+            (MarketType::Futures == mt || MarketType::Cfd == mt);
         auto open_result = m_positionMgr.openPosition(
             report.symbol,
             report.side,
             remaining,
             report.avg_fill_price,
             report.client_order_id,
-            reservation.request.market_type,
-            futures ? reservation.request.leverage : 1.0,
+            mt,
+            leverage_market ? reservation.request.leverage : 1.0,
             MarginMode::Cross,
             reservation.request.quanto_multiplier,
             0.005);

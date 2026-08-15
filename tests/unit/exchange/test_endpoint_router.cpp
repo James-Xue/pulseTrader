@@ -190,3 +190,47 @@ TEST(EndpointRouterTest, LeveragePath_Spot_Empty)
 }
 
 } // namespace pulse::exchange::test
+
+namespace pulse::exchange::test
+{
+TEST(EndpointRouterTest, RestPrefix_Cfd)
+{
+    EXPECT_EQ("/api/v4/tradfi", EndpointRouter::restPrefix(MarketType::Cfd));
+}
+
+TEST(EndpointRouterTest, OrdersPath_Cfd)
+{
+    EXPECT_EQ("/api/v4/tradfi/orders", EndpointRouter::ordersPath(MarketType::Cfd));
+    EXPECT_EQ("/api/v4/tradfi/orders/12345",
+              EndpointRouter::orderPath(MarketType::Cfd, "12345"));
+}
+
+TEST(EndpointRouterTest, AccountsPath_Cfd)
+{
+    EXPECT_EQ("/api/v4/tradfi/users/assets",
+              EndpointRouter::accountsPath(MarketType::Cfd));
+}
+
+TEST(EndpointRouterTest, CfdSymbolsPath)
+{
+    EXPECT_EQ("/api/v4/tradfi/symbols", EndpointRouter::cfdSymbolsPath());
+    EXPECT_EQ("/api/v4/tradfi/symbols/detail",
+              EndpointRouter::cfdSymbolsDetailPath());
+}
+
+TEST(EndpointRouterTest, CfdTickerAndKlinesPaths)
+{
+    EXPECT_EQ("/api/v4/tradfi/symbols/XAUUSD/tickers",
+              EndpointRouter::cfdTickerPath("XAUUSD"));
+    EXPECT_EQ("/api/v4/tradfi/symbols/XAUUSD/klines",
+              EndpointRouter::cfdKlinesPath("XAUUSD"));
+}
+
+TEST(EndpointRouterTest, CfdPositionsPaths)
+{
+    EXPECT_EQ("/api/v4/tradfi/positions", EndpointRouter::cfdPositionsPath());
+    EXPECT_EQ("/api/v4/tradfi/positions/pos_1/close",
+              EndpointRouter::cfdPositionClosePath("pos_1"));
+}
+
+} // namespace pulse::exchange::test

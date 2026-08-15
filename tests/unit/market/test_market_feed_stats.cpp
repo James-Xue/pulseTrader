@@ -189,3 +189,68 @@ TEST(MarketFeedStats, FuturesKlineSubscriptionPayloadOrder)
     EXPECT_EQ("BTC_USDT", payload[1]);
     EXPECT_EQ("ETH_USDT", payload[2]);
 }
+
+// ---------------------------------------------------------------------------
+// M15: TradFi CFD feed parsers (pure static functions, no network)
+// ---------------------------------------------------------------------------
+
+TEST(MarketFeedCfd, ParseCfdTicker)
+{
+    // Probe-verified shape (2026-08-15): strings under data.
+    const nlohmann::json ticker = {
+        { "last_price", "4376.45" },
+        { "bid_price", "4376.35" },
+        { "ask_price", "4376.55" },
+        { "price_change", "0.58" },
+        { "status", "open" },
+    };
+
+    const auto parsed = MarketFeed::parseCfdTicker(ticker, "XAUUSD");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ("XAUUSD", parsed->symbol);
+    EXPECT_DOUBLE_EQ(4376.45, parsed->last);
+    EXPECT_DOUBLE_EQ(4376.35, parsed->bid);
+    EXPECT_DOUBLE_EQ(4376.55, parsed->ask);
+    EXPECT_DOUBLE_EQ(0.58, parsed->change_pct);
+    EXPECT_DOUBLE_EQ(0.0, parsed->volume_24h); // no volume in TradFi tickers
+}
+
+TEST(MarketFeedCfd, ParseCfdTickerRejectsMissingLast)
+{
+    EXPECT_FALSE(MarketFeed::parseCfdTicker(
+                     nlohmann::json{ { "bid_price", "4376.35" } }, "XAUUSD")
+                     .has_value());
+    EXPECT_FALSE(MarketFeed::parseCfdTicker(
+                     nlohmann::json{ { "last_price", "0" } }, "XAUUSD")
+                     .has_value());
+}
+
+TEST(MarketFeedCfd, ParseCfdKline)
+{
+    // Probe-verified shape: {o,h,l,c,t} with t in Unix seconds.
+    const nlohmann::json candle = {
+        { "o", "4375.88" },
+        { "h", "4375.91" },
+        { "l", "4375.40" },
+        { "c", "4375.62" },
+        { "t", 1786740960 },
+    };
+
+    const auto parsed = MarketFeed::parseCfdKline(candle);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(1786740960LL * 1000, parsed->open_time);
+    EXPECT_EQ(1786740960LL * 1000 + 60000, parsed->close_time);
+    EXPECT_DOUBLE_EQ(4375.88, parsed->open);
+    EXPECT_DOUBLE_EQ(4375.91, parsed->high);
+    EXPECT_DOUBLE_EQ(4375.40, parsed->low);
+    EXPECT_DOUBLE_EQ(4375.62, parsed->close);
+    EXPECT_DOUBLE_EQ(0.0, parsed->volume); // no volume field
+    EXPECT_TRUE(parsed->closed);
+}
+
+TEST(MarketFeedCfd, ParseCfdKlineRejectsMissingFields)
+{
+    EXPECT_FALSE(MarketFeed::parseCfdKline(
+                     nlohmann::json{ { "o", "1" }, { "h", "2" } })
+                     .has_value());
+}

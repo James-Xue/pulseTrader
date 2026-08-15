@@ -86,7 +86,7 @@ int main()
     GateWsClient ws_client(exchange_cfg);
 
     // 4. Create MarketFeed dispatcher.
-    MarketFeed feed(ws_client, rest_client);
+    MarketFeed feed(&ws_client, rest_client);
 
     // 5. Start the WebSocket client.
     std::cout << "[INFO] Starting WebSocket client..." << std::endl;
