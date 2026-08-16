@@ -124,6 +124,14 @@ class EndpointRouter
     /// Cfd:     returns empty string (leverage is account-level).
     [[nodiscard]] static std::string leveragePath(MarketType mt, const std::string &contract = "");
 
+    /// Path to list open positions.
+    ///
+    /// Futures: "/api/v4/futures/usdt/positions" (all contracts; entries
+    /// with size == 0 have no open position).
+    /// Spot/Cfd: returns empty string (spot has no position endpoint; CFD
+    /// uses getCfdPositions()).
+    [[nodiscard]] static std::string positionsPath(MarketType mt);
+
     // -----------------------------------------------------------------------
     // TradFi (CFD) specific endpoint builders — no WebSocket, distinct paths
     // -----------------------------------------------------------------------

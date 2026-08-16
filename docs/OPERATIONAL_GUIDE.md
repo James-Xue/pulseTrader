@@ -332,6 +332,14 @@ journalctl --user -u pulsetrader -f       # live logs (journald, not engine.log)
   (two engines each trading independently, exchange position ≠ engine view).
   Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
 
+**Startup position reconciliation**: the engine imports real open positions from
+the exchange at startup (`GET /futures/usdt/positions`), so positions opened by a
+previous run or manually appear in `positions` / `get_positions` immediately —
+look for `[app] Position sync: ...` in the log. Synced positions count toward
+risk limits (that is the point — true exposure), so if a large manual position
+(e.g. a 5000-USDT SKHY short) exceeds `maxPositionNotional`, the engine refuses
+new orders until the limits are raised or the position is closed.
+
 **Alternative: manual launch (blocking, same binary)**
 
 ```bash

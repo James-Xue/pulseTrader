@@ -34,6 +34,71 @@ Result<std::string> PositionManager::openPosition(
                          MarketType::Spot, 1.0, MarginMode::Cross, 1.0, 0.0);
 }
 
+void PositionManager::syncPositionFromExchange(
+    const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+    Price mark_price, MarketType market_type, double leverage,
+    MarginMode margin_mode, double quanto_multiplier, double maintenance_rate,
+    Price liquidation_price, Timestamp open_time)
+{
+    // Startup reconciliation: import positions that already exist on the
+    // exchange (previous engine run, manual trading). No limit validation —
+    // the exposure is real and must be visible to the risk engine.
+    const std::string pos_id = symbol + "_"
+        + (Side::Buy == side ? "Buy" : "Sell") + "_sync";
+
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    auto it = m_positions.find(pos_id);
+    if (m_positions.end() != it)
+    {
+        // Re-sync: refresh prices/quantity in place, keep open_time.
+        auto &pos = it->second;
+        pos.side = side;
+        pos.quantity = qty;
+        pos.entry_price = entry_price;
+        pos.market_type = market_type;
+        pos.leverage = leverage;
+        pos.margin_mode = margin_mode;
+        pos.quanto_multiplier = quanto_multiplier;
+        pos.margin_used = (leverage > 0.0)
+            ? qty * entry_price * quanto_multiplier / leverage
+            : 0.0;
+        pos.liquidation_price = liquidation_price;
+        pos.current_price = mark_price;
+        pos.notional_value = qty * mark_price * quanto_multiplier;
+        pos.unrealized_pnl = calculateUnrealizedPnl(
+            side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+        return;
+    }
+
+    Position pos;
+    pos.position_id = pos_id;
+    pos.symbol = symbol;
+    pos.side = side;
+    pos.quantity = qty;
+    pos.entry_price = entry_price;
+    pos.current_price = mark_price;
+    pos.notional_value = qty * mark_price * quanto_multiplier;
+    pos.open_time = (Timestamp{} == open_time) ? now() : open_time;
+    pos.strategy_id = ""; // Exchange-side position — no owning strategy.
+    pos.market_type = market_type;
+    pos.leverage = leverage;
+    pos.margin_mode = margin_mode;
+    pos.quanto_multiplier = quanto_multiplier;
+    pos.margin_used = (leverage > 0.0)
+        ? qty * entry_price * quanto_multiplier / leverage
+        : 0.0;
+    pos.liquidation_price = liquidation_price;
+    pos.unrealized_pnl = calculateUnrealizedPnl(
+        side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+
+    m_positions[pos_id] = pos;
+    PULSE_LOG_INFO("risk",
+        "Synced exchange position {}: {} {} {} @ {} (mark {}, liq {})",
+        pos_id, symbol, (Side::Buy == side ? "long" : "short"), qty,
+        entry_price, mark_price, liquidation_price);
+}
+
 Result<std::string> PositionManager::openPosition(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id,

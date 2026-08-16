@@ -100,6 +100,25 @@ class PositionManager
         MarketType market_type, double leverage, MarginMode margin_mode,
         double quanto_multiplier, double maintenance_rate);
 
+    /// Import a position that already exists on the exchange (startup sync).
+    ///
+    /// Unlike openPosition(), NO portfolio-limit validation is applied: the
+    /// position is real money exposure on the exchange and must be visible
+    /// to the risk engine regardless of configured limits — hiding it would
+    /// undercount risk (drawdown, notional caps) and confuse displays.
+    ///
+    /// Idempotent per (symbol, side): re-syncing updates the existing synced
+    /// entry (fresh prices/quantity) instead of duplicating it. Synced
+    /// positions use the id "<symbol>_<Buy|Sell>_sync", which cannot collide
+    /// with engine-opened ids ("<symbol>_<Buy|Sell>_<n>"). liquidation_price
+    /// is taken from the exchange (more accurate than the estimate).
+    void syncPositionFromExchange(
+        const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+        Price mark_price, MarketType market_type, double leverage,
+        MarginMode margin_mode, double quanto_multiplier,
+        double maintenance_rate, Price liquidation_price,
+        Timestamp open_time = {});
+
     /// Close a position (fully or partially).
     ///
     ///   1. If close_qty >= position.quantity: position is removed (full close)

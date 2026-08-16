@@ -124,6 +124,19 @@ class GateRestClient
     /// Requires valid API key and secret.
     [[nodiscard]] Result<nlohmann::json> getFuturesAccounts();
 
+    /// GET /api/v4/futures/usdt/positions — list open futures positions.
+    ///
+    /// Returns an array of position objects, one per contract, with fields:
+    /// contract, size (contracts, signed: +long/-short; 0 = no position),
+    /// entry_price, mark_price, leverage (0 = cross margin), mode,
+    /// liq_price, maintenance_rate, unrealised_pnl, margin, etc.
+    ///
+    /// Contracts without an open position (size == 0) are filtered out so
+    /// the result contains only real exposure. This is the startup
+    /// reconciliation source: positions opened by a previous engine run (or
+    /// manually) become visible to the risk engine after a restart.
+    [[nodiscard]] Result<nlohmann::json> getFuturesPositions();
+
     /// GET /api/v4/futures/usdt/accounts — fetch and parse futures account balance.
     ///
     /// Convenience wrapper around getFuturesAccounts() that returns a parsed

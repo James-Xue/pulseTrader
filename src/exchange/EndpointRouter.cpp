@@ -146,6 +146,19 @@ std::string EndpointRouter::orderPath(MarketType mt, const std::string &order_id
 }
 
 // ---------------------------------------------------------------------------
+// positionsPath — futures only (spot has no position endpoint; CFD has its
+// own getCfdPositions() with a different response shape)
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::positionsPath(MarketType mt)
+{
+    if (MarketType::Futures == mt)
+    {
+        return "/api/v4/futures/usdt/positions";
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
 // leveragePath — futures only
 // ---------------------------------------------------------------------------
 std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contract)

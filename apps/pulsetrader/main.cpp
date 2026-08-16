@@ -449,6 +449,14 @@ static void logSystemHeartbeat(
 // ===========================================================================
 // main
 // ===========================================================================
+
+// Forward declaration — defined after runCli; called from runTrade at startup.
+static void syncFuturesPositionsFromExchange(
+    pulse::exchange::GateRestClient &futures_rest,
+    pulse::risk::PositionManager &position_mgr,
+    const std::shared_ptr<pulse::market::SymbolRegistry> &registry,
+    std::mutex &rest_mutex);
+
 static int runTrade(int argc, char* argv[])
 {
     using pulse::MarketType;
@@ -956,6 +964,15 @@ static int runTrade(int argc, char* argv[])
         order_flow.setSymbolRegistry(symbol_registry);
     }
 
+    // Reconcile positions that already exist on the exchange (previous
+    // engine run, manual trading) so risk limits and displays reflect the
+    // true exposure from the first second. Non-fatal on failure.
+    if (futures_rest)
+    {
+        syncFuturesPositionsFromExchange(
+            *futures_rest, position_mgr, symbol_registry, rest_mutex);
+    }
+
     aggregator.setOutputCallback(
         [&order_flow](const pulse::strategy::TradingSignal& sig)
         {
@@ -1398,6 +1415,119 @@ int runCliRepl(pulse::control::ControlClient &client)
 }
 
 } // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// Position reconciliation — import positions that already exist on the
+// exchange (opened by a previous engine run or manually) into the risk
+// engine at startup. Without this, a restart silently forgets open
+// positions: the engine view drifts from the exchange (2026-08-16 incident)
+// and risk limits / displays undercount real exposure. Non-fatal on failure.
+// ---------------------------------------------------------------------------
+
+/// Read a numeric field that may arrive as a JSON string or number.
+static double jsonNumber(const nlohmann::json &j, const char *key)
+{
+    const auto it = j.find(key);
+    if (j.end() == it)
+    {
+        return 0.0;
+    }
+    if (it->is_string())
+    {
+        return pulse::safeParseDouble(it->get<std::string>()).value_or(0.0);
+    }
+    if (it->is_number())
+    {
+        return it->get<double>();
+    }
+    return 0.0;
+}
+
+static void syncFuturesPositionsFromExchange(
+    pulse::exchange::GateRestClient &futures_rest,
+    pulse::risk::PositionManager &position_mgr,
+    const std::shared_ptr<pulse::market::SymbolRegistry> &registry,
+    std::mutex &rest_mutex)
+{
+    nlohmann::json positions;
+    {
+        std::lock_guard<std::mutex> rest_lock(rest_mutex);
+        auto result = futures_rest.getFuturesPositions();
+        if (!pulse::ok(result))
+        {
+            PULSE_LOG_WARN("app", "Position sync skipped: {}",
+                           pulse::error(result).message);
+            return;
+        }
+        positions = pulse::value(result);
+    }
+
+    int synced = 0;
+    for (const auto &p : positions)
+    {
+        const std::string contract = p.value("contract", "");
+        if (contract.empty())
+        {
+            continue;
+        }
+        const int size = p.value("size", 0);
+        if (0 == size)
+        {
+            continue;
+        }
+
+        const double entry = jsonNumber(p, "entry_price");
+        const double mark = jsonNumber(p, "mark_price");
+
+        // Gate reports leverage = 0 (as a STRING) for cross margin; fall
+        // back to the account's cross leverage limit for margin/PnL math.
+        double leverage = jsonNumber(p, "leverage");
+        if (leverage <= 0.0)
+        {
+            leverage = jsonNumber(p, "cross_leverage_limit");
+        }
+        if (leverage <= 0.0)
+        {
+            leverage = 10.0;
+        }
+
+        double quanto_multiplier = 1.0;
+        if (registry)
+        {
+            if (const auto info = registry->get(contract))
+            {
+                quanto_multiplier = info->quanto_multiplier;
+            }
+        }
+
+        // Exchange open_time is a unix SECONDS string; Position stores ns.
+        const double open_secs = jsonNumber(p, "open_time");
+        pulse::Timestamp open_time{};
+        if (open_secs > 0.0)
+        {
+            open_time = std::chrono::time_point_cast<pulse::Duration>(
+                std::chrono::system_clock::time_point{
+                    std::chrono::seconds{static_cast<std::int64_t>(open_secs)}});
+        }
+
+        const bool is_long = size > 0;
+        position_mgr.syncPositionFromExchange(
+            contract, is_long ? pulse::Side::Buy : pulse::Side::Sell,
+            static_cast<double>(std::abs(size)), entry, mark,
+            pulse::MarketType::Futures, leverage, pulse::MarginMode::Cross,
+            quanto_multiplier, jsonNumber(p, "maintenance_rate"),
+            jsonNumber(p, "liq_price"), open_time);
+
+        PULSE_LOG_INFO("app",
+            "Position sync: {} {} {} contracts @ {} (mark {}, liq {})",
+            contract, (is_long ? "long" : "short"), std::abs(size), entry,
+            mark, jsonNumber(p, "liq_price"));
+        ++synced;
+    }
+    PULSE_LOG_INFO("app",
+        "Position sync complete: {} position(s) imported from exchange",
+        synced);
+}
 
 /// `pulsetrader cli` — attach to a running engine's control socket.
 int runCli(int argc, char *argv[])

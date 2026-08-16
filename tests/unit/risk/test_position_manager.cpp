@@ -520,3 +520,100 @@ TEST(PositionManager, PortfolioSummary_FuturesFields)
     EXPECT_EQ(1, summary.futures_position_count);
     EXPECT_GT(summary.total_margin_used, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// syncPositionFromExchange — startup reconciliation
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, SyncImportsExchangePositionWithoutLimitChecks)
+{
+    // Tiny limits on purpose: a real exchange position must be imported
+    // even when it exceeds the configured caps (hiding it would undercount
+    // risk, not protect it).
+    PositionManager pm(make_config(100.0, 2, 50.0));
+
+    // 6 contracts of BTC @ 63072.3 → notional ≈ 37.8 (quanto 0.0001) — under
+    // the caps; margin_used = 6 * 63072.3 * 0.0001 / 10 ≈ 3.78.
+    pm.syncPositionFromExchange(
+        "BTC_USDT", Side::Sell, 6.0, 63072.3, 63037.2,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005, 69000.0);
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size());
+    const auto &pos = all[0];
+
+    EXPECT_EQ("BTC_USDT_Sell_sync", pos.position_id);
+    EXPECT_EQ(Side::Sell, pos.side);
+    EXPECT_NEAR(6.0, pos.quantity, 1e-9);
+    EXPECT_NEAR(63072.3, pos.entry_price, 1e-9);
+    EXPECT_NEAR(63037.2, pos.current_price, 1e-9);
+    EXPECT_EQ(MarketType::Futures, pos.market_type);
+    EXPECT_NEAR(10.0, pos.leverage, 1e-9);
+    EXPECT_EQ(MarginMode::Cross, pos.margin_mode);
+    EXPECT_NEAR(0.0001, pos.quanto_multiplier, 1e-12);
+    EXPECT_NEAR(69000.0, pos.liquidation_price, 1e-9);
+    // margin = qty * entry * quanto / leverage.
+    EXPECT_NEAR(6.0 * 63072.3 * 0.0001 / 10.0, pos.margin_used, 1e-6);
+    // Short at a mark below entry → positive unrealized PnL.
+    EXPECT_NEAR((63072.3 - 63037.2) * 6.0 * 0.0001 * 10.0, pos.unrealized_pnl, 1e-6);
+    // No owning strategy.
+    EXPECT_TRUE(pos.strategy_id.empty());
+}
+
+TEST(PositionManager, SyncImportAboveLimitsStillVisible)
+{
+    PositionManager pm(make_config(50.0, 2, 20.0)); // tight caps
+
+    // A real exchange position that exceeds every configured limit must
+    // still be imported — the caps apply to NEW orders, not to reality.
+    pm.syncPositionFromExchange(
+        "ETH_USDT", Side::Buy, 100.0, 3000.0, 3010.0,
+        MarketType::Futures, 5.0, MarginMode::Cross, 0.01, 0.005, 2500.0);
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size());
+    EXPECT_EQ("ETH_USDT_Buy_sync", all[0].position_id);
+    EXPECT_NEAR(100.0, all[0].quantity, 1e-9);
+}
+
+TEST(PositionManager, SyncIsIdempotentPerSymbolSide)
+{
+    PositionManager pm(make_config());
+
+    pm.syncPositionFromExchange(
+        "BTC_USDT", Side::Sell, 6.0, 63072.3, 63037.2,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005, 69000.0);
+
+    // Re-sync with updated prices/qty (exchange merged position changed).
+    pm.syncPositionFromExchange(
+        "BTC_USDT", Side::Sell, 7.0, 63050.0, 63010.0,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005, 69100.0);
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size()); // updated, not duplicated
+    EXPECT_EQ("BTC_USDT_Sell_sync", all[0].position_id);
+    EXPECT_NEAR(7.0, all[0].quantity, 1e-9);
+    EXPECT_NEAR(63050.0, all[0].entry_price, 1e-9);
+    EXPECT_NEAR(69100.0, all[0].liquidation_price, 1e-9);
+}
+
+TEST(PositionManager, SyncDoesNotCollideWithEngineOpenedPositions)
+{
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // Exchange-side synced short.
+    pm.syncPositionFromExchange(
+        "BTC_USDT", Side::Sell, 6.0, 63072.3, 63037.2,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.0001, 0.005, 69000.0);
+
+    // Engine opens a new position in the same symbol — separate id.
+    const auto opened = pm.openPosition(
+        "BTC_USDT", Side::Sell, 1.0, 63000.0, "momentum");
+    ASSERT_TRUE(ok(opened));
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(2, all.size());
+    EXPECT_NE("BTC_USDT_Sell_sync", pulse::value(opened));
+    EXPECT_TRUE(pm.getPosition("BTC_USDT_Sell_sync").has_value());
+    EXPECT_TRUE(pm.getPosition(pulse::value(opened)).has_value());
+}

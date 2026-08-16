@@ -509,6 +509,36 @@ Result<nlohmann::json> GateRestClient::getFuturesAccounts()
     return request("GET", EndpointRouter::accountsPath(MarketType::Futures));
 }
 
+Result<nlohmann::json> GateRestClient::getFuturesPositions()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
+    }
+
+    auto result = request("GET", EndpointRouter::positionsPath(MarketType::Futures));
+    if (!ok(result))
+    {
+        return result;
+    }
+
+    // The positions endpoint returns one object PER CONTRACT, including
+    // contracts with no open position (size == 0). Keep only real exposure.
+    const auto &raw = value(result);
+    nlohmann::json open = nlohmann::json::array();
+    if (raw.is_array())
+    {
+        for (const auto &p : raw)
+        {
+            if (0 != p.value("size", 0))
+            {
+                open.push_back(p);
+            }
+        }
+    }
+    return open;
+}
+
 Result<AccountBalance> GateRestClient::getFuturesAccountBalance()
 {
     auto result = getFuturesAccounts();
