@@ -295,6 +295,10 @@ requestTimeoutMs = 30000
 enabled = true
 bindAddress = "127.0.0.1"              # Localhost only — do NOT expose to the network
 port = 8081                            # JSON-RPC control socket (env override: PULSE_CONTROL_PORT)
+display_timezone = "local"             # Human-readable timestamps in control output:
+                                       #   "local" (machine TZ) | "utc" | "±HH:MM"
+                                       #   e.g. "-04:00" = US Eastern summer time —
+                                       #   align with your phone app's timezone.
 ```
 
 > **Control Socket Security Model**:
@@ -302,6 +306,33 @@ port = 8081                            # JSON-RPC control socket (env override: 
 > - It speaks newline-delimited JSON-RPC 2.0 over TCP. Prefer the built-in `cli` REPL or the `mcp` server over raw socket access.
 
 ### 4.3 Start Trading
+
+**Preferred: systemd user service (auto-start + crash restart + single instance)**
+
+Install once (service file ships in `deploy/pulsetrader.service`):
+
+```bash
+cp deploy/pulsetrader.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now pulsetrader
+loginctl enable-linger $USER          # start at boot without a login session
+```
+
+```bash
+systemctl --user start pulsetrader        # start
+systemctl --user status pulsetrader       # status
+systemctl --user restart pulsetrader      # restart (e.g. after a rebuild)
+journalctl --user -u pulsetrader -f       # live logs (journald, not engine.log)
+```
+
+- Enabled at boot via `loginctl enable-linger` — no manual start needed after reboot.
+- The engine takes an exclusive `flock` on `data/engine.lock` at startup: a second
+  engine process (manual `./run.sh trade`, another Claude session, etc.) is
+  **refused immediately** — this prevents the 2026-08-16 double-engine incident
+  (two engines each trading independently, exchange position ≠ engine view).
+  Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
+
+**Alternative: manual launch (blocking, same binary)**
 
 ```bash
 # Terminal 1: Start trading main program

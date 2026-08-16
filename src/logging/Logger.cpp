@@ -101,7 +101,9 @@ std::shared_ptr<spdlog::logger> makeLogger(std::string_view module, const LogCon
     {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(g_default_level);
-        console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
+        // %z appends the UTC offset (e.g. +0800) so every line is
+        // timezone-unambiguous next to a phone app showing another TZ.
+        console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e %z] [%^%l%$] [%n] %v");
         sinks.push_back(console_sink);
     }
 
@@ -111,7 +113,7 @@ std::shared_ptr<spdlog::logger> makeLogger(std::string_view module, const LogCon
         auto file_path = std::filesystem::path(config.logDir) / (std::string(module) + ".log");
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(file_path.string(), /*truncate=*/false);
         file_sink->set_level(g_default_level);
-        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%n] %v");
+        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e %z] [%l] [%n] %v");
         sinks.push_back(file_sink);
     }
 

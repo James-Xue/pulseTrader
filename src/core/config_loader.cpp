@@ -671,6 +671,8 @@ PulseError parseControl(const toml::value &root, ControlConfig &out)
     out.bindAddress = toml::find_or(sec, "bindAddress", out.bindAddress);
     out.port = static_cast<std::uint16_t>(
         toml::find_or(sec, "port", static_cast<int>(out.port)));
+    out.displayTimezone = toml::find_or(
+        sec, "display_timezone", out.displayTimezone);
 
     return {};
 }

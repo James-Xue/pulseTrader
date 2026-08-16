@@ -8,6 +8,7 @@
 // Call after loadConfigFile() or buildDefaultConfig() before starting
 // the trading engine.
 
+#include "core/TimeUtil.hpp"
 #include "core/config_validator.hpp"
 
 #include <cmath>
@@ -340,6 +341,13 @@ PulseError validateConfig(const PulseConfig &cfg)
             return PulseError{ErrorCode::ConfigValidationError,
                               "control.bindAddress must not be empty when "
                               "control.enabled is true"};
+        }
+        if (!parseDisplayTimezone(cfg.control.displayTimezone))
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.display_timezone must be \"local\", "
+                              "\"utc\" or \"±HH:MM\" (got \""
+                                  + cfg.control.displayTimezone + "\")"};
         }
     }
 

@@ -17,6 +17,7 @@
 //   pulsetrader --help                   Print usage
 //   pulsetrader --version                Print version
 
+#include "core/SingleInstanceGuard.hpp"
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
 #include "core/config_validator.hpp"
@@ -454,7 +455,29 @@ static int runTrade(int argc, char* argv[])
     using pulse::MarginMode;
 
     // ------------------------------------------------------------------
-    // 0. Command-line parsing
+    // 0. Single-instance guard — refuse a second engine on this machine.
+    //    Two engines ran simultaneously on 2026-08-16 and each only knew
+    //    its own fills, so the exchange position drifted from the engine
+    //    view. The flock lives for the whole process (RAII).
+    // ------------------------------------------------------------------
+    std::optional<pulse::SingleInstanceGuard> instance_guard;
+    if (nullptr == std::getenv("PULSE_ALLOW_MULTI_INSTANCES"))
+    {
+        instance_guard.emplace("data/engine.lock");
+        if (!instance_guard->acquired())
+        {
+            std::cerr << "[fatal] Another pulseTrader engine instance is "
+                         "already running (lock: data/engine.lock).\n"
+                         "Stopping this instance to avoid double trading.\n"
+                         "  - check `systemctl --user status pulsetrader`\n"
+                         "  - or set PULSE_ALLOW_MULTI_INSTANCES=1 to "
+                         "bypass (not recommended)\n";
+            return 1;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 1. Command-line parsing
     // ------------------------------------------------------------------
     std::string config_path;
 

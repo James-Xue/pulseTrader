@@ -1,5 +1,7 @@
 add_executable(test_core
     testTypes.cpp
+    testTimeUtil.cpp
+    test_single_instance_guard.cpp
 )
 
 target_link_libraries(test_core

@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-15
-> File size: 21635 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 22078 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview

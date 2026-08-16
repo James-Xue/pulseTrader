@@ -227,6 +227,15 @@ struct ControlConfig
     bool enabled = true;                   ///< Enable TCP control socket.
     std::string bindAddress = "127.0.0.1"; ///< Localhost only by default.
     std::uint16_t port = 8081;             ///< Control socket listen port.
+
+    /// Timezone for human-readable timestamps in control-plane output
+    /// (JSON-RPC *_str fields, REPL tables). One of:
+    ///   "local" — machine local time (default)
+    ///   "utc"   — UTC
+    ///   "±HH:MM" — fixed UTC offset, e.g. "-04:00" for US Eastern summer
+    /// time or "+08:00" for Beijing. Lets you align displayed times with a
+    /// phone app showing a different timezone.
+    std::string displayTimezone = "local";
 };
 
 // ---------------------------------------------------------------------------

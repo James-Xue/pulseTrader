@@ -330,10 +330,11 @@ std::string formatPositions(const nlohmann::json &result)
                 : std::to_string(p.value("quantity", 0.0)),
             std::to_string(p.value("entry_price", 0.0)),
             std::to_string(p.value("unrealized_pnl", 0.0)),
+            p.value("open_time_str", ""),
         });
     }
     std::string out = renderTable(
-        rows, { "POSITION", "SYMBOL", "SIDE", "QTY", "ENTRY", "PNL" });
+        rows, { "POSITION", "SYMBOL", "SIDE", "QTY", "ENTRY", "PNL", "OPEN_TIME" });
     if (result.contains("portfolio"))
     {
         const auto &pf = result["portfolio"];
@@ -358,10 +359,11 @@ std::string formatOrders(const nlohmann::json &result)
             o.value("type", ""),
             std::to_string(o.value("requested_qty", 0.0)),
             o.value("status", ""),
+            o.value("submit_time_str", ""),
         });
     }
     std::string out = renderTable(
-        rows, { "ORDER", "SYMBOL", "SIDE", "TYPE", "QTY", "STATUS" });
+        rows, { "ORDER", "SYMBOL", "SIDE", "TYPE", "QTY", "STATUS", "SUBMIT" });
     const auto &reports = result.value("recentReports", nlohmann::json::array());
     if (!reports.empty())
     {

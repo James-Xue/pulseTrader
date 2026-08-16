@@ -33,7 +33,7 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
 # Build
 cmake --build build -j$(nproc)
 
-# Run tests (583 tests)
+# Run tests (643 tests)
 ctest --test-dir build --output-on-failure
 
 # Optional features
@@ -49,6 +49,10 @@ Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_par
 - `./run.sh trade` — trading engine (default subcommand `trade`); embeds a REPL when stdin is a TTY, and opens the JSON-RPC control socket (TCP 127.0.0.1:8081, `[control]` TOML section, `PULSE_CONTROL_PORT` env override)
 - `./run.sh cli` — remote-attach REPL over the control socket (auto-loads `trading.toml`; the engine must be running)
 - `./run.sh mcp` — stdio MCP server bridging to the control socket (auto-loads `trading.toml`), for LLM clients like Claude Desktop / Claude Code
+
+**Production deployment**: the engine runs as the systemd user service `pulsetrader.service` (`~/.config/systemd/user/`, `loginctl enable-linger`) — auto-start at boot, `Restart=on-failure`, journald logs (`journalctl --user -u pulsetrader -f`). Restart after rebuilding: `systemctl --user restart pulsetrader`.
+
+**Single instance**: `runTrade()` takes an exclusive `flock` on `data/engine.lock` and exits if another engine holds it. NEVER start a second engine (manual `./run.sh trade`, another session, a nohup) while one is running — two engines trade independently and the engine view drifts from the exchange position (2026-08-16 incident). `PULSE_ALLOW_MULTI_INSTANCES=1` bypasses the lock for deliberate multi-instance setups only. `cli`/`mcp` subcommands must NOT take the lock.
 
 ## Control Plane Rule
 

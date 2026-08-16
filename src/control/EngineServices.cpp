@@ -132,6 +132,8 @@ EngineServices::EngineServices(
     , m_cfdTracker{ cfd_tracker }
     , m_orderFlow{ order_flow }
     , m_restMutex{ rest_mutex }
+    , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
+                       .value_or(DisplayTimezone::local()) }
 {
 }
 
@@ -256,6 +258,15 @@ nlohmann::json EngineServices::positions() const
     nlohmann::json j;
     j["positions"] = m_positionMgr.getAllPositions();
     j["portfolio"] = m_positionMgr.portfolioSummary();
+
+    // Human-readable timestamps in the configured display timezone. The raw
+    // epoch-ms fields stay untouched (machine-readable, TZ-independent); the
+    // *_str companions make the times comparable with a phone app that shows
+    // a different timezone (e.g. US time vs Beijing time).
+    for (auto &p : j["positions"])
+    {
+        p["open_time_str"] = formatEpochMs(p.value("open_time", 0LL), m_displayTz);
+    }
     return j;
 }
 
@@ -301,6 +312,23 @@ nlohmann::json EngineServices::orders() const
     }
     j["activeOrders"] = active;
     j["recentReports"] = reports;
+
+    // Human-readable timestamps in the configured display timezone (see
+    // positions()). Note: OrderSnapshot timestamps are epoch MILLIseconds,
+    // ExecutionReport timestamps are epoch NANOSECONDS — normalize both.
+    for (auto &o : j["activeOrders"])
+    {
+        o["submit_time_str"] = formatEpochMs(o.value("submit_time", 0LL), m_displayTz);
+        o["last_update_time_str"] = formatEpochMs(
+            o.value("last_update_time", 0LL), m_displayTz);
+    }
+    for (auto &r : j["recentReports"])
+    {
+        r["submit_time_str"] = formatEpochMs(
+            r.value("submit_time", 0LL) / 1000000LL, m_displayTz);
+        r["fill_time_str"] = formatEpochMs(
+            r.value("fill_time", 0LL) / 1000000LL, m_displayTz);
+    }
     return j;
 }
 

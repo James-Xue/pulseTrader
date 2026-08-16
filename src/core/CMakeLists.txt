@@ -6,6 +6,7 @@
 # C++20 requirement, and toml11 dependency propagated automatically.
 
 add_library(pulse_core STATIC
+    SingleInstanceGuard.cpp
     config_loader.cpp
     config_validator.cpp
 )

@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-632%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-643%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -15,7 +15,7 @@ pulseTrader is a C++20 quantitative trading framework purpose-built for high-fre
 
 The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
-**Milestones M1–M14 achieved, M15 (dual-direction trading) in progress** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket.
+**Milestones M1–M15 achieved** — all 9 layers operational with full spot + futures dual-market support plus switchable TradFi/CFD gold (XAUUSD), TOML configuration, SQLite trade recording, EndpointRouter for market-type-aware routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket. Single-instance enforcement prevents two engines from trading at once, and a systemd user service provides auto-start + crash restart.
 
 ---
 
@@ -55,6 +55,8 @@ For the full architecture document including module responsibilities, key files,
 - **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 17 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`.
 - **Runtime control** — Per-strategy pause/resume (`pause_strategy` / `resume_strategy`, atomic `setPaused`), manual trading halt (`halt_trading` / `resume_trading`), and live atomic strategy param get/set (`get_strategy_params` / `set_strategy_param`). Manual orders share the same `OrderFlowExecutor` as the signal aggregator.
 - **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
+- **Single-instance enforcement** — The engine takes an exclusive `flock` on `data/engine.lock` at startup; any second engine process (manual launch, another Claude session, a stale nohup) is refused immediately and exits. This prevents double trading — two engines placing orders independently caused the exchange position to drift from the engine view on 2026-08-16. The lock is kernel-managed, so crashes/SIGKILL leave no stale lock. Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
+- **Configurable display timezone** — `[control] display_timezone` (`local` / `utc` / fixed offset like `"-04:00"` or `"+08:00"`) formats all human-readable timestamps in control-plane output (`*_str` fields in JSON-RPC responses, REPL tables, and every log line carries its UTC offset). Align the display with a phone app showing another timezone (e.g. US time vs Beijing time) so positions/orders can be cross-checked at a glance. Raw epoch fields stay untouched for machine consumption.
 
 ---
 
@@ -139,7 +141,7 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (583 tests)
+# 4. Run tests (643 tests)
 ctest --test-dir build --output-on-failure
 ```
 
@@ -198,7 +200,32 @@ cp trading.toml.example trading.toml
 # Edit trading.toml to configure symbols, strategies, risk limits, etc.
 ```
 
+Control-plane timestamps are shown in the machine's local timezone by default. To match a phone app showing another timezone (e.g. US time vs Beijing time), set `[control] display_timezone` in `trading.toml`:
+
+```toml
+[control]
+display_timezone = "local"   # machine local time (default)
+# display_timezone = "utc"              # UTC
+# display_timezone = "-04:00"           # fixed offset, e.g. US Eastern summer time
+# display_timezone = "+08:00"           # Beijing time, explicit
+```
+
+Applies to the `*_str` human-readable timestamp fields in JSON-RPC responses and the REPL `positions`/`orders` tables; raw epoch fields remain unchanged.
+
 ### Run
+
+**Preferred: systemd user service** (auto-start at boot, crash restart, journald logs):
+
+```bash
+systemctl --user start pulsetrader         # start the engine
+systemctl --user status pulsetrader        # status (active/running)
+systemctl --user restart pulsetrader       # restart (e.g. after a rebuild)
+journalctl --user -u pulsetrader -f        # live logs
+```
+
+The service sources `.env` and execs the same binary (`build_headless/.../pulsetrader --config trading.toml`). Boot-time startup is enabled via `loginctl enable-linger`. Because the engine refuses to start when `data/engine.lock` is held, at most one engine can ever run — the service and any manual launch cannot double-trade.
+
+**Manual launch** (foreground, same binary):
 
 ```bash
 # Start the trading engine (all 9 layers, auto-loads trading.toml if present).
@@ -220,7 +247,7 @@ cp trading.toml.example trading.toml
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 583 unit tests
+./run.sh test        # Run all 643 unit tests
 ```
 
 ### MCP Client Configuration

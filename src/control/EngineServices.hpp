@@ -10,6 +10,7 @@
 // atomics / seqlock), so concurrent control sessions are safe.
 
 #include "core/PulseError.hpp"
+#include "core/TimeUtil.hpp"
 #include "core/config.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "execution/OrderExecutor.hpp"
@@ -122,6 +123,10 @@ class EngineServices
     execution::OrderTracker *m_cfdTracker;
     OrderFlowExecutor &m_orderFlow;
     std::mutex &m_restMutex;
+
+    /// Display timezone for human-readable *_str timestamps in JSON output
+    /// (from [control] display_timezone; default = machine local time).
+    pulse::DisplayTimezone m_displayTz;
 };
 
 } // namespace pulse::control

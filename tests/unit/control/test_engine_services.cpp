@@ -3,6 +3,7 @@
 #include "control/EngineServices.hpp"
 #include "control/OrderFlowExecutor.hpp"
 
+#include "core/TimeUtil.hpp"
 #include "execution/OrderTracker.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
@@ -104,6 +105,33 @@ TEST_F(EngineServicesTest, PositionsEmptyState)
     const auto j = m_services->positions();
     EXPECT_EQ(0, j["positions"].size());
     EXPECT_EQ(0, j["portfolio"]["openPositionCount"].get<int>());
+}
+
+TEST_F(EngineServicesTest, PositionsIncludeHumanReadableOpenTime)
+{
+    // A display timezone different from the machine local (US Eastern):
+    // the *_str companion must be formatted in that timezone.
+    m_cfg.control.displayTimezone = "-04:00";
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        m_restClient.get(), nullptr, nullptr,
+        nullptr, nullptr, nullptr, *m_flow, m_restMutex);
+
+    // Small qty keeps notional under the fixture's risk limits
+    // (per-symbol 500 USDT).
+    const auto opened = m_positionMgr->openPosition(
+        "BTC_USDT", Side::Sell, 0.007, 63075.5, "s1");
+    ASSERT_TRUE(ok(opened));
+
+    const auto j = svc.positions();
+    ASSERT_EQ(1, j["positions"].size());
+    const auto &p = j["positions"][0];
+    ASSERT_TRUE(p.contains("open_time_str"));
+    const auto tz = parseDisplayTimezone("-04:00");
+    ASSERT_TRUE(tz);
+    EXPECT_EQ(p["open_time_str"].get<std::string>(),
+              formatEpochMs(p["open_time"].get<std::int64_t>(), *tz));
 }
 
 TEST_F(EngineServicesTest, StrategiesEmptyState)
