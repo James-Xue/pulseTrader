@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-643%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-647%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -142,7 +142,7 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (643 tests)
+# 4. Run tests (647 tests)
 ctest --test-dir build --output-on-failure
 ```
 
@@ -248,7 +248,7 @@ The service sources `.env` and execs the same binary (`build_headless/.../pulset
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 643 unit tests
+./run.sh test        # Run all 647 unit tests
 ```
 
 ### MCP Client Configuration

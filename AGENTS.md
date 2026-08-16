@@ -33,7 +33,7 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
 # Build
 cmake --build build -j$(nproc)
 
-# Run tests (643 tests)
+# Run tests (647 tests)
 ctest --test-dir build --output-on-failure
 
 # Optional features
