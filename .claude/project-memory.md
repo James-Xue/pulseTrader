@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-15
-> File size: 22078 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-16
+> File size: 23862 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,8 +32,9 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **632 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **669 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 - M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
+- M16 (2026-08-16) additions: maker-first order flow — 14 OrderFlowTest (best bid/ask post-only pricing, sweep cancel+fallback, partial-fill remainder, exchange-reject no-chase, rate-limit/direction-switch rejection, cancel-race) + 5 config validator + 3 config loader = 22 new
 - OrderFlowTest 2026-08-14 regressions: OnSignalModifiedOrderIsPlaced, OnSignalModifiedFailureReleasesReservation, FuturesQuantoKeepsFullContractQuantity, SellFillOpensShortWhenNoLong
 
 ### Milestones
@@ -103,24 +104,14 @@
 - **Laptop environment setup**: apt install libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0 (~/.local)
 - 532 tests all green (original 528 + 4 new tests)
 
-### Testnet WS CloudFront TLS Incompatibility (2026-06-21)
-- **Problem**: Testnet market data WS `wss://ws-testnet.gate.com/v4/ws/futures/usdt` behind CloudFront; TLS handshake HTTP/2 negotiation causes websocketpp 0.8.3-dev to report `Invalid HTTP status`
-- **Diagnosis**: Python raw socket direct connection returns `HTTP/1.1 101` ✅, but websocketpp via ProxyTunnel cannot parse response (server returns 3535-byte Amazon certificate + DOWNGRD flag)
-- **Solution**: `kTestnetFuturesWs` changed back to mainnet URL `wss://fx-ws.gateio.ws/v4/ws/usdt` (market data is identical between mainnet/testnet), REST still uses testnet
-- **TOML**: `trading.toml` explicitly lists 3 URLs for easy user override
-- **commit**: `0e61877`
+### Testnet WS CloudFront TLS Incompatibility (2026-06-21, commit `0e61877`)
+Testnet futures WS (`ws-testnet.gate.com`) sits behind CloudFront → websocketpp reports `Invalid HTTP status` (HTTP/2 negotiation). Fix: testnet WS uses the mainnet URL `wss://fx-ws.gateio.ws/v4/ws/usdt` (market data identical); REST stays on testnet. `trading.toml` lists the 3 URLs explicitly for override.
 
 ### System Heartbeat Logging (2026-06-21)
-- **Problem**: System completely silent after warmup, no way to confirm it's alive
-- **Solution**: MarketFeed added `FeedStats` atomic counters (ticker/orderbook/kline); main loop prints system status summary every 60 seconds
-- **Log format**: `[heartbeat] uptime 1h23m | futures 100 tick/s  10 kline/s  80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT)`
-- **Performance**: Hot path only `fetch_add(1, relaxed)` ~1 cycle; one log per 60s on main thread (otherwise idle)
-- **Changes**: `market_feed.hpp` (+FeedStats +3 atomic) · `market_feed.cpp` (+counters +stats()) · `main.cpp` (+log_system_heartbeat +modified main loop)
-- 5 new tests (FeedStats initialization/concurrency/delta calculation)
-- 537 tests all green
+`FeedStats` atomic counters (ticker/orderbook/kline) + 60s heartbeat line: `[heartbeat] uptime 1h23m | futures 100 tick/s 10 kline/s 80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT) | account ...`. Hot path = 1 relaxed fetch_add.
 
 ### WebUI History (removed 2026-08-13 on `headless` branch)
-K-line chart fixes (futures contract extraction, subscription payload order, live-candle updates), account balance top bar (DashboardState 10s REST polling), TradingView candlestick chart, TS+Vite+GoldenLayout migration, panel visibility menu, tab-close hidden, camelCase field-name fixes, token caching, panel scrollbar issue — all superseded by the control plane; see git history.
+Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git history.
 
 ### Account Balance (2026-06-21, still relevant)
 - **AccountBalance struct**: total, available, unrealised_pnl, position_margin, order_margin, currency
@@ -135,19 +126,17 @@ K-line chart fixes (futures contract extraction, subscription payload order, liv
 - **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
 - AGENTS.md updated with new naming + file naming rules. 547 tests all green.
 
-### Fast Ctrl+C Shutdown (2026-06-23)
-- **Commit `0c1a7ed`**: Fixed 3 blocking points that caused 20-90s shutdown delays:
-  1. **DashboardState REST** — `curl_easy_perform` blocked up to 20s. Fix: `CURLOPT_XFERINFOFUNCTION` progress callback checks `m_abortRequested`; `DashboardState::stop()` calls `cancelRequests()` before join. Added 5s connect timeout.
-  2. **TaskQueue** — `HeartbeatScheduler::stop()` didn't stop TaskQueue (deferred to destructor, up to 90s). Fix: added public `TaskQueue::stop()`, called explicitly in `HeartbeatScheduler::stop()`.
-  3. **ProxyTunnel** — `handleConnection`'s `remote_sock` was stack-local, unreachable by `stop()`. Fix: tracked as `m_connectingSock` member, `stop()` closes it to unblock `asio::connect()`.
-- `GateRestClient`: custom move ops (atomic not default-movable), `cancelRequests()`, retry loop checks abort flag.
-- Shutdown: ~20s worst case → <1s typical.
+### Fast Ctrl+C Shutdown (2026-06-23, commit `0c1a7ed`)
+3 blocking points fixed (20-90s → <1s): DashboardState REST (XFERINFO abort check + cancelRequests + 5s connect timeout), HeartbeatScheduler TaskQueue (`stop()` called explicitly), ProxyTunnel `remote_sock` hoisted to member so `stop()` can unblock `asio::connect()`. GateRestClient: custom move ops + `cancelRequests()`.
 
-### vcpkg/Linux Build Compatibility (2026-06-23)
-- **Commit `a812333`**: Remote commit from hehao machine changed WebUI CMake to use vcpkg `unofficial-usockets`/`unofficial-uwebsockets` and websocketpp `get_io_service()`. Reverted 4 CMakeLists.txt + 2 source files to use vendored `third_party/` and `get_io_context()`.
-- Linux build (apt + vendored uWebSockets) confirmed working. 547 tests all green.
+### vcpkg/Linux Build Compatibility (2026-06-23, commit `a812333`)
+Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Linux builds use vendored `third_party/` + `get_io_context()`.
 
-### Next Steps
+### Next Steps (2026-08-16 pending)
+- ⏳ SKHY 止损触发单 (170.5) existence check + risk handling — ≈1.3% from mark price, ≈-260 USDT if triggered
+- ⏳ After gold market reopens (~08-17): clean leftover CFD trigger orders (buy@4295 id 17511143 / sell@4428 id 17471679) via `tools/test_gate_rest --tradfi-cleanup`
+- ⏳ Maker-first verification: testnet first, then small live capital; watch logs "Maker-first attempt registered" / "Maker-first fallback"; consider `order_type = "maker_first"` on a futures instance (e.g. maker_timeout_ms 500)
+- ⏳ Loopback port returning awselb responses (suspected Clash TUN hijack of loopback traffic) — can investigate separately
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
 - ✅ #5 OrderTracker Callback Under Write Lock — "collect inside lock, execute outside lock" pattern: `completion_callback_` in `process_order_update()` and `poll_order_status()` called after unique_lock is released. `set_completion_callback()` protected by lock. Added `test_simulate_ws_update()` / `test_try_shared_lock()` test interfaces. 3 new tests.
 - ✅ #6 ProxyTunnel Extraction — 373 lines of network code extracted from `gate_ws_client.cpp` into `proxy_tunnel.hpp/.cpp`. Fixed 2 hidden bugs: (1) `handle_connection` thread changed from `.detach()` to joinable; (2) relay socket/thread registration merged into a single lock_guard scope. Removed 58 lines of dead code (SSL relay overloads). 7 new tests.
@@ -164,6 +153,20 @@ K-line chart fixes (futures contract extraction, subscription payload order, liv
 - **Operational notes**: ① CFD account balance was withdrawn to 0.00 on 2026-08-15 (user intent); two leftover trigger orders from the 08-14 manual verification (buy@4295 id 17511143, sell@4428 id 17471679) could NOT be cancelled while the market was closed (`NOT_IN_TRADE`) — retry `tools/test_gate_rest --tradfi-cleanup` after the market reopens (~08-17). ② 16→17: MCP tool count, JsonRpcServer registry, AGENTS.md/README/OPERATIONAL_GUIDE all updated. ③ nohup logging: stdout only (run.sh console sink); `logs/app.log` may not receive the new run's lines.
 
 Then: rebuild + restart engine → live verification (`get_status` active_market=futures, `get_market XAUUSD` works, `open_order` cfd rejected with 3008, `switch cfd` pauses futures + cancels orders) → manual 0.01-lot verification → small-capital live trading → production hardening
+
+### M16 Maker-First Orders (2026-08-16, done — commits b6f785f / deb5a1e)
+- **Config**: per-instance `order_type = "market"|"post_only"|"maker_first"` + `maker_timeout_ms` (ms; > 0 required for maker_first). Validator rejects non-market order_type on `cfd` — TradFi API only has `price_type: market|trigger`, no post-only.
+- **Signal flow**: post_only/maker_first signals place `OrderType::PostOnly` at the exact best bid (buy) / best ask (sell) from `OrderBookManager` (futures + spot WS books; futures ticker bid/ask are hardcoded 0). No book data → maker_first falls back to market; post_only drops the signal (never crosses).
+- **Sweep**: main loop calls `order_flow.sweepMakerAttempts()` every 200 ms. Expired attempts: cancel (under rest_mutex) → release reservation but KEEP the entry with `reservation_id = 0` (late Cancelled reports still open partial fills with correct futures metadata; `consumeReservation(0)` is a no-op) → fresh 1-arg `placeOrder` for the **remaining** qty (new token + reservation; direction gate / drawdown re-checked).
+- **No-chase**: exchange-rejected post-only never falls back to taker; failed cancel (already filled) never falls back. Partial fill + fallback converge to the intended total.
+- `OrderType::MakerFirst` is config-only — requests in flight are always Market/PostOnly/Limit. ctor gained two nullable `OrderBookManager*` (spot/futures).
+
+### Engine Ops (2026-08-16, same session — commits d0b305c / 0472f82 / cc381c9)
+- **display_timezone**: `[control] display_timezone` ("local"/"utc"/±HH:MM) → `*_str` time fields in JSON-RPC output + REPL time column (src/core/TimeUtil.hpp).
+- **Single instance**: flock on `data/engine.lock`; second engine refuses to start (`PULSE_ALLOW_MULTI_INSTANCES=1` bypasses). systemd user service `pulsetrader.service` in deploy/ (loginctl enable-linger + Restart=on-failure + journald).
+- **Startup reconciliation**: `GateRestClient::getFuturesPositions` (filters size=0) + `PositionManager::syncPositionFromExchange` (no limit checks, idempotent, `_sync` position id, keeps exchange open_time/liq/leverage); main.cpp syncs at startup (warn-only on failure). Fixed leverage-string crash: `leverage` is a string ("0") in positions JSON.
+- **Limits** (user decision, SKHY manual 5051 notional): maxPositionNotional 500→6000, maxSymbolNotional 300→5500, maxOpenPositions 3→4. Engine now systemd-managed (single instance owns 8081/MCP). New-position budget ≈928 USDT.
+- **Origin**: dual-engine incident (two engines each placed 3 BTC shorts, phone showed 6) — root-caused, killed the extra engine, fixed above. 1 futures contract = 0.0001 BTC (quanto_multiplier live-verified); 0.0006 = 6 contracts, phone was right.
 
 ## Control Plane (L9, `headless` branch)
 
