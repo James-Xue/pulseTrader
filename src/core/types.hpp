@@ -67,9 +67,11 @@ enum class Side : std::uint8_t
 /// Order types supported by Gate.io spot/futures API.
 enum class OrderType : std::uint8_t
 {
-    Market,   ///< Execute immediately at best available price.
-    Limit,    ///< Place at a specific price; may rest in the book.
-    PostOnly, ///< Rejected if it would match immediately (maker-only).
+    Market,    ///< Execute immediately at best available price.
+    Limit,     ///< Place at a specific price; may rest in the book.
+    PostOnly,  ///< Rejected if it would match immediately (maker-only).
+    MakerFirst ///< Config-level: post-only with taker fallback after a
+               ///< timeout (signals emit PostOnly requests in flight).
 };
 
 /// Lifecycle state of an order from submission to terminal state.
@@ -142,8 +144,8 @@ struct AccountBalance
     return std::nullopt;
 }
 
-/// Parse "market"/"limit"/"post_only" (case-insensitive) into OrderType.
-/// Nullopt on bad input.
+/// Parse "market"/"limit"/"post_only"/"maker_first" (case-insensitive)
+/// into OrderType. Nullopt on bad input.
 [[nodiscard]] inline std::optional<OrderType> parseOrderType(std::string_view sv) noexcept
 {
     if ("market" == sv || "MARKET" == sv)
@@ -158,7 +160,28 @@ struct AccountBalance
     {
         return OrderType::PostOnly;
     }
+    if ("maker_first" == sv || "MAKER_FIRST" == sv)
+    {
+        return OrderType::MakerFirst;
+    }
     return std::nullopt;
+}
+
+/// Convert OrderType to a human-readable string.
+[[nodiscard]] constexpr const char* toString(OrderType ot) noexcept
+{
+    switch (ot)
+    {
+    case OrderType::Market:
+        return "market";
+    case OrderType::Limit:
+        return "limit";
+    case OrderType::PostOnly:
+        return "post_only";
+    case OrderType::MakerFirst:
+        return "maker_first";
+    }
+    return "unknown";
 }
 
 /// Parse "spot"/"futures"/"cfd" (case-insensitive) into MarketType.

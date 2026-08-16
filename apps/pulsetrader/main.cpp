@@ -909,6 +909,8 @@ static int runTrade(int argc, char* argv[])
         spot_tracker.get(),
         futures_tracker.get(),
         cfd_tracker.get(),
+        spot_feed ? &spot_feed->orderbookManager() : nullptr,
+        futures_feed ? &futures_feed->orderbookManager() : nullptr,
         rest_mutex
 #ifdef PULSE_ENABLE_SQLITE
         , trade_recorder.get()
@@ -1208,6 +1210,12 @@ static int runTrade(int argc, char* argv[])
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
+
+        // Maker-first sweep: cancel expired post-only attempts and re-issue
+        // the remainder as market orders. Takes rest_mutex internally — the
+        // loop body holds no locks at this point (logSystemHeartbeat locks
+        // internally).
+        order_flow.sweepMakerAttempts();
 
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)
         {

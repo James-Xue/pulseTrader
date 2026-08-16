@@ -18,6 +18,7 @@ nlohmann::json ExecutionReport::to_json() const
             type == OrderType::Market   ? "market"
             : type == OrderType::Limit  ? "limit"
             : type == OrderType::PostOnly ? "post_only"
+            : type == OrderType::MakerFirst ? "maker_first"
                                           : "unknown" },
         { "requested_qty", requested_qty },
         { "filled_qty", filled_qty },

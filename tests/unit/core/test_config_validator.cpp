@@ -413,5 +413,61 @@ TEST(ConfigValidator, AcceptsMainnetWithSpotStrategy)
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
+// ---------------------------------------------------------------------------
+// order_type / maker_timeout_ms
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, RejectsCfdWithPostOnly)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Cfd;
+    cfg.strategy.strategies[0].order_type = OrderType::PostOnly;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("order_type"));
+}
+
+TEST(ConfigValidator, RejectsCfdWithMakerFirst)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Cfd;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 500;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("order_type"));
+}
+
+TEST(ConfigValidator, AcceptsFuturesWithMakerFirst)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 500;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, RejectsMakerFirstWithoutTimeout)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 0;   // must be > 0
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("maker_timeout_ms"));
+}
+
+TEST(ConfigValidator, AcceptsPostOnlyWithoutTimeout)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::PostOnly;
+    cfg.strategy.strategies[0].maker_timeout_ms = 0;   // resting order, no fallback
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
 } // namespace
 } // namespace pulse

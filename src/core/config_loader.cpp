@@ -196,6 +196,33 @@ PulseError parseMarginMode(const std::string &str, MarginMode &out)
 }
 
 // ---------------------------------------------------------------------------
+// parseOrderType — string to OrderType enum
+// ---------------------------------------------------------------------------
+PulseError parseOrderType(const std::string &str, OrderType &out)
+{
+    if ("market" == str)
+    {
+        out = OrderType::Market;
+        return {};
+    }
+    if ("post_only" == str)
+    {
+        out = OrderType::PostOnly;
+        return {};
+    }
+    if ("maker_first" == str)
+    {
+        out = OrderType::MakerFirst;
+        return {};
+    }
+
+    return PulseError{
+        ErrorCode::ConfigInvalidValue,
+        "order_type must be \"market\", \"post_only\" or \"maker_first\", got \""
+            + str + "\""};
+}
+
+// ---------------------------------------------------------------------------
 // Section parsers — each reads one TOML [section] into a config struct
 // ---------------------------------------------------------------------------
 
@@ -597,6 +624,22 @@ PulseError parseStrategyInstance(const toml::value &tbl,
             return err;
         }
     }
+
+    if (tbl.contains("order_type"))
+    {
+        std::string ot_str = toml::find<std::string>(tbl, "order_type");
+        auto err = parseOrderType(ot_str, out.order_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    out.maker_timeout_ms =
+        static_cast<std::uint32_t>(
+            toml::find_or(tbl, "maker_timeout_ms",
+                          static_cast<int>(out.maker_timeout_ms)));
 
     return {};
 }

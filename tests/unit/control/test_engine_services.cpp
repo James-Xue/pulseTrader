@@ -61,7 +61,8 @@ class EngineServicesTest : public ::testing::Test
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
             m_placer.get(), nullptr, nullptr,
-            nullptr, nullptr, nullptr, m_restMutex, nullptr);
+            nullptr, nullptr, nullptr,
+            nullptr, nullptr, m_restMutex, nullptr);
 
         m_services = std::make_unique<EngineServices>(
             "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,

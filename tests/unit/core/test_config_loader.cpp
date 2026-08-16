@@ -808,5 +808,56 @@ futuresWsUrl = "wss://custom-fx.example.com/ws/usdt"
     EXPECT_EQ("wss://custom-fx.example.com/ws/usdt", ex.futuresWsUrl);
 }
 
+// ---------------------------------------------------------------------------
+// order_type / maker_timeout_ms parsing
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_OrderTypeAndMakerTimeout)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+order_type = "maker_first"
+maker_timeout_ms = 800
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ(OrderType::MakerFirst, inst.order_type);
+    EXPECT_EQ(800u, inst.maker_timeout_ms);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_RejectsUnknownOrderType)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+order_type = "taker"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+    EXPECT_NE(std::string::npos, error(result).message.find("order_type"));
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_DefaultsOrderTypeToMarket)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ(OrderType::Market, inst.order_type);
+    EXPECT_EQ(0u, inst.maker_timeout_ms);
+}
+
 } // namespace
 } // namespace pulse

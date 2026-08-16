@@ -28,6 +28,7 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
         req.type == OrderType::Market   ? "market"
         : req.type == OrderType::Limit  ? "limit"
         : req.type == OrderType::PostOnly ? "post_only"
+        : req.type == OrderType::MakerFirst ? "maker_first"
                                           : "unknown",
         req.quantity,
         req.price);
@@ -130,7 +131,13 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
         else
         {
             body["price"] = std::to_string(req.price);
-            body["tif"] = (OrderType::PostOnly == req.type) ? "poc" : "gtc";
+            // Defensive: requests never carry MakerFirst (buildRequestFromSignal
+            // maps it to PostOnly), but a leaked value must not silently become
+            // a GTC limit order.
+            body["tif"] = (OrderType::PostOnly == req.type
+                           || OrderType::MakerFirst == req.type)
+                              ? "poc"
+                              : "gtc";
         }
 
         body["reduce_only"] = req.reduce_only;
@@ -171,6 +178,7 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
             body["time_in_force"] = "gtc";
             break;
         case OrderType::PostOnly:
+        case OrderType::MakerFirst:   // Defensive: never in flight (mapped to PostOnly).
             body["type"] = "limit";
             body["price"] = std::to_string(req.price);
             body["time_in_force"] = "poc";

@@ -33,6 +33,8 @@ std::string orderTypeToString(OrderType t)
             return "limit";
         case OrderType::PostOnly:
             return "post_only";
+        case OrderType::MakerFirst:
+            return "maker_first";
     }
     return "unknown";
 }

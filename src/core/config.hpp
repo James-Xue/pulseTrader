@@ -248,6 +248,9 @@ struct ControlConfig
 //   4. min_confidence    — minimum signal confidence to emit (0.0–1.0)
 //   5. enabled           — whether this strategy is active
 //   6. poll_interval_ms  — how often the strategy thread polls market data
+//   7. order_type        — "market" (default) | "post_only" | "maker_first"
+//   8. maker_timeout_ms  — maker_first: ms to wait for a maker fill before
+//                          falling back to a taker (market) order; 0 = never
 // ---------------------------------------------------------------------------
 struct StrategyInstanceConfig
 {
@@ -260,6 +263,9 @@ struct StrategyInstanceConfig
     MarketType market_type = MarketType::Spot; ///< Market type: Spot or Futures.
     double leverage = 1.0;                    ///< Leverage multiplier (1.0 = no leverage / spot).
     MarginMode margin_mode = MarginMode::Cross; ///< Margin mode for futures (Cross or Isolated).
+    OrderType order_type = OrderType::Market;  ///< Market, PostOnly (resting maker), or
+                                               ///< MakerFirst (post-only + taker fallback).
+    std::uint32_t maker_timeout_ms = 0;        ///< Maker fill wait before taker fallback (ms).
 };
 
 // ---------------------------------------------------------------------------

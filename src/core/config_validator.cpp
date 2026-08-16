@@ -239,6 +239,28 @@ PulseError validateConfig(const PulseConfig &cfg)
                     "Set market_type = \"futures\" or testnet = false."};
         }
 
+        // Post-only / maker-first need an order book and exchange-side
+        // post-only support. TradFi CFD only accepts price_type
+        // "market"|"trigger" (docs/CFD_TRADFI.md) — no post-only orders.
+        if (OrderType::Market != s.order_type && MarketType::Cfd == s.market_type)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".order_type \"" + toString(s.order_type)
+                    + "\" is not supported on market_type \"cfd\" (TradFi "
+                      "API has no post-only orders; only \"market\" is "
+                      "allowed)"};
+        }
+
+        // maker_first must know when to give up and take liquidity.
+        if (OrderType::MakerFirst == s.order_type && 0 == s.maker_timeout_ms)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".maker_timeout_ms must be > 0 when "
+                        "order_type = \"maker_first\""};
+        }
+
         // OrderBookScalper needs the WS order-book channel — CFD has none.
         if ("orderbook_scalper" == s.name && MarketType::Cfd == s.market_type)
         {

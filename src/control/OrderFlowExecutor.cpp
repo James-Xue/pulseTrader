@@ -63,6 +63,8 @@ OrderFlowExecutor::OrderFlowExecutor(
     execution::OrderTracker *spot_tracker,
     execution::OrderTracker *futures_tracker,
     execution::OrderTracker *cfd_tracker,
+    market::OrderBookManager *spot_order_book,
+    market::OrderBookManager *futures_order_book,
     std::mutex &rest_mutex,
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *trade_recorder
@@ -80,6 +82,8 @@ OrderFlowExecutor::OrderFlowExecutor(
     , m_spotTracker{ spot_tracker }
     , m_futuresTracker{ futures_tracker }
     , m_cfdTracker{ cfd_tracker }
+    , m_spotOrderBook{ spot_order_book }
+    , m_futuresOrderBook{ futures_order_book }
     , m_restMutex{ rest_mutex }
 #ifdef PULSE_ENABLE_SQLITE
     , m_tradeRecorder{ trade_recorder }
@@ -116,7 +120,7 @@ MarketType OrderFlowExecutor::activeMarket() const
     return m_activeMarket.load(std::memory_order_acquire);
 }
 
-execution::OrderRequest
+std::optional<execution::OrderRequest>
 OrderFlowExecutor::buildRequestFromSignal(const strategy::TradingSignal &sig) const
 {
     execution::OrderRequest req;
@@ -134,37 +138,65 @@ OrderFlowExecutor::buildRequestFromSignal(const strategy::TradingSignal &sig) co
     // Find strategy config for leverage/quantity settings.
     // Signal aggregator uses strategy_id "signal_aggregator" which won't
     // match any instance name — fall back to first strategy on the same symbol.
+    const auto *inst = matchInstanceConfig(sig);
     req.quantity = 0.001;
-    bool matched = false;
-    for (const auto &inst : m_strategyCfg.strategies)
+    if (inst)
     {
-        if (inst.name == sig.strategy_id)
-        {
-            req.quantity     = inst.order_quantity;
-            req.market_type  = inst.market_type;
-            req.leverage     = inst.leverage;
-            matched          = true;
-            break;
-        }
-    }
-    if (!matched)
-    {
-        for (const auto &inst : m_strategyCfg.strategies)
-        {
-            if (inst.enabled && inst.symbol == sig.symbol)
-            {
-                req.quantity    = inst.order_quantity;
-                req.market_type = inst.market_type;
-                req.leverage    = inst.leverage;
-                break;
-            }
-        }
+        req.quantity    = inst->order_quantity;
+        req.market_type = inst->market_type;
+        req.leverage    = inst->leverage;
     }
 
     // For futures: convert quantity to contract_size (integer contracts).
     if (MarketType::Futures == req.market_type && 0 == req.contract_size)
     {
         req.contract_size = static_cast<int>(std::max(1.0, std::round(req.quantity)));
+    }
+
+    // Maker pricing: post_only / maker_first configs place a POST-ONLY order
+    // at the exact best bid (buy) / best ask (sell) from the live book.
+    //
+    // No book data → behavior depends on the config: maker_first (which is
+    // allowed to take liquidity) falls back to a market order; plain post_only
+    // (which by definition never crosses the spread) drops the signal — a
+    // stale or guessed price would be rejected by the exchange anyway.
+    if (inst && OrderType::Market != inst->order_type)
+    {
+        if (MarketType::Cfd == req.market_type)
+        {
+            // Unreachable (config validator rejects non-market on CFD),
+            // defensive only: keep the market order.
+            logging::Logger::get("app")->debug(
+                "Signal [{}]: order_type {} on cfd is unsupported — market order",
+                sig.strategy_id, toString(inst->order_type));
+        }
+        else
+        {
+            auto *book = (MarketType::Futures == req.market_type)
+                             ? m_futuresOrderBook
+                             : m_spotOrderBook;
+            const auto price = bestBookPrice(book, sig.symbol, req.side);
+            if (price.has_value())
+            {
+                req.type  = OrderType::PostOnly;
+                req.price = *price;
+            }
+            else if (OrderType::MakerFirst == inst->order_type)
+            {
+                logging::Logger::get("app")->debug(
+                    "Signal [{}]: no order book for {} — falling back to "
+                    "market order",
+                    sig.strategy_id, sig.symbol);
+            }
+            else
+            {
+                logging::Logger::get("app")->warn(
+                    "Signal [{}]: no order book for {} — post_only signal "
+                    "dropped",
+                    sig.strategy_id, sig.symbol);
+                return std::nullopt; // Signal dropped — never take liquidity.
+            }
+        }
     }
 
     return req;
@@ -196,7 +228,13 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
         return;
     }
 
-    auto req = buildRequestFromSignal(sig);
+    auto req_opt = buildRequestFromSignal(sig);
+    if (!req_opt.has_value())
+    {
+        // post_only signal with no book data — already logged, never trades.
+        return;
+    }
+    auto req = *req_opt;
 
     // Risk evaluation.
     auto eval = m_riskMgr.evaluateOrder(req);
@@ -238,6 +276,28 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
         log_app->error("Signal order FAILED: {} (code={})",
                        error(result).message,
                        static_cast<int>(error(result).code));
+        return;
+    }
+
+    // Maker-first: register a fallback attempt (deadline = now + timeout).
+    // Only for signals whose config is maker_first and whose request was
+    // actually placed as post-only (i.e. the book was available). The sweep
+    // cancels expired attempts and re-issues the remainder as a market order.
+    if (OrderType::PostOnly == req.type)
+    {
+        const auto *inst = matchInstanceConfig(sig);
+        if (inst && OrderType::MakerFirst == inst->order_type
+            && inst->maker_timeout_ms > 0)
+        {
+            std::lock_guard lock(m_mutex);
+            m_makerAttempts[value(result).order_id] = MakerAttempt{
+                std::chrono::steady_clock::now()
+                    + std::chrono::milliseconds(inst->maker_timeout_ms),
+                req,
+                req.market_type };
+            log_app->info("Maker-first attempt registered: id={} fallback in {}ms",
+                          value(result).order_id, inst->maker_timeout_ms);
+        }
     }
 }
 
@@ -495,11 +555,18 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
     ReservationEntry reservation;
     {
         std::lock_guard lock(m_mutex);
+        m_makerAttempts.erase(report.order_id);   // Terminal report ends any attempt.
         auto it = m_reservations.find(report.order_id);
         if (it != m_reservations.end())
         {
             reservation = it->second;
-            m_positionMgr.consumeReservation(it->second.reservation_id);
+            // The reservation may already be released by the maker-first
+            // fallback (sweep zeroes reservation_id but keeps the request so
+            // a partial fill still opens with correct market metadata).
+            if (it->second.reservation_id > 0)
+            {
+                m_positionMgr.consumeReservation(it->second.reservation_id);
+            }
             m_reservations.erase(it);
         }
     }
@@ -577,6 +644,216 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
         }
     }
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Maker-first helpers
+// ---------------------------------------------------------------------------
+
+const StrategyInstanceConfig *
+OrderFlowExecutor::matchInstanceConfig(const strategy::TradingSignal &sig) const noexcept
+{
+    // Signal aggregator uses strategy_id "signal_aggregator" which won't
+    // match any instance name — fall back to first strategy on the same symbol.
+    for (const auto &inst : m_strategyCfg.strategies)
+    {
+        if (inst.name == sig.strategy_id)
+        {
+            return &inst;
+        }
+    }
+    for (const auto &inst : m_strategyCfg.strategies)
+    {
+        if (inst.enabled && inst.symbol == sig.symbol)
+        {
+            return &inst;
+        }
+    }
+    return nullptr;
+}
+
+std::optional<Price>
+OrderFlowExecutor::bestBookPrice(market::OrderBookManager *book,
+                                 const Symbol &symbol,
+                                 Side side) const noexcept
+{
+    if (nullptr == book)
+    {
+        return std::nullopt;
+    }
+    if (Side::Buy == side)
+    {
+        const auto levels = book->topBids(symbol, 1);
+        if (levels.empty())
+        {
+            return std::nullopt;
+        }
+        return levels.front().price;
+    }
+    const auto levels = book->topAsks(symbol, 1);
+    if (levels.empty())
+    {
+        return std::nullopt;
+    }
+    return levels.front().price;
+}
+
+execution::OrderTracker *
+OrderFlowExecutor::trackerFor(MarketType mt) const noexcept
+{
+    switch (mt)
+    {
+    case MarketType::Futures:
+        return m_futuresTracker;
+    case MarketType::Cfd:
+        return m_cfdTracker;
+    default:
+        return m_spotTracker;
+    }
+}
+
+void OrderFlowExecutor::eraseAttempt(const std::string &order_id)
+{
+    std::lock_guard lock(m_mutex);
+    m_makerAttempts.erase(order_id);
+}
+
+// ---------------------------------------------------------------------------
+// Maker-first sweep — cancel expired post-only attempts, fall back to market
+//
+// Lock order is strictly rest_mutex → m_mutex (matching placeOrder): the
+// sweep holds rest_mutex ONLY around cancelOrder, takes m_mutex only after
+// releasing it, and calls placeOrder (which locks rest_mutex internally)
+// with no locks held.
+// ---------------------------------------------------------------------------
+void OrderFlowExecutor::sweepMakerAttempts()
+{
+    auto log_app = logging::Logger::get("app");
+
+    // Phase 1 — snapshot expired attempts (no erasure yet: a failed cancel
+    // must keep the attempt alive for the next sweep).
+    struct Expired
+    {
+        std::string order_id;
+        MakerAttempt attempt;
+    };
+    std::vector<Expired> expired;
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_makerAttempts.empty())
+        {
+            return;   // Fast path.
+        }
+        const auto now = std::chrono::steady_clock::now();
+        for (const auto &[id, att] : m_makerAttempts)
+        {
+            if (now >= att.deadline)
+            {
+                expired.push_back({ id, att });
+            }
+        }
+    }
+    if (expired.empty())
+    {
+        return;
+    }
+
+    for (auto &e : expired)
+    {
+        // Phase 2 — is the order still live, and how much has filled?
+        // activeOrders() is a shared-lock snapshot; filled_qty is kept live
+        // by WS updates + REST polls. No REST traffic here.
+        auto *tracker = trackerFor(e.attempt.market_type);
+        if (nullptr == tracker)
+        {
+            eraseAttempt(e.order_id);
+            continue;
+        }
+        const auto live = tracker->activeOrders();
+        double filled = 0.0;
+        bool found = false;
+        for (const auto &snap : live)
+        {
+            if (snap.order_id == e.order_id)
+            {
+                found = true;
+                filled = snap.filled_qty;
+                break;
+            }
+        }
+        if (!found)
+        {
+            // Terminal already (fill or exchange-side cancel) — the report
+            // path (onOrderComplete) owns cleanup; just drop the attempt.
+            eraseAttempt(e.order_id);
+            continue;
+        }
+        const double remaining = e.attempt.request.quantity - filled;
+        if (remaining <= 1e-9)
+        {
+            // Fully filled — the Filled report will handle it.
+            eraseAttempt(e.order_id);
+            continue;
+        }
+
+        // Phase 3 — cancel under rest_mutex (cancelOrder's contract). A
+        // cancel the exchange refuses (already filled / rejected) means do
+        // NOT fall back — chasing a filled order would double-open. The
+        // attempt stays alive; the next sweep either sees it gone (terminal
+        // report arrived) or retries the cancel.
+        bool cancel_ok;
+        {
+            std::lock_guard rest_lock(m_restMutex);
+            cancel_ok = cancelOrder(e.order_id);
+        }
+        if (!cancel_ok)
+        {
+            continue;
+        }
+
+        // Phase 4 — release the old reservation but KEEP the entry with
+        // reservation_id = 0: the Cancelled report for this order is on its
+        // way, and it still needs the request metadata to open any partial
+        // fill with the correct market type / leverage / multiplier.
+        // consumeReservation(0) is a no-op (ids start at 1).
+        {
+            std::lock_guard lock(m_mutex);
+            auto it = m_reservations.find(e.order_id);
+            if (it != m_reservations.end())
+            {
+                if (it->second.reservation_id > 0)
+                {
+                    m_positionMgr.cancelReservation(it->second.reservation_id);
+                }
+                it->second.reservation_id = 0;
+            }
+            m_makerAttempts.erase(e.order_id);
+        }
+
+        // Phase 5 — fresh market fallback for the REMAINDER. Full re-eval:
+        // new rate-limiter token, new notional reservation. No locks held
+        // here — placeOrder(req) locks rest_mutex (then m_mutex) internally.
+        auto fallback = e.attempt.request;
+        fallback.type     = OrderType::Market;
+        fallback.price    = 0.0;
+        fallback.quantity = remaining;
+        auto res = placeOrder(fallback);
+        if (!ok(res))
+        {
+            log_app->warn(
+                "Maker-first fallback FAILED for {}: {} (code={}) — partial "
+                "maker fill (if any) stands, remainder not entered",
+                e.order_id, error(res).message,
+                static_cast<int>(error(res).code));
+        }
+        else
+        {
+            log_app->info("Maker-first fallback: cancelled {}, re-issued "
+                          "market {:.6f} {} -> {}",
+                          e.order_id, remaining, fallback.symbol,
+                          value(res).order_id);
+        }
+    }
 }
 
 } // namespace pulse::control

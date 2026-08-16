@@ -55,6 +55,16 @@ signal_cooldown_sec         = 30   # 同币种信号冷却（秒）
 
 # 每个 [[strategy.instances]] 定义一个策略实例。
 # name 必须是: momentum_scalper | orderbook_scalper | mean_reversion_scalper
+#
+# order_type（可选，默认 "market"）:
+#   "market"      — 市价单（吃单，taker 费率，如合约 0.05%/边）
+#   "post_only"   — 最优买卖价挂单（做市，maker 费率如 0.02%/边）；无行情簿
+#                   数据时丢弃信号，绝不吃单
+#   "maker_first" — 挂单优先 + 超时后撤单转市价兜底（见 maker_timeout_ms）
+# maker_timeout_ms（仅 maker_first 生效）: 挂单未成交等待毫秒数，超时撤单
+#   改市价单。示例: 0.01 手 XAUUSD 一轮 maker 可省约 0.06% 手续费
+#   注意: CFD 市场不支持 post_only（TradFi API 仅 market|trigger），
+#   验证器会拒绝 cfd + 非 market 的组合
 
 [[strategy.instances]]
 name            = "momentum_scalper"
@@ -94,6 +104,8 @@ poll_interval_ms = 500
 # min_confidence  = 0.65
 # enabled         = true
 # poll_interval_ms = 200
+# order_type      = "maker_first"   # "market"（默认）| "post_only" | "maker_first"
+# maker_timeout_ms = 500            # 挂单超时毫秒，超时撤单改市价（仅 maker_first）
 
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]

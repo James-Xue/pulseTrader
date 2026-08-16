@@ -456,6 +456,42 @@ tail -f logs/ai.log          # AI analysis results
 
 ---
 
+## 4.6 Maker-First Orders (order_type / maker_timeout_ms)
+
+Strategy signals normally place market orders (taker fee — 0.05%/side on
+futures, 0.1% round trip). With `order_type = "post_only"` or
+`"maker_first"` on a strategy instance, signals instead place **post-only
+limit orders at the exact best bid (buy) / best ask (sell)** from the live
+order book (maker fee 0.02%/side — a 60% fee reduction):
+
+| Config | Behavior |
+|--------|----------|
+| `order_type = "market"` (default) | Market order, taker fee — unchanged behavior |
+| `order_type = "post_only"` | Maker order at best price; **never** crosses the spread. If no order-book data is available the signal is dropped |
+| `order_type = "maker_first"` + `maker_timeout_ms = 500` | Post-only at best price; if unfilled after the timeout, the engine cancels and re-issues a market order for the **remaining** quantity (partial fills are topped up, never doubled) |
+
+Key behavior:
+
+- **Coverage**: strategy exits flow through the same signal path, so both
+  open and close signals are maker-first. Manual `close_position` is
+  unchanged (market, or limit if a price is passed).
+- **No-chase policy**: if the exchange rejects a post-only order instantly
+  (the price moved and the order would have crossed), the engine does NOT
+  fall back to a taker order — the signal is dropped. Chasing a moved price
+  costs a scalper more than a missed signal.
+- **Book outage**: no book data → `maker_first` falls back to market
+  immediately; `post_only` drops the signal. Never a stale-priced order.
+- **Risk**: the fallback re-runs the full risk gate (rate limiter + notional
+  reservation), so a drawdown halt or direction switch mid-attempt blocks it
+  cleanly. `maker_timeout_ms` must be > 0 for `maker_first`.
+- **CFD**: not supported — the TradFi API only accepts
+  `price_type: market|trigger`. The config validator rejects any non-market
+  `order_type` on `market_type = "cfd"`.
+
+**Fee example**: 0.01 lot XAUUSD ≈ 4350 USDT notional — taker round trip
+0.10% ≈ 4.35 USDT vs maker round trip 0.04% ≈ 1.74 USDT (saves ≈ 2.6 USDT
+per round trip, if both legs fill as maker).
+
 ## 5. Key Parameter Tuning Guide
 
 ### 5.1 Strategy Parameters
@@ -467,6 +503,8 @@ tail -f logs/ai.log          # AI analysis results
 | `poll_interval_ms` | Market data polling frequency | Lower = better latency but higher CPU usage. Recommended 100–500ms |
 | `signal_aggregator_threshold` | Aggregated signal execution threshold | 0.6 = single strategy can trigger an order; with multi-strategy consensus, raise to 0.7+ |
 | `signal_cooldown_sec` | Per-symbol signal cooldown | Prevents consecutive order placement. For scalping, recommended 15–60 seconds |
+| `order_type` | `"market"` (default) / `"post_only"` / `"maker_first"` | Maker-first saves ~0.06% round-trip fees but risks missed fills in fast markets; raise `maker_timeout_ms` for liquid symbols, lower for volatile ones |
+| `maker_timeout_ms` | Maker fill wait before taker fallback (ms) | 300–1000 typical for scalping; too long = stale signals enter late, too short = rarely fills as maker |
 
 ### 5.2 EMA Crossover Strategy (momentum_scalper)
 

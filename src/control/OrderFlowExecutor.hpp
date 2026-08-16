@@ -15,6 +15,7 @@
 #include "core/config.hpp"
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
+#include "market/OrderBookManager.hpp"
 #include "market/SymbolRegistry.hpp"
 #include "risk/DrawdownGuard.hpp"
 #include "risk/PositionManager.hpp"
@@ -22,9 +23,11 @@
 #include "strategy/signal_types.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -97,8 +100,11 @@ class OrderFlowExecutor
     ///   8. spot_tracker    — spot order tracker (nullable)
     ///   9. futures_tracker — futures order tracker (nullable)
     ///  10. cfd_tracker     — CFD order tracker (nullable)
-    ///  11. rest_mutex      — shared serialization for non-thread-safe REST
-    ///  12. trade_recorder  — SQLite recorder (nullable; only when PULSE_ENABLE_SQLITE)
+    ///  11. spot_order_book — live spot order book (nullable; null → maker
+    ///                        configs fall back to market orders)
+    ///  12. futures_order_book — live futures order book (nullable; same)
+    ///  13. rest_mutex      — shared serialization for non-thread-safe REST
+    ///  14. trade_recorder  — SQLite recorder (nullable; only when PULSE_ENABLE_SQLITE)
     OrderFlowExecutor(const StrategyConfig &strategy_cfg,
                       risk::RiskManager &risk_mgr,
                       risk::PositionManager &position_mgr,
@@ -109,6 +115,8 @@ class OrderFlowExecutor
                       execution::OrderTracker *spot_tracker,
                       execution::OrderTracker *futures_tracker,
                       execution::OrderTracker *cfd_tracker,
+                      market::OrderBookManager *spot_order_book,
+                      market::OrderBookManager *futures_order_book,
                       std::mutex &rest_mutex,
 #ifdef PULSE_ENABLE_SQLITE
                       trade_recorder::TradeRecorder *trade_recorder
@@ -144,6 +152,12 @@ class OrderFlowExecutor
     /// Must be called with the shared rest_mutex held.
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
+    /// Maker-first sweep: cancel expired post-only attempts and re-issue the
+    /// remainder as market orders (fresh risk evaluation). Call every main-loop
+    /// iteration WITHOUT holding rest_mutex — the sweep acquires it internally
+    /// around the cancel only, and placeOrder() acquires it internally too.
+    void sweepMakerAttempts();
+
     // --- Single active trading direction (runtime-switchable) ---
     //
     // Only the active market's orders pass the gate: strategy signals and
@@ -176,7 +190,9 @@ class OrderFlowExecutor
     };
 
     /// Build an OrderRequest from a strategy signal (quantity/leverage lookup).
-    [[nodiscard]] execution::OrderRequest
+    /// Returns nullopt when the signal must be dropped (post_only config with
+    /// no book data — the signal cannot be priced as a maker order).
+    [[nodiscard]] std::optional<execution::OrderRequest>
     buildRequestFromSignal(const strategy::TradingSignal &sig) const;
 
     /// Place an order using a pre-computed risk evaluation. Does NOT
@@ -184,6 +200,34 @@ class OrderFlowExecutor
     [[nodiscard]] Result<execution::OrderResponse>
     placeOrder(const execution::OrderRequest &req,
                const risk::RiskEvalResult &eval);
+
+    /// One in-flight maker-first attempt: the placed post-only request plus
+    /// the deadline after which it falls back to a taker order.
+    struct MakerAttempt
+    {
+        std::chrono::steady_clock::time_point deadline;
+        execution::OrderRequest request; ///< The request actually placed (post-Modified).
+        MarketType market_type;
+    };
+
+    /// Locate the strategy instance backing a signal (name match, then first
+    /// enabled instance on the symbol). Returns nullptr if none matches.
+    [[nodiscard]] const StrategyInstanceConfig *
+    matchInstanceConfig(const strategy::TradingSignal &sig) const noexcept;
+
+    /// Best bid (buy) / best ask (sell) from the given book, or nullopt when
+    /// the book is null, has no snapshot, or the level set is empty.
+    [[nodiscard]] std::optional<Price>
+    bestBookPrice(market::OrderBookManager *book, const Symbol &symbol,
+                  Side side) const noexcept;
+
+    /// Tracker for a market type (spot/futures/cfd), matching cancelOrder's
+    /// probe order. Nullable.
+    [[nodiscard]] execution::OrderTracker *
+    trackerFor(MarketType mt) const noexcept;
+
+    /// Erase a maker attempt (guarded by m_mutex).
+    void eraseAttempt(const std::string &order_id);
 
     StrategyConfig m_strategyCfg;
     risk::RiskManager &m_riskMgr;
@@ -195,6 +239,8 @@ class OrderFlowExecutor
     execution::OrderTracker *m_spotTracker;
     execution::OrderTracker *m_futuresTracker;
     execution::OrderTracker *m_cfdTracker;
+    market::OrderBookManager *m_spotOrderBook;
+    market::OrderBookManager *m_futuresOrderBook;
     std::mutex &m_restMutex;
     std::atomic<MarketType> m_activeMarket{ MarketType::Futures };
     std::shared_ptr<const market::SymbolRegistry> m_registry;
@@ -202,8 +248,9 @@ class OrderFlowExecutor
     trade_recorder::TradeRecorder *m_tradeRecorder;
 #endif
 
-    std::mutex m_mutex;   ///< Guards m_reservations.
+    std::mutex m_mutex;   ///< Guards m_reservations AND m_makerAttempts.
     std::unordered_map<std::string, ReservationEntry> m_reservations;
+    std::unordered_map<std::string, MakerAttempt> m_makerAttempts;
 };
 
 } // namespace pulse::control
