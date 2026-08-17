@@ -890,6 +890,16 @@ static int runTrade(int argc, char* argv[])
             continue;
         }
 
+        // Seed the per-instance min_confidence from config into the live
+        // params. Previously the config value was loaded but never applied,
+        // so every strategy ran with the hard-coded default (0.6) — a scale
+        // mismatch that silently muted low-confidence-scale strategies on the
+        // signal board (momentum ~1e-4, mean_reversion ~0.01-0.1; only
+        // supertrend, whose confidence is distance/ATR clamped to 1.0, ever
+        // published — 2026-08-17 overnight finding).
+        strat->params().min_confidence.store(inst_cfg.min_confidence,
+                                             std::memory_order_release);
+
         log->info("[L6] Registered strategy: {} on {} (qty={}, conf={:.2f}, market={})",
                   inst_cfg.name, inst_cfg.symbol,
                   inst_cfg.order_quantity, inst_cfg.min_confidence,

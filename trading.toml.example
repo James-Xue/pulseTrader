@@ -74,7 +74,11 @@ signal_cooldown_sec         = 30   # 同币种信号冷却（秒）
 name            = "momentum_scalper"
 symbol          = "BTC_USDT"
 order_quantity  = 0.001            # 每笔 0.001 BTC（约 $65）
-min_confidence  = 0.6              # 信号置信度门槛（0.0–1.0）
+min_confidence  = 0.6              # 信号置信度门槛（0.0–1.0）；注意各策略置信度
+                                    # 尺度不同——momentum 的 EMA 间距归一化约 1e-4、
+                                    # mean_reversion 的带宽穿透比约 0.01-0.1，高门槛
+                                    # 会把它们永久静默（只留 distance/ATR 尺度的
+                                    # supertrend），低尺度策略请设 0.0
 enabled         = true
 poll_interval_ms = 200             # 行情轮询间隔（毫秒）
 
