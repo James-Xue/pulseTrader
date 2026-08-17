@@ -152,6 +152,18 @@ class OrderTracker
     [[nodiscard]] static nlohmann::json findCfdOrderInList(const nlohmann::json &list,
                                                            const std::string &order_id);
 
+    /// Key-match fallback: find a TradFi order by symbol/side/volume/price
+    /// within the submit-time window, NOT by id.
+    ///
+    /// Used when the engine tracks a POST response's data.id while the list
+    /// carries the real exchange order id (list read lagged the POST —
+    /// 2026-08-17: trigger 47777 never matched by id, mis-cancelled while
+    /// 17654490 was still open). Market orders match on symbol/side/volume;
+    /// trigger orders additionally require price equality. Pure function.
+    [[nodiscard]] static nlohmann::json findCfdOrderByKey(
+        const nlohmann::json &list, const Symbol &symbol, Side side,
+        Quantity qty, OrderType type, Price price, std::int64_t submit_sec);
+
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
     [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
@@ -170,6 +182,14 @@ class OrderTracker
     {
         processOrderUpdate(event);
     }
+
+    /// Resolve a tracked (possibly data.id) key to the real exchange order id.
+    ///
+    /// TradFi CFD: POST returns data.id, the open-orders list carries the
+    /// real id. After pollCfdOrderStatus re-anchors a tracked key, this
+    /// returns the real id (callers like cancel need it). Returns the input
+    /// unchanged when no alias is recorded.
+    [[nodiscard]] std::string resolveExchangeId(const std::string &order_id) const;
 
     /// Test-only: simulate a CFD list-poll result for one order (calls the
     /// same apply+complete path as pollCfdOrderStatus, without network).
@@ -204,11 +224,18 @@ class OrderTracker
         OrderStatus status;
         Timestamp submit_time;
         Timestamp last_update_time;
+        std::string exchange_position_id; ///< TradFi CFD only — exchange-side
+                                          ///< position id from the fill ("" elsewhere).
     };
 
     mutable std::shared_mutex m_mutex;
     std::unordered_map<std::string, TrackedOrder> m_trackedOrders;
     std::unordered_map<std::string, ExecutionReport> m_completedReports;
+    /// data.id → real exchange id (TradFi CFD re-anchor map). A POST returns
+    /// the internal submission number; the open-orders list carries the real
+    /// id, so the tracked key may be re-anchored by pollCfdOrderStatus. The
+    /// alias lets callers (cancel) resolve the tracked key to the real id.
+    std::unordered_map<std::string, std::string> m_idAliases;
     CompletionCallback m_completionCallback;
     bool m_wsSubscribed; ///< Whether we've subscribed to the orders channel.
     bool m_enableWs;     ///< False = REST-poll-only (TradFi CFD has no WS channel).

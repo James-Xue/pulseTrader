@@ -451,11 +451,16 @@ static void logSystemHeartbeat(
 // main
 // ===========================================================================
 
-// Forward declaration — defined after runCli; called from runTrade at startup.
+// Forward declarations — defined after runCli; called from runTrade at startup.
 static void syncFuturesPositionsFromExchange(
     pulse::exchange::GateRestClient &futures_rest,
     pulse::risk::PositionManager &position_mgr,
     const std::shared_ptr<pulse::market::SymbolRegistry> &registry,
+    std::mutex &rest_mutex);
+
+static void syncCfdPositionsFromExchange(
+    pulse::exchange::GateRestClient &cfd_rest,
+    pulse::risk::PositionManager &position_mgr,
     std::mutex &rest_mutex);
 
 static int runTrade(int argc, char* argv[])
@@ -1045,6 +1050,10 @@ static int runTrade(int argc, char* argv[])
         syncFuturesPositionsFromExchange(
             *futures_rest, position_mgr, symbol_registry, rest_mutex);
     }
+    if (cfd_rest)
+    {
+        syncCfdPositionsFromExchange(*cfd_rest, position_mgr, rest_mutex);
+    }
 
     aggregator.setOutputCallback(
         [&order_flow](const pulse::strategy::TradingSignal& sig)
@@ -1617,6 +1626,99 @@ static void syncFuturesPositionsFromExchange(
     }
     PULSE_LOG_INFO("app",
         "Position sync complete: {} position(s) imported from exchange",
+        synced);
+}
+
+/// Sync TradFi CFD positions from the exchange at startup.
+///
+/// CFD positions (XAUUSD etc.) are NOT covered by the futures sync: the
+/// /tradfi/positions list is a different product shape (position_dir,
+/// price_open, volume). Without this, a restart silently forgets CFD
+/// exposure — the engine view drifts from the exchange and the risk engine
+/// may open a duplicate position on top of a real one (2026-08-17: strategy
+/// short XAUUSD_Sell_2 was lost on restart). Non-fatal on failure.
+static void syncCfdPositionsFromExchange(
+    pulse::exchange::GateRestClient &cfd_rest,
+    pulse::risk::PositionManager &position_mgr,
+    std::mutex &rest_mutex)
+{
+    nlohmann::json data;
+    {
+        std::lock_guard<std::mutex> rest_lock(rest_mutex);
+        auto result = cfd_rest.getCfdPositions();
+        if (!pulse::ok(result))
+        {
+            PULSE_LOG_WARN("app", "CFD position sync skipped: {}",
+                           pulse::error(result).message);
+            return;
+        }
+        const auto &resp = pulse::value(result);
+        data = resp.value("data", nlohmann::json::object());
+    }
+
+    const auto &list = data.value("list", nlohmann::json::array());
+    if (!list.is_array())
+    {
+        PULSE_LOG_INFO("app", "CFD position sync: no open positions");
+        return;
+    }
+
+    int synced = 0;
+    for (const auto &p : list)
+    {
+        const std::string symbol = p.value("symbol", "");
+        if (symbol.empty())
+        {
+            continue;
+        }
+        const bool is_long = ("Long" == p.value("position_dir", ""));
+        const double volume = jsonNumber(p, "volume");
+        if (volume <= 0.0)
+        {
+            continue;
+        }
+        const double entry = jsonNumber(p, "price_open");
+        const double mark = jsonNumber(p, "counterparty_price");
+        double leverage = jsonNumber(p, "leverage");
+        if (leverage <= 0.0)
+        {
+            leverage = 1.0;
+        }
+
+        // Exchange time_create is unix SECONDS; Position stores ns.
+        const double create_secs = jsonNumber(p, "time_create");
+        pulse::Timestamp open_time{};
+        if (create_secs > 0.0)
+        {
+            open_time = std::chrono::time_point_cast<pulse::Duration>(
+                std::chrono::system_clock::time_point{
+                    std::chrono::seconds{static_cast<std::int64_t>(create_secs)}});
+        }
+
+        // CFD symbols carry their own multiplier in the feed (quanto=100 for
+        // XAUUSD = 1 lot of 100 oz); 1.0 keeps notional in USD lots here.
+        position_mgr.syncPositionFromExchange(
+            symbol, is_long ? pulse::Side::Buy : pulse::Side::Sell,
+            volume, entry, mark, pulse::MarketType::Cfd, leverage,
+            pulse::MarginMode::Cross, 1.0, 0.0, jsonNumber(p, "liq_price"),
+            open_time);
+
+        // The close endpoint needs the EXCHANGE position id; sync imported
+        // ids are "<symbol>_<Buy|Sell>_sync".
+        const std::string pos_id = symbol + "_"
+            + (is_long ? "Buy" : "Sell") + "_sync";
+        position_mgr.setExchangePositionId(
+            pos_id, std::to_string(static_cast<std::int64_t>(
+                        jsonNumber(p, "position_id"))));
+
+        PULSE_LOG_INFO("app",
+            "CFD position sync: {} {} {} lots @ {} (mark {}, liq {})",
+            symbol, (is_long ? "long" : "short"), volume, entry, mark,
+            jsonNumber(p, "liq_price"));
+        ++synced;
+    }
+    PULSE_LOG_INFO("app",
+        "CFD position sync complete: {} position(s) imported from exchange",
         synced);
 }
 

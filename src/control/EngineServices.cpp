@@ -555,12 +555,26 @@ EngineServices::closePosition(const nlohmann::json &params)
             return PulseError{ ErrorCode::InternalError,
                                "close_position: CFD infrastructure not configured" };
         }
+        // The close endpoint needs the EXCHANGE position id (e.g. "17653462").
+        // The internal position_id ("XAUUSD_Buy_1") is engine-local — the
+        // exchange rejects it (400 "Data is being updated" is the generic
+        // unknown-id response, verified 2026-08-17).
+        const std::string exchange_pid = pos.exchange_position_id;
+        if (exchange_pid.empty())
+        {
+            return PulseError{
+                ErrorCode::InternalError,
+                "close_position: position " + position_id
+                    + " has no exchange position id (was it opened by this "
+                      "engine? sync-imported CFD positions cannot be closed "
+                      "by id)" };
+        }
         const double close_qty = params.value("quantity", pos.quantity);
         const int close_type = (close_qty >= pos.quantity - 1e-9) ? 2 : 1;
         Result<nlohmann::json> res;
         {
             std::lock_guard lock(m_restMutex);
-            res = m_cfdRest->postCfdPositionClose(position_id, close_type, close_qty);
+            res = m_cfdRest->postCfdPositionClose(exchange_pid, close_type, close_qty);
         }
         if (!ok(res))
         {

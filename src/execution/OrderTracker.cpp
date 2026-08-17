@@ -221,8 +221,8 @@ Result<OrderStatus> OrderTracker::pollCfdOrderStatus(const std::string &order_id
     }
 
     const auto &data = value(list_result).value("data", nlohmann::json::object());
-    const auto found =
-        findCfdOrderInList(data.value("list", nlohmann::json::array()), order_id);
+    const auto list = data.value("list", nlohmann::json::array());
+    auto found = findCfdOrderInList(list, order_id);
 
     // Prepare callback data under lock, invoke outside lock.
     std::optional<ExecutionReport> completed_report;
@@ -254,6 +254,60 @@ Result<OrderStatus> OrderTracker::pollCfdOrderStatus(const std::string &order_id
         if (!tracked)
         {
             return OrderStatus::Pending; // Not tracked — nothing to update.
+        }
+
+        // Key-match fallback: the list may carry the EXCHANGE order id while
+        // we track the POST's data.id (the list read lagged the POST, or the
+        // id-resolution retries were exhausted — verified 2026-08-17: a
+        // trigger order tracked as data.id 47777 was never found by id and
+        // mis-cancelled while the real 17654490 was still open). Match by
+        // symbol/side/volume/price/time instead, then re-anchor the tracking
+        // key to the real id before applying the update.
+        const std::int64_t submit_sec =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                tracked->submit_time.time_since_epoch())
+                .count();
+        found = findCfdOrderByKey(list, tracked->symbol, tracked->side,
+                                  tracked->requested_qty, tracked->type,
+                                  tracked->submit_mid_price, submit_sec);
+        if (!found.is_null())
+        {
+            const std::string real_id = orderIdToString(found["order_id"]);
+            if (real_id != order_id)
+            {
+                PULSE_LOG_WARN("execution",
+                    "CFD order {} re-anchored to exchange id {}", order_id,
+                    real_id);
+                // Re-anchor under the write lock, then treat the poll as if
+                // it had been for the real id. Keep the data.id → real-id
+                // alias so callers (cancel_order) can resolve the tracked key.
+                std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+                m_idAliases[order_id] = real_id;
+                auto node = m_trackedOrders.extract(order_id);
+                if (!node.empty())
+                {
+                    node.key() = real_id;
+                    m_trackedOrders.insert(std::move(node));
+                    completed_report =
+                        applyUpdateAndMaybeComplete(real_id, found);
+                    callback_copy = m_completionCallback;
+                }
+            }
+            else
+            {
+                std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+                completed_report = applyUpdateAndMaybeComplete(order_id, found);
+                callback_copy = m_completionCallback;
+            }
+            if (completed_report)
+            {
+                if (callback_copy)
+                {
+                    callback_copy(*completed_report);
+                }
+                return completed_report->final_status;
+            }
+            return getStatus(order_id).value_or(OrderStatus::Pending);
         }
 
         PULSE_LOG_WARN("execution",
@@ -306,6 +360,9 @@ Result<OrderStatus> OrderTracker::pollCfdOrderStatus(const std::string &order_id
                     fill["filled_volume"] = p["volume"];
                     fill["fill_price"] = p["price_open"];
                     fill["fee"] = p["commission"];
+                    // The close endpoint needs the EXCHANGE position id (the
+                    // internal position_id is engine-local).
+                    fill["exchange_position_id"] = p["position_id"];
                     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
                     completed_report = applyUpdateAndMaybeComplete(order_id, fill);
                     callback_copy = m_completionCallback;
@@ -476,6 +533,11 @@ void OrderTracker::applyOrderUpdate(const nlohmann::json &update, TrackedOrder &
         {
             order.fees = jsonNumOrStr(update, "fee", order.fees);
         }
+        if (update.contains("exchange_position_id"))
+        {
+            order.exchange_position_id =
+                orderIdToString(update["exchange_position_id"]);
+        }
         order.last_update_time = now();
         return;
     }
@@ -531,6 +593,7 @@ ExecutionReport OrderTracker::generateReport(const TrackedOrder &order, Timestam
     report.submit_time = order.submit_time;
     report.fill_time = fill_time;
     report.final_status = order.status;
+    report.exchange_position_id = order.exchange_position_id;
 
     return report;
 }
@@ -623,6 +686,53 @@ nlohmann::json OrderTracker::findCfdOrderInList(const nlohmann::json &list,
     return nullptr;
 }
 
+nlohmann::json OrderTracker::findCfdOrderByKey(
+    const nlohmann::json &list, const Symbol &symbol, Side side,
+    Quantity qty, OrderType type, Price price, std::int64_t submit_sec)
+{
+    if (!list.is_array())
+    {
+        return nullptr;
+    }
+    const int want_side = (Side::Buy == side) ? 2 : 1;
+    constexpr std::int64_t kCfdMatchSlackSec = 5; // Covers clock skew.
+
+    for (const auto &o : list)
+    {
+        if (!o.is_object())
+        {
+            continue;
+        }
+        if (o.value("symbol", "") != symbol || o.value("side", 0) != want_side)
+        {
+            continue;
+        }
+        const double volume = jsonNumOrStr(o, "volume", -1.0);
+        if (volume < 0.0 || std::abs(volume - qty) > 1e-9)
+        {
+            continue;
+        }
+        // Only orders placed AFTER our POST can be ours (time_setup=0/missing
+        // is outside the window). Market orders match on the key fields only;
+        // trigger orders must also agree on price.
+        const std::int64_t time_setup = o.value("time_setup", 0LL);
+        if (time_setup < submit_sec - kCfdMatchSlackSec)
+        {
+            continue;
+        }
+        if (OrderType::Market != type)
+        {
+            const double list_price = jsonNumOrStr(o, "price", -1.0);
+            if (list_price < 0.0 || std::abs(list_price - price) > 1e-6)
+            {
+                continue;
+            }
+        }
+        return o;
+    }
+    return nullptr;
+}
+
 void OrderTracker::testSimulateCfdPoll(const nlohmann::json &order_obj)
 {
     if (!order_obj.is_object() || !order_obj.contains("order_id"))
@@ -643,6 +753,13 @@ void OrderTracker::testSimulateCfdPoll(const nlohmann::json &order_obj)
     {
         callback_copy(*completed_report);
     }
+}
+
+std::string OrderTracker::resolveExchangeId(const std::string &order_id) const
+{
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    auto it = m_idAliases.find(order_id);
+    return (m_idAliases.end() == it) ? order_id : it->second;
 }
 
 std::vector<OrderSnapshot> OrderTracker::activeOrders() const

@@ -99,6 +99,9 @@ struct Position
     double margin_used;          ///< Margin used = qty * entry * quanto / leverage.
     Price liquidation_price;     ///< Estimated liquidation price (futures only).
     double quanto_multiplier;    ///< Contract multiplier (1.0 for spot).
+    std::string exchange_position_id; ///< Exchange-side position id (TradFi CFD
+                                      ///< only — the close endpoint requires it;
+                                      ///< the internal position_id is engine-local).
 
     Position()
         : position_id{}
@@ -117,6 +120,7 @@ struct Position
         , margin_used{ 0.0 }
         , liquidation_price{ 0.0 }
         , quanto_multiplier{ 1.0 }
+        , exchange_position_id{}
     {
     }
 };

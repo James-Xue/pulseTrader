@@ -472,7 +472,14 @@ bool OrderFlowExecutor::cancelOrder(const std::string &order_id)
     {
         if (m_cfdTracker->getStatus(order_id).has_value())
         {
-            return m_cfdPlacer->cancel(order_id);
+            // TradFi CFD: the tracked key may be the POST's data.id while the
+            // exchange carries the real order id (list-read lag — the cancel
+            // would 400 on data.id). Poll once to trigger the re-anchor, then
+            // cancel the resolved real id.
+            (void)m_cfdTracker->pollOrderStatus(order_id);
+            const std::string real_id =
+                m_cfdTracker->resolveExchangeId(order_id);
+            return m_cfdPlacer->cancel(real_id);
         }
     }
     if (m_futuresTracker && m_futuresPlacer)
@@ -635,6 +642,14 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
         {
             log_app->warn("Failed to open position: {}",
                           error(open_result).message);
+        }
+        else if (!report.exchange_position_id.empty())
+        {
+            // TradFi CFD: record the exchange position id on the engine
+            // position so close_position can call the real close endpoint
+            // (the internal position_id is engine-local).
+            m_positionMgr.setExchangePositionId(
+                value(open_result), report.exchange_position_id);
         }
     }
 

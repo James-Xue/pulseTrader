@@ -114,11 +114,14 @@ inline void to_json(nlohmann::json &j, const Position &p)
     j["open_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
         p.open_time.time_since_epoch()).count();
     j["strategy_id"] = p.strategy_id;
-    j["market_type"] = (MarketType::Futures == p.market_type) ? "futures" : "spot";
+    j["market_type"] = (MarketType::Futures == p.market_type)   ? "futures"
+                     : (MarketType::Cfd == p.market_type) ? "cfd"
+                                                          : "spot";
     j["leverage"] = p.leverage;
     j["margin_mode"] = (MarginMode::Cross == p.margin_mode) ? "cross" : "isolated";
     j["margin_used"] = p.margin_used;
     j["liquidation_price"] = p.liquidation_price;
+    j["exchange_position_id"] = p.exchange_position_id;
 }
 
 /// Serialize PortfolioSummary to JSON.

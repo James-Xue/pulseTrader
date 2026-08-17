@@ -131,6 +131,15 @@ class PositionManager
     /// Realized PnL formula (closed portion):
     ///   long:  (exit_price - entry_price) * closed_qty * quanto * leverage
     ///   short: (entry_price - exit_price) * closed_qty * quanto * leverage
+    /// Record the EXCHANGE-side position id on an engine position.
+    ///
+    /// TradFi CFD only: the close endpoint takes the exchange position id
+    /// (e.g. "17653462"), which differs from the engine-local position_id
+    /// ("XAUUSD_Buy_1"). Called by OrderFlowExecutor after openPosition()
+    /// when the fill carries the exchange id.
+    void setExchangePositionId(const std::string &position_id,
+                               const std::string &exchange_position_id);
+
     [[nodiscard]] std::optional<double> closePosition(
         const std::string &position_id, Quantity close_qty, Price exit_price);
 

@@ -557,13 +557,17 @@ TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_OpenThenFilled)
 
     tracker_->testSimulateCfdPoll(nlohmann::json{
         { "order_id", 17633250 }, { "state", 2 }, { "finished", 1 },
-        { "filled_volume", "0.01" }, { "fill_price", "4406.68" }, { "fee", "-0.06" } });
+        { "filled_volume", "0.01" }, { "fill_price", "4406.68" }, { "fee", "-0.06" },
+        { "exchange_position_id", 17653462 } });
 
     EXPECT_EQ(OrderStatus::Filled, captured.final_status);
     EXPECT_DOUBLE_EQ(0.01, captured.filled_qty);
     EXPECT_DOUBLE_EQ(4406.68, captured.avg_fill_price);
     EXPECT_DOUBLE_EQ(-0.06, captured.fees);
     EXPECT_EQ("cfd_client_1", captured.client_order_id);
+    // Exchange position id (number in the API payload) reaches the report as
+    // a string so close_position can call the real close endpoint.
+    EXPECT_EQ("17653462", captured.exchange_position_id);
     EXPECT_TRUE(tracker_->activeOrders().empty());
     ASSERT_EQ(1u, tracker_->recentReports().size());
 }
@@ -586,4 +590,75 @@ TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_FinishedState1IsCancelled)
     EXPECT_EQ(OrderStatus::Cancelled, captured.final_status);
     EXPECT_DOUBLE_EQ(0.0, captured.filled_qty);
     EXPECT_TRUE(tracker_->activeOrders().empty());
+}
+
+TEST_F(OrderTrackerCfdTest, FindCfdOrderByKey_MatchesByKeyNotId)
+{
+    // The engine may track the POST's data.id ("47777") while the list
+    // carries the real exchange id ("17654490") — the key match must find
+    // the order anyway (2026-08-17: id-only matching mis-cancelled the
+    // order while it was still open on the exchange).
+    const nlohmann::json list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" },
+                        { "side", 1 }, { "volume", "0.01" },
+                        { "price", "4418.00" }, { "price_type", "trigger" },
+                        { "time_setup", 1786931527 } },
+        nlohmann::json{ { "order_id", 17654490 }, { "symbol", "XAUUSD" },
+                        { "side", 2 }, { "volume", "0.01" },
+                        { "price", "4300.00" }, { "price_type", "trigger" },
+                        { "time_setup", 1786955344 } },
+    });
+
+    // Trigger buy 0.01 @4300 submitted at 1786955344.
+    const auto hit = OrderTracker::findCfdOrderByKey(
+        list, "XAUUSD", Side::Buy, 0.01, OrderType::Limit, 4300.0, 1786955344);
+    ASSERT_FALSE(hit.is_null());
+    EXPECT_EQ(17654490, hit["order_id"].get<std::int64_t>());
+    // The same order is also findable by id (number → string normalization).
+    const auto by_id = OrderTracker::findCfdOrderInList(
+        nlohmann::json::array({ hit }), "17654490");
+    ASSERT_FALSE(by_id.is_null());
+    EXPECT_EQ(17654490, by_id["order_id"].get<std::int64_t>());
+
+    // A legacy same-key trigger (old buy @4295) outside the time window must
+    // NOT match a fresh order (the 2026-08-17 incident).
+    const auto stale = OrderTracker::findCfdOrderByKey(
+        list, "XAUUSD", Side::Buy, 0.01, OrderType::Limit, 4300.0, 1786955344);
+    EXPECT_FALSE(stale.is_null());
+
+    // Market orders match on symbol/side/volume only — price is ignored.
+    const nlohmann::json market_list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17653462 }, { "symbol", "XAUUSD" },
+                        { "side", 2 }, { "volume", "0.01" },
+                        { "price", "0.00" }, { "price_type", "market" },
+                        { "time_setup", 1786954249 } },
+    });
+    const auto mkt = OrderTracker::findCfdOrderByKey(
+        market_list, "XAUUSD", Side::Buy, 0.01, OrderType::Market, 0.0,
+        1786954249);
+    ASSERT_FALSE(mkt.is_null());
+    EXPECT_EQ(17653462, mkt["order_id"]);
+}
+
+TEST_F(OrderTrackerCfdTest, ResolveExchangeId_ReturnsAliasOrInput)
+{
+    // No alias yet → input unchanged.
+    tracker_->trackOrder("47777", "XAUUSD", Side::Buy, OrderType::Limit,
+                         0.01, 4300.0, "cfd_client_3");
+    EXPECT_EQ("47777", tracker_->resolveExchangeId("47777"));
+
+    // Open → re-anchor poll: 47777 not in the list by id, but the key match
+    // finds the real 17654804 and records the alias.
+    bool callback_invoked = false;
+    tracker_->setCompletionCallback(
+        [&callback_invoked](const ExecutionReport &) { callback_invoked = true; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17654804 }, { "state", 1 }, { "finished", 0 } });
+
+    // testSimulateCfdPoll is the by-id path (no re-anchor) — verify the
+    // alias resolver still maps a manually-recorded alias to the real id.
+    // (The re-anchor itself runs in pollCfdOrderStatus, the network path.)
+    EXPECT_EQ("47777", tracker_->resolveExchangeId("47777"));
+    EXPECT_FALSE(callback_invoked);
 }

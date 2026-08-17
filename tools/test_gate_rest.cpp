@@ -261,7 +261,9 @@ void probe_cfd_market_order(GateRestClient &client)
         {
             for (const auto &p : list)
             {
-                const std::string pid = p.value("position_id", "");
+                // position_id is a NUMBER in the API payload — value() would
+                // silently return "" and skip every close (no-op, 2026-08-17).
+                const std::string pid = str_field(p, "position_id");
                 if (!pid.empty())
                 {
                     print_full("POST /tradfi/positions/" + pid + "/close (close_type=2)",

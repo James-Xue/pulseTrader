@@ -7,6 +7,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <thread>
 
 namespace pulse::execution
 {
@@ -77,35 +78,47 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
     // placed_at window (stale same-key leftovers are never matched).
     if (MarketType::Cfd == m_marketType && resp.order_id.empty())
     {
-        auto list_result = m_restClient.request(
-            "GET", EndpointRouter::ordersPath(MarketType::Cfd));
-        if (ok(list_result))
+        // The freshly POSTed order is NOT always visible in the open-orders
+        // list immediately — TradFi list reads lag the POST by ~1-2s
+        // (verified 2026-08-17: an immediate GET missed our own trigger
+        // order, so the engine tracked data.id and later mis-cancelled).
+        // Retry the list a few times before falling back to data.id.
+        std::string resolved_id;
+        for (int attempt = 0; attempt < 4 && resolved_id.empty(); ++attempt)
         {
-            const auto &data =
-                value(list_result).value("data", nlohmann::json::object());
-            resp.order_id = matchCfdOrderId(
-                data.value("list", nlohmann::json::array()), req, placed_at_unix);
-            if (!resp.order_id.empty())
+            if (attempt > 0)
             {
-                resp.status = OrderStatus::Open;
-                PULSE_LOG_INFO("execution",
-                    "Resolved CFD order id {} from the open-orders list",
-                    resp.order_id);
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
-            else
+            auto list_result = m_restClient.request(
+                "GET", EndpointRouter::ordersPath(MarketType::Cfd));
+            if (!ok(list_result))
             {
                 PULSE_LOG_WARN("execution",
-                    "CFD order placed but id not resolvable from the "
-                    "open-orders list (matched symbol={} side={} volume={})",
-                    req.symbol, req.side == Side::Buy ? "buy" : "sell",
-                    req.quantity);
+                    "CFD order placed but order-list query failed: {}",
+                    error(list_result).message);
+                break;
             }
+            const auto &data =
+                value(list_result).value("data", nlohmann::json::object());
+            resolved_id = matchCfdOrderId(
+                data.value("list", nlohmann::json::array()), req, placed_at_unix);
+        }
+        resp.order_id = resolved_id;
+        if (!resp.order_id.empty())
+        {
+            resp.status = OrderStatus::Open;
+            PULSE_LOG_INFO("execution",
+                "Resolved CFD order id {} from the open-orders list",
+                resp.order_id);
         }
         else
         {
             PULSE_LOG_WARN("execution",
-                "CFD order placed but order-list query failed: {}",
-                error(list_result).message);
+                "CFD order placed but id not resolvable from the "
+                "open-orders list (matched symbol={} side={} volume={})",
+                req.symbol, req.side == Side::Buy ? "buy" : "sell",
+                req.quantity);
         }
     }
 

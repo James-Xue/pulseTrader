@@ -237,11 +237,23 @@ Result<std::string> PositionManager::openPosition(
 
     PULSE_LOG_INFO("risk",
         "Opened {} position {} : {} {} {} @ {:.2f} (lev={:.1f}x, strategy: {})",
-        MarketType::Futures == market_type ? "futures" : "spot",
+        (MarketType::Futures == market_type) ? "futures"
+            : (MarketType::Cfd == market_type) ? "cfd" : "spot",
         pos_id, symbol, (Side::Buy == side ? "BUY" : "SELL"),
         qty, entry_price, leverage, strategy_id);
 
     return pos_id;
+}
+
+void PositionManager::setExchangePositionId(
+    const std::string &position_id, const std::string &exchange_position_id)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() != it)
+    {
+        it->second.exchange_position_id = exchange_position_id;
+    }
 }
 
 std::optional<double> PositionManager::closePosition(const std::string &position_id, Quantity close_qty, Price exit_price)
