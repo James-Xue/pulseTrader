@@ -129,6 +129,21 @@ class OrderFlowTest : public ::testing::Test
         });
     }
 
+    /// Simulate a CFD list-poll fill (state=2/finished=1 + the fill fields
+    /// pollCfdOrderStatus synthesizes from the positions fallback) through
+    /// the CFD tracker — same completion-callback path as live fills.
+    void completeCfdOrder(const std::string &order_id, double qty, double price)
+    {
+        m_cfdTracker->testSimulateCfdPoll(nlohmann::json{
+            { "order_id", order_id },
+            { "state", 2 },
+            { "finished", 1 },
+            { "filled_volume", std::to_string(qty) },
+            { "fill_price", std::to_string(price) },
+            { "fee", "-0.06" },
+        });
+    }
+
     /// Simulate a cancelled (or partially-filled-then-cancelled) order report.
     void completeCancelled(const std::string &order_id, double filled_qty = 0.0,
                            double price = 0.0)
@@ -1187,4 +1202,102 @@ TEST_F(OrderFlowTest, PerMarketBudget_CfdOrderNotClampedByFuturesPosition)
     EXPECT_DOUBLE_EQ(0.01, m_cfdPlacer->placed[0].quantity);
     // The futures placer must not see the CFD order.
     EXPECT_EQ(0, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, CfdFillOpensPositionWithCfdMetadata)
+{
+    // M19: a CFD market-order fill (detected via the positions fallback in
+    // pollCfdOrderStatus) must flow through the completion callback into
+    // PositionManager with the CFD market metadata — the engine's CFD fills
+    // were invisible before (no tracked position, no report, no recordTrade).
+    m_riskCfg.maxPositionNotional = 6000.0;   // fallback cap
+    m_riskCfg.maxPositionNotionalCfd = 6000.0;
+    m_riskCfg.maxSymbolNotional = 6000.0;
+    m_riskCfg.maxOpenPositions = 5;
+
+    // Rebuild the stack AFTER setting caps (PositionManager copies the
+    // config) — same shape as SetUp.
+    m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+    m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+    m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+    m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                              *m_drawdownGuard, *m_rateLimiter);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+        nullptr, m_tracker.get(), m_cfdTracker.get(),
+        nullptr, nullptr, m_restMutex, nullptr);
+
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_cfdPlacer->place_count);
+    const std::string order_id = value(result).order_id;
+    ASSERT_FALSE(order_id.empty());
+
+    // The immediate poll (CFD market orders) hits the network-less client,
+    // fails gracefully and leaves the order tracked — then the fill arrives
+    // via the CFD tracker state machine (positions-fallback shape).
+    completeCfdOrder(order_id, 0.01, 4406.68);
+
+    // The fill must open a tracked XAUUSD long with CFD metadata.
+    EXPECT_EQ(1, m_positionMgr->openPositionCount());
+    const auto positions = m_positionMgr->getPositionsBySymbol("XAUUSD");
+    ASSERT_EQ(1u, positions.size());
+    const auto &pos = positions[0];
+    EXPECT_EQ(Side::Buy, pos.side);
+    EXPECT_DOUBLE_EQ(0.01, pos.quantity);
+    EXPECT_EQ(MarketType::Cfd, pos.market_type);
+    EXPECT_DOUBLE_EQ(500.0, pos.leverage);
+    EXPECT_DOUBLE_EQ(4406.68, pos.entry_price);
+}
+
+TEST_F(OrderFlowTest, CfdMarketOrderTriggersImmediatePollNoCrash)
+{
+    // Regression guard: the immediate poll for CFD market orders runs against
+    // a network-less REST client — it must fail with a WARN and leave the
+    // order tracked, never crash or open a phantom position.
+    m_riskCfg.maxPositionNotionalCfd = 6000.0;
+    m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+    m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+    m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+    m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                              *m_drawdownGuard, *m_rateLimiter);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+        nullptr, m_tracker.get(), m_cfdTracker.get(),
+        nullptr, nullptr, m_restMutex, nullptr);
+
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_cfdPlacer->place_count);
+
+    // No fill was simulated — no position, order still tracked (trackOrder
+    // starts at Pending; the failed poll leaves it there).
+    EXPECT_EQ(0, m_positionMgr->openPositionCount());
+    const auto active = m_cfdTracker->activeOrders();
+    ASSERT_EQ(1u, active.size());
+    EXPECT_EQ(OrderStatus::Pending, active[0].status);
 }

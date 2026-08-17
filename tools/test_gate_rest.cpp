@@ -161,6 +161,166 @@ void probe_cfd(GateRestClient &client)
     }
 }
 
+// Helper: read a field as string regardless of JSON type (number/string).
+std::string str_field(const nlohmann::json &o, const char *key)
+{
+    if (!o.contains(key))
+    {
+        return "";
+    }
+    const auto &v = o[key];
+    if (v.is_string())
+    {
+        return v.get<std::string>();
+    }
+    if (v.is_number())
+    {
+        return std::to_string(v.get<double>());
+    }
+    return "";
+}
+
+// Helper: print a Result<json> WITHOUT truncation (for critical probe evidence).
+void print_full(const std::string &label, const Result<nlohmann::json> &r)
+{
+    if (ok(r))
+    {
+        std::cout << "[OK]   " << label << "\n" << value(r).dump(2) << "\n\n";
+    }
+    else
+    {
+        std::cout << "[FAIL] " << label << " — code=" << static_cast<int>(error(r).code)
+                  << " msg=" << error(r).message << "\n\n";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TradFi (CFD) market-order probe — root-causes the engine's broken market
+// order path. Places a REAL 0.01-lot market buy (fills ~immediately), dumps
+// every response unfiltered, then closes the position right away.
+//
+// Evidence captured:
+//   - POST /tradfi/orders response body (2xx-with-label vs {"data":...})
+//   - whether a filled market order stays in the open-orders list, and its
+//     exact state/finished/fill fields (drives OrderTracker parsing)
+//   - trigger order lifecycle: open state -> DELETE -> final state
+// ---------------------------------------------------------------------------
+void probe_cfd_market_order(GateRestClient &client)
+{
+    std::cout << "=== TradFi (CFD) Market-Order Probe ===\n\n";
+
+    if (!client.hasCredentials())
+    {
+        std::cout << "[SKIP] no credentials\n\n";
+        return;
+    }
+
+    // 1. Preconditions — balance high enough to cover 0.01 lot (~9 USD margin).
+    auto assets = client.getCfdAssets();
+    print_full("GET /tradfi/users/assets (pre)", assets);
+    bool balance_ok = false;
+    if (ok(assets))
+    {
+        const auto &data = value(assets).value("data", nlohmann::json::object());
+        balance_ok = safeParseDouble(str_field(data, "outable")).value_or(0.0) >= 15.0;
+    }
+    if (!balance_ok)
+    {
+        std::cout << "[ABORT] CFD balance < 15 USD — deposit first.\n\n";
+        return;
+    }
+
+    // 2. Snapshot the current open orders + positions.
+    print_full("GET /tradfi/orders (pre)",
+               client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd)));
+    print_full("GET /tradfi/positions (pre)", client.getCfdPositions());
+
+    // 3. Market order POST — EXACTLY the engine's body (no price field).
+    std::cout << "--- Market order POST (engine-identical body) ---\n\n";
+    nlohmann::json body;
+    body["symbol"]     = "XAUUSD";
+    body["side"]       = 2; // 2 = buy, 1 = sell (MT5 style)
+    body["volume"]     = "0.01";
+    body["price_type"] = "market";
+    print_full("POST /tradfi/orders {symbol,side:2,volume:0.01,price_type:market}",
+               client.postCfdOrder(body));
+
+    // 4. Post-POST evidence — is the order in the open list? Did a position open?
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    print_full("GET /tradfi/orders (after market POST)",
+               client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd)));
+    auto positions = client.getCfdPositions();
+    print_full("GET /tradfi/positions (after market POST)", positions);
+
+    // 5. Close any XAUUSD position the market order opened (full close).
+    if (ok(positions))
+    {
+        const auto &data = value(positions).value("data", nlohmann::json::object());
+        const auto &list = data.value("list", nlohmann::json::array());
+        if (list.is_array())
+        {
+            for (const auto &p : list)
+            {
+                const std::string pid = p.value("position_id", "");
+                if (!pid.empty())
+                {
+                    print_full("POST /tradfi/positions/" + pid + "/close (close_type=2)",
+                               client.postCfdPositionClose(pid, 2, 0.0));
+                }
+            }
+        }
+    }
+
+    // 6. Trigger lifecycle — open state, then DELETE, then final state.
+    std::cout << "--- Trigger order lifecycle ---\n\n";
+    nlohmann::json trig;
+    trig["symbol"]     = "XAUUSD";
+    trig["side"]       = 2;
+    trig["volume"]     = "0.01";
+    trig["price_type"] = "trigger";
+    trig["price"]      = "3000"; // Unfillable — far below the market.
+    print_full("POST /tradfi/orders (trigger buy @3000)", client.postCfdOrder(trig));
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    auto trig_list = client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd));
+    print_full("GET /tradfi/orders (trigger open state)", trig_list);
+
+    // Find the trigger we just placed (newest XAUUSD buy 0.01 trigger @3000).
+    std::string trig_id;
+    if (ok(trig_list))
+    {
+        const auto &data = value(trig_list).value("data", nlohmann::json::object());
+        const auto &list = data.value("list", nlohmann::json::array());
+        if (list.is_array())
+        {
+            for (const auto &o : list)
+            {
+                if (o.value("symbol", "") != "XAUUSD") continue;
+                if (o.value("side", 0) != 2) continue;
+                if (std::abs(safeParseDouble(str_field(o, "price")).value_or(0.0) - 3000.0) > 0.01) continue;
+                if (o.contains("order_id"))
+                {
+                    trig_id = o["order_id"].is_number()
+                        ? std::to_string(o["order_id"].get<std::int64_t>())
+                        : o["order_id"].get<std::string>();
+                }
+                break;
+            }
+        }
+    }
+    if (!trig_id.empty())
+    {
+        std::cout << "       trigger order id = " << trig_id << "\n\n";
+        print_full("DELETE /tradfi/orders/" + trig_id, client.cancelCfdOrder(trig_id));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        print_full("GET /tradfi/orders (after trigger DELETE)",
+                   client.request("GET", EndpointRouter::ordersPath(MarketType::Cfd)));
+    }
+
+    // 7. Final balance.
+    print_full("GET /tradfi/users/assets (post)", client.getCfdAssets());
+}
+
 // ---------------------------------------------------------------------------
 // TradFi (CFD) cleanup — cancel all active orders and withdraw the full CFD
 // balance back to the main account. Used when the CFD direction is parked.
@@ -238,6 +398,7 @@ int main(int argc, char *argv[])
 {
     const bool run_cfd = (argc > 1 && std::string("--tradfi") == argv[1]);
     const bool run_cleanup = (argc > 1 && std::string("--tradfi-cleanup") == argv[1]);
+    const bool run_market = (argc > 1 && std::string("--tradfi-market") == argv[1]);
 
     // 1. Initialise logging (console only, info level)
     LogConfig log_cfg;
@@ -278,6 +439,14 @@ int main(int argc, char *argv[])
     if (run_cleanup)
     {
         probe_cfd_cleanup(client);
+        logging::Logger::shutdown();
+        std::cout << "Done.\n";
+        return 0;
+    }
+
+    if (run_market)
+    {
+        probe_cfd_market_order(client);
         logging::Logger::shutdown();
         std::cout << "Done.\n";
         return 0;

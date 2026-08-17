@@ -128,6 +128,11 @@ TEST(OrderExecutor, BuildOrderBodyFuturesRegression)
 namespace
 {
 
+// Anchor for the match window — the fixture's fresh entries are placed at
+// this instant; the stale leftover (17511143 = the 08-14 buy@4295) is one
+// day old and must never be matched by a new order with the same key.
+constexpr std::int64_t kPlacedAt = 1786000000;
+
 // Simulated data.list of GET /tradfi/orders (newest-first, real field shapes:
 // order_id as int, volume/price as strings, side 2=buy / 1=sell).
 nlohmann::json cfd_orders_list()
@@ -135,13 +140,16 @@ nlohmann::json cfd_orders_list()
     return nlohmann::json::array({
         nlohmann::json{ { "order_id", 17633250 }, { "symbol", "XAUUSD" },
                         { "side", 2 },              { "volume", "0.01" },
-                        { "price", "1000.00" },     { "price_type", "trigger" } },
+                        { "price", "1000.00" },     { "price_type", "trigger" },
+                        { "time_setup", kPlacedAt } },
         nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" },
                         { "side", 1 },              { "volume", "0.01" },
-                        { "price", "4418.00" },     { "price_type", "trigger" } },
+                        { "price", "4418.00" },     { "price_type", "trigger" },
+                        { "time_setup", kPlacedAt } },
         nlohmann::json{ { "order_id", 17511143 }, { "symbol", "XAUUSD" },
                         { "side", 2 },              { "volume", "0.01" },
-                        { "price", "4295.00" },     { "price_type", "trigger" } },
+                        { "price", "4295.00" },     { "price_type", "trigger" },
+                        { "time_setup", kPlacedAt - 86400 } },
     });
 }
 
@@ -162,7 +170,7 @@ TEST(OrderExecutor, MatchCfdOrderId_FindsNewestMatchingTrigger)
 {
     // Newest-first list; the placed trigger buy @1000 matches the first entry.
     const auto id = OrderExecutor::matchCfdOrderId(
-        cfd_orders_list(), cfd_request(Side::Buy, 0.01, 1000.0));
+        cfd_orders_list(), cfd_request(Side::Buy, 0.01, 1000.0), kPlacedAt);
     EXPECT_EQ("17633250", id);
 }
 
@@ -171,14 +179,14 @@ TEST(OrderExecutor, MatchCfdOrderId_IgnoresWrongSideAndPrice)
     // Sell @1000 exists nowhere in the list: the sell entries are @4418/@4295
     // (buy) — no match despite the same symbol/side/volume.
     const auto id = OrderExecutor::matchCfdOrderId(
-        cfd_orders_list(), cfd_request(Side::Sell, 0.01, 1000.0));
+        cfd_orders_list(), cfd_request(Side::Sell, 0.01, 1000.0), kPlacedAt);
     EXPECT_TRUE(id.empty());
 }
 
 TEST(OrderExecutor, MatchCfdOrderId_ReturnsEmptyWhenNothingMatches)
 {
     const auto id = OrderExecutor::matchCfdOrderId(
-        cfd_orders_list(), cfd_request(Side::Sell, 0.05, 1000.0));
+        cfd_orders_list(), cfd_request(Side::Sell, 0.05, 1000.0), kPlacedAt);
     EXPECT_TRUE(id.empty());
 }
 
@@ -188,7 +196,7 @@ TEST(OrderExecutor, MatchCfdOrderId_MarketOrderMatchesWithoutPrice)
     req.type = OrderType::Market;
 
     // The sell @4418 entry matches on symbol/side/volume alone.
-    const auto id = OrderExecutor::matchCfdOrderId(cfd_orders_list(), req);
+    const auto id = OrderExecutor::matchCfdOrderId(cfd_orders_list(), req, kPlacedAt);
     EXPECT_EQ("17618607", id);
 }
 
@@ -197,8 +205,85 @@ TEST(OrderExecutor, MatchCfdOrderId_HandlesStringOrderId)
     auto list = cfd_orders_list();
     list[0]["order_id"] = "17633250"; // string form
     const auto id = OrderExecutor::matchCfdOrderId(
-        list, cfd_request(Side::Buy, 0.01, 1000.0));
+        list, cfd_request(Side::Buy, 0.01, 1000.0), kPlacedAt);
     EXPECT_EQ("17633250", id);
+}
+
+// ---------------------------------------------------------------------------
+// M19: match window — the 2026-08-17 incident regression
+// (a new market buy 0.01 matched the stale buy@4295 and the later cancel
+// deleted the user's leftover trigger).
+// ---------------------------------------------------------------------------
+
+TEST(OrderExecutor, MatchCfdOrderId_MarketTimeWindowExcludesLegacySameKey)
+{
+    // A NEW market buy 0.01 has the exact same symbol/side/volume as the
+    // stale leftover 17511143 — the legacy entry is one day old and must be
+    // skipped; only the fresh entry (newest-first) can be ours.
+    OrderRequest req = cfd_request(Side::Buy, 0.01, 0.0);
+    req.type = OrderType::Market;
+
+    const auto id = OrderExecutor::matchCfdOrderId(cfd_orders_list(), req, kPlacedAt);
+    EXPECT_EQ("17633250", id); // The fresh buy @1000 — never 17511143.
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_TimeWindowBoundary)
+{
+    OrderRequest req = cfd_request(Side::Buy, 0.01, 0.0);
+    req.type = OrderType::Market;
+
+    auto list = cfd_orders_list();
+
+    // time_setup == placed_at - 5s — inside the window (slack inclusive).
+    list[0]["time_setup"] = kPlacedAt - 5;
+    EXPECT_EQ("17633250", OrderExecutor::matchCfdOrderId(list, req, kPlacedAt));
+
+    // time_setup == placed_at - 6s — outside the window: no fresh buy match.
+    list[0]["time_setup"] = kPlacedAt - 6;
+    EXPECT_TRUE(OrderExecutor::matchCfdOrderId(list, req, kPlacedAt).empty());
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_NewestWithinWindowWins)
+{
+    // Two same-key buys within the window — the newest-first entry wins.
+    auto list = cfd_orders_list();
+    list[0]["time_setup"] = kPlacedAt;          // newest
+    list[1] = nlohmann::json{ { "order_id", 99999999 }, { "symbol", "XAUUSD" },
+                              { "side", 2 }, { "volume", "0.01" },
+                              { "price_type", "market" },
+                              { "time_setup", kPlacedAt - 3 } };
+    list.erase(list.begin() + 2); // drop the stale entry
+
+    OrderRequest req = cfd_request(Side::Buy, 0.01, 0.0);
+    req.type = OrderType::Market;
+    EXPECT_EQ("17633250", OrderExecutor::matchCfdOrderId(list, req, kPlacedAt));
+}
+
+// ---------------------------------------------------------------------------
+// M19: 2xx business-error detection ({"label","message"} bodies)
+// ---------------------------------------------------------------------------
+
+TEST(OrderExecutor, CfdBusinessError_DetectsLabelBody)
+{
+    const nlohmann::json err = nlohmann::json::parse(R"({
+        "label": "NOT_IN_TRADE",
+        "message": "Market currently closed",
+        "data": null
+    })");
+
+    const auto result = OrderExecutor::cfdBusinessError(err);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(ErrorCode::OrderRejected, result->code);
+    EXPECT_NE(std::string::npos, result->message.find("NOT_IN_TRADE"));
+}
+
+TEST(OrderExecutor, CfdBusinessError_OkOnDataBody)
+{
+    const nlohmann::json ok = nlohmann::json::parse(R"({
+        "data": { "id": "43713", "log_id": "15853632" }
+    })");
+
+    EXPECT_FALSE(OrderExecutor::cfdBusinessError(ok).has_value());
 }
 
 // ---------------------------------------------------------------------------

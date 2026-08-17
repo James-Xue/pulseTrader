@@ -34,6 +34,13 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
         req.quantity,
         req.price);
 
+    // Anchor the CFD match window (Unix seconds) BEFORE the POST — the
+    // exchange's time_setup must not predate the request.
+    const std::int64_t placed_at_unix =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+
     // Build order body
     const nlohmann::json body_json = buildOrderBody(m_marketType, req);
     const std::string body = body_json.dump();
@@ -51,9 +58,23 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
     const auto &resp_json = value(result);
     OrderResponse resp = parseOrderResponse(resp_json);
 
+    // TradFi CFD: the POST may carry a 2xx business error ({"label","message"}
+    // body) that the HTTP status check cannot see — surface it as a real
+    // failure so the caller releases its risk reservation.
+    if (MarketType::Cfd == m_marketType)
+    {
+        if (auto biz_err = cfdBusinessError(resp_json))
+        {
+            PULSE_LOG_ERROR("execution", "CFD order rejected by exchange: {}",
+                            biz_err->message);
+            return *biz_err;
+        }
+    }
+
     // TradFi CFD: POST /tradfi/orders does not echo the exchange order id
     // (data.id is an internal submission number) — resolve it from the
-    // open-orders list, matched by symbol/side/volume/price.
+    // open-orders list, matched by symbol/side/volume/price within the
+    // placed_at window (stale same-key leftovers are never matched).
     if (MarketType::Cfd == m_marketType && resp.order_id.empty())
     {
         auto list_result = m_restClient.request(
@@ -62,8 +83,8 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
         {
             const auto &data =
                 value(list_result).value("data", nlohmann::json::object());
-            resp.order_id =
-                matchCfdOrderId(data.value("list", nlohmann::json::array()), req);
+            resp.order_id = matchCfdOrderId(
+                data.value("list", nlohmann::json::array()), req, placed_at_unix);
             if (!resp.order_id.empty())
             {
                 resp.status = OrderStatus::Open;
@@ -259,6 +280,22 @@ OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) cons
             result.order_id = resp["id"].get<std::string>();
         }
     }
+    // TradFi CFD wraps the payload in {"data": ...}; data.id is an internal
+    // submission reference (probe-verified 2026-08-17: string, e.g. "43713").
+    // Use it as the tracking key when the list-based resolution is empty.
+    if (result.order_id.empty() && resp.contains("data")
+        && resp["data"].is_object() && resp["data"].contains("id"))
+    {
+        const auto &inner_id = resp["data"]["id"];
+        if (inner_id.is_string())
+        {
+            result.order_id = inner_id.get<std::string>();
+        }
+        else if (inner_id.is_number())
+        {
+            result.order_id = std::to_string(inner_id.get<std::int64_t>());
+        }
+    }
 
     // Status — spot uses "status" (open/closed/cancelled),
     // futures uses "status" (open/finished) + "finish_as" (filled/cancelled/etc).
@@ -326,13 +363,15 @@ OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) cons
 }
 
 std::string OrderExecutor::matchCfdOrderId(const nlohmann::json &list,
-                                           const OrderRequest &req)
+                                           const OrderRequest &req,
+                                           std::int64_t placed_at_unix)
 {
     // The TradFi orders list is newest-first; the first entry matching the
     // placed request is ours. The list echoes volumes/prices as strings with
     // the exchange's own precision (e.g. "0.01", "3000.00"), so compare
     // numerically rather than string-wise.
     const int side = (Side::Buy == req.side) ? 2 : 1;
+    constexpr std::int64_t kCfdMatchSlackSec = 5; // Covers clock skew.
 
     for (const auto &o : list)
     {
@@ -348,6 +387,17 @@ std::string OrderExecutor::matchCfdOrderId(const nlohmann::json &list,
         const double volume =
             safeParseDouble(o.value("volume", "0")).value_or(-1.0);
         if (volume < 0.0 || std::abs(volume - req.quantity) > 1e-9)
+        {
+            continue;
+        }
+
+        // Only orders placed AFTER our POST can be ours — a filled market
+        // order leaves the list immediately, so without this window a stale
+        // same-key legacy trigger (e.g. an old buy@4295 for a new buy 0.01)
+        // would be matched and later cancelled by mistake (2026-08-17
+        // incident). time_setup=0 (missing) is always outside the window.
+        const std::int64_t time_setup = o.value("time_setup", 0LL);
+        if (time_setup < placed_at_unix - kCfdMatchSlackSec)
         {
             continue;
         }
@@ -384,6 +434,25 @@ std::string OrderExecutor::matchCfdOrderId(const nlohmann::json &list,
     }
 
     return {};
+}
+
+std::optional<PulseError> OrderExecutor::cfdBusinessError(const nlohmann::json &resp)
+{
+    // Success bodies are wrapped as {"data": {...}}; business errors come back
+    // as {"label": "...", "message": "...", "data": null} with a 2xx HTTP
+    // status (probe-verified 2026-08-17: data is present but null).
+    if (resp.is_object() && (resp.contains("label") || resp.contains("message")))
+    {
+        const bool has_data = resp.contains("data") && !resp["data"].is_null();
+        if (!has_data)
+        {
+            const std::string label = resp.value("label", "");
+            const std::string message = resp.value("message", "");
+            return PulseError{ ErrorCode::OrderRejected,
+                               "CFD order rejected by exchange: " + label + ": " + message };
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace pulse::execution

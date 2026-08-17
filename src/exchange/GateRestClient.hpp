@@ -210,6 +210,10 @@ class GateRestClient
     /// GET /api/v4/tradfi/orders/{order_id} — query a CFD order.
     [[nodiscard]] Result<nlohmann::json> getCfdOrder(const std::string &order_id);
 
+    /// GET /api/v4/tradfi/orders — the open-orders list. Used for CFD order
+    /// id resolution and status polling (the single-order GET does not exist).
+    [[nodiscard]] Result<nlohmann::json> getCfdOrders();
+
     /// DELETE /api/v4/tradfi/orders/{order_id} — cancel a CFD order.
     [[nodiscard]] Result<nlohmann::json> cancelCfdOrder(const std::string &order_id);
 

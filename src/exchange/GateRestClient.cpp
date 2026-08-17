@@ -449,6 +449,15 @@ Result<nlohmann::json> GateRestClient::getCfdOrder(const std::string &order_id)
     return request("GET", EndpointRouter::orderPath(MarketType::Cfd, order_id));
 }
 
+Result<nlohmann::json> GateRestClient::getCfdOrders()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query CFD orders"};
+    }
+    return request("GET", EndpointRouter::ordersPath(MarketType::Cfd));
+}
+
 Result<nlohmann::json> GateRestClient::cancelCfdOrder(const std::string &order_id)
 {
     if (!hasCredentials())

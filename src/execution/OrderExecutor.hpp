@@ -151,10 +151,25 @@ class OrderExecutor
     /// caller must match the placed order back against the list.
     ///
     /// The list is newest-first; the FIRST entry matching symbol + side +
-    /// volume (+ price for trigger orders) wins. Returns "" when nothing
-    /// matches. Pure function (no network) — unit-tested.
+    /// volume (+ price for trigger orders) wins. placed_at_unix anchors a
+    /// 5-second match window: candidates whose time_setup predates the POST
+    /// are stale leftovers and must never be matched (a filled market order
+    /// leaves the list immediately, so a same-key legacy trigger — the
+    /// 2026-08-17 incident — is exactly the failure this window prevents).
+    /// Returns "" when nothing matches. Pure function (no network) — unit-tested.
     [[nodiscard]] static std::string matchCfdOrderId(const nlohmann::json &list,
-                                                     const OrderRequest &req);
+                                                     const OrderRequest &req,
+                                                     std::int64_t placed_at_unix);
+
+    /// Detect a 2xx business error in a TradFi response body.
+    ///
+    /// Gate.io TradFi wraps success in {"data": ...} but reports business
+    /// errors (NOT_IN_TRADE, INVALID_ARGUMENT, ...) as {"label","message"}
+    /// with a 2xx HTTP status — the REST client's HTTP-status check alone
+    /// cannot see them. Returns nullopt for success-shaped bodies.
+    /// Pure function — unit-tested.
+    [[nodiscard]] static std::optional<PulseError>
+    cfdBusinessError(const nlohmann::json &resp);
 
   private:
     exchange::GateRestClient &m_restClient;

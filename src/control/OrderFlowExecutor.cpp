@@ -437,7 +437,16 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
         // no fill event ever arrives. Compensate with an immediate REST poll
         // so the fill lands in PositionManager right away instead of staying
         // Pending until a later reconcile.
-        if (OrderStatus::Filled == resp.status)
+        //
+        // CFD market orders: parseOrderResponse cannot know the fill (the
+        // POST response carries only an internal submission id), so poll
+        // immediately too — pollCfdOrderStatus detects the fill via the
+        // positions fallback and drives the completion callback.
+        const bool needs_immediate_poll =
+            (OrderStatus::Filled == resp.status)
+            || (MarketType::Cfd == order_req.market_type
+                && OrderType::Market == order_req.type);
+        if (needs_immediate_poll)
         {
             auto poll = tracker->pollOrderStatus(resp.order_id);
             if (!ok(poll))

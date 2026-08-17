@@ -460,3 +460,130 @@ TEST_F(OrderTrackerCallbackTest, FuturesPartialFillComputesFilledFromSizeLeft)
     EXPECT_DOUBLE_EQ(reports[0].filled_qty, 3.0);
     EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 50010.0);
 }
+
+// ---------------------------------------------------------------------------
+// M19: TradFi CFD order parsing + list-poll state machine
+//
+// CFD order objects use state/finished (ints) instead of the spot/futures
+// status string; the single-order GET endpoint does not exist, so status
+// comes from the open-orders list (findCfdOrderInList) + the fill-fields
+// synthesized from the positions fallback.
+// ---------------------------------------------------------------------------
+
+TEST(OrderTracker, ParseCfdStatus_OpenAndPending)
+{
+    EXPECT_EQ(OrderStatus::Open, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 1 }, { "finished", 0 } }));
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 0 }, { "finished", 0 } }));
+    // Missing fields default to Pending.
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(nlohmann::json::object()));
+    // Non-object input (null) degrades to Pending without throwing.
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(nlohmann::json{}));
+}
+
+TEST(OrderTracker, ParseCfdStatus_Terminal)
+{
+    // state=1 + finished=1 → deleted (cancelled); any other terminal → filled.
+    EXPECT_EQ(OrderStatus::Cancelled, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 1 }, { "finished", 1 } }));
+    EXPECT_EQ(OrderStatus::Filled, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 2 }, { "finished", 1 } }));
+}
+
+TEST(OrderTracker, FindCfdOrderInList_ById)
+{
+    const nlohmann::json list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" } },
+        nlohmann::json{ { "order_id", "17511143" }, { "symbol", "XAUUSD" } }, // string form
+    });
+
+    // int id, string id.
+    EXPECT_EQ(17618607, OrderTracker::findCfdOrderInList(list, "17618607")["order_id"]);
+    EXPECT_EQ("17511143", OrderTracker::findCfdOrderInList(list, "17511143")["order_id"]);
+
+    // Not found / null list / missing order_id entries.
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(list, "999").is_null());
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(nlohmann::json{}, "17618607").is_null());
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(
+        nlohmann::json::array({ nlohmann::json{ { "symbol", "XAUUSD" } } }), "1").is_null());
+}
+
+// ---------------------------------------------------------------------------
+// CFD state machine via testSimulateCfdPoll (no network).
+// ---------------------------------------------------------------------------
+
+class OrderTrackerCfdTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        ExchangeConfig config;
+        m_wsClient = std::make_unique<GateWsClient>(config);
+        m_restClient = std::make_unique<GateRestClient>(config);
+        // CFD: REST-poll-only (enable_ws=false), like main.cpp's cfd_tracker.
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient,
+                                                  MarketType::Cfd, /*enable_ws=*/false);
+    }
+
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
+    std::unique_ptr<OrderTracker> tracker_;
+};
+
+TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_OpenThenFilled)
+{
+    tracker_->trackOrder("17633250", "XAUUSD", Side::Buy, OrderType::Market,
+                         0.01, 4406.5, "cfd_client_1");
+
+    // 1. Open state (state=1, finished=0) — stays tracked, no callback.
+    bool callback_invoked = false;
+    tracker_->setCompletionCallback(
+        [&callback_invoked](const ExecutionReport &) { callback_invoked = true; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17633250 }, { "state", 1 }, { "finished", 0 } });
+
+    EXPECT_FALSE(callback_invoked);
+    auto active = tracker_->activeOrders();
+    ASSERT_EQ(1u, active.size());
+    EXPECT_EQ(OrderStatus::Open, active[0].status);
+
+    // 2. Terminal fill (state=2, finished=1, fill fields synthesized from
+    //    the positions fallback) — callback fires, report carries the fill.
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&captured](const ExecutionReport &report) { captured = report; });
+
+    tracker_->testSimulateCfdPoll(nlohmann::json{
+        { "order_id", 17633250 }, { "state", 2 }, { "finished", 1 },
+        { "filled_volume", "0.01" }, { "fill_price", "4406.68" }, { "fee", "-0.06" } });
+
+    EXPECT_EQ(OrderStatus::Filled, captured.final_status);
+    EXPECT_DOUBLE_EQ(0.01, captured.filled_qty);
+    EXPECT_DOUBLE_EQ(4406.68, captured.avg_fill_price);
+    EXPECT_DOUBLE_EQ(-0.06, captured.fees);
+    EXPECT_EQ("cfd_client_1", captured.client_order_id);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    ASSERT_EQ(1u, tracker_->recentReports().size());
+}
+
+TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_FinishedState1IsCancelled)
+{
+    // A deleted order (state=1, finished=1) — e.g. after a successful cancel
+    // removed it from the list — completes as Cancelled with filled_qty 0
+    // (no phantom position can be opened by onOrderComplete).
+    tracker_->trackOrder("17511143", "XAUUSD", Side::Buy, OrderType::Market,
+                         0.01, 4400.0, "cfd_client_2");
+
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&captured](const ExecutionReport &report) { captured = report; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17511143 }, { "state", 1 }, { "finished", 1 } });
+
+    EXPECT_EQ(OrderStatus::Cancelled, captured.final_status);
+    EXPECT_DOUBLE_EQ(0.0, captured.filled_qty);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+}

@@ -152,6 +152,14 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
 {
     PULSE_LOG_DEBUG("execution", "Polling order status: {}", order_id);
 
+    // TradFi CFD: the single-order GET /tradfi/orders/{id} endpoint does not
+    // exist (route-level 404) — status comes from the open-orders list with
+    // a positions-based fill fallback instead.
+    if (MarketType::Cfd == m_marketType)
+    {
+        return pollCfdOrderStatus(order_id);
+    }
+
     const std::string path = EndpointRouter::orderPath(m_marketType, order_id);
     auto result = m_restClient.request("GET", path);
 
@@ -174,18 +182,17 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
         auto it = m_trackedOrders.find(order_id);
         if (it != m_trackedOrders.end())
         {
-            applyOrderUpdate(resp, it->second);
-            new_status = it->second.status;
-
-            // Check if terminal state — collect report + callback under lock
-            if (isTerminalStatus(new_status))
+            completed_report = applyUpdateAndMaybeComplete(order_id, resp);
+            if (completed_report)
             {
-                completed_report = generateReport(it->second, now());
-                m_completedReports[order_id] = *completed_report;
-
-                callback_copy = m_completionCallback;
-                m_trackedOrders.erase(it);
+                new_status = completed_report->final_status;
             }
+            else
+            {
+                // Still tracked (non-terminal) — the entry survives.
+                new_status = it->second.status;
+            }
+            callback_copy = m_completionCallback;
         }
         else
         {
@@ -203,6 +210,165 @@ Result<OrderStatus> OrderTracker::pollOrderStatus(const std::string &order_id)
     }
 
     return new_status;
+}
+
+Result<OrderStatus> OrderTracker::pollCfdOrderStatus(const std::string &order_id)
+{
+    auto list_result = m_restClient.getCfdOrders();
+    if (!ok(list_result))
+    {
+        return error(list_result);
+    }
+
+    const auto &data = value(list_result).value("data", nlohmann::json::object());
+    const auto found =
+        findCfdOrderInList(data.value("list", nlohmann::json::array()), order_id);
+
+    // Prepare callback data under lock, invoke outside lock.
+    std::optional<ExecutionReport> completed_report;
+    CompletionCallback callback_copy;
+
+    if (!found.is_null())
+    {
+        // Normal path: the order is still in the open-orders list.
+        {
+            std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+            completed_report = applyUpdateAndMaybeComplete(order_id, found);
+            callback_copy = m_completionCallback;
+        }
+    }
+    else
+    {
+        // The order left the list — either cancelled (deleted) or filled
+        // (a filled market order disappears immediately). Snapshot the
+        // tracked order's metadata, then check positions for a fresh fill.
+        std::optional<TrackedOrder> tracked;
+        {
+            std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+            auto it = m_trackedOrders.find(order_id);
+            if (it != m_trackedOrders.end())
+            {
+                tracked = it->second;
+            }
+        }
+        if (!tracked)
+        {
+            return OrderStatus::Pending; // Not tracked — nothing to update.
+        }
+
+        PULSE_LOG_WARN("execution",
+            "CFD order {} not in the open-orders list — checking positions "
+            "for a fill before declaring it cancelled",
+            order_id);
+
+        bool matched_fill = false;
+        auto pos_result = m_restClient.getCfdPositions();
+        if (ok(pos_result))
+        {
+            const auto &pos_data =
+                value(pos_result).value("data", nlohmann::json::object());
+            const auto &pos_list = pos_data.value("list", nlohmann::json::array());
+            if (pos_list.is_array())
+            {
+                const std::int64_t submit_sec =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        tracked->submit_time.time_since_epoch())
+                        .count();
+                for (const auto &p : pos_list)
+                {
+                    if (p.value("symbol", "") != tracked->symbol)
+                    {
+                        continue;
+                    }
+                    const bool is_long = ("Long" == p.value("position_dir", ""));
+                    if (is_long != (Side::Buy == tracked->side))
+                    {
+                        continue;
+                    }
+                    if (std::abs(jsonNumOrStr(p, "volume", 0.0)
+                                 - tracked->requested_qty) > 1e-9)
+                    {
+                        continue;
+                    }
+                    // Filled within [submit-5s, submit+120s] — MT5 fill
+                    // registration can lag the POST by tens of seconds.
+                    const std::int64_t opened = p.value("time_create", 0LL);
+                    if (opened < submit_sec - 5 || opened > submit_sec + 120)
+                    {
+                        continue;
+                    }
+
+                    // Synthesize a filled update object from the position.
+                    nlohmann::json fill;
+                    fill["order_id"] = order_id;
+                    fill["state"] = 2; // Terminal (filled).
+                    fill["finished"] = 1;
+                    fill["filled_volume"] = p["volume"];
+                    fill["fill_price"] = p["price_open"];
+                    fill["fee"] = p["commission"];
+                    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+                    completed_report = applyUpdateAndMaybeComplete(order_id, fill);
+                    callback_copy = m_completionCallback;
+                    matched_fill = true;
+                    break;
+                }
+            }
+        }
+        if (!matched_fill)
+        {
+            // No fresh position — treat as cancelled. filled_qty stays 0 so
+            // onOrderComplete cannot open a phantom position.
+            nlohmann::json cancelled;
+            cancelled["order_id"] = order_id;
+            cancelled["state"] = 1; // Deleted.
+            cancelled["finished"] = 1;
+            std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+            completed_report = applyUpdateAndMaybeComplete(order_id, cancelled);
+            callback_copy = m_completionCallback;
+        }
+    }
+
+    // Invoke callback outside lock — no lock-ordering coupling.
+    if (completed_report)
+    {
+        if (callback_copy)
+        {
+            callback_copy(*completed_report);
+        }
+        return completed_report->final_status;
+    }
+    return getStatus(order_id).value_or(OrderStatus::Pending);
+}
+
+std::optional<ExecutionReport> OrderTracker::applyUpdateAndMaybeComplete(
+    const std::string &order_id, const nlohmann::json &update)
+{
+    // Caller holds the write lock (m_mutex) — this is the single lock-held
+    // state machine shared by the WS path, the REST poll path and the CFD
+    // list-poll path.
+    auto it = m_trackedOrders.find(order_id);
+    if (it == m_trackedOrders.end())
+    {
+        return std::nullopt; // Not tracking this order.
+    }
+
+    applyOrderUpdate(update, it->second);
+
+    // Terminal state — generate the report, stash it, erase the order.
+    if (isTerminalStatus(it->second.status))
+    {
+        auto report = generateReport(it->second, now());
+        m_completedReports[order_id] = report;
+
+        PULSE_LOG_INFO("execution",
+            "Order completed: {} status={} filled_qty={} avg_price={} slippage={}bps",
+            order_id, update.value("status", ""), report.filled_qty,
+            report.avg_fill_price, report.slippage_bps);
+
+        m_trackedOrders.erase(it);
+        return report;
+    }
+    return std::nullopt;
 }
 
 void OrderTracker::reconcileAll()
@@ -275,27 +441,8 @@ void OrderTracker::processOrderUpdate(const nlohmann::json &update)
 
     {
         std::unique_lock<std::shared_mutex> write_lock(m_mutex);
-        auto it = m_trackedOrders.find(order_id);
-        if (it == m_trackedOrders.end())
-        {
-            return; // Not tracking this order
-        }
-
-        applyOrderUpdate(update, it->second);
-
-        // Check if terminal state — collect report + callback under lock
-        if (isTerminalStatus(it->second.status))
-        {
-            completed_report = generateReport(it->second, now());
-            m_completedReports[order_id] = *completed_report;
-
-            PULSE_LOG_INFO("execution", "Order completed: {} status={} filled_qty={} avg_price={} slippage={}bps",
-                order_id, update.value("status", ""), completed_report->filled_qty,
-                completed_report->avg_fill_price, completed_report->slippage_bps);
-
-            callback_copy = m_completionCallback;
-            m_trackedOrders.erase(it);
-        }
+        completed_report = applyUpdateAndMaybeComplete(order_id, update);
+        callback_copy = m_completionCallback;
     } // write_lock released
 
     // Invoke callback outside lock — no lock-ordering coupling
@@ -307,6 +454,32 @@ void OrderTracker::processOrderUpdate(const nlohmann::json &update)
 
 void OrderTracker::applyOrderUpdate(const nlohmann::json &update, TrackedOrder &order)
 {
+    // TradFi CFD order objects use state/finished (ints) instead of the
+    // status string; fills carry filled_volume/fill_price/fee (the fill
+    // fields are synthesized by pollCfdOrderStatus from the position object).
+    if (MarketType::Cfd == m_marketType)
+    {
+        order.status = parseCfdOrderStatus(update);
+        if (update.contains("filled_volume"))
+        {
+            order.filled_qty = jsonNumOrStr(update, "filled_volume", order.filled_qty);
+        }
+        else if (OrderStatus::Filled == order.status)
+        {
+            order.filled_qty = order.requested_qty;
+        }
+        if (update.contains("fill_price"))
+        {
+            order.avg_fill_price = jsonNumOrStr(update, "fill_price", order.avg_fill_price);
+        }
+        if (update.contains("fee"))
+        {
+            order.fees = jsonNumOrStr(update, "fee", order.fees);
+        }
+        order.last_update_time = now();
+        return;
+    }
+
     const std::string status_str = update.value("status", "");
     const std::string finish_as  = update.value("finish_as", "");
     order.status = parseFuturesStatus(status_str, finish_as);
@@ -406,6 +579,70 @@ OrderStatus OrderTracker::parseFuturesStatus(const std::string &status,
         return OrderStatus::Filled;
     }
     return parseStatus(status);
+}
+
+OrderStatus OrderTracker::parseCfdOrderStatus(const nlohmann::json &order_obj)
+{
+    // TradFi CFD order objects use ints: state + finished (probe-verified
+    // 2026-08-17: open orders report state=1, finished=0). Terminal mapping:
+    // state==1 with finished!=0 = deleted (cancelled); any other terminal
+    // state = filled. A filled_qty field is authoritative when present.
+    if (!order_obj.is_object())
+    {
+        return OrderStatus::Pending;
+    }
+    const int state = order_obj.value("state", 0);
+    const int finished = order_obj.value("finished", 0);
+
+    if (0 != finished)
+    {
+        return (1 == state) ? OrderStatus::Cancelled : OrderStatus::Filled;
+    }
+    return (state >= 1) ? OrderStatus::Open : OrderStatus::Pending;
+}
+
+nlohmann::json OrderTracker::findCfdOrderInList(const nlohmann::json &list,
+                                                const std::string &order_id)
+{
+    if (!list.is_array())
+    {
+        return nullptr;
+    }
+    for (const auto &o : list)
+    {
+        if (!o.is_object() || !o.contains("order_id"))
+        {
+            continue;
+        }
+        // The list encodes order_id as int (probe-verified) — normalize.
+        if (orderIdToString(o["order_id"]) == order_id)
+        {
+            return o;
+        }
+    }
+    return nullptr;
+}
+
+void OrderTracker::testSimulateCfdPoll(const nlohmann::json &order_obj)
+{
+    if (!order_obj.is_object() || !order_obj.contains("order_id"))
+    {
+        return;
+    }
+    const std::string order_id = orderIdToString(order_obj["order_id"]);
+
+    // Same lock-held state machine as pollCfdOrderStatus — network-free.
+    std::optional<ExecutionReport> completed_report;
+    CompletionCallback callback_copy;
+    {
+        std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+        completed_report = applyUpdateAndMaybeComplete(order_id, order_obj);
+        callback_copy = m_completionCallback;
+    }
+    if (completed_report && callback_copy)
+    {
+        callback_copy(*completed_report);
+    }
 }
 
 std::vector<OrderSnapshot> OrderTracker::activeOrders() const

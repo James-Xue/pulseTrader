@@ -134,6 +134,24 @@ class OrderTracker
     [[nodiscard]] static OrderStatus parseFuturesStatus(const std::string &status,
                                                         const std::string &finish_as);
 
+    /// Parse a TradFi CFD order object into an OrderStatus.
+    ///
+    /// CFD order objects use `state` (int) + `finished` (0/1) instead of the
+    /// spot/futures `status` string (probe-verified 2026-08-17). Mapping:
+    ///   finished != 0  → terminal; state == 1 → Cancelled (deleted),
+    ///                    otherwise → Filled
+    ///   finished == 0  → state >= 1 ? Open : Pending
+    /// Pure function — unit-tested.
+    [[nodiscard]] static OrderStatus parseCfdOrderStatus(const nlohmann::json &order_obj);
+
+    /// Find an order by id inside a TradFi open-orders list (`data.list`).
+    ///
+    /// order_id may be encoded as int or string in the list. Returns the
+    /// matching order object (a reference into the list), or a null JSON
+    /// value when not found or the list is not an array. Pure function.
+    [[nodiscard]] static nlohmann::json findCfdOrderInList(const nlohmann::json &list,
+                                                           const std::string &order_id);
+
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
     [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
@@ -152,6 +170,10 @@ class OrderTracker
     {
         processOrderUpdate(event);
     }
+
+    /// Test-only: simulate a CFD list-poll result for one order (calls the
+    /// same apply+complete path as pollCfdOrderStatus, without network).
+    void testSimulateCfdPoll(const nlohmann::json &order_obj);
 
     /// Test-only: try to acquire a shared read lock (returns immediately).
     /// Used to verify that callbacks run outside the write lock.
@@ -191,11 +213,23 @@ class OrderTracker
     bool m_wsSubscribed; ///< Whether we've subscribed to the orders channel.
     bool m_enableWs;     ///< False = REST-poll-only (TradFi CFD has no WS channel).
 
+    /// Poll a CFD order's status via the open-orders list (the single-order
+    /// GET /tradfi/orders/{id} endpoint does not exist — route-level 404).
+    /// Falls back to position-based fill detection when the order has left
+    /// the list (a filled market order disappears immediately).
+    [[nodiscard]] Result<OrderStatus> pollCfdOrderStatus(const std::string &order_id);
+
     /// WS callback for spot.orders channel events.
     void onOrderUpdate(const nlohmann::json &event);
 
     /// Parse WS order update event and update tracked order state.
     void processOrderUpdate(const nlohmann::json &event);
+
+    /// Shared lock-held state machine: apply an order object update to a
+    /// tracked order and, on terminal state, generate the report + stash the
+    /// callback for out-of-lock invocation. Returns the report if completed.
+    std::optional<ExecutionReport> applyUpdateAndMaybeComplete(const std::string &order_id,
+                                                               const nlohmann::json &update);
 
     /// Apply a Gate.io order object (WS event result or REST response) to a
     /// tracked order. Handles both spot and futures field layouts.
