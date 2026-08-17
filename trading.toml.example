@@ -20,7 +20,8 @@ symbols = ["BTC_USDT", "ETH_USDT"]
 # 单活跃方向模型：任一时刻只有一个方向（futures / cfd）真实交易。
 # 另一方向的策略启动即暂停、切换时撤单；重启后回到此配置值。
 # 运行时切换: REPL `switch <futures|cfd>` 或 MCP switch_direction。
-# active_market = "futures"
+# 2026-08-17 起本工程主力为黄金 CFD: 取消下行注释即为持久默认。
+active_market = "cfd"
 
 # ── 交易所 ────────────────────────────────────────────────────────────
 [exchange]
