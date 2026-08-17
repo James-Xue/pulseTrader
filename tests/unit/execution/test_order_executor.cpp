@@ -122,6 +122,86 @@ TEST(OrderExecutor, BuildOrderBodyFuturesRegression)
 }
 
 // ---------------------------------------------------------------------------
+// M17: CFD order-id resolution (POST /tradfi/orders does not echo the id)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Simulated data.list of GET /tradfi/orders (newest-first, real field shapes:
+// order_id as int, volume/price as strings, side 2=buy / 1=sell).
+nlohmann::json cfd_orders_list()
+{
+    return nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17633250 }, { "symbol", "XAUUSD" },
+                        { "side", 2 },              { "volume", "0.01" },
+                        { "price", "1000.00" },     { "price_type", "trigger" } },
+        nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" },
+                        { "side", 1 },              { "volume", "0.01" },
+                        { "price", "4418.00" },     { "price_type", "trigger" } },
+        nlohmann::json{ { "order_id", 17511143 }, { "symbol", "XAUUSD" },
+                        { "side", 2 },              { "volume", "0.01" },
+                        { "price", "4295.00" },     { "price_type", "trigger" } },
+    });
+}
+
+OrderRequest cfd_request(Side side, double qty, double price)
+{
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = side;
+    req.type = OrderType::Limit;
+    req.quantity = qty;
+    req.price = price;
+    return req;
+}
+
+} // namespace
+
+TEST(OrderExecutor, MatchCfdOrderId_FindsNewestMatchingTrigger)
+{
+    // Newest-first list; the placed trigger buy @1000 matches the first entry.
+    const auto id = OrderExecutor::matchCfdOrderId(
+        cfd_orders_list(), cfd_request(Side::Buy, 0.01, 1000.0));
+    EXPECT_EQ("17633250", id);
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_IgnoresWrongSideAndPrice)
+{
+    // Sell @1000 exists nowhere in the list: the sell entries are @4418/@4295
+    // (buy) — no match despite the same symbol/side/volume.
+    const auto id = OrderExecutor::matchCfdOrderId(
+        cfd_orders_list(), cfd_request(Side::Sell, 0.01, 1000.0));
+    EXPECT_TRUE(id.empty());
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_ReturnsEmptyWhenNothingMatches)
+{
+    const auto id = OrderExecutor::matchCfdOrderId(
+        cfd_orders_list(), cfd_request(Side::Sell, 0.05, 1000.0));
+    EXPECT_TRUE(id.empty());
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_MarketOrderMatchesWithoutPrice)
+{
+    OrderRequest req = cfd_request(Side::Sell, 0.01, 0.0);
+    req.type = OrderType::Market;
+
+    // The sell @4418 entry matches on symbol/side/volume alone.
+    const auto id = OrderExecutor::matchCfdOrderId(cfd_orders_list(), req);
+    EXPECT_EQ("17618607", id);
+}
+
+TEST(OrderExecutor, MatchCfdOrderId_HandlesStringOrderId)
+{
+    auto list = cfd_orders_list();
+    list[0]["order_id"] = "17633250"; // string form
+    const auto id = OrderExecutor::matchCfdOrderId(
+        list, cfd_request(Side::Buy, 0.01, 1000.0));
+    EXPECT_EQ("17633250", id);
+}
+
+// ---------------------------------------------------------------------------
 // M12: Futures-specific OrderRequest tests
 // ---------------------------------------------------------------------------
 

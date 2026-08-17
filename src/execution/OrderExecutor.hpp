@@ -145,6 +145,17 @@ class OrderExecutor
     [[nodiscard]] static nlohmann::json buildOrderBody(MarketType mt,
                                                        const OrderRequest &req);
 
+    /// Resolve the exchange order id from the TradFi open-orders list
+    /// (`data.list` of GET /tradfi/orders). POST /tradfi/orders does NOT echo
+    /// the order id — its `data.id` is an internal submission number — so the
+    /// caller must match the placed order back against the list.
+    ///
+    /// The list is newest-first; the FIRST entry matching symbol + side +
+    /// volume (+ price for trigger orders) wins. Returns "" when nothing
+    /// matches. Pure function (no network) — unit-tested.
+    [[nodiscard]] static std::string matchCfdOrderId(const nlohmann::json &list,
+                                                     const OrderRequest &req);
+
   private:
     exchange::GateRestClient &m_restClient;
     MarketType m_marketType;

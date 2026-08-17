@@ -6,6 +6,7 @@
 #include "logging/Logger.hpp"
 
 #include <charconv>
+#include <cmath>
 
 namespace pulse::execution
 {
@@ -48,7 +49,44 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
 
     // Parse response
     const auto &resp_json = value(result);
-    const OrderResponse resp = parseOrderResponse(resp_json);
+    OrderResponse resp = parseOrderResponse(resp_json);
+
+    // TradFi CFD: POST /tradfi/orders does not echo the exchange order id
+    // (data.id is an internal submission number) — resolve it from the
+    // open-orders list, matched by symbol/side/volume/price.
+    if (MarketType::Cfd == m_marketType && resp.order_id.empty())
+    {
+        auto list_result = m_restClient.request(
+            "GET", EndpointRouter::ordersPath(MarketType::Cfd));
+        if (ok(list_result))
+        {
+            const auto &data =
+                value(list_result).value("data", nlohmann::json::object());
+            resp.order_id =
+                matchCfdOrderId(data.value("list", nlohmann::json::array()), req);
+            if (!resp.order_id.empty())
+            {
+                resp.status = OrderStatus::Open;
+                PULSE_LOG_INFO("execution",
+                    "Resolved CFD order id {} from the open-orders list",
+                    resp.order_id);
+            }
+            else
+            {
+                PULSE_LOG_WARN("execution",
+                    "CFD order placed but id not resolvable from the "
+                    "open-orders list (matched symbol={} side={} volume={})",
+                    req.symbol, req.side == Side::Buy ? "buy" : "sell",
+                    req.quantity);
+            }
+        }
+        else
+        {
+            PULSE_LOG_WARN("execution",
+                "CFD order placed but order-list query failed: {}",
+                error(list_result).message);
+        }
+    }
 
     PULSE_LOG_INFO("execution", "Order placed: id={}, status={}", resp.order_id, resp_json.value("status", "unknown"));
 
@@ -147,6 +185,12 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
     {
         // --- TradFi CFD order format (MT5 style) ---
         // side: 2 = buy, 1 = sell; volume in lots (0.01 min for XAUUSD).
+        //
+        // CFD cost model (recorded, NOT enforced by the engine):
+        //   - Commission: 0.06 USDT per 0.01 lot, charged once on BUY only
+        //     (sell side is free); 6 USDT per full lot in the symbol detail.
+        //   - Gold storage/swap (利差): charged per overnight hold, surfaced
+        //     in the assets `storage` field. Long positions typically pay.
         body["symbol"] = req.symbol;
         body["side"] = (Side::Buy == req.side) ? 2 : 1;
         body["volume"] = std::to_string(req.quantity);
@@ -279,6 +323,67 @@ OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) cons
     }
 
     return result;
+}
+
+std::string OrderExecutor::matchCfdOrderId(const nlohmann::json &list,
+                                           const OrderRequest &req)
+{
+    // The TradFi orders list is newest-first; the first entry matching the
+    // placed request is ours. The list echoes volumes/prices as strings with
+    // the exchange's own precision (e.g. "0.01", "3000.00"), so compare
+    // numerically rather than string-wise.
+    const int side = (Side::Buy == req.side) ? 2 : 1;
+
+    for (const auto &o : list)
+    {
+        if (o.value("symbol", "") != req.symbol)
+        {
+            continue;
+        }
+        if (o.value("side", 0) != side)
+        {
+            continue;
+        }
+
+        const double volume =
+            safeParseDouble(o.value("volume", "0")).value_or(-1.0);
+        if (volume < 0.0 || std::abs(volume - req.quantity) > 1e-9)
+        {
+            continue;
+        }
+
+        // Trigger orders must match the price too; market orders match on
+        // symbol/side/volume only.
+        if (OrderType::Market != req.type)
+        {
+            const double price =
+                safeParseDouble(o.value("price", "0")).value_or(-1.0);
+            if (price < 0.0 || std::abs(price - req.price) > 1e-6)
+            {
+                continue;
+            }
+        }
+
+        if (o.contains("order_id"))
+        {
+            if (o["order_id"].is_number())
+            {
+                return std::to_string(o["order_id"].get<std::int64_t>());
+            }
+            return o["order_id"].get<std::string>();
+        }
+        // order_id missing — try "id" as a fallback field name.
+        if (o.contains("id"))
+        {
+            if (o["id"].is_number())
+            {
+                return std::to_string(o["id"].get<std::int64_t>());
+            }
+            return o["id"].get<std::string>();
+        }
+    }
+
+    return {};
 }
 
 } // namespace pulse::execution
