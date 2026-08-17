@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-17
-> File size: 23655 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-17 (evening, home machine)
+> File size: 24265 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -103,6 +103,14 @@ Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git 
 - **get_positions**:Position 结构新增 `sl_price`/`tp_price`(0=无,交易所为准),to_json 输出——子代理可直接看到持仓保护价。
 - **实测**:引擎重启后 JSON-RPC 直连验证 sync_positions 返回摘要、modify_sl_tp 对未知仓返回 9101、get_positions 空仓正常。
 - **子代理现状**:v2 交易模式已授权(按设计文档 §4),验证单 +1.20 USD(用户手动平),已挂起等本小节落地后恢复循环 + trailing 升级。
+
+### 家庭电脑环境 (2026-08-17, MECHREVO)
+- 编译:新建 `build_headless`(Debug + SQLITE ON),745 测试全绿(11.7s,16 核);旧 `build/` 是 WebUI 时代残留,已废弃
+- 配置重建:`trading.toml` 从"测试网 ETH 合约"改为主网 CFD 黄金(XAUUSD 3 策略 + signal_only + 风控 6000/5500/4);旧配置备份 `trading.toml.bak-eth-testnet`(不入库)
+- 密钥:`GATE_MAINNET_*` 更换新 key(实盘账户 54.60 USD 核对一致);`.env` 不入库
+- MCP 注册:`claude mcp add pulsetrader -- /home/james/1_Code/09_pulseTrader/run.sh mcp`(local scope),20 工具验证通过
+- 修复:run.sh mcp 分支的 `echo "=== MCP stdio server ==="` 污染 stdio 协议流 → 已移除(MCP 模式 stdout 必须纯 JSON-RPC)
+- 引擎以 nohup 后台运行(mainnet, signal_only, 0 持仓);注意 REST 偶发超时(Clash 代理抖动,自动重试恢复)
 
 ### Next Steps (2026-08-17)
 - ✅ **M20 已提交推送**（d5daf08）

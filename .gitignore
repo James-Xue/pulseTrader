@@ -65,10 +65,14 @@ Testing/
 
 # Local config files
 trading.toml
+trading.toml.bak*
 trading.testnet.toml
 
 # SQLite database
 data/
+
+# Frontend deps (WebUI removed on headless; leftover from M13 era)
+frontend/node_modules/
 
 # CMake in-source build artifacts (prevent accidental in-source builds)
 CMakeCache.txt

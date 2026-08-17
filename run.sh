@@ -75,7 +75,7 @@ case "$1" in
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" cli --config trading.toml
         ;;
     mcp)
-        echo "=== MCP stdio server ==="
+        # MCP 走 stdio 协议: stdout 必须是纯 JSON-RPC, 禁止 echo 污染
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
         ;;
     strategy)
