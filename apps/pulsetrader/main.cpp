@@ -632,6 +632,32 @@ static int runTrade(int argc, char* argv[])
     // Default to spot if no strategies configured (backward compatibility).
     if (!has_spot && !has_futures && !has_cfd) has_spot = true;
 
+    // Per-market symbol lists for the feeds. Each feed must only poll the
+    // symbols that exist in ITS market: the CFD feed polling a futures-only
+    // symbol (e.g. BTC_USDT) spams SYMBOL_NOT_EXISTS every second AND fails
+    // the whole SymbolRegistry detail load (losing XAUUSD's quanto_multiplier
+    // = 100 → notional underestimated 100x). Falls back to cfg.symbols when
+    // a market has no enabled strategies (backward compatibility).
+    auto symbols_for = [&cfg](MarketType mt)
+    {
+        std::vector<std::string> syms;
+        for (const auto &inst : cfg.strategy.strategies)
+        {
+            if (!inst.enabled || inst.market_type != mt)
+            {
+                continue;
+            }
+            if (std::find(syms.begin(), syms.end(), inst.symbol) == syms.end())
+            {
+                syms.push_back(inst.symbol);
+            }
+        }
+        return syms.empty() ? cfg.symbols : syms;
+    };
+    const auto spot_symbols    = symbols_for(MarketType::Spot);
+    const auto futures_symbols = symbols_for(MarketType::Futures);
+    const auto cfd_symbols     = symbols_for(MarketType::Cfd);
+
     // Spot infrastructure.
     std::unique_ptr<pulse::exchange::GateRestClient> spot_rest;
     std::unique_ptr<pulse::exchange::GateWsClient>   spot_ws;
@@ -1109,19 +1135,21 @@ static int runTrade(int argc, char* argv[])
     // L3: Subscribe to market data channels.
     // The CFD feed's REST poll thread starts regardless of the active
     // direction — switching to CFD must be instant (no warm-up wait).
+    // Each feed polls only its own market's symbols (per-market filtering).
     if (spot_feed)
     {
-        spot_feed->start(cfg.symbols);
+        spot_feed->start(spot_symbols);
     }
     if (futures_feed)
     {
-        futures_feed->start(cfg.symbols);
+        futures_feed->start(futures_symbols);
     }
     if (cfd_feed)
     {
-        cfd_feed->start(cfg.symbols);
+        cfd_feed->start(cfd_symbols);
     }
-    log->info("[L3] Market feed(s) started for {} symbol(s)", cfg.symbols.size());
+    log->info("[L3] Market feed(s) started (spot={} futures={} cfd={} symbols)",
+              spot_symbols.size(), futures_symbols.size(), cfd_symbols.size());
 
     // L6: Spawn strategy threads.
     strategy_mgr.start();
