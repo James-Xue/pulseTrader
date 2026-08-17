@@ -964,17 +964,17 @@ int EngineServices::syncCfdPositionsFromExchange(int *pruned_out)
                             static_cast<std::int64_t>(create_secs)}});
             }
 
-            // CFD symbols carry their own multiplier in the feed
-            // (quanto=100 for XAUUSD = 1 lot of 100 oz); 1.0 keeps notional
-            // in USD lots here.
-            const std::string pos_id = symbol + "_"
-                + (is_long ? "Buy" : "Sell") + "_sync";
+            // CFD symbols carry their own contract-size multiplier in the
+            // symbol registry (quanto=100 for XAUUSD = 1 lot of 100 oz).
+            // Use the same multiplier as the fill path so notional/PnL
+            // conventions agree between engine-opened and synced positions.
+            const double quanto = m_orderFlow.quantoMultiplierFor(symbol);
             m_positionMgr.syncPositionFromExchange(
                 symbol, is_long ? Side::Buy : Side::Sell, volume, entry, mark,
-                MarketType::Cfd, leverage, MarginMode::Cross, 1.0, 0.0,
+                MarketType::Cfd, leverage, MarginMode::Cross, quanto, 0.0,
                 syncJsonNumber(p, "liq_price"), open_time,
-                syncJsonNumber(p, "price_sl"), syncJsonNumber(p, "price_tp"));
-            m_positionMgr.setExchangePositionId(pos_id, exchange_id);
+                syncJsonNumber(p, "price_sl"), syncJsonNumber(p, "price_tp"),
+                exchange_id);
 
             PULSE_LOG_INFO("app",
                 "Position sync (CFD): {} {} {} lots @ {} (mark {}, sl {}, tp {})",

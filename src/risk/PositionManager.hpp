@@ -95,11 +95,15 @@ class PositionManager
     ///   - liquidation_price (estimated)
     ///
     /// Returns position_id on success, PulseError if any limit is exceeded.
+    /// sl_price/tp_price (optional) carry the exchange-native protective
+    /// stops attached to the entry order (CFD) onto the tracked position, so
+    /// get_positions reflects the protection immediately after the fill.
     [[nodiscard]] Result<std::string> openPosition(
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         const std::string &strategy_id,
         MarketType market_type, double leverage, MarginMode margin_mode,
-        double quanto_multiplier, double maintenance_rate);
+        double quanto_multiplier, double maintenance_rate,
+        double sl_price = 0.0, double tp_price = 0.0);
 
     /// Import a position that already exists on the exchange (startup sync).
     ///
@@ -108,17 +112,25 @@ class PositionManager
     /// to the risk engine regardless of configured limits — hiding it would
     /// undercount risk (drawdown, notional caps) and confuse displays.
     ///
-    /// Idempotent per (symbol, side): re-syncing updates the existing synced
-    /// entry (fresh prices/quantity) instead of duplicating it. Synced
-    /// positions use the id "<symbol>_<Buy|Sell>_sync", which cannot collide
-    /// with engine-opened ids ("<symbol>_<Buy|Sell>_<n>"). liquidation_price
-    /// is taken from the exchange (more accurate than the estimate).
+    /// Dedup rules, in order:
+    ///   1. If exchange_position_id is non-empty and a tracked position
+    ///      already carries it (engine-opened fill, previous sync), the
+    ///      existing entry is updated IN PLACE — its position_id, strategy_id
+    ///      and open_time survive. Without this, a fill-tracked CFD position
+    ///      and its exchange twin would both show in get_positions.
+    ///   2. Otherwise, idempotent per (symbol, side): re-syncing updates the
+    ///      existing synced entry (fresh prices/quantity). Synced positions
+    ///      use the id "<symbol>_<Buy|Sell>_sync", which cannot collide with
+    ///      engine-opened ids ("<symbol>_<Buy|Sell>_<n>").
+    /// liquidation_price is taken from the exchange (more accurate than the
+    /// estimate).
     void syncPositionFromExchange(
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         Price mark_price, MarketType market_type, double leverage,
         MarginMode margin_mode, double quanto_multiplier,
         double maintenance_rate, Price liquidation_price,
-        Timestamp open_time = {}, double sl_price = 0.0, double tp_price = 0.0);
+        Timestamp open_time = {}, double sl_price = 0.0, double tp_price = 0.0,
+        const std::string &exchange_position_id = {});
 
     /// Close a position (fully or partially).
     ///
@@ -128,9 +140,10 @@ class PositionManager
     /// Returns the realized PnL for the closed portion on success, or
     /// std::nullopt if position_id was not found.
     ///
-    /// Realized PnL formula (closed portion):
-    ///   long:  (exit_price - entry_price) * closed_qty * quanto * leverage
-    ///   short: (entry_price - exit_price) * closed_qty * quanto * leverage
+    /// Realized PnL formula (closed portion, leverage-free — leverage only
+    /// affects margin, never PnL):
+    ///   long:  (exit_price - entry_price) * closed_qty * quanto
+    ///   short: (entry_price - exit_price) * closed_qty * quanto
     /// Record the EXCHANGE-side position id on an engine position.
     ///
     /// TradFi CFD only: the close endpoint takes the exchange position id
@@ -266,13 +279,17 @@ class PositionManager
     [[nodiscard]] std::string generatePositionId(const Symbol &symbol, Side side);
 
     /// Calculate unrealized PnL for a position.
-    /// Buy: (current - entry) * qty * quanto * leverage
-    /// Sell: (entry - current) * qty * quanto * leverage
-    /// Default leverage=1.0 and quanto_multiplier=1.0 make spot PnL identical
-    /// to the original formula.
+    /// Buy: (current - entry) * qty * quanto
+    /// Sell: (entry - current) * qty * quanto
+    /// Leverage is deliberately NOT part of PnL (it only scales margin); the
+    /// quanto_multiplier carries the contract-size conversion (100 oz/lot for
+    /// XAUUSD, BTC-per-contract for futures), so the result is real USD.
+    /// Defaults quanto_multiplier=1.0 make spot PnL identical to the original
+    /// formula. leverage is accepted (and ignored) for source compatibility.
     [[nodiscard]] static double calculateUnrealizedPnl(
         Side side, Price entry, Price current, Quantity qty,
         double leverage = 1.0, double quanto_multiplier = 1.0);
+
 };
 
 } // namespace pulse::risk

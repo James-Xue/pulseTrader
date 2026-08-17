@@ -467,7 +467,7 @@ TEST(PositionManager, OpenFuturesPosition_LiquidationPriceSell)
     EXPECT_NEAR(54750.0, pos->liquidation_price, 1.0);
 }
 
-TEST(PositionManager, UpdatePrice_FuturesPnlWithLeverage)
+TEST(PositionManager, UpdatePrice_FuturesPnlIgnoresLeverage)
 {
     PositionManager pm(make_config(100000.0, 100, 100000.0));
 
@@ -479,13 +479,15 @@ TEST(PositionManager, UpdatePrice_FuturesPnlWithLeverage)
     ASSERT_TRUE(pulse::ok(result));
     const std::string pos_id = pulse::value(result);
 
-    // Price moves to 51000 (+2%)
-    // PnL = (51000 - 50000) * 10 * 0.0001 * 10 = 1000 * 10 * 0.0001 * 10 = 10.0
+    // Price moves to 51000 (+2%).
+    // PnL = (51000 - 50000) * 10 * 0.0001 = 1.0 — leverage scales MARGIN,
+    // never PnL (regression: the old formula multiplied by leverage, showing
+    // 10.0 and 10x-inflating every futures/CFD PnL display).
     pm.updatePrice(pos_id, 51000.0);
 
     const auto pos = pm.getPosition(pos_id);
     ASSERT_TRUE(pos.has_value());
-    EXPECT_NEAR(10.0, pos->unrealized_pnl, 1e-6);
+    EXPECT_NEAR(1.0, pos->unrealized_pnl, 1e-6);
 }
 
 TEST(PositionManager, CalculatePnl_SpotEquivalent)
@@ -554,8 +556,9 @@ TEST(PositionManager, SyncImportsExchangePositionWithoutLimitChecks)
     EXPECT_NEAR(69000.0, pos.liquidation_price, 1e-9);
     // margin = qty * entry * quanto / leverage.
     EXPECT_NEAR(6.0 * 63072.3 * 0.0001 / 10.0, pos.margin_used, 1e-6);
-    // Short at a mark below entry → positive unrealized PnL.
-    EXPECT_NEAR((63072.3 - 63037.2) * 6.0 * 0.0001 * 10.0, pos.unrealized_pnl, 1e-6);
+    // Short at a mark below entry → positive unrealized PnL. Leverage-free:
+    // (entry - mark) * qty * quanto = 35.1 * 0.0006 = 0.02106.
+    EXPECT_NEAR((63072.3 - 63037.2) * 6.0 * 0.0001, pos.unrealized_pnl, 1e-6);
     // No owning strategy.
     EXPECT_TRUE(pos.strategy_id.empty());
 }
@@ -616,6 +619,98 @@ TEST(PositionManager, SyncDoesNotCollideWithEngineOpenedPositions)
     EXPECT_NE("BTC_USDT_Sell_sync", pulse::value(opened));
     EXPECT_TRUE(pm.getPosition("BTC_USDT_Sell_sync").has_value());
     EXPECT_TRUE(pm.getPosition(pulse::value(opened)).has_value());
+}
+
+TEST(PositionManager, OpenPositionCarriesAttachedSlTp)
+{
+    // Regression (2026-08-17): a CFD entry filled with attached
+    // price_sl/price_tp produced a tracked position with sl_price=0 —
+    // get_positions hid the protection until the next sync.
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    const auto r = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4388.35, "test-sl-tp-verify",
+        MarketType::Cfd, 0.0, MarginMode::Cross, 100.0, 0.0,
+        4383.86, 4396.86);
+    ASSERT_TRUE(ok(r));
+
+    const auto pos = pm.getPosition(value(r));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_DOUBLE_EQ(4383.86, pos->sl_price);
+    EXPECT_DOUBLE_EQ(4396.86, pos->tp_price);
+}
+
+TEST(PositionManager, SyncUpdatesEngineOpenedPositionByExchangeId)
+{
+    // Regression (2026-08-17): hot-sync imported the exchange twin of a
+    // fill-tracked CFD position as a second "_sync" entry (same
+    // exchange_position_id), doubling the risk engine's exposure view.
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // Engine fill opens XAUUSD_Buy_1 and records the exchange position id.
+    const auto r = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, "test-sl-tp-verify",
+        MarketType::Cfd, 500.0, MarginMode::Cross, 100.0, 0.0,
+        4391.33, 4405.33);
+    ASSERT_TRUE(ok(r));
+    const std::string engine_id = value(r);
+    pm.setExchangePositionId(engine_id, "17679434");
+
+    // Hot-sync sees the same exchange position (qty/prices/sl-tp refreshed).
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, 4396.01, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 100.0, 0.0, 0.0, Timestamp{}, 4390.10, 4406.20,
+        "17679434");
+
+    // Updated in place — NOT duplicated; the engine id survives.
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size());
+    EXPECT_EQ(engine_id, all[0].position_id);
+    EXPECT_EQ("test-sl-tp-verify", all[0].strategy_id);
+    EXPECT_DOUBLE_EQ(4390.10, all[0].sl_price);
+    EXPECT_DOUBLE_EQ(4406.20, all[0].tp_price);
+    EXPECT_EQ("17679434", all[0].exchange_position_id);
+}
+
+TEST(PositionManager, CfdSyncPnlDoesNotMultiplyByLeverage)
+{
+    // Regression (2026-08-17): synced CFD position showed PnL × leverage
+    // (XAUUSD 0.01 lot: -0.70 real vs -3.50 displayed at 500x) and used
+    // quanto=1.0, disagreeing with the fill path (quanto=100).
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    // 0.01 lot XAUUSD @ 4390.00, mark 4389.30, leverage 500, quanto 100
+    // (1 lot = 100 oz; 0.01 lot = 1 oz → 0.70 USD per 0.70 USD/oz move).
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4390.00, 4389.30, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 100.0, 0.0, 4337.32, Timestamp{}, 4385.00, 4398.00,
+        "17679434");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size());
+    const auto &pos = all[0];
+    EXPECT_NEAR(-0.70, pos.unrealized_pnl, 1e-9);   // (4389.30-4390.00)*0.01*100
+    EXPECT_NEAR(4389.30, pos.notional_value, 1e-6); // 0.01 * 4389.30 * 100
+    EXPECT_DOUBLE_EQ(4385.00, pos.sl_price);
+    EXPECT_DOUBLE_EQ(4398.00, pos.tp_price);
+    EXPECT_EQ("17679434", pos.exchange_position_id);
+}
+
+TEST(PositionManager, RealizedPnlDoesNotMultiplyByLeverage)
+{
+    // Realized PnL shares the leverage-free formula (closePosition).
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    const auto r = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4390.00, "s1",
+        MarketType::Cfd, 500.0, MarginMode::Cross, 100.0, 0.0,
+        4385.00, 4398.00);
+    ASSERT_TRUE(ok(r));
+
+    // Close at 4392.00: realized = (4392.00-4390.00) * 0.01 * 100 = 2.00.
+    const auto pnl = pm.closePosition(value(r), 0.01, 4392.00);
+    ASSERT_TRUE(pnl.has_value());
+    EXPECT_NEAR(2.00, pnl.value(), 1e-9);
 }
 
 // ---------------------------------------------------------------------------

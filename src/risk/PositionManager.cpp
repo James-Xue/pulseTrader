@@ -39,20 +39,40 @@ void PositionManager::syncPositionFromExchange(
     Price mark_price, MarketType market_type, double leverage,
     MarginMode margin_mode, double quanto_multiplier, double maintenance_rate,
     Price liquidation_price, Timestamp open_time, double sl_price,
-    double tp_price)
+    double tp_price, const std::string &exchange_position_id)
 {
-    // Startup reconciliation: import positions that already exist on the
+    // Startup/hot reconciliation: import positions that already exist on the
     // exchange (previous engine run, manual trading). No limit validation —
     // the exposure is real and must be visible to the risk engine.
-    const std::string pos_id = symbol + "_"
+    //
+    // Dedup first by exchange_position_id: a fill-tracked CFD position
+    // (e.g. "XAUUSD_Buy_1" opened via open_order) and its exchange twin
+    // share the same exchange id — importing a second "_sync" entry would
+    // double-count exposure in the risk engine and confuse displays.
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    std::string pos_id = symbol + "_"
         + (Side::Buy == side ? "Buy" : "Sell") + "_sync";
 
-    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    if (!exchange_position_id.empty())
+    {
+        // Inline scan (the write lock is already held here — a helper that
+        // takes its own shared lock would self-deadlock).
+        for (const auto &[candidate_id, candidate] : m_positions)
+        {
+            if (candidate.exchange_position_id == exchange_position_id)
+            {
+                pos_id = candidate_id; // update the fill-tracked entry in place
+                break;
+            }
+        }
+    }
 
     auto it = m_positions.find(pos_id);
     if (m_positions.end() != it)
     {
-        // Re-sync: refresh prices/quantity in place, keep open_time.
+        // Re-sync: refresh prices/quantity in place; keep the original
+        // position_id, strategy_id (may be an engine fill) and open_time.
         auto &pos = it->second;
         pos.side = side;
         pos.quantity = qty;
@@ -71,6 +91,10 @@ void PositionManager::syncPositionFromExchange(
             side, entry_price, mark_price, qty, leverage, quanto_multiplier);
         pos.sl_price = sl_price;
         pos.tp_price = tp_price;
+        if (!exchange_position_id.empty())
+        {
+            pos.exchange_position_id = exchange_position_id;
+        }
         return;
     }
 
@@ -96,6 +120,7 @@ void PositionManager::syncPositionFromExchange(
         side, entry_price, mark_price, qty, leverage, quanto_multiplier);
     pos.sl_price = sl_price;
     pos.tp_price = tp_price;
+    pos.exchange_position_id = exchange_position_id;
 
     m_positions[pos_id] = pos;
     PULSE_LOG_INFO("risk",
@@ -108,7 +133,8 @@ Result<std::string> PositionManager::openPosition(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id,
     MarketType market_type, double leverage, MarginMode margin_mode,
-    double quanto_multiplier, double maintenance_rate)
+    double quanto_multiplier, double maintenance_rate,
+    double sl_price, double tp_price)
 {
     // Open a new position after validating all portfolio limits:
     // 1. Acquire exclusive (write) lock
@@ -189,6 +215,11 @@ Result<std::string> PositionManager::openPosition(
     pos.notional_value = proposed_notional;
     pos.open_time = now();
     pos.strategy_id = strategy_id;
+    // Exchange-native protective stops attached to the entry order (CFD):
+    // carry them onto the tracked position so get_positions reflects the
+    // protection immediately after the fill.
+    pos.sl_price = sl_price;
+    pos.tp_price = tp_price;
 
     // Futures-specific fields.
     pos.market_type = market_type;
@@ -285,13 +316,14 @@ std::optional<double> PositionManager::closePosition(const std::string &position
     // Actual closed quantity (capped at position size for full close).
     const double closed_qty = std::min(close_qty, pos.quantity);
 
-    // Realized PnL for the closed portion.
-    //   long:  (exit - entry) * qty * quanto * leverage
-    //   short: (entry - exit) * qty * quanto * leverage
+    // Realized PnL for the closed portion. Leverage-free (same reasoning as
+    // calculateUnrealizedPnl): leverage scales margin, never PnL.
+    //   long:  (exit - entry) * qty * quanto
+    //   short: (entry - exit) * qty * quanto
     const double direction = (Side::Buy == pos.side) ? 1.0 : -1.0;
     const double realized_pnl =
         direction * (exit_price - pos.entry_price) * closed_qty
-        * pos.quanto_multiplier * pos.leverage;
+        * pos.quanto_multiplier;
 
     if (close_qty >= pos.quantity)
     {
@@ -793,16 +825,21 @@ double PositionManager::calculateUnrealizedPnl(
     Side side, Price entry, Price current, Quantity qty,
     double leverage, double quanto_multiplier)
 {
-    // Buy: profit when current > entry -> (current - entry) * qty * quanto * leverage
-    // Sell: profit when current < entry -> (entry - current) * qty * quanto * leverage
-    // For spot: leverage=1.0, quanto_multiplier=1.0 → original formula.
+    // Buy: profit when current > entry -> (current - entry) * qty * quanto
+    // Sell: profit when current < entry -> (entry - current) * qty * quanto
+    // Leverage is deliberately excluded: it scales MARGIN, not PnL. The
+    // quanto_multiplier carries the contract-size conversion (e.g. 100 oz per
+    // XAUUSD lot, BTC per futures contract), so the result is real USD.
+    // (leverage is accepted for source compatibility; spot passes 1.0/1.0
+    // which reduces to the original formula.)
+    (void)leverage;
     if (Side::Buy == side)
     {
-        return (current - entry) * qty * quanto_multiplier * leverage;
+        return (current - entry) * qty * quanto_multiplier;
     }
     else
     {
-        return (entry - current) * qty * quanto_multiplier * leverage;
+        return (entry - current) * qty * quanto_multiplier;
     }
 }
 

@@ -650,7 +650,12 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
             leverage_market ? reservation.request.leverage : 1.0,
             MarginMode::Cross,
             reservation.request.quanto_multiplier,
-            0.005);
+            0.005,
+            // Carry the exchange-native protective stops (CFD) attached to
+            // the entry order onto the tracked position, so get_positions
+            // reflects them immediately after the fill.
+            reservation.request.sl_price.value_or(0.0),
+            reservation.request.tp_price.value_or(0.0));
         if (!ok(open_result))
         {
             log_app->warn("Failed to open position: {}",
