@@ -40,15 +40,28 @@ class ControlClient
     /// Send one JSON-RPC request, wait for the response, return result.
     /// The response "result" is returned on success; JSON-RPC errors and
     /// transport failures return PulseError.
+    ///
+    /// On a transport failure (ControlEngineUnreachable — e.g. the engine
+    /// process was restarted and the socket is stale), the client drops the
+    /// socket, reconnects to the last-used endpoint and retries once. The MCP
+    /// and CLI bridges previously stayed dead with 9104 until manually
+    /// restarted.
     [[nodiscard]] Result<nlohmann::json>
     call(const std::string &method,
          const nlohmann::json &params = nlohmann::json::object());
 
   private:
+    /// One write+read round-trip on the current socket (no reconnect logic).
+    [[nodiscard]] Result<nlohmann::json>
+    tryCallOnce(const std::string &method, const nlohmann::json &params);
+
     std::unique_ptr<asio::io_context> m_ioCtx;
     std::unique_ptr<asio::ip::tcp::socket> m_sock;
     std::string m_lineBuffer;
     std::uint64_t m_nextId{ 1 };
+    std::string m_host;          ///< Last connect() endpoint (auto-reconnect).
+    std::uint16_t m_port{ 0 };
+    int m_timeoutMs{ 3000 };
 };
 
 } // namespace pulse::control

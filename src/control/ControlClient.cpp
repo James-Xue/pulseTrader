@@ -24,6 +24,12 @@ ControlClient::~ControlClient()
 bool ControlClient::connect(const std::string &host, std::uint16_t port,
                             int timeout_ms)
 {
+    // Remember the endpoint so call() can transparently reconnect when the
+    // engine restarts and the old socket starts failing with broken pipe.
+    m_host = host;
+    m_port = port;
+    m_timeoutMs = timeout_ms;
+
     disconnect();
 
     m_ioCtx = std::make_unique<asio::io_context>();
@@ -100,12 +106,36 @@ bool ControlClient::connected() const
 Result<nlohmann::json>
 ControlClient::call(const std::string &method, const nlohmann::json &params)
 {
-    if (!connected())
+    // Transport failures (ControlEngineUnreachable) trigger one
+    // disconnect+reconnect+retry: the engine process may have been restarted
+    // since the socket was established, and a stale socket fails every write
+    // with a broken pipe that never heals on its own. Protocol errors (e.g.
+    // JSON-RPC error responses) are engine business outcomes — never retried.
+    for (int attempt = 0; attempt < 2; ++attempt)
     {
-        return PulseError{ ErrorCode::ControlEngineUnreachable,
-                           "not connected to the trading engine control socket" };
-    }
+        if (!connected())
+        {
+            if (m_host.empty() || !connect(m_host, m_port, m_timeoutMs))
+            {
+                return PulseError{ ErrorCode::ControlEngineUnreachable,
+                                   "not connected to the trading engine control socket" };
+            }
+        }
 
+        auto result = tryCallOnce(method, params);
+        if (ok(result) || error(result).code != ErrorCode::ControlEngineUnreachable)
+        {
+            return result;
+        }
+        disconnect(); // Stale socket — drop it and reconnect on the next attempt.
+    }
+    return PulseError{ ErrorCode::ControlEngineUnreachable,
+                       "engine unreachable after reconnect retry" };
+}
+
+Result<nlohmann::json>
+ControlClient::tryCallOnce(const std::string &method, const nlohmann::json &params)
+{
     nlohmann::json request{
         { "jsonrpc", "2.0" },
         { "id", m_nextId++ },
