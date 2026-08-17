@@ -198,3 +198,35 @@ TEST(CommandParser, MarketCommandWithCfdFlag)
     EXPECT_EQ("get_market", cmd->method);
     EXPECT_EQ("cfd", cmd->params["market_type"].get<std::string>());
 }
+
+TEST(CommandParser, SyncCommandMapsToSyncPositions)
+{
+    const auto cmd = parseCommandLine("sync");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("sync_positions", cmd->method);
+}
+
+TEST(CommandParser, ModifyCommandParsesSlTp)
+{
+    const auto cmd = parseCommandLine(
+        "modify XAUUSD_Buy_1 --sl 4390.5 --tp 4408");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("modify_sl_tp", cmd->method);
+    EXPECT_EQ("XAUUSD_Buy_1", cmd->params["position_id"]);
+    EXPECT_DOUBLE_EQ(4390.5, cmd->params["sl_price"].get<double>());
+    EXPECT_DOUBLE_EQ(4408.0, cmd->params["tp_price"].get<double>());
+}
+
+TEST(CommandParser, ModifyCommandAllowsSingleField)
+{
+    const auto cmd = parseCommandLine("modify XAUUSD_Buy_1 --sl 4390.5");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("modify_sl_tp", cmd->method);
+    EXPECT_DOUBLE_EQ(4390.5, cmd->params["sl_price"].get<double>());
+    EXPECT_FALSE(cmd->params.contains("tp_price"));
+}
+
+TEST(CommandParser, ModifyCommandRejectsUnknownFlag)
+{
+    EXPECT_FALSE(parseCommandLine("modify XAUUSD_Buy_1 --wat 1").has_value());
+}

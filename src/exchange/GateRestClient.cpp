@@ -467,6 +467,26 @@ Result<nlohmann::json> GateRestClient::cancelCfdOrder(const std::string &order_i
     return request("DELETE", EndpointRouter::orderPath(MarketType::Cfd, order_id));
 }
 
+Result<nlohmann::json> GateRestClient::putCfdPositionModify(
+    const std::string &position_id, const std::string &sl_price,
+    const std::string &tp_price)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError,
+                          "Missing API key/secret — cannot modify CFD position"};
+    }
+    // MT5-style modify: the request body carries the new protective prices
+    // as strings ("0" clears the stop). Both fields are always sent; the
+    // caller fills omitted ones with the current attached values.
+    nlohmann::json body{
+        { "price_sl", sl_price },
+        { "price_tp", tp_price },
+    };
+    return request("PUT", EndpointRouter::cfdPositionModifyPath(position_id),
+                   "", body.dump());
+}
+
 // ---------------------------------------------------------------------------
 // Public endpoint wrappers
 // ---------------------------------------------------------------------------

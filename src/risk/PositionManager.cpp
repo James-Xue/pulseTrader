@@ -38,7 +38,8 @@ void PositionManager::syncPositionFromExchange(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     Price mark_price, MarketType market_type, double leverage,
     MarginMode margin_mode, double quanto_multiplier, double maintenance_rate,
-    Price liquidation_price, Timestamp open_time)
+    Price liquidation_price, Timestamp open_time, double sl_price,
+    double tp_price)
 {
     // Startup reconciliation: import positions that already exist on the
     // exchange (previous engine run, manual trading). No limit validation —
@@ -68,6 +69,8 @@ void PositionManager::syncPositionFromExchange(
         pos.notional_value = qty * mark_price * quanto_multiplier;
         pos.unrealized_pnl = calculateUnrealizedPnl(
             side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+        pos.sl_price = sl_price;
+        pos.tp_price = tp_price;
         return;
     }
 
@@ -91,6 +94,8 @@ void PositionManager::syncPositionFromExchange(
     pos.liquidation_price = liquidation_price;
     pos.unrealized_pnl = calculateUnrealizedPnl(
         side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+    pos.sl_price = sl_price;
+    pos.tp_price = tp_price;
 
     m_positions[pos_id] = pos;
     PULSE_LOG_INFO("risk",
@@ -346,6 +351,26 @@ void PositionManager::updatePrice(const std::string &position_id, Price current_
         pos.side, pos.entry_price, current_price, pos.quantity,
         pos.leverage, pos.quanto_multiplier);
     pos.notional_value = std::abs(pos.quantity * current_price * pos.quanto_multiplier);
+}
+
+bool PositionManager::removePosition(const std::string &position_id)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    return m_positions.erase(position_id) > 0;
+}
+
+void PositionManager::updateExchangeStops(const std::string &position_id,
+                                          double sl_price, double tp_price)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
+    {
+        return;
+    }
+    it->second.sl_price = sl_price;
+    it->second.tp_price = tp_price;
 }
 
 // ---------------------------------------------------------------------------

@@ -118,7 +118,7 @@ class PositionManager
         Price mark_price, MarketType market_type, double leverage,
         MarginMode margin_mode, double quanto_multiplier,
         double maintenance_rate, Price liquidation_price,
-        Timestamp open_time = {});
+        Timestamp open_time = {}, double sl_price = 0.0, double tp_price = 0.0);
 
     /// Close a position (fully or partially).
     ///
@@ -142,6 +142,20 @@ class PositionManager
 
     [[nodiscard]] std::optional<double> closePosition(
         const std::string &position_id, Quantity close_qty, Price exit_price);
+
+    /// Remove a tracked position entirely (hot-sync ghost pruning).
+    ///
+    /// Used by the periodic/manual exchange reconciliation when a position
+    /// no longer exists on the exchange (e.g. the user closed it manually in
+    /// the app). Returns true if the position existed and was removed.
+    [[nodiscard]] bool removePosition(const std::string &position_id);
+
+    /// Refresh the exchange-native protective stops on a tracked position.
+    ///
+    /// Called after a successful modify_sl_tp so the local view reflects the
+    /// new prices immediately (the periodic sync would catch up anyway).
+    void updateExchangeStops(const std::string &position_id,
+                             double sl_price, double tp_price);
 
     /// Update mark price for a position (called on each tick for PnL recalculation).
     ///

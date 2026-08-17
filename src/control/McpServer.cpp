@@ -99,6 +99,30 @@ nlohmann::json McpServer::toolDefinitions()
         "treated as stale by consumers.",
         nlohmann::json::object(), {});
 
+    add("sync_positions",
+        "Reconcile the engine position view against the exchange (futures + "
+        "CFD): imports missing positions and prunes local ghosts no longer "
+        "on the exchange (e.g. positions closed manually in the app). "
+        "Runs automatically every ~10s; call this to force it.",
+        nlohmann::json::object(), {});
+
+    add("modify_sl_tp",
+        "Dynamically adjust the protective stops attached to an open CFD "
+        "position (exchange-native price_sl/price_tp, so they survive the "
+        "engine dying). Pass 0 to clear a stop; omit a field to keep the "
+        "current value. CFD positions only.",
+        nlohmann::json{
+            { "position_id", stringParam("position_id",
+                                         "Position ID (e.g. XAUUSD_Buy_1)") },
+            { "sl_price", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "New stop-loss price (0 = clear)" } } },
+            { "tp_price", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "New take-profit price (0 = clear)" } } },
+        },
+        { "position_id" });
+
     add("list_strategies",
         "Registered strategies: id, symbol, enabled, running, paused.",
         nlohmann::json::object(), {});

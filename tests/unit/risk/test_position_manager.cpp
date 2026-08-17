@@ -771,3 +771,47 @@ TEST(PositionManager, CanOpenPosition_PerMarketAware)
     EXPECT_FALSE(pm.canOpenPosition("SKHY_USDT", 1.0, 5099.0, 1.0,
                                     MarketType::Futures));
 }
+
+// ---------------------------------------------------------------------------
+// M21 — attached SL/TP fields, ghost pruning, stop refresh
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, SyncCarriesAttachedSlTp)
+{
+    PositionManager pm(make_config(6000.0, 4, 5500.0));
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, 4396.01, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 1.0, 0.0, 0.0, Timestamp{}, 4391.33, 4405.33);
+
+    const auto pos = pm.getPosition("XAUUSD_Buy_sync");
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_DOUBLE_EQ(4391.33, pos->sl_price);
+    EXPECT_DOUBLE_EQ(4405.33, pos->tp_price);
+}
+
+TEST(PositionManager, RemovePositionErasesOnlyTheTarget)
+{
+    PositionManager pm(make_config(6000.0, 4, 5500.0));
+    ASSERT_TRUE(ok(pm.openPosition("BTC_USDT", Side::Buy, 0.001, 63000.0, "s1")));
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, 4396.01, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 1.0, 0.0, 0.0, Timestamp{}, 4391.33, 4405.33);
+
+    EXPECT_TRUE(pm.removePosition("XAUUSD_Buy_sync"));
+    EXPECT_FALSE(pm.removePosition("XAUUSD_Buy_sync")); // already gone
+    EXPECT_EQ(1, pm.openPositionCount());
+}
+
+TEST(PositionManager, UpdateExchangeStopsRefreshesAttachedPrices)
+{
+    PositionManager pm(make_config(6000.0, 4, 5500.0));
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, 4396.01, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 1.0, 0.0, 0.0, Timestamp{}, 4391.33, 4405.33);
+
+    pm.updateExchangeStops("XAUUSD_Buy_sync", 4392.50, 4406.00);
+    const auto pos = pm.getPosition("XAUUSD_Buy_sync");
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_DOUBLE_EQ(4392.50, pos->sl_price);
+    EXPECT_DOUBLE_EQ(4406.00, pos->tp_price);
+}

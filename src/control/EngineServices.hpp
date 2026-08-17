@@ -16,6 +16,7 @@
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
 #include "market/MarketFeed.hpp"
+#include "market/SymbolRegistry.hpp"
 #include "risk/PositionManager.hpp"
 #include "risk/RiskManager.hpp"
 #include "strategy/StrategyManager.hpp"
@@ -25,8 +26,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace pulse::control
 {
@@ -53,7 +56,9 @@ class EngineServices
                    execution::OrderTracker *cfd_tracker,
                    OrderFlowExecutor &order_flow,
                    strategy::SignalBoard &signal_board,
-                   std::mutex &rest_mutex);
+                   std::mutex &rest_mutex,
+                   const std::shared_ptr<market::SymbolRegistry> &registry =
+                       nullptr);
 
     // --- Queries (each returns ready-to-serialize JSON) ---
     [[nodiscard]] nlohmann::json status() const;
@@ -66,6 +71,18 @@ class EngineServices
     /// consensus from the signal board (`get_signals`). Publish timestamps
     /// get a display-timezone `ts_str` companion field.
     [[nodiscard]] nlohmann::json signals() const;
+
+    /// Reconcile the engine position view against the exchange (futures +
+    /// CFD) — `sync_positions`. Imports missing positions and prunes local
+    /// ghosts that no longer exist on the exchange (e.g. manual app-side
+    /// closes). Runs at startup, on a ~10s background tick, and on demand.
+    /// Never fatal: exchange failures return a summary with zeros.
+    [[nodiscard]] nlohmann::json syncPositions();
+
+    /// Dynamically adjust the protective stops on an open CFD position —
+    /// `modify_sl_tp` (exchange-native price_sl/price_tp, "0" clears a stop).
+    /// Params: position_id (required), sl_price?, tp_price?. CFD only.
+    [[nodiscard]] Result<nlohmann::json> modifySlTp(const nlohmann::json &params);
     [[nodiscard]] nlohmann::json getStrategyParams(const std::string &id) const;
     [[nodiscard]] bool setStrategyParam(const std::string &id,
                                         const std::string &param,
@@ -135,6 +152,28 @@ class EngineServices
     /// Display timezone for human-readable *_str timestamps in JSON output
     /// (from [control] display_timezone; default = machine local time).
     pulse::DisplayTimezone m_displayTz;
+
+    /// Futures contract registry (quanto multiplier lookup for the futures
+    /// position sync). May be null — sync then assumes quanto 1.0.
+    std::shared_ptr<market::SymbolRegistry> m_registry;
+
+    /// Sync futures positions from the exchange (mirrors the old startup
+    /// free function in main.cpp; consolidated here so startup, the ~10s
+    /// background tick and the manual `sync_positions` share one code path).
+    /// Returns the number of positions imported.
+    [[nodiscard]] int syncFuturesPositionsFromExchange();
+
+    /// Sync TradFi CFD positions from the exchange, then prune local ghosts.
+    /// Returns the number of positions imported; the number of pruned ghosts
+    /// is written to pruned_out when non-null.
+    [[nodiscard]] int syncCfdPositionsFromExchange(int *pruned_out = nullptr);
+
+    /// Remove local positions of a market type whose exchange_position_id
+    /// is absent from the fresh exchange list and whose age exceeds the
+    /// grace period (freshly-opened fills may not have appeared yet).
+    /// Returns the number of positions pruned.
+    [[nodiscard]] int pruneGhostPositions(
+        MarketType mt, const std::vector<std::string> &live_exchange_ids);
 };
 
 } // namespace pulse::control

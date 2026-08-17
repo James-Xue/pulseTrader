@@ -338,3 +338,96 @@ TEST_F(EngineServicesTest, GetSignalsRegisteredInMethodRegistry)
     // Board was constructed with StrategyConfig's default threshold (0.7).
     EXPECT_DOUBLE_EQ(0.7, payload["aggregate"]["threshold"].get<double>());
 }
+
+// ---------------------------------------------------------------------------
+// M21 — hot position sync + dynamic SL/TP
+// ---------------------------------------------------------------------------
+
+TEST_F(EngineServicesTest, ModifySlTpRejectsUnknownPosition)
+{
+    const auto result = m_services->modifySlTp(
+        nlohmann::json{ { "position_id", "no_such_position" },
+                        { "sl_price", 4300.0 } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos, error(result).message.find("not found"));
+}
+
+TEST_F(EngineServicesTest, ModifySlTpRequiresAtLeastOneField)
+{
+    const auto result = m_services->modifySlTp(
+        nlohmann::json{ { "position_id", "XAUUSD_Buy_1" } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("sl_price/tp_price"));
+}
+
+TEST_F(EngineServicesTest, ModifySlTpRejectsNonCfdPosition)
+{
+    const auto opened = m_positionMgr->openPosition(
+        "BTC_USDT", Side::Sell, 0.007, 63075.5, "s1");
+    ASSERT_TRUE(ok(opened));
+
+    const auto result = m_services->modifySlTp(
+        nlohmann::json{ { "position_id", value(opened) },
+                        { "sl_price", 63000.0 } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("CFD positions"));
+}
+
+TEST_F(EngineServicesTest, ModifySlTpOnCfdPositionRequiresInfrastructure)
+{
+    // CFD-only validation passes; the fixture wires no CFD REST client, so
+    // the method must fail with the infrastructure error (not crash).
+    const auto opened = m_positionMgr->openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4400.0, "s1", MarketType::Cfd, 100.0,
+        MarginMode::Cross, 1.0, 0.0);
+    ASSERT_TRUE(ok(opened));
+
+    const auto result = m_services->modifySlTp(
+        nlohmann::json{ { "position_id", value(opened) },
+                        { "sl_price", 4395.0 },
+                        { "tp_price", 4408.0 } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("infrastructure"));
+}
+
+TEST_F(EngineServicesTest, PositionsIncludeAttachedSlTp)
+{
+    // A CFD position synced from the exchange carries its native
+    // price_sl / price_tp — get_positions must surface them so consumers
+    // (sub-agent) can read the attached protective stops.
+    m_positionMgr->syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4396.01, 4396.01, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 1.0, 0.0, 0.0, Timestamp{}, 4391.33, 4405.33);
+
+    const auto j = m_services->positions();
+    ASSERT_EQ(1, j["positions"].size());
+    const auto &p = j["positions"][0];
+    EXPECT_DOUBLE_EQ(4391.33, p["sl_price"].get<double>());
+    EXPECT_DOUBLE_EQ(4405.33, p["tp_price"].get<double>());
+}
+
+TEST_F(EngineServicesTest, SyncPositionsHandlesUnconfiguredRest)
+{
+    // No futures/CFD REST clients are wired in this fixture — the sync must
+    // return a zeroed summary instead of crashing or erroring.
+    const auto summary = m_services->syncPositions();
+    EXPECT_TRUE(summary.is_object());
+    EXPECT_EQ(0, summary["futures_synced"].get<int>());
+    EXPECT_EQ(0, summary["cfd_synced"].get<int>());
+    EXPECT_EQ(0, summary["pruned"].get<int>());
+}
+
+TEST_F(EngineServicesTest, SyncPositionsAndModifySlTpRegistered)
+{
+    const auto reg = makeMethodRegistry(*m_services);
+    EXPECT_NE(reg.end(), reg.find("sync_positions"));
+    EXPECT_NE(reg.end(), reg.find("modify_sl_tp"));
+
+    // sync_positions is a no-arg query that must resolve without params.
+    const auto sync_result = reg.at("sync_positions")(nlohmann::json::object());
+    const auto payload = std::get<nlohmann::json>(sync_result);
+    EXPECT_TRUE(payload.is_object());
+}

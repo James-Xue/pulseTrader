@@ -122,6 +122,8 @@ inline void to_json(nlohmann::json &j, const Position &p)
     j["margin_used"] = p.margin_used;
     j["liquidation_price"] = p.liquidation_price;
     j["exchange_position_id"] = p.exchange_position_id;
+    j["sl_price"] = p.sl_price;
+    j["tp_price"] = p.tp_price;
 }
 
 /// Serialize PortfolioSummary to JSON.

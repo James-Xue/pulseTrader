@@ -217,6 +217,12 @@ class GateRestClient
     /// DELETE /api/v4/tradfi/orders/{order_id} — cancel a CFD order.
     [[nodiscard]] Result<nlohmann::json> cancelCfdOrder(const std::string &order_id);
 
+    /// Dynamically adjust the protective stops on an open CFD position —
+    /// PUT /tradfi/positions/{id} with price_sl / price_tp ("0" clears).
+    [[nodiscard]] Result<nlohmann::json> putCfdPositionModify(
+        const std::string &position_id, const std::string &sl_price,
+        const std::string &tp_price);
+
     /// Set futures position leverage for a contract (dual/hedge mode).
     ///
     /// Gate.io applies leverage at the position level, NOT per order — a

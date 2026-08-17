@@ -5,6 +5,7 @@
 #include "control/OrderFlowExecutor.hpp"
 #include "core/snapshot_types.hpp"
 #include "core/types.hpp"
+#include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
 
 #include <chrono>
@@ -115,7 +116,8 @@ EngineServices::EngineServices(
     execution::OrderTracker *cfd_tracker,
     OrderFlowExecutor &order_flow,
     strategy::SignalBoard &signal_board,
-    std::mutex &rest_mutex)
+    std::mutex &rest_mutex,
+    const std::shared_ptr<market::SymbolRegistry> &registry)
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
     , m_cfg{ cfg }
@@ -136,6 +138,7 @@ EngineServices::EngineServices(
     , m_restMutex{ rest_mutex }
     , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
                        .value_or(DisplayTimezone::local()) }
+    , m_registry{ registry }
 {
 }
 
@@ -778,6 +781,357 @@ nlohmann::json EngineServices::strategyParamsJson(
         j[name] = getter(p);
     }
     return j;
+}
+
+// ---------------------------------------------------------------------------
+// Position sync — startup, ~10s background tick, manual `sync_positions`.
+// Consolidated from the old main.cpp free functions so all three paths share
+// one implementation (and one pruning rule for manual app-side closes).
+// ---------------------------------------------------------------------------
+
+/// Read a numeric field that may arrive as a JSON string or number.
+static double syncJsonNumber(const nlohmann::json &j, const char *key)
+{
+    const auto it = j.find(key);
+    if (j.end() == it)
+    {
+        return 0.0;
+    }
+    if (it->is_string())
+    {
+        return safeParseDouble(it->get<std::string>()).value_or(0.0);
+    }
+    if (it->is_number())
+    {
+        return it->get<double>();
+    }
+    return 0.0;
+}
+
+int EngineServices::syncFuturesPositionsFromExchange()
+{
+    if (nullptr == m_futuresRest)
+    {
+        return 0;
+    }
+
+    nlohmann::json positions;
+    {
+        std::lock_guard<std::mutex> rest_lock(m_restMutex);
+        auto result = m_futuresRest->getFuturesPositions();
+        if (!ok(result))
+        {
+            PULSE_LOG_WARN("app", "Position sync (futures) skipped: {}",
+                           error(result).message);
+            return 0;
+        }
+        positions = value(result);
+    }
+
+    int synced = 0;
+    for (const auto &p : positions)
+    {
+        const std::string contract = p.value("contract", "");
+        if (contract.empty())
+        {
+            continue;
+        }
+        const int size = p.value("size", 0);
+        if (0 == size)
+        {
+            continue;
+        }
+
+        const double entry = syncJsonNumber(p, "entry_price");
+        const double mark = syncJsonNumber(p, "mark_price");
+
+        // Gate reports leverage = 0 (as a STRING) for cross margin; fall
+        // back to the account's cross leverage limit for margin/PnL math.
+        double leverage = syncJsonNumber(p, "leverage");
+        if (leverage <= 0.0)
+        {
+            leverage = syncJsonNumber(p, "cross_leverage_limit");
+        }
+        if (leverage <= 0.0)
+        {
+            leverage = 10.0;
+        }
+
+        double quanto_multiplier = 1.0;
+        if (m_registry)
+        {
+            if (const auto info = m_registry->get(contract))
+            {
+                quanto_multiplier = info->quanto_multiplier;
+            }
+        }
+
+        // Exchange open_time is a unix SECONDS string; Position stores ns.
+        const double open_secs = syncJsonNumber(p, "open_time");
+        Timestamp open_time{};
+        if (open_secs > 0.0)
+        {
+            open_time = std::chrono::time_point_cast<Duration>(
+                std::chrono::system_clock::time_point{
+                    std::chrono::seconds{static_cast<std::int64_t>(open_secs)}});
+        }
+
+        const bool is_long = size > 0;
+        m_positionMgr.syncPositionFromExchange(
+            contract, is_long ? Side::Buy : Side::Sell,
+            static_cast<double>(std::abs(size)), entry, mark,
+            MarketType::Futures, leverage, MarginMode::Cross,
+            quanto_multiplier, syncJsonNumber(p, "maintenance_rate"),
+            syncJsonNumber(p, "liq_price"), open_time);
+        ++synced;
+    }
+    PULSE_LOG_INFO("app",
+        "Position sync (futures): {} position(s) imported from exchange",
+        synced);
+    return synced;
+}
+
+int EngineServices::syncCfdPositionsFromExchange(int *pruned_out)
+{
+    if (nullptr == m_cfdRest)
+    {
+        if (pruned_out)
+        {
+            *pruned_out = 0;
+        }
+        return 0;
+    }
+
+    nlohmann::json data;
+    {
+        std::lock_guard<std::mutex> rest_lock(m_restMutex);
+        auto result = m_cfdRest->getCfdPositions();
+        if (!ok(result))
+        {
+            PULSE_LOG_WARN("app", "Position sync (CFD) skipped: {}",
+                           error(result).message);
+            if (pruned_out)
+            {
+                *pruned_out = 0;
+            }
+            return 0;
+        }
+        const auto &resp = value(result);
+        data = resp.value("data", nlohmann::json::object());
+    }
+
+    const auto &list = data.value("list", nlohmann::json::array());
+    std::vector<std::string> live_exchange_ids;
+    int synced = 0;
+
+    if (list.is_array())
+    {
+        for (const auto &p : list)
+        {
+            const std::string symbol = p.value("symbol", "");
+            if (symbol.empty())
+            {
+                continue;
+            }
+            const bool is_long = ("Long" == p.value("position_dir", ""));
+            const double volume = syncJsonNumber(p, "volume");
+            if (volume <= 0.0)
+            {
+                continue;
+            }
+
+            // The close/modify endpoints need the EXCHANGE position id.
+            const std::string exchange_id = std::to_string(
+                static_cast<std::int64_t>(syncJsonNumber(p, "position_id")));
+            live_exchange_ids.push_back(exchange_id);
+
+            const double entry = syncJsonNumber(p, "price_open");
+            const double mark = syncJsonNumber(p, "counterparty_price");
+            double leverage = syncJsonNumber(p, "leverage");
+            if (leverage <= 0.0)
+            {
+                leverage = 1.0;
+            }
+
+            // Exchange time_create is unix SECONDS; Position stores ns.
+            const double create_secs = syncJsonNumber(p, "time_create");
+            Timestamp open_time{};
+            if (create_secs > 0.0)
+            {
+                open_time = std::chrono::time_point_cast<Duration>(
+                    std::chrono::system_clock::time_point{
+                        std::chrono::seconds{
+                            static_cast<std::int64_t>(create_secs)}});
+            }
+
+            // CFD symbols carry their own multiplier in the feed
+            // (quanto=100 for XAUUSD = 1 lot of 100 oz); 1.0 keeps notional
+            // in USD lots here.
+            const std::string pos_id = symbol + "_"
+                + (is_long ? "Buy" : "Sell") + "_sync";
+            m_positionMgr.syncPositionFromExchange(
+                symbol, is_long ? Side::Buy : Side::Sell, volume, entry, mark,
+                MarketType::Cfd, leverage, MarginMode::Cross, 1.0, 0.0,
+                syncJsonNumber(p, "liq_price"), open_time,
+                syncJsonNumber(p, "price_sl"), syncJsonNumber(p, "price_tp"));
+            m_positionMgr.setExchangePositionId(pos_id, exchange_id);
+
+            PULSE_LOG_INFO("app",
+                "Position sync (CFD): {} {} {} lots @ {} (mark {}, sl {}, tp {})",
+                symbol, (is_long ? "long" : "short"), volume, entry, mark,
+                syncJsonNumber(p, "price_sl"), syncJsonNumber(p, "price_tp"));
+            ++synced;
+        }
+    }
+
+    // Prune local ghosts: the user frequently closes CFD positions manually
+    // in the app; the engine only learns about it from the exchange list.
+    const int pruned = pruneGhostPositions(MarketType::Cfd, live_exchange_ids);
+    if (pruned_out)
+    {
+        *pruned_out = pruned;
+    }
+    return synced;
+}
+
+int EngineServices::pruneGhostPositions(
+    MarketType mt, const std::vector<std::string> &live_exchange_ids)
+{
+    // Grace window: a freshly-opened engine position may not have appeared
+    // in the exchange list yet (fill latency, list pagination). Only prune
+    // positions older than the grace period so we never drop a real one.
+    constexpr auto kGrace = std::chrono::seconds{ 60 };
+    const auto cutoff = now() - kGrace;
+
+    int pruned = 0;
+    for (const auto &pos : m_positionMgr.getAllPositions())
+    {
+        if (mt != pos.market_type)
+        {
+            continue;
+        }
+        if (pos.exchange_position_id.empty())
+        {
+            // No exchange id to compare — leave it to the restart sync.
+            continue;
+        }
+        const bool still_live = std::find(live_exchange_ids.begin(),
+                                          live_exchange_ids.end(),
+                                          pos.exchange_position_id)
+            != live_exchange_ids.end();
+        if (still_live)
+        {
+            continue;
+        }
+        if (pos.open_time > cutoff)
+        {
+            continue; // Too fresh — likely a fill that has not appeared yet.
+        }
+        if (m_positionMgr.removePosition(pos.position_id))
+        {
+            PULSE_LOG_INFO("app",
+                "Position sync: pruned ghost {} (absent from exchange)",
+                pos.position_id);
+            ++pruned;
+        }
+    }
+    if (pruned > 0)
+    {
+        PULSE_LOG_INFO("app", "Position sync: pruned {} ghost position(s)", pruned);
+    }
+    return pruned;
+}
+
+nlohmann::json EngineServices::syncPositions()
+{
+    nlohmann::json summary{
+        { "futures_synced", 0 },
+        { "cfd_synced", 0 },
+        { "pruned", 0 },
+        { "error", nullptr },
+    };
+
+    if (m_futuresRest)
+    {
+        summary["futures_synced"] = syncFuturesPositionsFromExchange();
+    }
+    if (m_cfdRest)
+    {
+        int pruned = 0;
+        summary["cfd_synced"] = syncCfdPositionsFromExchange(&pruned);
+        summary["pruned"] = pruned;
+    }
+
+    return summary;
+}
+
+Result<nlohmann::json> EngineServices::modifySlTp(const nlohmann::json &params)
+{
+    if (!params.is_object())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "modify_sl_tp: params must be an object" };
+    }
+
+    const auto position_id = params.value("position_id", "");
+    if (position_id.empty())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "modify_sl_tp: position_id is required" };
+    }
+
+    const bool has_sl = params.contains("sl_price")
+        && params["sl_price"].is_number();
+    const bool has_tp = params.contains("tp_price")
+        && params["tp_price"].is_number();
+    if (!has_sl && !has_tp)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "modify_sl_tp: at least one of sl_price/tp_price "
+                           "is required" };
+    }
+
+    const auto pos_opt = m_positionMgr.getPosition(position_id);
+    if (!pos_opt.has_value())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "modify_sl_tp: position not found: " + position_id };
+    }
+    const auto &pos = *pos_opt;
+    if (MarketType::Cfd != pos.market_type)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "modify_sl_tp: only CFD positions support "
+                           "attached SL/TP" };
+    }
+
+    if (nullptr == m_cfdRest)
+    {
+        return PulseError{ ErrorCode::InternalError,
+                           "modify_sl_tp: CFD infrastructure not configured" };
+    }
+
+    // Omitted fields keep the currently attached value ("0" = no stop).
+    const double sl = has_sl ? params["sl_price"].get<double>()
+                             : pos.sl_price;
+    const double tp = has_tp ? params["tp_price"].get<double>()
+                             : pos.tp_price;
+
+    std::lock_guard<std::mutex> rest_lock(m_restMutex);
+    auto result = m_cfdRest->putCfdPositionModify(
+        position_id, std::to_string(sl), std::to_string(tp));
+    if (!ok(result))
+    {
+        return error(result);
+    }
+
+    // Refresh the local view immediately (the periodic sync would catch up
+    // within ~10s anyway).
+    m_positionMgr.updateExchangeStops(position_id, sl, tp);
+    PULSE_LOG_INFO("app", "modify_sl_tp: {} -> sl {}, tp {}",
+                   position_id, sl, tp);
+
+    return value(result);
 }
 
 } // namespace pulse::control

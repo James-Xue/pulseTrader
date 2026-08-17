@@ -156,6 +156,10 @@ class EndpointRouter
 
     /// "/api/v4/tradfi/positions/{position_id}/close" — close a CFD position.
     [[nodiscard]] static std::string cfdPositionClosePath(const std::string &position_id);
+
+    /// PUT /api/v4/tradfi/positions/{position_id} — modify an open CFD
+    /// position (dynamic price_sl / price_tp adjustment).
+    [[nodiscard]] static std::string cfdPositionModifyPath(const std::string &position_id);
 };
 
 } // namespace pulse::exchange

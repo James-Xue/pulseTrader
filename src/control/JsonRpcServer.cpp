@@ -427,6 +427,14 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.signals() };
     };
+    reg["sync_positions"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.syncPositions() };
+    };
+    reg["modify_sl_tp"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.modifySlTp(params) };
+    };
     reg["get_market"] = [&services](const nlohmann::json &params)
     {
         const auto symbol = params.value("symbol", "");

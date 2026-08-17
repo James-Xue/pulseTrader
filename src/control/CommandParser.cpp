@@ -93,6 +93,10 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
     {
         return ParsedCommand{ "get_signals", nlohmann::json::object() };
     }
+    if ("sync" == cmd)
+    {
+        return ParsedCommand{ "sync_positions", nlohmann::json::object() };
+    }
 
     // --- One-arg commands ---
     if ("params" == cmd && tokens.size() >= 2)
@@ -235,6 +239,39 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
             }
         }
         return ParsedCommand{ "open_order", params };
+    }
+
+    // --- modify <position_id> [--sl P] [--tp P] (CFD dynamic SL/TP) ---
+    if ("modify" == cmd && tokens.size() >= 2)
+    {
+        nlohmann::json params{ { "position_id", tokens[1] } };
+        for (std::size_t i = 2; i < tokens.size(); ++i)
+        {
+            const std::string &flag = tokens[i];
+            if ("--sl" == flag && i + 1 < tokens.size())
+            {
+                auto sl = parseNumber(tokens[++i]);
+                if (!sl.has_value())
+                {
+                    return std::nullopt;
+                }
+                params["sl_price"] = *sl;
+            }
+            else if ("--tp" == flag && i + 1 < tokens.size())
+            {
+                auto tp = parseNumber(tokens[++i]);
+                if (!tp.has_value())
+                {
+                    return std::nullopt;
+                }
+                params["tp_price"] = *tp;
+            }
+            else
+            {
+                return std::nullopt; // unknown flag
+            }
+        }
+        return ParsedCommand{ "modify_sl_tp", params };
     }
 
     // --- market <symbol> [--levels N] [--klines N] [--market spot|futures|cfd] ---
@@ -485,6 +522,8 @@ std::string replHelp()
         "  halt / resume          halt or resume all trading\n"
         "  pause <id> / resume-strategy <id>\n"
         "  risk                   risk snapshot (drawdown, rate limiter)\n"
+        "  modify <id> [--sl P] [--tp P]   adjust CFD position SL/TP live (0 clears)\n"
+        "  sync                   reconcile position view with the exchange\n"
         "  market <sym> [--levels N] [--klines N] [--market spot|futures|cfd]\n"
         "  help / quit / exit\n";
 }
