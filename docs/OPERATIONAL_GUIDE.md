@@ -401,11 +401,15 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 | `risk` | Risk snapshot (drawdown, rate limiter) |
 | `market <sym> [--levels N] [--klines N] [--market spot\|futures]` | Market snapshot |
 | `signals` | Signal board: latest per-strategy signals + indicators + aggregator consensus |
+| `modify <id> [--sl P] [--tp P]` | Adjust an open CFD position's exchange-native SL/TP live (0 clears a stop; omitted field keeps the current value) |
+| `sync` | Reconcile the engine position view with the exchange (imports missing positions, prunes ghosts from manual app-side closes) |
 | `help` / `quit` / `exit` | Help / leave the REPL |
 
-**Control-plane methods (= MCP tool names, 18 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`. REPL commands map 1:1 to these methods over the control socket.
+**Control-plane methods (= MCP tool names, 20 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`. REPL commands map 1:1 to these methods over the control socket.
 
 **Signal-only mode** — `[strategy] signal_only = true` makes strategies compute + publish signals to the signal board (`get_signals` / REPL `signals`) without ever placing orders; manual `open_order`/`close_position` remain live (the XAUUSD sub-agent's execution path). Board entries carry `ts_ms` + indicator snapshots — treat entries older than ~120 s as stale.
+
+**Hot position sync (M21)** — the engine reconciles positions against the exchange at startup, every ~10 s, and on demand (`sync_positions` / REPL `sync`): exchange-side positions are imported and local ghosts (positions closed manually in the Gate app — the user's normal habit) are pruned without a restart. **Dynamic SL/TP (M21)** — `modify_sl_tp` (REPL `modify <id> --sl P --tp P`) adjusts an open CFD position's exchange-native `price_sl`/`price_tp` over `PUT /tradfi/positions/{id}`; the stops live on the exchange, so they fire even if the engine or sub-agent dies. `get_positions` now reports each position's attached `sl_price`/`tp_price`.
 
 **MCP usage** — the `mcp` subcommand exposes the 18 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
 
