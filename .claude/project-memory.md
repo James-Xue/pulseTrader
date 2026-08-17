@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-17
-> File size: 24728 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 24490 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,7 +32,7 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **687 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **703 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget + M18 sink/recorder/migration tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 - M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
 - M16 (2026-08-16) additions: maker-first order flow — 14 OrderFlowTest (best bid/ask post-only pricing, sweep cancel+fallback, partial-fill remainder, exchange-reject no-chase, rate-limit/direction-switch rejection, cancel-race) + 5 config validator + 3 config loader = 22 new
 - M17 (2026-08-17) additions: per-market notional budget (PositionManager reserveNotional/openPosition/canOpenPosition filtered by market_type; optional maxPositionNotional{Futures,Cfd,Spot} with maxPositionNotional fallback; canOpenPosition quanto fix) + CFD order-id resolution (matchCfdOrderId — POST /tradfi/orders does not echo the order id) = 18 new
@@ -56,12 +56,9 @@
   3. `ProxyTunnel` relay threads: no longer `detach()`; `stop()` closes sockets then `join()`s all relay threads
   4. `run_io_loop()`: explicit `tunnel->stop()` + `tunnel.reset()` before function return (correct cleanup order)
   5. `WsInternal`: added `io_ctx_ptr` field, set after `init_asio()`, cleared after `client.run()` returns
-- **Strategy warmup diagnostics** — kline-driven strategies now log progress during cold start:
-  - `MomentumScalper` / `MeanReversionScalper` `on_tick()`: logs "Waiting for kline data" every 30s when no klines exist (WS not connected)
-  - `on_kline()`: logs "Warming up: X/N candles accumulated" every 30s when insufficient data for EMA/BB computation
-  - New members: `last_warmup_log_ms_`, `last_no_data_log_ms_` in both `.hpp` headers
-- **Aggregator threshold lowered** — `trading.toml` `signal_aggregator_threshold` from 0.7 → 0.6 to match single-strategy min_confidence, preventing valid signals from being silently dropped
-- **OPERATIONAL_GUIDE.md updated** — §4.4 added strategy warmup period explanation (log examples + "wait at least 25 minutes"), §5.1 updated threshold tuning guidance, added Q7 "No orders placed after startup?" troubleshooting checklist
+- **Strategy warmup diagnostics** — kline strategies log "Waiting for kline data" / "Warming up: X/N candles" every 30s during cold start (new `last_warmup_log_ms_`/`last_no_data_log_ms_` members)
+- **Aggregator threshold lowered** — `signal_aggregator_threshold` 0.7 → 0.6 to match single-strategy min_confidence
+- **OPERATIONAL_GUIDE.md updated** — §4.4 warmup explanation, §5.1 threshold tuning, Q7 "No orders placed after startup?" checklist
 
 ### Architecture Review Fixes (2026-06-20)
 - **#1 PnL Wired to DrawdownGuard** (`c857e21`): `close_position()` returns `optional<double>` with realized PnL; main.cpp accumulates it and passes to `drawdown_guard.record_pnl()`. Drawdown protection is now active.
@@ -105,14 +102,21 @@ Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git 
 ### vcpkg/Linux Build Compatibility (2026-06-23, commit `a812333`)
 Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Linux builds use vendored `third_party/` + `get_io_context()`.
 
-### M17 Per-Market Budget + CFD Order-Id Fix (2026-08-17, done — 687 tests)
-- **Incident**: after SKHY futures short (5099 notional) occupied the shared maxPositionNotional 6000, a 0.01-lot XAUUSD CFD order (4392 notional) was clamped to 0.003 lots → below the 0.01 minimum → `VOLUME_LESS_THAN_MIN_LIMIT`. Futures position ate the CFD budget.
-- **Fix**: notional cap enforced PER MARKET TYPE. RiskConfig gains optional `maxPositionNotionalFutures/Cfd/Spot` (fallback = maxPositionNotional); `PositionManager::reserveNotional`/`openPosition`/`canOpenPosition` filter totals by market_type and use `notionalLimitFor(mt)`; `PendingReservation` carries market_type; `canOpenPosition` now multiplies the quanto (latent bug). `maxOpenPositions`/`maxSymbolNotional` stay global. RiskManager passes `order.market_type` through. trading.toml: futures=6000, cfd=6000, fallback 6000.
-- **CFD order-id fix**: POST /tradfi/orders does NOT echo the order id (`data.id` = internal submission number, GET 404) → `OrderExecutor::matchCfdOrderId` (static, unit-tested) resolves it from the open-orders list (newest match by symbol/side/volume/price). Live-verified: place → `Resolved CFD order id ...` → cancel via engine.
-- **SKHY episode closed**: SL trigger 170.5 fired 2026-08-17 11:33 (SKHY pumped 169.85→170.5); position closed, futures balance 414→151 USDT (loss ≈ -263 USDT). TP 151 auto-cancelled. Earlier 168.63 plan-close had trimmed 4000→3000 (08-16). Engine now holds NO futures positions.
-- **CFD live state**: user's sell@4399 trigger fired 12:02 → 0.01-lot short @4399.04 (no TP/SL) → later closed (balance 35.95→37.18). Remaining user trigger orders: sell@4418 (17618607), buy@4295 (17511143), sell@4428 (17471679) — KEEP (user's CFD plan). CFD account 37.18 USD; futures 151.44 USDT. active_market=cfd, momentum_scalper_XAUUSD running, 4 futures strategies paused.
+### M17 (2026-08-17, done — 687 tests, committed 5504e3f/e38ed1b/1ced101)
+- **Per-market notional budget**: cap enforced per market type — RiskConfig optional `maxPositionNotionalFutures/Cfd/Spot` (fallback maxPositionNotional); PositionManager reserveNotional/openPosition/canOpenPosition filter by market_type via `notionalLimitFor(mt)`; canOpenPosition quanto fix; maxOpenPositions/maxSymbolNotional stay global. Fixes: SKHY futures (5099) ate the CFD budget → 0.01-lot XAUUSD clamped to 0.003 → VOLUME_LESS_THAN_MIN_LIMIT.
+- **CFD order-id fix**: POST /tradfi/orders echoes no order id (`data.id` = internal number) → `matchCfdOrderId` resolves from open-orders list (symbol/side/volume/price). Live-verified place→resolve→cancel.
+- **SKHY closed**: SL 170.5 fired 11:33 (loss ≈ -263 USDT, 414→151). CFD: user's sell@4399 fired 12:02 → 0.01 short @4399.04 → later closed (35.95→37.18). Remaining user triggers: sell@4418 / buy@4295 / sell@4428 — KEEP. CFD acct 37.18 USD, futures 151.44 USDT. active_market=cfd; XAUUSD now runs 3 instances (momentum/mean_reversion/supertrend, added 12:55 local config only).
+
+### M18 落库 (2026-08-17, DONE — 703 tests, 未提交)
+- **任务**: 用户要求黄金实盘数据落库。方案文件: `~/.claude/plans/replicated-floating-key.md`。
+- **Part A (trades 表 + 迁移)**: TradeRecorder DDL 追加 market_type/leverage/quanto 3 列 + `migrateSchema()`(user_version v1 + pragma_table_info 守卫防重复 ALTER) + open() busy_timeout=5000;recordTrade 3 默认参数(Spot/1.0/1.0);getTrades 位置读取 +3;TradeRecord +3 字段;OrderFlowExecutor onOrderComplete 传 reservation 的 market_type/leverage/quanto,strategy_name 改 matchInstanceConfig
+- **Part B (行情落库)**: 新建 MarketDataSink.hpp(onTicker/onKline 虚接口,禁止阻塞契约);MarketFeed setMarketDataSink + 4 写入点(WS ticker/kline + CFD ticker/kline)+ Ticker.timestamp 改 nowMs();新建 MarketRecorder(POD 环队列 8192,溢出丢最旧,jthread 批量写 batch 128/1s,BEGIN IMMEDIATE,kline INSERT OR IGNORE PK(symbol,open_time),ticker_ticks/kline_bars 表,stop() drain+checkpoint 幂等,`Result<unique_ptr>`);SqliteConfig.recordMarketData + `record_market`(trading.toml=true,example=false);main.cpp 接线(失败仅 warn,关闭顺序 feeds→market_recorder→trade_recorder)
+- **验证**: 703 测试绿;实盘库真实迁移(user_version=1、20 列、12 旧成交保留);实盘 ticker_ticks XAUUSD|cfd ~1/s + BTC_USDT|futures 13 行,kline_bars CFD backfill 500;引擎 13:22 重启生效(systemd)
+- **提交建议**: Part A + Part B 一次提交(位置读取与 DDL 同 commit),备份 data/trades.db.bak-m18
 
 ### Next Steps (2026-08-17)
+- ⏳ **提交 M18**(工作区 ~20 文件,703 绿;建议 1-2 commit)
+- ⏳ **启动黄金自动交易子代理**(用户已确认风控规则):子代理实时调 MCP(get_market XAUUSD/get_positions/get_account/get_risk)盯盘,规则——单笔 0.01 手、技术信号入场(EMA+RSI+支撑阻力)、硬止损 -5 USD、止盈 +8~10 或趋势反转、日亏 -10 USD 停手、每笔写 md 复盘到 /home/joey/1_Code/commit_my_life/0_note/;用户喂思路/新闻转达。执行前先确认 commit_my_life/0_note/ 存在
 - ⏳ CFD strategy tune-up for the cost model: 0.06 USDT/0.01 lot buy-only commission + gold storage/swap (利差) — RECORDED in docs/CFD_TRADFI.md + OrderExecutor comment, not yet modeled in PnL/risk
 - ⏳ Maker-first verification: testnet first, then small live capital; watch logs "Maker-first attempt registered" / "Maker-first fallback"; consider `order_type = "maker_first"` on a futures instance (e.g. maker_timeout_ms 500)
 - ⏳ Loopback port returning awselb responses (suspected Clash TUN hijack of loopback traffic) — can investigate separately
@@ -127,10 +131,9 @@ Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Lin
 ### M14 + CFD Direction (2026-08-14) → M15 Dual-Direction Trading (2026-08-15, done)
 - **Product pivot**: trading direction moved from BTC_USDT perpetual futures to **Gate.io TradFi/CFD gold (`XAUUSD`)** — see `docs/CFD_TRADFI.md` (full API survey + phased implementation plan) and OPERATIONAL_GUIDE §10.
 - **Verified live**: CFD account registered (`mt5_uid 2017864`), XAUUSD ~4348 USD/oz, 1 lot = 100 oz, min 0.01 lot, leverage 20–500; API key **CFD permission works** (futures permission is a separate product — the 403 on `/futures/*` is expected and irrelevant to CFD).
-- **M15 implemented (2026-08-15, 632 tests green)**: `MarketType::Cfd` + config (`active_market`, max_leverage→500); EndpointRouter `/api/v4/tradfi/*`; GateRestClient 11 TradFi methods; OrderExecutor static `buildOrderBody` (MT5 schema, live-verified); OrderTracker REST-poll mode; MarketFeed REST-poll loop (ticker 1s / klines 60s, backfill 500, dedupe); SymbolRegistry CFD branch + `mergeFrom`; `RiskManager::evaluateCfdOrder` (7101/7102, margin includes contract_volume); CFD close via `/tradfi/positions/{id}/close`; **direction switching**: `switch_direction` method/REPL `switch`/MCP tool (17 methods) — pauses old direction's strategies, cancels its open orders, positions stay open; gate in OrderFlowExecutor (`InactiveMarket 3008`, `reduce_only` exempt); `open_order` defaults to active direction; `get_market` market_type-aware; status shows `active_market`; heartbeat has cfd feed + USD balance.
-- **Engine state**: rebuilt engine required before next run (kills stale mcp bridge first, see below). trading.toml has `active_market = "futures"` (default, safe) + a momentum XAUUSD CFD instance (enabled but paused at startup). **CFD never trades until `switch cfd`**.
-- **Strategy compatibility for CFD**: momentum / mean_reversion / supertrend (kline-driven) OK; orderbook_scalper not usable (no order-book channel; validator rejects it on cfd).
-- **Operational notes**: ① CFD account balance was withdrawn to 0.00 on 2026-08-15 (user intent); two leftover trigger orders from the 08-14 manual verification (buy@4295 id 17511143, sell@4428 id 17471679) could NOT be cancelled while the market was closed (`NOT_IN_TRADE`) — retry `tools/test_gate_rest --tradfi-cleanup` after the market reopens (~08-17). ② 16→17: MCP tool count, JsonRpcServer registry, AGENTS.md/README/OPERATIONAL_GUIDE all updated. ③ nohup logging: stdout only (run.sh console sink); `logs/app.log` may not receive the new run's lines.
+- **M15 implemented (2026-08-15, 632 tests green)**: `MarketType::Cfd` + `active_market` config; EndpointRouter `/api/v4/tradfi/*`; GateRestClient 11 TradFi methods; OrderExecutor static `buildOrderBody` (MT5 schema, live-verified); OrderTracker REST-poll mode; MarketFeed REST-poll loop (ticker 1s / klines 60s, backfill 500); SymbolRegistry CFD branch; `evaluateCfdOrder` (7101/7102); CFD close `/tradfi/positions/{id}/close`; **direction switching** (`switch_direction`/REPL `switch`/MCP, 17 methods) — pauses old-direction strategies, cancels its open orders, positions stay open; gate `InactiveMarket 3008` (reduce_only exempt); `open_order` defaults to active direction; `get_market` market_type-aware.
+- **Engine state**: `active_market = "futures"` in trading.toml; XAUUSD instances auto-paused at startup, **CFD never trades until `switch cfd`**. Strategy compat for CFD: momentum/mean_reversion/supertrend OK; orderbook_scalper unusable (no order-book channel, validator rejects).
+- **Operational**: CFD balance was 0.00 on 08-15 (user intent); leftover trigger orders (buy@4295/17511143, sell@4428/17471679) uncancellable while market closed — now superseded by M17 notes. MCP tool count 17; nohup: stdout-only logging (`logs/app.log` may miss lines).
 
 Then: live-verified 2026-08-17 (direction switch, CFD order placement + id resolution — see M17 section)
 
