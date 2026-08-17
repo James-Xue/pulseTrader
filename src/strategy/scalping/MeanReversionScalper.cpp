@@ -168,6 +168,11 @@ void MeanReversionScalper::onKline(const market::Kline & /*kline*/)
     signal.reason = oversold
         ? "Price at/below lower Bollinger Band (oversold, mean reversion expected)"
         : "Price at/above upper Bollinger Band (overbought, mean reversion expected)";
+    signal.indicators = {
+        { "bb_upper", upper_band },
+        { "bb_lower", lower_band },
+        { "bb_mid", sma },
+    };
 
     PULSE_LOG_INFO("strategy", "[{}] {} signal: price={:.2f}, upper={:.2f}, lower={:.2f}, sma={:.2f}",
         id(), signal.reason, current_price, upper_band, lower_band, sma);

@@ -18,6 +18,8 @@
 
 #include "core/types.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cstdint>
 #include <string>
 
@@ -57,6 +59,11 @@ struct TradingSignal
     std::string reason;         ///< Human-readable explanation.
     MarketType market_type;     ///< Spot or Futures (for routing to correct executor).
 
+    /// Indicator snapshot at signal time (e.g. {"ema_fast": 4400.1, ...}).
+    /// Published to the signal board; empty by default so the aggregator and
+    /// all existing consumers are unaffected.
+    nlohmann::json indicators;
+
     /// Default constructor.
     TradingSignal()
         : type{ SignalType::Flat }
@@ -67,6 +74,7 @@ struct TradingSignal
         , timestamp{}
         , reason{}
         , market_type{ MarketType::Spot }
+        , indicators{ nlohmann::json::object() }
     {
     }
 };

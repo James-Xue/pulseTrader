@@ -123,6 +123,13 @@ void OrderBookScalper::onOrderbook(const market::OrderBook &book)
     signal.reason = buy_signal
         ? "Order book buy pressure (imbalance > threshold)"
         : "Order book sell pressure (imbalance < -threshold)";
+    signal.indicators = {
+        { "imbalance", imbalance },
+        { "bid_volume", bid_volume },
+        { "ask_volume", ask_volume },
+        { "best_bid", book.bids.begin()->first },
+        { "best_ask", book.asks.begin()->first },
+    };
 
     PULSE_LOG_INFO("strategy", "[{}] {} signal: imbalance={:.4f}, bid_vol={:.4f}, ask_vol={:.4f}",
         id(), signal.reason, imbalance, bid_volume, ask_volume);

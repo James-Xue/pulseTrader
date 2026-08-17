@@ -12,6 +12,7 @@ add_library(pulse_strategy STATIC
     scalping/MeanReversionScalper.cpp
     scalping/SuperTrendScalper.cpp
     signal/SignalAggregator.cpp
+    signal/SignalBoard.cpp
 )
 
 add_library(pulse::strategy ALIAS pulse_strategy)

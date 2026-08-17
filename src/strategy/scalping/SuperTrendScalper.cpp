@@ -206,6 +206,11 @@ void SuperTrendScalper::onKline(const market::Kline & /*kline*/)
                 signal.reason = flipped_bullish
                     ? "SuperTrend flipped bullish (price crossed above band)"
                     : "SuperTrend flipped bearish (price crossed below band)";
+                signal.indicators = {
+                    { "supertrend", current_supertrend },
+                    { "supertrend_dir", flipped_bullish ? 1 : -1 },
+                    { "atr", atr },
+                };
 
                 PULSE_LOG_INFO("strategy", "[{}] {} signal: confidence={:.4f}, price={:.2f}, atr={:.2f}",
                     id(), signal.reason, confidence, signal.price, atr);

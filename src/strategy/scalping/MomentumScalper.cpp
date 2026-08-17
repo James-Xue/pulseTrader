@@ -133,6 +133,11 @@ void MomentumScalper::onKline(const market::Kline & /*kline*/)
             signal.reason = bullish_cross
                 ? "EMA bullish crossover (fast > slow)"
                 : "EMA bearish crossover (fast < slow)";
+            signal.indicators = {
+                { "ema_fast", ema_fast },
+                { "ema_slow", ema_slow },
+                { "ema_diff", ema_fast - ema_slow },
+            };
 
             PULSE_LOG_INFO("strategy", "[{}] {} signal: confidence={:.4f}, price={:.2f}",
                 id(), signal.reason, confidence, signal.price);
