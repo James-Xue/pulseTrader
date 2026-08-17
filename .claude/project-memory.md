@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-16
-> File size: 23862 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-17
+> File size: 24728 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -32,9 +32,10 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **669 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **687 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 - M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
 - M16 (2026-08-16) additions: maker-first order flow — 14 OrderFlowTest (best bid/ask post-only pricing, sweep cancel+fallback, partial-fill remainder, exchange-reject no-chase, rate-limit/direction-switch rejection, cancel-race) + 5 config validator + 3 config loader = 22 new
+- M17 (2026-08-17) additions: per-market notional budget (PositionManager reserveNotional/openPosition/canOpenPosition filtered by market_type; optional maxPositionNotional{Futures,Cfd,Spot} with maxPositionNotional fallback; canOpenPosition quanto fix) + CFD order-id resolution (matchCfdOrderId — POST /tradfi/orders does not echo the order id) = 18 new
 - OrderFlowTest 2026-08-14 regressions: OnSignalModifiedOrderIsPlaced, OnSignalModifiedFailureReleasesReservation, FuturesQuantoKeepsFullContractQuantity, SellFillOpensShortWhenNoLong
 
 ### Milestones
@@ -43,38 +44,10 @@
 - **M7** ✅: SQLite trade recorder (17-col schema, 4 queries)
 - **M8** ✅: Futures config foundation (MarketType/MarginMode enums, 7xxx errors)
 - **M9** ✅: EndpointRouter + WS ping/pong fix
-- **M10** ✅: Futures Market Data
-  - `Ticker`: mark_price, index_price, funding_rate fields
-  - `SymbolInfo`: quanto_multiplier, leverage_max/min, maintenance_rate, funding_interval, order_size_min/max, market_type
-  - `SymbolRegistry`: MarketType param, `parse_futures_contract()`, futures validate_order()
-  - `MarketFeed`: MarketType param, EndpointRouter channel routing, dual-format JSON parsing
-  - `EndpointRouter`: orders_path(), order_path(), leverage_path()
-  - `GateRestClient`: post/cancel/get_futures_order()
-  - 11 new tests
-- **M11** ✅: Futures Risk / PnL
-  - `Position`: market_type, leverage, margin_mode, margin_used, liquidation_price, quanto_multiplier
-  - `PortfolioSummary`: total_margin_used, futures_position_count
-  - `PositionManager`: leverage-aware PnL (`calculate_unrealized_pnl` with leverage/quanto), futures open_position overload, liquidation price estimation
-  - `RiskManager`: evaluate_futures_order() — leverage + margin checks, first use of 7xxx error codes
-  - 12 new tests
-- **M12** ✅: Futures Execution + Dual-Market Wiring
-  - `OrderRequest`: market_type, leverage, reduce_only, contract_size
-  - `OrderExecutor`: MarketType param, futures order body (contract/size/tif), futures response parsing (int id, finish_as)
-  - `OrderTracker`: MarketType param, EndpointRouter WS/REST routing
-  - `TradingSignal`: market_type field, auto-set by emit_signal()
-  - `main.cpp`: dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker), strategy→market routing
-  - 7 new tests
-- **M13** ✅: Testnet Support
-  - `ExchangeConfig`: `bool testnet` field
-  - `PULSE_NETWORK` env var: "mainnet" (default) / "testnet" switch
-  - Testnet REST: `https://api-testnet.gateapi.io` (correct URL, not `fx-api-testnet`)
-  - Testnet WS: uses mainnet `fx-ws.gateio.ws` (testnet WS unreachable from China; data identical)
-  - TOML `[exchange] testnet = true` overrides REST URL automatically
-  - Config validator: rejects spot strategies in testnet mode (futures-only)
-  - `run.sh`: auto-loads `trading.toml` if no `--config` specified
-  - SQLite: auto-creates `data/` directory for dbPath
-  - `.env` structure: `GATE_MAINNET_*` / `GATE_TESTNET_*` key separation
-  - 6 new tests (3 loader + 3 validator)
+- **M10** ✅: Futures Market Data — Ticker mark/index/funding fields; SymbolInfo (quanto, leverage, maintenance, order_size, market_type); SymbolRegistry MarketType + parse_futures_contract; MarketFeed MarketType routing; EndpointRouter orders/leverage paths; 11 tests
+- **M11** ✅: Futures Risk / PnL — Position (market_type, leverage, margin, liq, quanto); PositionManager leverage-aware PnL + futures openPosition; RiskManager evaluate_futures_order (7xxx codes); 12 tests
+- **M12** ✅: Futures Execution + Dual-Market — OrderRequest market_type/leverage/reduce_only/contract_size; OrderExecutor/OrderTracker MarketType routing; TradingSignal market_type; main.cpp dual-market wiring; 7 tests
+- **M13** ✅: Testnet — `PULSE_NETWORK` mainnet/testnet; testnet REST api-testnet.gateapi.io; testnet WS falls back to mainnet fx-ws (unreachable from China, data identical); config testnet=true overrides; .env GATE_MAINNET_*/GATE_TESTNET_* split; 6 tests
 
 ### Post-M13 Bugfixes (2026-06-20)
 - **Ctrl+C graceful shutdown** — 3-layer fix in `gate_ws_client.cpp`:
@@ -132,11 +105,18 @@ Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git 
 ### vcpkg/Linux Build Compatibility (2026-06-23, commit `a812333`)
 Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Linux builds use vendored `third_party/` + `get_io_context()`.
 
-### Next Steps (2026-08-16 pending)
-- ⏳ SKHY 止损触发单 (170.5) existence check + risk handling — ≈1.3% from mark price, ≈-260 USDT if triggered
-- ⏳ After gold market reopens (~08-17): clean leftover CFD trigger orders (buy@4295 id 17511143 / sell@4428 id 17471679) via `tools/test_gate_rest --tradfi-cleanup`
+### M17 Per-Market Budget + CFD Order-Id Fix (2026-08-17, done — 687 tests)
+- **Incident**: after SKHY futures short (5099 notional) occupied the shared maxPositionNotional 6000, a 0.01-lot XAUUSD CFD order (4392 notional) was clamped to 0.003 lots → below the 0.01 minimum → `VOLUME_LESS_THAN_MIN_LIMIT`. Futures position ate the CFD budget.
+- **Fix**: notional cap enforced PER MARKET TYPE. RiskConfig gains optional `maxPositionNotionalFutures/Cfd/Spot` (fallback = maxPositionNotional); `PositionManager::reserveNotional`/`openPosition`/`canOpenPosition` filter totals by market_type and use `notionalLimitFor(mt)`; `PendingReservation` carries market_type; `canOpenPosition` now multiplies the quanto (latent bug). `maxOpenPositions`/`maxSymbolNotional` stay global. RiskManager passes `order.market_type` through. trading.toml: futures=6000, cfd=6000, fallback 6000.
+- **CFD order-id fix**: POST /tradfi/orders does NOT echo the order id (`data.id` = internal submission number, GET 404) → `OrderExecutor::matchCfdOrderId` (static, unit-tested) resolves it from the open-orders list (newest match by symbol/side/volume/price). Live-verified: place → `Resolved CFD order id ...` → cancel via engine.
+- **SKHY episode closed**: SL trigger 170.5 fired 2026-08-17 11:33 (SKHY pumped 169.85→170.5); position closed, futures balance 414→151 USDT (loss ≈ -263 USDT). TP 151 auto-cancelled. Earlier 168.63 plan-close had trimmed 4000→3000 (08-16). Engine now holds NO futures positions.
+- **CFD live state**: user's sell@4399 trigger fired 12:02 → 0.01-lot short @4399.04 (no TP/SL) → later closed (balance 35.95→37.18). Remaining user trigger orders: sell@4418 (17618607), buy@4295 (17511143), sell@4428 (17471679) — KEEP (user's CFD plan). CFD account 37.18 USD; futures 151.44 USDT. active_market=cfd, momentum_scalper_XAUUSD running, 4 futures strategies paused.
+
+### Next Steps (2026-08-17)
+- ⏳ CFD strategy tune-up for the cost model: 0.06 USDT/0.01 lot buy-only commission + gold storage/swap (利差) — RECORDED in docs/CFD_TRADFI.md + OrderExecutor comment, not yet modeled in PnL/risk
 - ⏳ Maker-first verification: testnet first, then small live capital; watch logs "Maker-first attempt registered" / "Maker-first fallback"; consider `order_type = "maker_first"` on a futures instance (e.g. maker_timeout_ms 500)
 - ⏳ Loopback port returning awselb responses (suspected Clash TUN hijack of loopback traffic) — can investigate separately
+- ⏳ Known display bug: futures position PnL multiplies leverage (SKHY showed -6009 vs exchange -244) — calculateUnrealizedPnl/position sync leverage handling
 - ✅ #4 RiskManager TOCTOU — `PositionManager::reserve_notional()` atomic reservation mode, single unique_lock replacing 3 independent shared_locks. `RiskEvalResult` added `reservation_id`; `main.cpp` failure path calls `cancel_reservation()`, success path auto-consumes. 5 new tests.
 - ✅ #5 OrderTracker Callback Under Write Lock — "collect inside lock, execute outside lock" pattern: `completion_callback_` in `process_order_update()` and `poll_order_status()` called after unique_lock is released. `set_completion_callback()` protected by lock. Added `test_simulate_ws_update()` / `test_try_shared_lock()` test interfaces. 3 new tests.
 - ✅ #6 ProxyTunnel Extraction — 373 lines of network code extracted from `gate_ws_client.cpp` into `proxy_tunnel.hpp/.cpp`. Fixed 2 hidden bugs: (1) `handle_connection` thread changed from `.detach()` to joinable; (2) relay socket/thread registration merged into a single lock_guard scope. Removed 58 lines of dead code (SSL relay overloads). 7 new tests.
@@ -152,7 +132,7 @@ Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Lin
 - **Strategy compatibility for CFD**: momentum / mean_reversion / supertrend (kline-driven) OK; orderbook_scalper not usable (no order-book channel; validator rejects it on cfd).
 - **Operational notes**: ① CFD account balance was withdrawn to 0.00 on 2026-08-15 (user intent); two leftover trigger orders from the 08-14 manual verification (buy@4295 id 17511143, sell@4428 id 17471679) could NOT be cancelled while the market was closed (`NOT_IN_TRADE`) — retry `tools/test_gate_rest --tradfi-cleanup` after the market reopens (~08-17). ② 16→17: MCP tool count, JsonRpcServer registry, AGENTS.md/README/OPERATIONAL_GUIDE all updated. ③ nohup logging: stdout only (run.sh console sink); `logs/app.log` may not receive the new run's lines.
 
-Then: rebuild + restart engine → live verification (`get_status` active_market=futures, `get_market XAUUSD` works, `open_order` cfd rejected with 3008, `switch cfd` pauses futures + cancels orders) → manual 0.01-lot verification → small-capital live trading → production hardening
+Then: live-verified 2026-08-17 (direction switch, CFD order placement + id resolution — see M17 section)
 
 ### M16 Maker-First Orders (2026-08-16, done — commits b6f785f / deb5a1e)
 - **Config**: per-instance `order_type = "market"|"post_only"|"maker_first"` + `maker_timeout_ms` (ms; > 0 required for maker_first). Validator rejects non-market order_type on `cfd` — TradFi API only has `price_type: market|trigger`, no post-only.

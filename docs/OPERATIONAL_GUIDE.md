@@ -265,8 +265,11 @@ poll_interval_ms = 500
 
 # --- Risk Control Configuration ---
 [risk]
-maxPositionNotional = 500            # Max position size 500 USDT
-maxOpenPositions = 3                 # Max 3 simultaneous open positions
+maxPositionNotional = 500            # Fallback position cap 500 USDT (per market)
+maxPositionNotionalFutures = 500     # Optional per-market override (futures)
+maxPositionNotionalCfd = 500         # Optional per-market override (CFD)
+maxPositionNotionalSpot = 500        # Optional per-market override (spot)
+maxOpenPositions = 3                 # Max 3 simultaneous open positions (all markets)
 maxDailyDrawdown = 0.02              # Daily loss ≥ 2% triggers halt
 maxDrawdown = 0.05                   # Total drawdown ≥ 5% stops everything
 maxOrdersPerSec = 5                  # Max 5 orders per second
@@ -336,9 +339,13 @@ journalctl --user -u pulsetrader -f       # live logs (journald, not engine.log)
 the exchange at startup (`GET /futures/usdt/positions`), so positions opened by a
 previous run or manually appear in `positions` / `get_positions` immediately —
 look for `[app] Position sync: ...` in the log. Synced positions count toward
-risk limits (that is the point — true exposure), so if a large manual position
-(e.g. a 5000-USDT SKHY short) exceeds `maxPositionNotional`, the engine refuses
-new orders until the limits are raised or the position is closed.
+risk limits (that is the point — true exposure). The position-notional cap is
+enforced **per market type** (`maxPositionNotional{Futures,Cfd,Spot}` with
+`maxPositionNotional` as fallback), so a large manual futures position
+(e.g. a 5000-USDT SKHY short) blocks *futures* orders but not CFD orders;
+`maxOpenPositions` and `maxSymbolNotional` remain global. Note: startup sync
+covers futures only — CFD positions are not re-imported (CFD never trades
+unless `switch cfd` is used).
 
 **Alternative: manual launch (blocking, same binary)**
 

@@ -182,7 +182,20 @@ Verification run with `tools/test_gate_rest --tradfi` (signed requests, mainnet 
 | Response wrapper | All responses wrapped: `{"data": {...}}`; lists under `{"data": {"list": [...]}}` (`list` may be `null` when empty). |
 | Ticker fields | `data.last_price / bid_price / ask_price / highest_price / lowest_price / price_change` (all strings), `status`, `open_time`/`close_time`, `next_open_time`. |
 | Kline fields | `data.list[] = {o, h, l, c, t}` (strings, `t` Unix seconds). |
-| Contract detail | `data.list[] = {symbol, contract_volume: "100", min_order_volume: "0.01", max_order_volume: "15", step_order_volume: "0.01", price_precision: 2, leverage: "500", leverages: ["20","50","100","200","500"], settlement_currency: "USD", commission: "6", hedged_margin, trade_mode: "4"}`. |
+| Contract detail | `data.list[] = {symbol, contract_volume: "100", min_order_volume: "0.01", max_order_volume: "15", step_order_volume: "0.01", price_precision: 2, leverage: "500", leverages: ["20","50","100","200","500"], settlement_currency: "USD", commission: "6", hedged_margin, trade_mode: "4"}`. `commission: "6"` = 6 USDT per full lot. |
+
+## Cost model (record-only — verified 2026-08-17, NOT enforced by the engine)
+
+- **Commission**: **0.06 USDT per 0.01 lot, charged once on the BUY side only**
+  (sell side is free). Matches the contract detail `commission: "6"` (6 USDT/lot).
+- **Gold storage/swap (利差)**: charged per overnight hold, surfaced in the
+  assets/positions payloads' `storage` field (currently `0.00` — no position
+  held overnight yet). Long positions typically pay swap; the rate is a
+  broker-side charge per instrument, visible only after holding across
+  the daily settlement.
+- The engine does **not** model either cost in PnL, reservations, or strategy
+  economics yet — recorded here and in `OrderExecutor::buildOrderBody` (Cfd)
+  as the reference for a future cost-model feature.
 | Assets | `data.balance / equity / margin / margin_free / unrealized_pnl / storage / outable / mt5_uid` (strings). |
 | Order object | `data.list[] = {order_id: <int>, symbol, side, volume, price, price_type, price_sl, price_tp, leverage, state: 1, finished: 0, time_setup: <unix sec>, ...}` — field is **`order_id`** (not `id`); no `status` string; **`state` + `finished`** encode status; timestamp is **`time_setup`** (not `create_time`). |
 | Positions | `data.list` (`null` when empty) + `data.total`. |
