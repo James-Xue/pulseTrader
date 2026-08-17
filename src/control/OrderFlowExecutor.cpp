@@ -674,33 +674,73 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
     // Update drawdown guard with realized PnL.
     m_drawdownGuard.recordPnl(pnl);
 
-#ifdef PULSE_ENABLE_SQLITE
-    if (m_tradeRecorder)
+    // Market metadata from the reservation's request (defaults = spot).
+    const MarketType mt = reservation.request.market_type;
+    const double lev = (MarketType::Spot == mt
+                        || reservation.request.leverage <= 0.0)
+                           ? 1.0
+                           : reservation.request.leverage;
+
+    recordCompletedTrade(report, pnl, mt, lev,
+                         reservation.request.quanto_multiplier);
+}
+
+void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,
+                                       double pnl, double leverage)
+{
+    auto log_app = logging::Logger::get("app");
+
+    log_app->info("CFD close recorded: id={} {} {} {:.6f} @ {:.2f} pnl={:.4f}",
+                  report.order_id,
+                  report.symbol,
+                  (Side::Buy == report.side) ? "BUY" : "SELL",
+                  report.filled_qty,
+                  report.avg_fill_price,
+                  pnl);
+
+    if (m_cfdTracker)
     {
-        // Strategy name: prefer the matched instance (signals usually carry
-        // an empty client_order_id); fall back to the client id.
-        strategy::TradingSignal sig;
-        sig.symbol = report.symbol;
-        const auto *inst = matchInstanceConfig(sig);
-        const std::string strategy_name =
-            inst ? inst->name : report.client_order_id;
-
-        // Market metadata from the reservation's request (defaults = spot).
-        const MarketType mt = reservation.request.market_type;
-        const double lev = (MarketType::Spot == mt
-                            || reservation.request.leverage <= 0.0)
-                               ? 1.0
-                               : reservation.request.leverage;
-
-        auto rec_result = m_tradeRecorder->recordTrade(
-            report, pnl, strategy_name, mt, lev,
-            reservation.request.quanto_multiplier);
-        if (!ok(rec_result))
-        {
-            log_app->warn("Trade recorder INSERT failed: {}",
-                          error(rec_result).message);
-        }
+        m_cfdTracker->recordCompletedReport(report);
     }
+    m_drawdownGuard.recordPnl(pnl);
+
+    recordCompletedTrade(report, pnl, MarketType::Cfd,
+                         leverage > 0.0 ? leverage : 1.0,
+                         quantoMultiplierFor(report.symbol));
+}
+
+void OrderFlowExecutor::recordCompletedTrade(
+    const execution::ExecutionReport &report, double pnl, MarketType market_type,
+    double leverage, double quanto_multiplier)
+{
+#ifdef PULSE_ENABLE_SQLITE
+    if (!m_tradeRecorder)
+    {
+        return;
+    }
+    auto log_app = logging::Logger::get("app");
+
+    // Strategy name: prefer the matched instance (signals usually carry
+    // an empty client_order_id); fall back to the client id.
+    strategy::TradingSignal sig;
+    sig.symbol = report.symbol;
+    const auto *inst = matchInstanceConfig(sig);
+    const std::string strategy_name =
+        inst ? inst->name : report.client_order_id;
+
+    auto rec_result = m_tradeRecorder->recordTrade(
+        report, pnl, strategy_name, market_type, leverage, quanto_multiplier);
+    if (!ok(rec_result))
+    {
+        log_app->warn("Trade recorder INSERT failed: {}",
+                      error(rec_result).message);
+    }
+#else
+    (void)report;
+    (void)pnl;
+    (void)market_type;
+    (void)leverage;
+    (void)quanto_multiplier;
 #endif
 }
 

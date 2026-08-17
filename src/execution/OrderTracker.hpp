@@ -175,6 +175,13 @@ class OrderTracker
     ///   1. n — maximum number of reports to return (default: 20)
     [[nodiscard]] std::vector<ExecutionReport> recentReports(std::size_t n = 20) const;
 
+    /// Stash a terminal ExecutionReport that never passed through
+    /// trackOrder(). TradFi CFD closes use the dedicated position-close
+    /// endpoint (no order lifecycle), so the engine synthesizes the report
+    /// and records it here to keep recentReports / trades.db / execution.log
+    /// complete (2026-08-17 overnight: close side left zero trace without it).
+    void recordCompletedReport(const ExecutionReport &report);
+
   public:
     /// Test-only: simulate a WS order update event (calls processOrderUpdate).
     /// Allows unit tests to exercise the state machine without a real WS connection.

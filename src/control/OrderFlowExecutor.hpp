@@ -156,6 +156,14 @@ class OrderFlowExecutor
     /// Order-completion entry point (wired to both trackers).
     void onOrderComplete(const execution::ExecutionReport &report);
 
+    /// Record a TradFi CFD close into the shared record pipeline (completed
+    /// reports, drawdown guard, SQLite). The dedicated close endpoint never
+    /// emits an order fill, so close_position synthesizes the terminal report
+    /// and calls this instead of onOrderComplete — that path would re-close
+    /// positions and consume a reservation that never existed.
+    void recordCfdClose(const execution::ExecutionReport &report,
+                        double pnl, double leverage);
+
     /// Cancel an open order; probes cfd tracker first, then futures, then spot.
     /// Must be called with the shared rest_mutex held.
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
@@ -236,6 +244,12 @@ class OrderFlowExecutor
 
     /// Erase a maker attempt (guarded by m_mutex).
     void eraseAttempt(const std::string &order_id);
+
+    /// Shared SQLite record path for completed trades (onOrderComplete and
+    /// recordCfdClose both end here).
+    void recordCompletedTrade(const execution::ExecutionReport &report,
+                              double pnl, MarketType market_type,
+                              double leverage, double quanto_multiplier);
 
     StrategyConfig m_strategyCfg;
     const bool m_signalOnly; ///< Signal-only mode: onSignal never places orders.

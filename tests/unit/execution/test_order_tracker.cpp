@@ -184,6 +184,33 @@ TEST_F(OrderTrackerSnapshotTest, RecentReportsRespectsLimit)
     EXPECT_TRUE(reports.empty());
 }
 
+TEST_F(OrderTrackerSnapshotTest, RecordCompletedReportWithoutTracking)
+{
+    // CFD closes bypass trackOrder() (dedicated position-close endpoint);
+    // the engine synthesizes a terminal report and calls this instead, so
+    // the close side must still show up in recentReports() (2026-08-18 fix
+    // for the close-side zero-trace gap).
+    ExecutionReport report;
+    report.order_id        = "close_XAUUSD_Buy_1";
+    report.client_order_id = report.order_id;
+    report.symbol          = "XAUUSD";
+    report.side            = Side::Sell;
+    report.type            = OrderType::Market;
+    report.requested_qty   = 0.01;
+    report.filled_qty      = 0.01;
+    report.avg_fill_price  = 4426.16;
+    report.final_status    = OrderStatus::Filled;
+
+    tracker_->recordCompletedReport(report);
+
+    const auto reports = tracker_->recentReports();
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports[0].order_id, "close_XAUUSD_Buy_1");
+    EXPECT_EQ(reports[0].side, Side::Sell);
+    EXPECT_EQ(reports[0].final_status, OrderStatus::Filled);
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 0.01);
+}
+
 // ---------------------------------------------------------------------------
 // Callback safety tests — verifies the "invoke outside lock" fix
 //

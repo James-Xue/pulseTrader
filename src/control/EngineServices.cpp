@@ -5,6 +5,7 @@
 #include "control/OrderFlowExecutor.hpp"
 #include "core/snapshot_types.hpp"
 #include "core/types.hpp"
+#include "execution/ExecutionReport.hpp"
 #include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
 
@@ -594,7 +595,10 @@ EngineServices::closePosition(const nlohmann::json &params)
     // order: POST /tradfi/positions/{id}/close (close_type 2 = full,
     // 1 = partial with close_volume). The close does not emit an order fill,
     // so PositionManager is updated locally and the realized PnL feeds the
-    // drawdown guard directly.
+    // drawdown guard directly. To keep recentReports / trades.db /
+    // execution.log complete, a terminal ExecutionReport is synthesized below
+    // and routed through OrderFlowExecutor::recordCfdClose (2026-08-17
+    // overnight finding: the close side previously left zero trace).
     if (MarketType::Cfd == pos.market_type)
     {
         if (nullptr == m_cfdRest)
@@ -634,10 +638,31 @@ EngineServices::closePosition(const nlohmann::json &params)
                                       ? pos.current_price : pos.entry_price;
         const auto pnl = m_positionMgr.closePosition(
             position_id, close_qty, exit_price);
-        if (pnl.has_value())
-        {
-            m_riskMgr.drawdownGuard().recordPnl(pnl.value());
-        }
+        const double realized = pnl.has_value() ? pnl.value() : 0.0;
+
+        // Synthesize a terminal fill report for the close side and route it
+        // through the shared record pipeline (completed reports, drawdown
+        // guard, trades.db, execution.log). Without this, a CFD close leaves
+        // zero trace anywhere.
+        execution::ExecutionReport report;
+        report.order_id            = "close_" + position_id;
+        report.client_order_id     = report.order_id;
+        report.symbol              = pos.symbol;
+        report.side                = opposite(pos.side);
+        report.type                = OrderType::Market;
+        report.requested_qty       = close_qty;
+        report.filled_qty          = close_qty;
+        report.avg_fill_price      = exit_price;
+        report.submit_mid_price    = exit_price;
+        report.slippage_bps        = 0.0;
+        report.fees                = 0.0;
+        report.latency             = std::chrono::milliseconds{ 0 };
+        report.submit_time         = now();
+        report.fill_time           = now();
+        report.final_status        = OrderStatus::Filled;
+        report.exchange_position_id = exchange_pid;
+        m_orderFlow.recordCfdClose(report, realized, pos.leverage);
+
         execution::OrderResponse resp;
         resp.order_id = position_id;
         resp.status = OrderStatus::Filled;

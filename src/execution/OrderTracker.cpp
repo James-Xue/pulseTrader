@@ -428,6 +428,16 @@ std::optional<ExecutionReport> OrderTracker::applyUpdateAndMaybeComplete(
     return std::nullopt;
 }
 
+void OrderTracker::recordCompletedReport(const ExecutionReport &report)
+{
+    std::lock_guard<std::shared_mutex> lock(m_mutex);
+    m_completedReports[report.order_id] = report;
+
+    PULSE_LOG_INFO("execution",
+        "Order completed (recorded close): {} status=filled filled_qty={} avg_price={}",
+        report.order_id, report.filled_qty, report.avg_fill_price);
+}
+
 void OrderTracker::reconcileAll()
 {
     // Snapshot tracked ids under a shared lock, then poll each — pollOrderStatus
