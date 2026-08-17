@@ -235,8 +235,17 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
         {
             body["price"] = std::to_string(req.price);
         }
-        // price_tp / price_sl (take-profit / stop-loss per order) are optional —
-        // left empty for now; the engine's own stop-loss engine covers exits.
+        // price_tp / price_sl — attached take-profit / stop-loss, the
+        // exchange-native protection for a CFD entry (fires even if the
+        // engine and every external consumer are down).
+        if (req.sl_price.has_value())
+        {
+            body["price_sl"] = std::to_string(*req.sl_price);
+        }
+        if (req.tp_price.has_value())
+        {
+            body["price_tp"] = std::to_string(*req.tp_price);
+        }
         break;
     }
     default:

@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -35,6 +36,12 @@ struct OrderRequest
     bool reduce_only;           ///< Reduce-only flag (futures only, default false).
     int contract_size;          ///< Order size in contracts (futures only, 0 = use quantity).
     double quanto_multiplier;   ///< Contract multiplier (e.g. 0.0001 = 1 contract = 0.0001 BTC).
+
+    /// Attached stop-loss / take-profit prices (CFD only — TradFi orders
+    /// accept per-order price_sl / price_tp, the exchange-native protection).
+    /// nullopt = no attached protection. Rejected on non-CFD paths.
+    std::optional<Price> sl_price;
+    std::optional<Price> tp_price;
 
     /// Default constructor.
     OrderRequest()
