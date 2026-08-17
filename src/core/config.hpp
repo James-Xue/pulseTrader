@@ -5,6 +5,7 @@
 // All fields have sensible defaults so the system can start with a minimal config.
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -181,17 +182,25 @@ struct NewsConfig
 //   4. maxDrawdown         — Maximum total drawdown before trading halts
 //   5. maxOrdersPerSec     — Token-bucket capacity for order rate limiting
 //   6. maxSymbolNotional   — Maximum notional exposure per individual symbol (USDT)
-//   7. stop_loss           — Default stop-loss configuration for new positions
-//   8. take_profit         — Default take-profit ladder configuration
+//   7. maxPositionNotional{Futures,Cfd,Spot} — Optional per-market-type overrides
+//      for the position-notional cap; when unset, maxPositionNotional applies.
+//   8. stop_loss           — Default stop-loss configuration for new positions
+//   9. take_profit         — Default take-profit ladder configuration
 // ---------------------------------------------------------------------------
 struct RiskConfig
 {
-    double maxPositionNotional = 1'000.0; ///< Max open notional value (USDT).
-    int maxOpenPositions = 5;             ///< Max concurrent open positions.
+    double maxPositionNotional = 1'000.0; ///< Max open notional value (USDT), per market type.
+    int maxOpenPositions = 5;             ///< Max concurrent open positions (all markets).
     double maxDailyDrawdown = 0.02;       ///< Max daily loss as fraction of equity.
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
     double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
+    /// Per-market overrides for the position-notional cap. Each falls back to
+    /// maxPositionNotional when unset, so the cap is enforced per market type
+    /// (a futures position does not consume the CFD budget).
+    std::optional<double> maxPositionNotionalFutures; ///< Futures notional cap override.
+    std::optional<double> maxPositionNotionalCfd;     ///< CFD notional cap override.
+    std::optional<double> maxPositionNotionalSpot;    ///< Spot notional cap override.
     double max_leverage = 10.0;           ///< Maximum leverage allowed per position (futures).
     double max_margin_used = 0.5;         ///< Maximum fraction of equity used as margin (futures).
     StopLossConfig stop_loss;             ///< Default stop-loss configuration.

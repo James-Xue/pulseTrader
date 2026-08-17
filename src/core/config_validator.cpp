@@ -89,6 +89,28 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.maxSymbolNotional must be > 0"};
     }
 
+    // Optional per-market notional overrides — must be positive when set.
+    if (cfg.risk.maxPositionNotionalFutures.has_value()
+        && cfg.risk.maxPositionNotionalFutures.value() <= 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.maxPositionNotionalFutures must be > 0"};
+    }
+
+    if (cfg.risk.maxPositionNotionalCfd.has_value()
+        && cfg.risk.maxPositionNotionalCfd.value() <= 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.maxPositionNotionalCfd must be > 0"};
+    }
+
+    if (cfg.risk.maxPositionNotionalSpot.has_value()
+        && cfg.risk.maxPositionNotionalSpot.value() <= 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.maxPositionNotionalSpot must be > 0"};
+    }
+
     // Futures-specific risk limits (CFD leverage ladder goes up to 500).
     if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 500.0)
     {

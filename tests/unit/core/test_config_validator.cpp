@@ -104,6 +104,35 @@ TEST(ConfigValidator, RejectsNegativePositionNotional)
     EXPECT_NE(std::string::npos, err.message.find("maxPositionNotional"));
 }
 
+TEST(ConfigValidator, RejectsNegativePerMarketPositionNotional)
+{
+    // Each per-market override must be > 0 when set.
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalFutures = -1.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalFutures"));
+    }
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalCfd = 0.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalCfd"));
+    }
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalSpot = -100.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalSpot"));
+    }
+}
+
 TEST(ConfigValidator, RejectsZeroMaxOpenPositions)
 {
     auto cfg = valid_config();

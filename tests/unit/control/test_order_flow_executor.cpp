@@ -1132,3 +1132,59 @@ TEST_F(OrderFlowTest, SweepToleratesNullBookAndEmptyAttempts)
     EXPECT_EQ(0, m_placer->place_count);
     EXPECT_EQ(0, m_placer->cancel_count);
 }
+
+// ---------------------------------------------------------------------------
+// M17: per-market notional budget — end-to-end through OrderFlowExecutor
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, PerMarketBudget_CfdOrderNotClampedByFuturesPosition)
+{
+    // Regression for the 2026-08-17 incident: with a SKHY futures position
+    // occupying 5099 of the FUTURES cap, a 0.01-lot CFD order (4392 USDT
+    // notional) must pass the risk gate at full quantity under the CFD cap.
+    // (Old shared-budget code clamped it to ~0.003 lots → exchange reject.)
+    m_riskCfg.maxPositionNotional = 1000.0;       // fallback (not used here)
+    m_riskCfg.maxPositionNotionalFutures = 6000.0;
+    m_riskCfg.maxPositionNotionalCfd = 6000.0;
+    m_riskCfg.maxSymbolNotional = 6000.0;
+    m_riskCfg.maxOpenPositions = 5;
+
+    // Rebuild the stack AFTER setting caps (PositionManager copies the config)
+    // with the CFD placer/tracker wired in — same shape as SetUp.
+    m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+    m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+    m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+    m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                              *m_drawdownGuard, *m_rateLimiter);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+        nullptr, m_tracker.get(), m_cfdTracker.get(),
+        nullptr, nullptr, m_restMutex, nullptr);
+
+    // SKHY futures short: 3000 contracts * 169.97 * 0.01 = 5099.1 notional.
+    const auto skhy = m_positionMgr->openPosition(
+        "SKHY_USDT", Side::Sell, 3000.0, 169.97, "manual",
+        MarketType::Futures, 25.0, MarginMode::Cross, 0.01, 0.025);
+    ASSERT_TRUE(ok(skhy));
+
+    // CFD must be the active direction for the gate to pass.
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Limit;
+    req.quantity = 0.01;
+    req.price = 4392.0;
+    req.market_type = MarketType::Cfd;
+    req.quanto_multiplier = 100.0;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_cfdPlacer->place_count);
+    ASSERT_EQ(1u, m_cfdPlacer->placed.size());
+    EXPECT_DOUBLE_EQ(0.01, m_cfdPlacer->placed[0].quantity);
+    // The futures placer must not see the CFD order.
+    EXPECT_EQ(0, m_placer->place_count);
+}

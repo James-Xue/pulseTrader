@@ -78,7 +78,8 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
     //    contracts); spot passes quanto_multiplier = 1.0 so the math is
     //    unchanged for spot orders.
     const auto reservation = m_positionManager.reserveNotional(
-        order.symbol, order.quantity, order.price, order.quanto_multiplier);
+        order.symbol, order.quantity, order.price, order.quanto_multiplier,
+        order.market_type);
 
     result.decision = reservation.decision;
     result.approved_qty = reservation.approved_qty;

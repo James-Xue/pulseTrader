@@ -109,7 +109,7 @@ Result<std::string> PositionManager::openPosition(
     // 1. Acquire exclusive (write) lock
     // 2. Compute proposed notional: qty * entry_price * quanto_multiplier
     //    (for spot, quanto_multiplier=1.0 so this is just qty * entry_price)
-    // 3. Check total notional + proposed <= maxPositionNotional
+    // 3. Check same-market notional + proposed <= per-market cap
     // 4. Check open position count < maxOpenPositions
     // 5. Check per-symbol notional + proposed <= maxSymbolNotional
     // 6. Generate unique position_id
@@ -118,19 +118,24 @@ Result<std::string> PositionManager::openPosition(
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     const double proposed_notional = qty * entry_price * quanto_multiplier;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // 3. Check total notional limit.
+    // 3. Check same-market total notional limit (per-market cap, so a
+    //    futures position does not consume the CFD budget).
     double total_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
     }
 
-    if (total_notional + proposed_notional > m_config.maxPositionNotional)
+    if (total_notional + proposed_notional > notional_limit)
     {
         PULSE_LOG_WARN("risk",
             "Position rejected: total notional {:.2f} + proposed {:.2f} exceeds limit {:.2f}",
-            total_notional, proposed_notional, m_config.maxPositionNotional);
+            total_notional, proposed_notional, notional_limit);
         return PulseError{ ErrorCode::PositionLimitHit,
             "Total notional limit exceeded" };
     }
@@ -458,28 +463,34 @@ double PositionManager::symbolNotional(const Symbol &symbol) const
 // Limit checks
 // ---------------------------------------------------------------------------
 
-bool PositionManager::canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const
+bool PositionManager::canOpenPosition(
+    const Symbol &symbol, Quantity qty, Price price,
+    double quanto_multiplier, MarketType market_type) const
 {
     // Pre-check whether a new position would exceed any limit:
     // 1. Acquire shared lock
-    // 2. Compute proposed notional
-    // 3. Check total notional limit
+    // 2. Compute proposed notional (qty * price * quanto_multiplier)
+    // 3. Check same-market total notional limit (per-market cap)
     // 4. Check open position count limit
     // 5. Check per-symbol notional limit
     // 6. Return true only if all checks pass
 
     std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    const double proposed_notional = qty * price;
+    const double proposed_notional = qty * price * quanto_multiplier;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // 3. Check total notional limit.
+    // 3. Check same-market total notional limit.
     double total_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
     }
 
-    if (total_notional + proposed_notional > m_config.maxPositionNotional)
+    if (total_notional + proposed_notional > notional_limit)
     {
         return false;
     }
@@ -519,7 +530,8 @@ int PositionManager::openPositionCount() const
 // ---------------------------------------------------------------------------
 
 NotionalReservation PositionManager::reserveNotional(
-    const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier)
+    const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier,
+    MarketType market_type)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -532,6 +544,10 @@ NotionalReservation PositionManager::reserveNotional(
     // Notional = qty * price * quanto_multiplier. Futures qty is in contracts
     // (e.g. 1 BTC_USDT contract = 0.0001 BTC), so the contract multiplier
     // converts to true notional value; spot uses quanto_multiplier = 1.0.
+    //
+    // The notional cap is PER MARKET TYPE: totals are filtered by market_type
+    // and compared against the per-market cap, so a futures position does not
+    // consume the CFD budget. Position count and per-symbol caps stay global.
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
@@ -540,13 +556,17 @@ NotionalReservation PositionManager::reserveNotional(
 
     const double notional_per_unit = price * quanto_multiplier;
     const double proposed_notional = qty * notional_per_unit;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // Compute current totals under the lock.
+    // Compute current totals under the lock (same-market only for the cap).
     double total_notional = 0.0;
     double sym_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
         if (pos.symbol == symbol)
         {
             sym_notional += pos.notional_value;
@@ -556,7 +576,10 @@ NotionalReservation PositionManager::reserveNotional(
     // Add pending reservations to totals (prevents double-spend).
     for (const auto &[id, pend] : m_pendingReservations)
     {
-        total_notional += pend.notional;
+        if (pend.market_type == market_type)
+        {
+            total_notional += pend.notional;
+        }
         if (pend.symbol == symbol)
         {
             sym_notional += pend.notional;
@@ -567,7 +590,7 @@ NotionalReservation PositionManager::reserveNotional(
                          + static_cast<int>(m_pendingReservations.size());
 
     // Check if the full order fits within all limits.
-    if (total_notional + proposed_notional <= m_config.maxPositionNotional
+    if (total_notional + proposed_notional <= notional_limit
         && open_count < m_config.maxOpenPositions
         && sym_notional + proposed_notional <= m_config.maxSymbolNotional)
     {
@@ -590,8 +613,8 @@ NotionalReservation PositionManager::reserveNotional(
     }
     else
     {
-        // Try reduced quantity.
-        const double remaining_pos = m_config.maxPositionNotional - total_notional;
+        // Try reduced quantity (same-market budget for the position cap).
+        const double remaining_pos = notional_limit - total_notional;
         const double remaining_sym = m_config.maxSymbolNotional - sym_notional;
         const double budget = std::min(remaining_pos, remaining_sym);
 
@@ -637,7 +660,7 @@ NotionalReservation PositionManager::reserveNotional(
     if (res.approved)
     {
         m_pendingReservations[res.reservation_id] = {
-            symbol, res.reserved_notional, res.approved_qty };
+            symbol, res.reserved_notional, res.approved_qty, market_type };
 
         PULSE_LOG_INFO("risk",
             "Reserved notional: id={} {} qty={} notional={:.2f} (decision: {})",
@@ -693,6 +716,34 @@ void PositionManager::cancelReservation(std::uint64_t reservation_id)
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+double PositionManager::notionalLimitFor(MarketType market_type) const noexcept
+{
+    // Per-market override when set, else the global fallback cap. Keeps the
+    // cap per market type: a futures position never consumes the CFD budget.
+    switch (market_type)
+    {
+    case MarketType::Futures:
+        if (m_config.maxPositionNotionalFutures.has_value())
+        {
+            return m_config.maxPositionNotionalFutures.value();
+        }
+        break;
+    case MarketType::Cfd:
+        if (m_config.maxPositionNotionalCfd.has_value())
+        {
+            return m_config.maxPositionNotionalCfd.value();
+        }
+        break;
+    case MarketType::Spot:
+        if (m_config.maxPositionNotionalSpot.has_value())
+        {
+            return m_config.maxPositionNotionalSpot.value();
+        }
+        break;
+    }
+    return m_config.maxPositionNotional;
+}
 
 std::string PositionManager::generatePositionId(const Symbol &symbol, Side side)
 {

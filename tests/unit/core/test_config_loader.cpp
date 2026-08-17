@@ -357,6 +357,46 @@ max_hold_seconds = 600
     EXPECT_EQ(600u, risk.stop_loss.max_hold_seconds);
 }
 
+TEST(ConfigLoader, ParseRisk_WithPerMarketNotionalCaps)
+{
+    TempToml tmp(R"(
+[risk]
+maxPositionNotional = 1000.0
+maxPositionNotionalFutures = 6000.0
+maxPositionNotionalCfd = 4000.0
+maxPositionNotionalSpot = 2000.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    EXPECT_DOUBLE_EQ(1000.0, risk.maxPositionNotional);
+    ASSERT_TRUE(risk.maxPositionNotionalFutures.has_value());
+    EXPECT_DOUBLE_EQ(6000.0, risk.maxPositionNotionalFutures.value());
+    ASSERT_TRUE(risk.maxPositionNotionalCfd.has_value());
+    EXPECT_DOUBLE_EQ(4000.0, risk.maxPositionNotionalCfd.value());
+    ASSERT_TRUE(risk.maxPositionNotionalSpot.has_value());
+    EXPECT_DOUBLE_EQ(2000.0, risk.maxPositionNotionalSpot.value());
+}
+
+TEST(ConfigLoader, ParseRisk_PerMarketCapsOptional)
+{
+    // Absent keys stay std::nullopt (fallback to maxPositionNotional).
+    TempToml tmp(R"(
+[risk]
+maxPositionNotional = 1000.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    EXPECT_FALSE(risk.maxPositionNotionalFutures.has_value());
+    EXPECT_FALSE(risk.maxPositionNotionalCfd.has_value());
+    EXPECT_FALSE(risk.maxPositionNotionalSpot.has_value());
+}
+
 TEST(ConfigLoader, ParseRisk_WithTakeProfit)
 {
     TempToml tmp(R"(
@@ -528,6 +568,10 @@ apiSecret = "s"
     // Risk defaults preserved.
     EXPECT_DOUBLE_EQ(1000.0, cfg.risk.maxPositionNotional);
     EXPECT_EQ(5, cfg.risk.maxOpenPositions);
+    // Per-market notional overrides default to unset (fallback semantics).
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalFutures.has_value());
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalCfd.has_value());
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalSpot.has_value());
     // Control defaults preserved.
     EXPECT_TRUE(cfg.control.enabled);
     EXPECT_EQ(8081, cfg.control.port);

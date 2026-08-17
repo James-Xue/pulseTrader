@@ -120,6 +120,20 @@ double findDouble(const toml::value &tbl, const std::string &key,
 }
 
 // ---------------------------------------------------------------------------
+// findOptionalDouble — optional numeric field: std::nullopt when absent,
+// otherwise the TOML value (int or float) via findDouble.
+// ---------------------------------------------------------------------------
+std::optional<double> findOptionalDouble(const toml::value &tbl,
+                                         const std::string &key)
+{
+    if (!tbl.contains(key))
+    {
+        return std::nullopt;
+    }
+    return findDouble(tbl, key, 0.0);
+}
+
+// ---------------------------------------------------------------------------
 // parseStopMode — string to StopMode enum
 // ---------------------------------------------------------------------------
 PulseError parseStopMode(const std::string &str, StopMode &out)
@@ -562,6 +576,12 @@ PulseError parseRisk(const toml::value &root, RiskConfig &out)
                           static_cast<int>(out.maxOrdersPerSec)));
     out.maxSymbolNotional =
         findDouble(sec, "maxSymbolNotional", out.maxSymbolNotional);
+    out.maxPositionNotionalFutures =
+        findOptionalDouble(sec, "maxPositionNotionalFutures");
+    out.maxPositionNotionalCfd =
+        findOptionalDouble(sec, "maxPositionNotionalCfd");
+    out.maxPositionNotionalSpot =
+        findOptionalDouble(sec, "maxPositionNotionalSpot");
     out.max_leverage =
         findDouble(sec, "max_leverage", out.max_leverage);
     out.max_margin_used =

@@ -509,3 +509,113 @@ TEST_F(RiskManagerTest, CfdMarginInsufficientRejected)
     EXPECT_EQ(RiskDecision::Rejected, r.decision);
     EXPECT_EQ(ErrorCode::CfdMarginInsufficient, r.reason_code);
 }
+
+// ---------------------------------------------------------------------------
+// Per-market notional budget (M17)
+//
+// NOTE: these use a LOCAL stack (config set BEFORE construction). The fixture
+// holds `const RiskConfig&` (sees late mutations) while PositionManager holds
+// a COPY (does not) — mutating the fixture config would not reach the budget.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Local stack with per-market caps mirroring the live engine.
+//
+// The config must be fully built BEFORE the PositionManager member is
+// constructed — PositionManager copies the config, RiskManager only
+// references it. Mutating cfg after construction would NOT reach the budget.
+struct PerMarketStack
+{
+    RiskConfig cfg;
+    PositionManager positionManager;
+    DrawdownGuard drawdownGuard;
+    OrderRateLimiter rateLimiter;
+    RiskManager riskManager;
+
+    static RiskConfig makeCfg(std::optional<double> futures_cap,
+                              std::optional<double> cfd_cap,
+                              double fallback)
+    {
+        RiskConfig c;
+        c.maxPositionNotional = fallback;
+        c.maxPositionNotionalFutures = futures_cap;
+        c.maxPositionNotionalCfd = cfd_cap;
+        c.maxSymbolNotional = 6000.0;
+        c.maxOpenPositions = 5;
+        return c;
+    }
+
+    PerMarketStack(std::optional<double> futures_cap = 6000.0,
+                   std::optional<double> cfd_cap = 6000.0,
+                   double fallback = 1000.0)
+        : cfg(makeCfg(futures_cap, cfd_cap, fallback)),
+          positionManager{ cfg },
+          drawdownGuard{ cfg },
+          rateLimiter{ cfg.maxOrdersPerSec },
+          riskManager{ cfg, positionManager, drawdownGuard, rateLimiter }
+    {
+    }
+
+    void openSkhyFutures()
+    {
+        // 3000 contracts * 169.97 * 0.01 = 5099.1 USDT notional.
+        const auto r = positionManager.openPosition(
+            "SKHY_USDT", Side::Sell, 3000.0, 169.97, "manual",
+            MarketType::Futures, 25.0, MarginMode::Cross, 0.01, 0.025);
+        ASSERT_TRUE(ok(r));
+    }
+
+    static OrderRequest cfdOrder()
+    {
+        OrderRequest req;
+        req.symbol = "XAUUSD";
+        req.side = Side::Buy;
+        req.type = OrderType::Limit;
+        req.quantity = 0.01;
+        req.price = 4392.0;
+        req.market_type = MarketType::Cfd;
+        req.quanto_multiplier = 100.0;
+        return req;
+    }
+};
+
+} // namespace
+
+TEST(RiskManager, PerMarketBudget_CfdOrderApprovedWithFuturesPosition)
+{
+    // Regression for the 2026-08-17 incident: with the SKHY futures position
+    // occupying 5099 of the futures cap, a 0.01-lot CFD order (4392 USDT
+    // notional) must still be APPROVED at full quantity.
+    PerMarketStack stack;
+    stack.openSkhyFutures();
+
+    const auto r = stack.riskManager.evaluateOrder(PerMarketStack::cfdOrder());
+    EXPECT_EQ(RiskDecision::Approved, r.decision);
+    EXPECT_DOUBLE_EQ(0.01, r.approved_qty);
+    EXPECT_EQ(ErrorCode::Ok, r.reason_code);
+}
+
+TEST(RiskManager, PerMarketBudget_CfdClampedByItsOwnCap)
+{
+    // CFD cap 3000 < proposed 4392 → Modified to 3000 / (4392*100).
+    // (futures cap stays 6000 so the SKHY position opens.)
+    PerMarketStack stack(/*futures_cap=*/6000.0, /*cfd_cap=*/3000.0);
+    stack.openSkhyFutures();
+
+    const auto r = stack.riskManager.evaluateOrder(PerMarketStack::cfdOrder());
+    EXPECT_EQ(RiskDecision::Modified, r.decision);
+    EXPECT_NEAR(3000.0 / (4392.0 * 100.0), r.approved_qty, 1e-9);
+}
+
+TEST(RiskManager, PerMarketBudget_FallbackMatchesLegacyBehavior)
+{
+    // No per-market overrides: CFD uses the global 1000 cap → the 4392-USDT
+    // order is clamped exactly as the legacy shared budget would.
+    PerMarketStack stack(std::nullopt, std::nullopt, /*fallback=*/1000.0);
+
+    const auto r = stack.riskManager.evaluateOrder(PerMarketStack::cfdOrder());
+    EXPECT_EQ(RiskDecision::Modified, r.decision);
+    EXPECT_NEAR(1000.0 / (4392.0 * 100.0), r.approved_qty, 1e-9);
+}

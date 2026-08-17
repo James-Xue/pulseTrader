@@ -77,7 +77,8 @@ class PositionManager
     /// Open a new position.
     ///
     /// Validates against portfolio limits before creating:
-    ///   1. Check total notional + proposed notional <= maxPositionNotional
+    ///   1. Check total notional + proposed notional <= notional limit for the
+    ///      position's market type (per-market cap, falls back to maxPositionNotional)
     ///   2. Check open position count < maxOpenPositions
     ///   3. Check per-symbol notional + proposed <= maxSymbolNotional
     ///
@@ -90,7 +91,7 @@ class PositionManager
     ///
     /// In addition to standard portfolio limits, computes:
     ///   - margin_used = qty * entry_price * quanto_multiplier / leverage
-    ///   - notional = qty * entry_price * quanto_multiplier * leverage
+    ///   - notional = qty * entry_price * quanto_multiplier
     ///   - liquidation_price (estimated)
     ///
     /// Returns position_id on success, PulseError if any limit is exceeded.
@@ -168,10 +169,16 @@ class PositionManager
     /// Check whether a new position can be opened without exceeding any limit.
     ///
     /// Evaluates:
-    ///   1. Total notional + proposed <= maxPositionNotional
+    ///   1. Total notional + proposed <= notional limit for the position's
+    ///      market type (per-market cap, falls back to maxPositionNotional)
     ///   2. Open count < maxOpenPositions
     ///   3. Symbol notional + proposed <= maxSymbolNotional
-    [[nodiscard]] bool canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const;
+    ///
+    /// Notional = qty * price * quanto_multiplier; spot uses quanto = 1.0.
+    [[nodiscard]] bool canOpenPosition(
+        const Symbol &symbol, Quantity qty, Price price,
+        double quanto_multiplier = 1.0,
+        MarketType market_type = MarketType::Spot) const;
 
     /// Returns the current number of open positions.
     [[nodiscard]] int openPositionCount() const;
@@ -193,9 +200,15 @@ class PositionManager
     /// this reduces to qty * price. Futures qty is in contracts, so the
     /// contract multiplier (e.g. 0.0001 BTC per BTC_USDT contract) must be
     /// passed to compute the true notional value.
+    ///
+    /// The notional cap is enforced PER MARKET TYPE: totals are filtered by
+    /// market_type and compared against the per-market cap (maxPositionNotional
+    /// <Futures|Cfd|Spot>, falling back to maxPositionNotional), so a futures
+    /// position does not consume the CFD budget.
     [[nodiscard]] NotionalReservation reserveNotional(
         const Symbol &symbol, Quantity qty, Price price,
-        double quanto_multiplier = 1.0);
+        double quanto_multiplier = 1.0,
+        MarketType market_type = MarketType::Spot);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.
@@ -217,9 +230,14 @@ class PositionManager
         Symbol symbol;
         double notional;
         double qty;
+        MarketType market_type;
     };
     std::unordered_map<std::uint64_t, PendingReservation> m_pendingReservations;
     std::uint64_t m_nextReservationId{ 1 }; ///< Monotonic reservation counter.
+
+    /// Resolve the position-notional cap for a market type: the per-market
+    /// override when set, else the global maxPositionNotional fallback.
+    [[nodiscard]] double notionalLimitFor(MarketType market_type) const noexcept;
 
     /// Generate a unique position ID from symbol, side, and counter.
     [[nodiscard]] std::string generatePositionId(const Symbol &symbol, Side side);

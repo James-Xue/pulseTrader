@@ -617,3 +617,157 @@ TEST(PositionManager, SyncDoesNotCollideWithEngineOpenedPositions)
     EXPECT_TRUE(pm.getPosition("BTC_USDT_Sell_sync").has_value());
     EXPECT_TRUE(pm.getPosition(pulse::value(opened)).has_value());
 }
+
+// ---------------------------------------------------------------------------
+// Per-market notional budget (M17)
+//
+// The position-notional cap is enforced PER MARKET TYPE: optional
+// maxPositionNotional{Futures,Cfd,Spot} overrides fall back to
+// maxPositionNotional. A futures position must not consume the CFD budget —
+// the 2026-08-17 incident: SKHY futures (~5099 USDT notional) clamped a
+// 0.01-lot XAUUSD CFD order to 0.003 lots (below the 0.01 minimum).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Config mirroring the live engine: fallback 1000, per-market 6000.
+RiskConfig per_market_config()
+{
+    RiskConfig cfg = make_config(1000.0, 5, 6000.0);
+    cfg.maxPositionNotionalFutures = 6000.0;
+    cfg.maxPositionNotionalCfd = 6000.0;
+    return cfg;
+}
+
+// Open a SKHY futures short of ~5099 USDT notional (3000 contracts,
+// quanto 0.01), like the synced live position.
+void open_skhy_futures(PositionManager &pm)
+{
+    const auto r = pm.openPosition(
+        "SKHY_USDT", Side::Sell, 3000.0, 169.97, "manual",
+        MarketType::Futures, 25.0, MarginMode::Cross, 0.01, 0.025);
+    ASSERT_TRUE(ok(r));
+    // Sanity: notional = 3000 * 169.97 * 0.01 = 5099.1
+    ASSERT_NEAR(5099.1, pm.getPosition(value(r))->notional_value, 1e-6);
+}
+} // namespace
+
+TEST(PositionManager, PerMarketNotional_FuturesDoesNotConsumeCfdBudget)
+{
+    PositionManager pm(per_market_config());
+    open_skhy_futures(pm);
+
+    // The 0.01-lot XAUUSD CFD order (4392 * 100 * 0.01 = 4392 USDT notional)
+    // fits the CFD cap 6000 even though the futures cap is 5099/6000 used.
+    const auto res = pm.reserveNotional("XAUUSD", 0.01, 4392.0, 100.0,
+                                        MarketType::Cfd);
+    ASSERT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Approved, res.decision);
+    EXPECT_DOUBLE_EQ(0.01, res.approved_qty);
+}
+
+TEST(PositionManager, PerMarketNotional_FuturesBudgetStillClampsFutures)
+{
+    PositionManager pm(per_market_config());
+    open_skhy_futures(pm);
+
+    // Same-market: 5099.1 used of 6000 → ~900.9 remains for futures.
+    const auto res = pm.reserveNotional("SKHY_USDT", 1.0, 5099.0, 1.0,
+                                        MarketType::Futures);
+    ASSERT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Modified, res.decision);
+    EXPECT_NEAR(900.9 / 5099.0, res.approved_qty, 1e-6);
+}
+
+TEST(PositionManager, PerMarketNotional_OverridesHonoredPerMarket)
+{
+    RiskConfig cfg = make_config(1000.0, 5, 6000.0);
+    cfg.maxPositionNotionalFutures = 6000.0;
+    cfg.maxPositionNotionalCfd = 3000.0; // tighter CFD cap
+    PositionManager pm(cfg);
+
+    // 0.004 lots (1756.8 USDT) fits the CFD cap → Approved untouched.
+    // (Checked first: a Modified reservation would consume the CFD budget.)
+    const auto fits = pm.reserveNotional("XAUUSD", 0.004, 4392.0, 100.0,
+                                         MarketType::Cfd);
+    ASSERT_TRUE(fits.approved);
+    EXPECT_EQ(RiskDecision::Approved, fits.decision);
+    EXPECT_DOUBLE_EQ(0.004, fits.approved_qty);
+
+    // CFD order 4392 > CFD cap 3000 → Modified to (3000-1756.8) / (4392*100),
+    // i.e. the budget left after the pending reservation.
+    const auto clamped = pm.reserveNotional("XAUUSD", 0.01, 4392.0, 100.0,
+                                            MarketType::Cfd);
+    ASSERT_TRUE(clamped.approved);
+    EXPECT_EQ(RiskDecision::Modified, clamped.decision);
+    EXPECT_NEAR((3000.0 - 1756.8) / (4392.0 * 100.0), clamped.approved_qty,
+                1e-9);
+}
+
+TEST(PositionManager, PerMarketNotional_FallbackWhenUnset)
+{
+    // Only the global fallback set — the cap applies per market type with
+    // maxPositionNotional as the value, so each bucket clamps identically.
+    PositionManager pm(make_config(1000.0, 5, 1000.0));
+
+    // Futures bucket: 900 used → 100 remains.
+    const auto r = pm.openPosition(
+        "BTC_USDT", Side::Buy, 1.0, 90000.0, "s1",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.01, 0.005);
+    ASSERT_TRUE(ok(r)); // 900 USDT notional.
+
+    // 100 USDT remains; a 1000-USDT futures proposal → Modified to 0.1.
+    const auto futures = pm.reserveNotional("BTC_USDT", 1.0, 100000.0, 0.01,
+                                            MarketType::Futures);
+    ASSERT_TRUE(futures.approved);
+    EXPECT_EQ(RiskDecision::Modified, futures.decision);
+    EXPECT_NEAR(100.0 / 1000.0, futures.approved_qty, 1e-9);
+
+    // CFD bucket is empty → the same 1000-USDT proposal fits the fallback
+    // cap untouched (the futures position does not consume it).
+    const auto cfd_full = pm.reserveNotional("XAUUSD", 1.0, 100000.0, 0.01,
+                                             MarketType::Cfd);
+    ASSERT_TRUE(cfd_full.approved);
+    EXPECT_EQ(RiskDecision::Approved, cfd_full.decision);
+    EXPECT_DOUBLE_EQ(1.0, cfd_full.approved_qty);
+
+    // Order not placed — release the reservation (realistic cancel path).
+    pm.cancelReservation(cfd_full.reservation_id);
+
+    // Fill the CFD bucket to 900 → the same 0.1 clamp applies there too.
+    const auto cfd_pos = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.9, 1000.0, "s1",
+        MarketType::Cfd, 500.0, MarginMode::Cross, 1.0, 0.005);
+    ASSERT_TRUE(ok(cfd_pos)); // 900 USDT notional.
+
+    const auto cfd = pm.reserveNotional("XAUUSD", 1.0, 100000.0, 0.01,
+                                        MarketType::Cfd);
+    ASSERT_TRUE(cfd.approved);
+    EXPECT_EQ(RiskDecision::Modified, cfd.decision);
+    EXPECT_NEAR(100.0 / 1000.0, cfd.approved_qty, 1e-9);
+}
+
+TEST(PositionManager, PerMarketNotional_OpenPositionValidatesPerMarket)
+{
+    PositionManager pm(per_market_config());
+    open_skhy_futures(pm);
+
+    // Fill-path re-validation must use the CFD cap, not the futures-occupied
+    // total — otherwise the fill would be rejected with PositionLimitHit.
+    const auto r = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4392.0, "cfd1",
+        MarketType::Cfd, 500.0, MarginMode::Cross, 100.0, 0.005);
+    ASSERT_TRUE(ok(r));
+}
+
+TEST(PositionManager, CanOpenPosition_PerMarketAware)
+{
+    PositionManager pm(per_market_config());
+    open_skhy_futures(pm);
+
+    // CFD pre-check passes (own budget), futures pre-check fails (cap used).
+    EXPECT_TRUE(pm.canOpenPosition("XAUUSD", 0.01, 4392.0, 100.0,
+                                   MarketType::Cfd));
+    EXPECT_FALSE(pm.canOpenPosition("SKHY_USDT", 1.0, 5099.0, 1.0,
+                                    MarketType::Futures));
+}
