@@ -4,12 +4,28 @@
 
 #include "exchange/EndpointRouter.hpp"
 #include "logging/Logger.hpp"
+#include "market/MarketDataSink.hpp"
+
+#include <chrono>
 
 namespace pulse::market
 {
 
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
+
+namespace
+{
+
+/// Current wall-clock time in Unix milliseconds (pulse::now() returns ns).
+std::int64_t nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+} // namespace
 
 MarketFeed::MarketFeed(exchange::GateWsClient *ws_client, exchange::GateRestClient &rest_client,
                        MarketType market_type, std::mutex *rest_mutex)
@@ -160,6 +176,11 @@ FeedStats MarketFeed::stats() const
     };
 }
 
+void MarketFeed::setMarketDataSink(MarketDataSink *sink)
+{
+    m_dataSink = sink;
+}
+
 void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     // Gate.io ticker format:
@@ -247,9 +268,13 @@ void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::js
             return; // Unknown format.
         }
 
-        ticker.timestamp = 0; // Will be set below from full_frame if available.
+        ticker.timestamp = nowMs(); // Stamp receive time (was hardcoded 0).
         m_tickerCache.update(ticker.symbol, ticker);
         m_tickerCount.fetch_add(1, std::memory_order_relaxed);
+        if (m_dataSink)
+        {
+            m_dataSink->onTicker(ticker.symbol, m_marketType, ticker);
+        }
     };
 
     if (result.is_array())
@@ -471,6 +496,10 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         auto &buffer = getKlineBuffer(symbol);
         buffer.push(kline);
         m_klineCount.fetch_add(1, std::memory_order_relaxed);
+        if (m_dataSink)
+        {
+            m_dataSink->onKline(symbol, m_marketType, kline);
+        }
     };
 
     if (result.is_array())
@@ -597,8 +626,13 @@ void MarketFeed::pollLoop(std::stop_token stoken)
         auto ticker_opt = parseCfdTicker(j["data"], symbol);
         if (ticker_opt)
         {
+            ticker_opt->timestamp = nowMs(); // Stamp poll receive time (parser stays pure).
             m_tickerCache.update(ticker_opt->symbol, *ticker_opt);
             m_tickerCount.fetch_add(1, std::memory_order_relaxed);
+            if (m_dataSink)
+            {
+                m_dataSink->onTicker(ticker_opt->symbol, m_marketType, *ticker_opt);
+            }
         }
     };
 
@@ -647,6 +681,10 @@ void MarketFeed::pollLoop(std::stop_token stoken)
             }
             buffer.push(*kline_opt);
             m_klineCount.fetch_add(1, std::memory_order_relaxed);
+            if (m_dataSink)
+            {
+                m_dataSink->onKline(symbol, m_marketType, *kline_opt);
+            }
         }
     };
 

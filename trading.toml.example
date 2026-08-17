@@ -170,3 +170,4 @@ maxClients  = 4                    # 最大 WebSocket 连接数
 [sqlite]
 enabled = true
 dbPath  = "data/trades.db"         # SQLite 数据库文件路径
+record_market = false             # M18: 行情(ticker/kline)落库,同文件第二连接

@@ -303,6 +303,7 @@ struct SqliteConfig
 {
     bool enabled = false;                ///< Disabled by default.
     std::string dbPath = "trades.db";    ///< SQLite database file path.
+    bool recordMarketData = false;       ///< Persist ticker/kline to SQLite (M18).
 };
 
 // ---------------------------------------------------------------------------

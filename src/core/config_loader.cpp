@@ -751,6 +751,7 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
 
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
+    out.recordMarketData = toml::find_or(sec, "record_market", out.recordMarketData);
 
     return {};
 }

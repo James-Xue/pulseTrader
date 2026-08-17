@@ -36,6 +36,8 @@
 namespace pulse::market
 {
 
+class MarketDataSink; // Forward declaration — see MarketDataSink.hpp.
+
 // ---------------------------------------------------------------------------
 // FeedStats — snapshot of MarketFeed event counters
 //
@@ -104,6 +106,25 @@ class MarketFeed
     /// from a monitoring thread — NOT for precise per-event accounting.
     [[nodiscard]] FeedStats stats() const;
 
+    /// Attach a market data sink (ticker/kline events). The sink is invoked
+    /// on the feed's I/O thread and MUST NOT block (see MarketDataSink.hpp).
+    ///
+    /// May be null (default) — no events are dispatched. Call before start()
+    /// or while the feed is stopped; the pointer is not owned by the feed.
+    void setMarketDataSink(MarketDataSink *sink);
+
+    /// Parse a ticker update JSON (WS spot/futures ticker channel).
+    ///
+    /// Test/diagnostic seam: kept public so sink dispatch can be unit-tested
+    /// without a live WebSocket connection.
+    void onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
+
+    /// Parse a K-line update JSON (WS spot/futures candlestick channel).
+    ///
+    /// Test/diagnostic seam: kept public so sink dispatch can be unit-tested
+    /// without a live WebSocket connection.
+    void onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
+
     /// Parse a TradFi ticker object into a Ticker (pure, unit-testable).
     ///
     /// Expected shape (probe-verified 2026-08-15):
@@ -145,14 +166,10 @@ class MarketFeed
     std::atomic<std::uint64_t> m_orderbookCount{ 0 };
     std::atomic<std::uint64_t> m_klineCount{ 0 };
 
-    /// Parse a ticker update JSON and store in TickerCache.
-    void onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
+    MarketDataSink *m_dataSink{ nullptr }; ///< Optional event consumer (not owned).
 
     /// Parse an order book update JSON and apply to OrderBookManager.
     void onOrderbookUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
-
-    /// Parse a K-line update JSON and push to the appropriate KlineBuffer.
-    void onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
 
     /// REST polling loop for MarketType::Cfd (no WebSocket channel).
     ///

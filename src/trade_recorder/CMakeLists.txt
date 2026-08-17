@@ -2,6 +2,7 @@
 
 add_library(pulse_trade_recorder STATIC
     TradeRecorder.cpp
+    MarketRecorder.cpp
 )
 
 add_library(pulse::trade_recorder ALIAS pulse_trade_recorder)

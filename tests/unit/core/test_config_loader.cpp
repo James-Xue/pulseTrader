@@ -903,5 +903,37 @@ symbol = "BTC_USDT"
     EXPECT_EQ(0u, inst.maker_timeout_ms);
 }
 
+TEST(ConfigLoader, ParseSqlite_RecordMarketDefaultFalse)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+dbPath = "data/trades.db"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.enabled);
+    EXPECT_EQ("data/trades.db", sql.dbPath);
+    EXPECT_FALSE(sql.recordMarketData);
+}
+
+TEST(ConfigLoader, ParseSqlite_RecordMarketParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+dbPath = "data/trades.db"
+record_market = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.enabled);
+    EXPECT_TRUE(sql.recordMarketData);
+}
+
 } // namespace
 } // namespace pulse

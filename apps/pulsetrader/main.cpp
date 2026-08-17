@@ -52,6 +52,7 @@
 
 
 #ifdef PULSE_ENABLE_SQLITE
+#include "trade_recorder/MarketRecorder.hpp"
 #include "trade_recorder/TradeRecorder.hpp"
 #endif
 
@@ -773,6 +774,50 @@ static int runTrade(int argc, char* argv[])
               "(compile with -DPULSE_ENABLE_SQLITE=ON)");
 #endif
 
+#ifdef PULSE_ENABLE_SQLITE
+    // Market data recorder (M18): persists ticker/kline to the same SQLite
+    // file via a second connection (WAL). Failure is warn-only — the engine
+    // keeps running without market data persistence.
+    std::unique_ptr<pulse::trade_recorder::MarketRecorder> market_recorder;
+
+    if (cfg.sqlite.recordMarketData)
+    {
+        auto mr_result = pulse::trade_recorder::MarketRecorder::open(
+            cfg.sqlite.dbPath);
+
+        if (pulse::ok(mr_result))
+        {
+            market_recorder = std::move(pulse::value(mr_result));
+            // Wire the sink to all feeds (constructed above at L1); events
+            // only flow once each feed is started.
+            if (spot_feed)
+            {
+                spot_feed->setMarketDataSink(market_recorder.get());
+            }
+            if (futures_feed)
+            {
+                futures_feed->setMarketDataSink(market_recorder.get());
+            }
+            if (cfd_feed)
+            {
+                cfd_feed->setMarketDataSink(market_recorder.get());
+            }
+            log->info("[L8+] Market data recorder opened: '{}'",
+                      cfg.sqlite.dbPath);
+        }
+        else
+        {
+            log->warn("[L8+] Market data recorder failed to open: {}",
+                      pulse::error(mr_result).message);
+        }
+    }
+    else
+    {
+        log->info("[L8+] Market data recording disabled "
+                  "(set sqlite.record_market = true)");
+    }
+#endif
+
     // ------------------------------------------------------------------
     // 7. L6: Strategy Engine
     // ------------------------------------------------------------------
@@ -1266,6 +1311,16 @@ static int runTrade(int argc, char* argv[])
     if (spot_feed) { spot_feed->stop(); }
     if (cfd_feed) { cfd_feed->stop(); }
     log->info("[L3] Market feed(s) stopped");
+
+    // L8+: Market data recorder — drains + checkpoints the WAL (must stop
+    // AFTER the feeds so no events are lost, BEFORE the trade recorder).
+#ifdef PULSE_ENABLE_SQLITE
+    if (market_recorder)
+    {
+        market_recorder->stop();
+        log->info("[L8+] Market data recorder stopped");
+    }
+#endif
 
     // L1: WebSockets
     if (futures_ws) { futures_ws->stop(); }
