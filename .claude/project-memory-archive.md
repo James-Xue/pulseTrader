@@ -107,3 +107,46 @@
 12. ✅ SQLite Trade Recorder → **M7** (27 tests, 431 total)
 13. ✅ Futures Config → **M8** (18 tests, 449 total)
 14. ✅ EndpointRouter + WS Ping → **M9** (18 tests, 467 total)
+
+## Moved from project-memory.md (compression, 2026-08-17)
+
+### Post-M13 Bugfixes (2026-06-20)
+- **Ctrl+C graceful shutdown** — 3-layer fix in `gate_ws_client.cpp`:
+  1. `GateWsClient::stop()`: `io_ctx_ptr->stop()` to force-stop asio event loop (unblocks `client.run()`)
+  2. `ProxyTunnel` accept thread: `poll()` + 200ms timeout instead of blocking `accept()` (Linux `close()` can't interrupt blocking `accept()`)
+  3. `ProxyTunnel` relay threads: no longer `detach()`; `stop()` closes sockets then `join()`s all relay threads
+  4. `run_io_loop()`: explicit `tunnel->stop()` + `tunnel.reset()` before function return (correct cleanup order)
+  5. `WsInternal`: added `io_ctx_ptr` field, set after `init_asio()`, cleared after `client.run()` returns
+- **Strategy warmup diagnostics** — kline strategies log "Waiting for kline data" / "Warming up: X/N candles" every 30s during cold start (new `last_warmup_log_ms_`/`last_no_data_log_ms_` members)
+- **Aggregator threshold lowered** — `signal_aggregator_threshold` 0.7 → 0.6 to match single-strategy min_confidence
+- **OPERATIONAL_GUIDE.md updated** — §4.4 warmup explanation, §5.1 threshold tuning, Q7 "No orders placed after startup?" checklist
+
+### Architecture Review Fixes (2026-06-20)
+- **#1 PnL Wired to DrawdownGuard** (`c857e21`): `close_position()` returns `optional<double>` with realized PnL; main.cpp accumulates it and passes to `drawdown_guard.record_pnl()`. Drawdown protection is now active.
+- **#2 AI Feedback Loop Wired** (`786e9f8`): `StrategyManager.all_params()` collects real params pointers from each strategy; `AiPipeline::run()` changed to accept `vector<StrategyParams*>&`; ParamAdvisor iterates and writes to all strategies' atomic params.
+- **#3 stod Crash Prevention** (`7c052cf`): Added `safe_parse_double()` (based on `std::from_chars`, exception-free, locale-independent), replaced 34 `std::stod` calls + 10 new tests. Total tests 513.
+
+### Testnet URL Auto-Switch Fix (2026-06-21)
+- **Problem**: When `testnet=true`, only the REST URL switched to testnet; WS URL stayed on mainnet (private channel auth failures)
+- **Solution**: `config_loader.cpp` adjusted load order — read `testnet` flag first → set URL defaults by network mode → then load URL fields with `find_or`
+- **Result**: When `testnet=true`, REST/Spot WS/Futures WS all auto-switch to testnet addresses; explicit TOML URLs can override (China users falling back to mainnet WS)
+- **Changes**: `config.hpp` added `pulse::url` namespace (6 URL constants); `config_loader.cpp` adjusted `parse_exchange()` load order; `main.cpp` removed old override block + banner displays all 3 URLs; `trading.toml` simplified (removed explicit URLs)
+- **Added 4 tests**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
+- **Laptop environment setup**: apt install libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0 (~/.local)
+- 532 tests all green (original 528 + 4 new tests)
+
+### Testnet WS CloudFront TLS Incompatibility (2026-06-21, commit `0e61877`)
+Testnet futures WS (`ws-testnet.gate.com`) sits behind CloudFront → websocketpp reports `Invalid HTTP status` (HTTP/2 negotiation). Fix: testnet WS uses the mainnet URL `wss://fx-ws.gateio.ws/v4/ws/usdt` (market data identical); REST stays on testnet. `trading.toml` lists the 3 URLs explicitly for override.
+
+### Naming Convention Refactoring (2026-06-23)
+- **Commit `cd8a4d5`**: Functions/methods snake_case → camelCase (~210 renames), member variables `trailing_underscore_` → `m_camelCase` prefix (~47 classes). 137 files, ±3271 lines. Exempt: `to_json`/`from_json` (ADL), TEST_F names, pure-data struct fields.
+- **Commit `6309be0`**: File names renamed to match primary class name (PascalCase). 80 files (40 .hpp + 40 .cpp), e.g. `order_executor.hpp` → `OrderExecutor.hpp`. All `#include` paths and CMakeLists.txt updated. 7+ multi-type modules kept as-is (`config.hpp`, `types.hpp`, `risk_types.hpp`, etc.).
+- **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
+- **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
+- AGENTS.md updated with new naming + file naming rules. 547 tests all green.
+
+### Fast Ctrl+C Shutdown (2026-06-23, commit `0c1a7ed`)
+3 blocking points fixed (20-90s → <1s): DashboardState REST (XFERINFO abort check + cancelRequests + 5s connect timeout), HeartbeatScheduler TaskQueue (`stop()` called explicitly), ProxyTunnel `remote_sock` hoisted to member so `stop()` can unblock `asio::connect()`. GateRestClient: custom move ops + `cancelRequests()`.
+
+### vcpkg/Linux Build Compatibility (2026-06-23, commit `a812333`)
+Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Linux builds use vendored `third_party/` + `get_io_context()`.

@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-17
-> File size: 24490 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 23655 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -29,10 +29,10 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M13 Done, 2026-06-21)
+## Current State (M20 Done, 2026-08-17)
 
 ### Test Summary
-- **731 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget + M18 sink/recorder/migration tests + M20 signal-only tests, EngineServicesTest incl. switch + signals tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **745 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget + M18 sink/recorder/migration tests + M20 signal-only tests + M21 sync/modify-sl-tp tests, EngineServicesTest incl. switch + signals + sync + modify tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 - M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
 - M16 (2026-08-16) additions: maker-first order flow — 14 OrderFlowTest (best bid/ask post-only pricing, sweep cancel+fallback, partial-fill remainder, exchange-reject no-chase, rate-limit/direction-switch rejection, cancel-race) + 5 config validator + 3 config loader = 22 new
 - M17 (2026-08-17) additions: per-market notional budget (PositionManager reserveNotional/openPosition/canOpenPosition filtered by market_type; optional maxPositionNotional{Futures,Cfd,Spot} with maxPositionNotional fallback; canOpenPosition quanto fix) + CFD order-id resolution (matchCfdOrderId — POST /tradfi/orders does not echo the order id) = 18 new
@@ -50,36 +50,17 @@
 - **M12** ✅: Futures Execution + Dual-Market — OrderRequest market_type/leverage/reduce_only/contract_size; OrderExecutor/OrderTracker MarketType routing; TradingSignal market_type; main.cpp dual-market wiring; 7 tests
 - **M13** ✅: Testnet — `PULSE_NETWORK` mainnet/testnet; testnet REST api-testnet.gateapi.io; testnet WS falls back to mainnet fx-ws (unreachable from China, data identical); config testnet=true overrides; .env GATE_MAINNET_*/GATE_TESTNET_* split; 6 tests
 
-### Post-M13 Bugfixes (2026-06-20)
-- **Ctrl+C graceful shutdown** — 3-layer fix in `gate_ws_client.cpp`:
-  1. `GateWsClient::stop()`: `io_ctx_ptr->stop()` to force-stop asio event loop (unblocks `client.run()`)
-  2. `ProxyTunnel` accept thread: `poll()` + 200ms timeout instead of blocking `accept()` (Linux `close()` can't interrupt blocking `accept()`)
-  3. `ProxyTunnel` relay threads: no longer `detach()`; `stop()` closes sockets then `join()`s all relay threads
-  4. `run_io_loop()`: explicit `tunnel->stop()` + `tunnel.reset()` before function return (correct cleanup order)
-  5. `WsInternal`: added `io_ctx_ptr` field, set after `init_asio()`, cleared after `client.run()` returns
-- **Strategy warmup diagnostics** — kline strategies log "Waiting for kline data" / "Warming up: X/N candles" every 30s during cold start (new `last_warmup_log_ms_`/`last_no_data_log_ms_` members)
-- **Aggregator threshold lowered** — `signal_aggregator_threshold` 0.7 → 0.6 to match single-strategy min_confidence
-- **OPERATIONAL_GUIDE.md updated** — §4.4 warmup explanation, §5.1 threshold tuning, Q7 "No orders placed after startup?" checklist
+### Post-M13 Bugfixes (2026-06-20) → 详情见 project-memory-archive.md
+Ctrl+C 3 层修复 · 预热诊断 · aggregator 阈值 0.7→0.6 · OPERATIONAL_GUIDE §4.4/§5.1/Q7
 
-### Architecture Review Fixes (2026-06-20)
-- **#1 PnL Wired to DrawdownGuard** (`c857e21`): `close_position()` returns `optional<double>` with realized PnL; main.cpp accumulates it and passes to `drawdown_guard.record_pnl()`. Drawdown protection is now active.
-- **#2 AI Feedback Loop Wired** (`786e9f8`): `StrategyManager.all_params()` collects real params pointers from each strategy; `AiPipeline::run()` changed to accept `vector<StrategyParams*>&`; ParamAdvisor iterates and writes to all strategies' atomic params.
-- **#3 stod Crash Prevention** (`7c052cf`): Added `safe_parse_double()` (based on `std::from_chars`, exception-free, locale-independent), replaced 34 `std::stod` calls + 10 new tests. Total tests 513.
+### Architecture Review Fixes (2026-06-20) → 详情见 project-memory-archive.md
+PnL→DrawdownGuard · AI 反馈回路 · safe_parse_double 防 stod 崩溃（3 commit）
 
-### Testnet URL Auto-Switch Fix (2026-06-21)
-- **Problem**: When `testnet=true`, only the REST URL switched to testnet; WS URL stayed on mainnet (private channel auth failures)
-- **Solution**: `config_loader.cpp` adjusted load order — read `testnet` flag first → set URL defaults by network mode → then load URL fields with `find_or`
-- **Result**: When `testnet=true`, REST/Spot WS/Futures WS all auto-switch to testnet addresses; explicit TOML URLs can override (China users falling back to mainnet WS)
-- **Changes**: `config.hpp` added `pulse::url` namespace (6 URL constants); `config_loader.cpp` adjusted `parse_exchange()` load order; `main.cpp` removed old override block + banner displays all 3 URLs; `trading.toml` simplified (removed explicit URLs)
-- **Added 4 tests**: `TestnetAutoSwitch`, `TestnetExplicitOverride`, `MainnetDefault`, `MainnetExplicit`
-- **Laptop environment setup**: apt install libasio-dev 1.30.2 + libwebsocketpp-dev 0.8.2+git20250909 + libsqlitecpp-dev 3.3.3 + toml11 4.4.0 (~/.local)
-- 532 tests all green (original 528 + 4 new tests)
-
-### Testnet WS CloudFront TLS Incompatibility (2026-06-21, commit `0e61877`)
-Testnet futures WS (`ws-testnet.gate.com`) sits behind CloudFront → websocketpp reports `Invalid HTTP status` (HTTP/2 negotiation). Fix: testnet WS uses the mainnet URL `wss://fx-ws.gateio.ws/v4/ws/usdt` (market data identical); REST stays on testnet. `trading.toml` lists the 3 URLs explicitly for override.
+### Testnet 修复 (2026-06-21) → 详情见 project-memory-archive.md
+URL 自动切换 4 测试（`pulse::url` 6 常量）；testnet WS 走主网 fx-ws（CloudFront TLS 不兼容）；笔记本环境 apt 依赖清单
 
 ### System Heartbeat Logging (2026-06-21)
-`FeedStats` atomic counters (ticker/orderbook/kline) + 60s heartbeat line: `[heartbeat] uptime 1h23m | futures 100 tick/s 10 kline/s 80 ob/s | ws spot=n/a futures=connected | strategies 3/3 running | positions 0 (notional 0.00 USDT) | account ...`. Hot path = 1 relaxed fetch_add.
+`FeedStats` 原子计数器 + 60s heartbeat 行（uptime/各 feed 速率/WS 状态/策略/持仓/账户），热路径 1 次 relaxed fetch_add
 
 ### WebUI History (removed 2026-08-13 on `headless` branch)
 Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git history.
@@ -90,32 +71,22 @@ Fully superseded by the control plane (JSON-RPC/REPL/MCP); all fixes are in git 
 - **Heartbeat log**: `... | account 1000.00 USDT (avail 950.00, pnl +2.50)`
 - `Result<T>` is `std::variant<T, PulseError>` — use `ok()` / `value()` / `error()`, not `has_value()`
 
-### Naming Convention Refactoring (2026-06-23)
-- **Commit `cd8a4d5`**: Functions/methods snake_case → camelCase (~210 renames), member variables `trailing_underscore_` → `m_camelCase` prefix (~47 classes). 137 files, ±3271 lines. Exempt: `to_json`/`from_json` (ADL), TEST_F names, pure-data struct fields.
-- **Commit `6309be0`**: File names renamed to match primary class name (PascalCase). 80 files (40 .hpp + 40 .cpp), e.g. `order_executor.hpp` → `OrderExecutor.hpp`. All `#include` paths and CMakeLists.txt updated. 7+ multi-type modules kept as-is (`config.hpp`, `types.hpp`, `risk_types.hpp`, etc.).
-- **False positives fixed**: spdlog `set_level()`, websocketpp `get_payload()` — manually reverted.
-- **Additional**: 3 snake_case helpers, 1 Yoda condition, 16 missing braces, 2 stale comments.
-- AGENTS.md updated with new naming + file naming rules. 547 tests all green.
-
-### Fast Ctrl+C Shutdown (2026-06-23, commit `0c1a7ed`)
-3 blocking points fixed (20-90s → <1s): DashboardState REST (XFERINFO abort check + cancelRequests + 5s connect timeout), HeartbeatScheduler TaskQueue (`stop()` called explicitly), ProxyTunnel `remote_sock` hoisted to member so `stop()` can unblock `asio::connect()`. GateRestClient: custom move ops + `cancelRequests()`.
-
-### vcpkg/Linux Build Compatibility (2026-06-23, commit `a812333`)
-Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Linux builds use vendored `third_party/` + `get_io_context()`.
+### 2026-06-23 重构与构建 → 详情见 project-memory-archive.md
+命名重构（camelCase/m_ 前缀/文件名 PascalCase，547 绿）· Fast Ctrl+C `0c1a7ed` · vcpkg 兼容 `a812333`
 
 ### M17 (2026-08-17, done — 687 tests, committed 5504e3f/e38ed1b/1ced101)
 - **Per-market notional budget**: cap enforced per market type — RiskConfig optional `maxPositionNotionalFutures/Cfd/Spot` (fallback maxPositionNotional); PositionManager reserveNotional/openPosition/canOpenPosition filter by market_type via `notionalLimitFor(mt)`; canOpenPosition quanto fix; maxOpenPositions/maxSymbolNotional stay global. Fixes: SKHY futures (5099) ate the CFD budget → 0.01-lot XAUUSD clamped to 0.003 → VOLUME_LESS_THAN_MIN_LIMIT.
 - **CFD order-id fix**: POST /tradfi/orders echoes no order id (`data.id` = internal number) → `matchCfdOrderId` resolves from open-orders list (symbol/side/volume/price). Live-verified place→resolve→cancel.
 - **SKHY closed**: SL 170.5 fired 11:33 (loss ≈ -263 USDT, 414→151). CFD: user's sell@4399 fired 12:02 → 0.01 short @4399.04 → later closed (35.95→37.18). Remaining user triggers: sell@4418 / buy@4295 / sell@4428 — KEEP. CFD acct 37.18 USD, futures 151.44 USDT. active_market=cfd; XAUUSD now runs 3 instances (momentum/mean_reversion/supertrend, added 12:55 local config only).
 
-### M18 落库 (2026-08-17, DONE — 703 tests, 未提交)
+### M18 落库 (2026-08-17, done — 703 tests, 已提交 e9a34d8/05627bd)
 - **任务**: 用户要求黄金实盘数据落库。方案文件: `~/.claude/plans/replicated-floating-key.md`。
 - **Part A (trades 表 + 迁移)**: TradeRecorder DDL 追加 market_type/leverage/quanto 3 列 + `migrateSchema()`(user_version v1 + pragma_table_info 守卫防重复 ALTER) + open() busy_timeout=5000;recordTrade 3 默认参数(Spot/1.0/1.0);getTrades 位置读取 +3;TradeRecord +3 字段;OrderFlowExecutor onOrderComplete 传 reservation 的 market_type/leverage/quanto,strategy_name 改 matchInstanceConfig
 - **Part B (行情落库)**: 新建 MarketDataSink.hpp(onTicker/onKline 虚接口,禁止阻塞契约);MarketFeed setMarketDataSink + 4 写入点(WS ticker/kline + CFD ticker/kline)+ Ticker.timestamp 改 nowMs();新建 MarketRecorder(POD 环队列 8192,溢出丢最旧,jthread 批量写 batch 128/1s,BEGIN IMMEDIATE,kline INSERT OR IGNORE PK(symbol,open_time),ticker_ticks/kline_bars 表,stop() drain+checkpoint 幂等,`Result<unique_ptr>`);SqliteConfig.recordMarketData + `record_market`(trading.toml=true,example=false);main.cpp 接线(失败仅 warn,关闭顺序 feeds→market_recorder→trade_recorder)
 - **验证**: 703 测试绿;实盘库真实迁移(user_version=1、20 列、12 旧成交保留);实盘 ticker_ticks XAUUSD|cfd ~1/s + BTC_USDT|futures 13 行,kline_bars CFD backfill 500;引擎 13:22 重启生效(systemd)
 - **提交建议**: Part A + Part B 一次提交(位置读取与 DDL 同 commit),备份 data/trades.db.bak-m18
 
-### M20 Signal-Only + SignalBoard (2026-08-17, done — 731 tests, 未提交)
+### M20 Signal-Only + SignalBoard (2026-08-17, done — 731 tests, 已提交 0041a4a..d5daf08)
 - **背景**:引擎 XAUUSD 策略(active_market=cfd 下自动运行)与 LLM 子代理双头交易风险。2026-08-17 17:06 事故实锤:旧引擎策略自动开 XAUUSD 多 0.01(entry 4397.7,exchange id 17657141),无任何 SL/TP,浮亏至 -7.5 后被用户手动平掉(CFD 账户 53.4 USD)。设计文档:`~/1_Code/commit_my_life/0_note/xauusd-signal-board-design.md`
 - **signal_only 模式**:StrategyConfig `signal_only`(默认 false,TOML `[strategy] signal_only`);OrderFlowExecutor ctor 存 `m_signalOnly`,`onSignal` 入口短路(Flat 检查之后、方向门之前),手动 `placeOrder` 不受影响;main.cpp 聚合回调无论哪种模式都 publishAggregate(复盘可审计)。trading.toml 已设 `signal_only = true`(引擎策略从此只发信号)
 - **SignalBoard**:新组件 `src/strategy/signal/SignalBoard.{hpp,cpp}` — 每 strategy_id 覆盖式保留最新 Entry(signal + ts_ms),聚合信号独立槽位(带 threshold),shared_mutex,`snapshot()` 输出 signals[] + aggregate;策略信号回调(main.cpp:919)双发 board+aggregator;TradingSignal 新增 `indicators`(json,默认 {})——四个策略已填:momentum(ema_fast/slow/diff)、mean_reversion(bb_upper/lower/mid)、supertrend(supertrend/dir/atr)、orderbook(imbalance/volumes/best bid-ask)
@@ -125,8 +96,18 @@ Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Lin
 - **部署**:systemd 重启后验收——持仓同步 0(用户手动平仓后重启同步正确)、策略运行中但零下单、信号板随 kline 回填出数据
 - **遗留观察**:① 持仓 `open_time_str` 显示为 +8h 错误偏移(1786957606000ms 被当作本地墙钟再加 UTC 标签)——display bug 家族一员,待查 ② 引擎内存持仓快照在外部手动平仓后不会自动清除,需重启触发 startup sync ③ 用户 sell@4418 触发单已不在活跃订单(去向待查 Gate 历史)
 
+### M21 持仓热同步 + 动态 SL/TP (2026-08-17, done — 745 tests, 已提交 6e15245/a0d31e5)
+- **背景**:验证单 SL/TP 附件实测通过(交易所持仓记录 price_sl 4391.33/price_tp 4405.33 与发送值一致);但用户**习惯在 Gate App 手动平仓**(盈利差不多就平),引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清——需求:热同步 + 动态 SL/TP。
+- **sync_positions**(MCP/REPL `sync`/JSON-RPC):futures + CFD 对账,导入缺失持仓 + **清幽灵仓**(exchange_position_id 不在最新列表且 age >60s 宽限期才删,防填充延迟误删)。启动、主循环每 ~10s(50 ticks)、手动三路复用同一实现(EngineServices 内部,旧的 main.cpp 自由函数已删;SymbolRegistry 传入 ctor 做 quanto 查找)。
+- **modify_sl_tp**(MCP/REPL `modify <id> [--sl P] [--tp P]`):`GateRestClient::putCfdPositionModify` → `PUT /tradfi/positions/{id}` {price_sl, price_tp}(MT5 字符串,"0" 清除);校验顺序:params→id→至少一个字段→持仓存在→仅 CFD→infra;成功后 `updateExchangeStops` 立即刷新本地视图。
+- **get_positions**:Position 结构新增 `sl_price`/`tp_price`(0=无,交易所为准),to_json 输出——子代理可直接看到持仓保护价。
+- **实测**:引擎重启后 JSON-RPC 直连验证 sync_positions 返回摘要、modify_sl_tp 对未知仓返回 9101、get_positions 空仓正常。
+- **子代理现状**:v2 交易模式已授权(按设计文档 §4),验证单 +1.20 USD(用户手动平),已挂起等本小节落地后恢复循环 + trailing 升级。
+
 ### Next Steps (2026-08-17)
-- ⏳ **提交 M20**(工作区 ~20 文件,731 绿;含 SignalBoard/signal_only/get_signals/sl-tp)
+- ✅ **M20 已提交推送**（d5daf08）
+- ✅ **M21 已提交推送**(6e15245/a0d31e5,745 绿)
+- ⏳ **子代理恢复循环 + trailing 升级**(通知已就绪:modify_sl_tp 可做移动止损;持仓热同步 10s 内反映用户手动平仓)
 - ⏳ **启动黄金自动交易子代理 v2**(用户已确认风控规则,因子决策模型见 xauusd-signal-board-design.md §4):子代理调 MCP(get_signals 读因子 + get_market XAUUSD klines/ticker 自算 + get_positions/get_account/get_risk)盯盘;因子新鲜度 ≤120s;开仓 `open_order` 带 `sl_price`/`tp_price`(CFD 交易所原生保护);规则——单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 USD 停手、每笔复盘到 /home/joey/1_Code/commit_my_life/0_note/;状态落盘 xauusd-agent-state.json
 - ⏳ CFD strategy tune-up for the cost model: 0.06 USDT/0.01 lot buy-only commission + gold storage/swap (利差) — RECORDED in docs/CFD_TRADFI.md + OrderExecutor comment, not yet modeled in PnL/risk
 - ⏳ Maker-first verification: testnet first, then small live capital; watch logs "Maker-first attempt registered" / "Maker-first fallback"; consider `order_type = "maker_first"` on a futures instance (e.g. maker_timeout_ms 500)
