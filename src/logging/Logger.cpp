@@ -122,7 +122,11 @@ std::shared_ptr<spdlog::logger> makeLogger(std::string_view module, const LogCon
 
     // Step 4: set level and flush policy
     logger->set_level(g_default_level);
-    logger->flush_on(spdlog::level::warn); // flush immediately on warn+ to catch issues early
+    // Flush on info+: low-traffic info-level slots (app/system/strategy/...)
+    // otherwise sit in the stdio 4KB buffer for hours, looking "silent" while
+    // the file exists and grows only at shutdown (2026-08-17 overnight:
+    // only warn-heavy exchange/market logs appeared live).
+    logger->flush_on(spdlog::level::info);
     return logger;
 }
 
