@@ -635,8 +635,24 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
 #ifdef PULSE_ENABLE_SQLITE
     if (m_tradeRecorder)
     {
+        // Strategy name: prefer the matched instance (signals usually carry
+        // an empty client_order_id); fall back to the client id.
+        strategy::TradingSignal sig;
+        sig.symbol = report.symbol;
+        const auto *inst = matchInstanceConfig(sig);
+        const std::string strategy_name =
+            inst ? inst->name : report.client_order_id;
+
+        // Market metadata from the reservation's request (defaults = spot).
+        const MarketType mt = reservation.request.market_type;
+        const double lev = (MarketType::Spot == mt
+                            || reservation.request.leverage <= 0.0)
+                               ? 1.0
+                               : reservation.request.leverage;
+
         auto rec_result = m_tradeRecorder->recordTrade(
-            report, pnl, report.client_order_id);
+            report, pnl, strategy_name, mt, lev,
+            reservation.request.quanto_multiplier);
         if (!ok(rec_result))
         {
             log_app->warn("Trade recorder INSERT failed: {}",

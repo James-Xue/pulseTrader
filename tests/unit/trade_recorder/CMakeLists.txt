@@ -3,12 +3,14 @@
 add_executable(test_trade_recorder_unit
     test_trade_recorder.cpp
     test_trade_queries.cpp
+    test_market_recorder.cpp
 )
 
 target_link_libraries(test_trade_recorder_unit
     PRIVATE
         pulse::trade_recorder
         pulse::execution
+        SQLiteCpp
         GTest::gtest_main
 )
 

@@ -74,7 +74,10 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl             REAL    DEFAULT 0,
     latency_ms      INTEGER NOT NULL,
     final_status    TEXT    NOT NULL,
-    strategy_name   TEXT    DEFAULT ''
+    strategy_name   TEXT    DEFAULT '',
+    market_type     TEXT    NOT NULL DEFAULT 'spot',
+    leverage        REAL    NOT NULL DEFAULT 0,
+    quanto_multiplier REAL  NOT NULL DEFAULT 1
 );
 )";
 
@@ -130,6 +133,8 @@ Result<TradeRecorder> TradeRecorder::open(const std::string &db_path)
         db->exec("PRAGMA journal_mode=WAL");
         db->exec("PRAGMA synchronous=NORMAL");
         db->exec("PRAGMA foreign_keys=ON");
+        // A second connection (MarketRecorder) shares the same file under WAL.
+        db->exec("PRAGMA busy_timeout=5000");
 
         TradeRecorder recorder(std::move(db));
         auto schema_result = recorder.createSchema();
@@ -137,6 +142,13 @@ Result<TradeRecorder> TradeRecorder::open(const std::string &db_path)
         if (!ok(schema_result))
         {
             return error(schema_result);
+        }
+
+        auto migrate_result = recorder.migrateSchema();
+
+        if (!ok(migrate_result))
+        {
+            return error(migrate_result);
         }
 
         return recorder;
@@ -165,6 +177,43 @@ Result<bool> TradeRecorder::createSchema()
     }
 }
 
+Result<bool> TradeRecorder::migrateSchema()
+{
+    try
+    {
+        const int version = m_db->execAndGet("PRAGMA user_version").getInt();
+        if (version >= 1)
+        {
+            return true;
+        }
+
+        // A fresh database created by the current DDL already has the new
+        // columns but user_version == 0 — only ALTER when they are missing.
+        const int has_market_type = m_db->execAndGet(
+            "SELECT COUNT(*) FROM pragma_table_info('trades') "
+            "WHERE name='market_type'")
+                                        .getInt();
+        if (0 == has_market_type)
+        {
+            m_db->exec("BEGIN");
+            m_db->exec("ALTER TABLE trades ADD COLUMN "
+                       "market_type TEXT NOT NULL DEFAULT 'spot'");
+            m_db->exec("ALTER TABLE trades ADD COLUMN "
+                       "leverage REAL NOT NULL DEFAULT 0");
+            m_db->exec("ALTER TABLE trades ADD COLUMN "
+                       "quanto_multiplier REAL NOT NULL DEFAULT 1");
+            m_db->exec("COMMIT");
+        }
+
+        m_db->exec("PRAGMA user_version = 1");
+        return true;
+    }
+    catch (const SQLite::Exception &e)
+    {
+        return PulseError{ErrorCode::TradeRecorderSchemaError, e.what()};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Record trade
 // ---------------------------------------------------------------------------
@@ -172,7 +221,10 @@ Result<bool> TradeRecorder::createSchema()
 Result<bool> TradeRecorder::recordTrade(
     const execution::ExecutionReport &report,
     double pnl,
-    const std::string &strategy_name)
+    const std::string &strategy_name,
+    MarketType market_type,
+    double leverage,
+    double quanto_multiplier)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -188,13 +240,21 @@ Result<bool> TradeRecorder::recordTrade(
                            report.fill_time.time_since_epoch())
                            .count();
 
+        // Spot (or an unset leverage) is normalized to 1.0 for storage.
+        const double eff_leverage =
+            (MarketType::Spot == market_type || leverage <= 0.0)
+                ? 1.0
+                : leverage;
+
         SQLite::Statement stmt(*m_db,
             "INSERT INTO trades "
             "(order_id, client_order_id, timestamp, symbol, side, "
             "order_type, requested_qty, filled_qty, avg_fill_price, "
             "submit_mid_price, slippage_bps, fees, pnl, latency_ms, "
-            "final_status, strategy_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            "final_status, strategy_name, market_type, leverage, "
+            "quanto_multiplier) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?)");
 
         stmt.bind(1, report.order_id);
         stmt.bind(2, report.client_order_id);
@@ -212,6 +272,9 @@ Result<bool> TradeRecorder::recordTrade(
         stmt.bind(14, static_cast<std::int64_t>(report.latency.count()));
         stmt.bind(15, statusToString(report.final_status));
         stmt.bind(16, strategy_name);
+        stmt.bind(17, toString(market_type));
+        stmt.bind(18, eff_leverage);
+        stmt.bind(19, quanto_multiplier);
 
         stmt.exec();
 
@@ -324,6 +387,9 @@ Result<std::vector<TradeRecord>> TradeRecorder::getTrades(
             rec.latency_ms = stmt.getColumn(14).getInt64();
             rec.final_status = stmt.getColumn(15).getString();
             rec.strategy_name = stmt.getColumn(16).getString();
+            rec.market_type = stmt.getColumn(17).getString();
+            rec.leverage = stmt.getColumn(18).getDouble();
+            rec.quanto_multiplier = stmt.getColumn(19).getDouble();
             results.push_back(std::move(rec));
         }
 
@@ -375,6 +441,9 @@ Result<std::vector<TradeRecord>> TradeRecorder::getTradesByStrategy(
             rec.latency_ms = stmt.getColumn(14).getInt64();
             rec.final_status = stmt.getColumn(15).getString();
             rec.strategy_name = stmt.getColumn(16).getString();
+            rec.market_type = stmt.getColumn(17).getString();
+            rec.leverage = stmt.getColumn(18).getDouble();
+            rec.quanto_multiplier = stmt.getColumn(19).getDouble();
             results.push_back(std::move(rec));
         }
 

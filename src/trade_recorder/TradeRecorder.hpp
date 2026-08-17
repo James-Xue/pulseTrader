@@ -51,10 +51,16 @@ class TradeRecorder
 
     /// Record a completed trade. Thread-safe (mutex-guarded).
     /// Returns true on success, PulseError on failure.
+    ///
+    /// market_type / leverage / quanto_multiplier identify the trading market
+    /// (defaults = spot semantics). leverage <= 0 is normalized to 1.0.
     [[nodiscard]] Result<bool> recordTrade(
         const execution::ExecutionReport &report,
         double pnl,
-        const std::string &strategy_name);
+        const std::string &strategy_name,
+        MarketType market_type = MarketType::Spot,
+        double leverage = 1.0,
+        double quanto_multiplier = 1.0);
 
     /// Query trades filtered by symbol and/or time range.
     /// Empty symbol + zero timestamps returns all trades.
@@ -89,6 +95,10 @@ class TradeRecorder
     explicit TradeRecorder(std::unique_ptr<SQLite::Database> db);
 
     [[nodiscard]] Result<bool> createSchema();
+
+    /// Versioned schema migration (v0 → v1: market_type/leverage/quanto
+    /// columns). Idempotent — safe on fresh and already-migrated databases.
+    [[nodiscard]] Result<bool> migrateSchema();
 
     mutable std::mutex m_mutex;
     std::unique_ptr<SQLite::Database> m_db;

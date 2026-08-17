@@ -32,6 +32,9 @@ struct TradeRecord
     std::int64_t latency_ms;
     std::string final_status;    ///< "filled" or "cancelled".
     std::string strategy_name;
+    std::string market_type;     ///< "spot", "futures", or "cfd".
+    double leverage;             ///< 1.0 for spot / unset.
+    double quanto_multiplier;
 };
 
 // ---------------------------------------------------------------------------
