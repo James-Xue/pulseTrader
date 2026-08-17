@@ -53,6 +53,9 @@ toFile    = true                   # 写入 logs/ 目录
 [strategy]
 signal_aggregator_threshold = 0.7  # 聚合信号置信度 ≥ 0.7 才执行
 signal_cooldown_sec         = 30   # 同币种信号冷却（秒）
+# signal_only = false              # true = 策略只发信号(get_signals)永不下单,
+                                   #       手动 open_order/close_position 不受影响
+                                   #       (LLM 子代理作为唯一下单者的模式)
 
 # 每个 [[strategy.instances]] 定义一个策略实例。
 # name 必须是: momentum_scalper | orderbook_scalper | mean_reversion_scalper

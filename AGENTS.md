@@ -56,7 +56,7 @@ Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_par
 
 ## Control Plane Rule
 
-The control socket speaks newline-delimited JSON-RPC 2.0 over TCP. **Method names on the control socket ARE the MCP tool names** — keep them identical when adding a method. The 17 methods/tools are: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`. REPL commands in `CommandParser` map to these methods. Manual orders and the signal aggregator both flow through `OrderFlowExecutor` (Layer 8).
+The control socket speaks newline-delimited JSON-RPC 2.0 over TCP. **Method names on the control socket ARE the MCP tool names** — keep them identical when adding a method. The 18 methods/tools are: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`. REPL commands in `CommandParser` map to these methods. Manual orders and the signal aggregator both flow through `OrderFlowExecutor` (Layer 8). `get_signals` reads the `SignalBoard` (strategy signals + indicator snapshots + aggregator consensus); with `[strategy] signal_only = true` the aggregator output never reaches the executor while manual orders remain live (the sub-agent's path).
 
 ---
 

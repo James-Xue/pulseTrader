@@ -393,18 +393,21 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 | `strategies` | Registered strategies |
 | `params <id>` | Strategy params |
 | `set <id> <param> <value>` | Set strategy param (e.g. `set mom min_confidence 0.7`) |
-| `open <sym> <buy\|sell> <qty> [--type market\|limit\|post_only] [--price P] [--market spot\|futures] [--leverage N] [--reduce-only] [--client-id S]` | Open an order |
+| `open <sym> <buy\|sell> <qty> [--type market\|limit\|post_only] [--price P] [--market spot\|futures] [--leverage N] [--reduce-only] [--client-id S] [--sl P] [--tp P]` | Open an order; `--sl`/`--tp` attach exchange-native stop-loss/take-profit (**CFD only**) |
 | `close <position_id> [qty] [price]` | Close a position |
 | `cancel <order_id>` | Cancel an open order |
 | `halt` / `resume` | Halt / resume all trading |
 | `pause <id>` / `resume-strategy <id>` | Pause / resume a single strategy |
 | `risk` | Risk snapshot (drawdown, rate limiter) |
 | `market <sym> [--levels N] [--klines N] [--market spot\|futures]` | Market snapshot |
+| `signals` | Signal board: latest per-strategy signals + indicators + aggregator consensus |
 | `help` / `quit` / `exit` | Help / leave the REPL |
 
-**Control-plane methods (= MCP tool names, 16 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`. REPL commands map 1:1 to these methods over the control socket.
+**Control-plane methods (= MCP tool names, 18 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`. REPL commands map 1:1 to these methods over the control socket.
 
-**MCP usage** — the `mcp` subcommand exposes the 17 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+**Signal-only mode** — `[strategy] signal_only = true` makes strategies compute + publish signals to the signal board (`get_signals` / REPL `signals`) without ever placing orders; manual `open_order`/`close_position` remain live (the XAUUSD sub-agent's execution path). Board entries carry `ts_ms` + indicator snapshots — treat entries older than ~120 s as stale.
+
+**MCP usage** — the `mcp` subcommand exposes the 18 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
 
 ```bash
 claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml

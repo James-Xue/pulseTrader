@@ -32,10 +32,11 @@
 ## Current State (M13 Done, 2026-06-21)
 
 ### Test Summary
-- **703 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget + M18 sink/recorder/migration tests, EngineServicesTest incl. switch tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
+- **731 tests all green** (CTest, `headless` branch): control plane (CommandParser, JsonRpcServer, McpServer, OrderFlowTest incl. M15 direction-gate + M16 maker-first + M17 per-market budget + M18 sink/recorder/migration tests + M20 signal-only tests, EngineServicesTest incl. switch + signals tests, ControlClient) + core/config/logger/exchange/market/execution/risk/strategy/AI/heartbeat/trade_recorder suites
 - M15 additions: gate rejects inactive market, switch allows cfd + rejects futures, reduce_only exemption, signal skip, cancel sweep, switchDirection (unconfigured fails / unknown rejected / noop / to-spot), openOrder defaults to active market, market() feed selection, evaluateCfdOrder (7101/7102), parseCfdDetail/validateOrder/mergeFrom, buildOrderBody CFD, cfd endpoint paths, REPL switch, parseCfdTicker/parseCfdKline
 - M16 (2026-08-16) additions: maker-first order flow — 14 OrderFlowTest (best bid/ask post-only pricing, sweep cancel+fallback, partial-fill remainder, exchange-reject no-chase, rate-limit/direction-switch rejection, cancel-race) + 5 config validator + 3 config loader = 22 new
 - M17 (2026-08-17) additions: per-market notional budget (PositionManager reserveNotional/openPosition/canOpenPosition filtered by market_type; optional maxPositionNotional{Futures,Cfd,Spot} with maxPositionNotional fallback; canOpenPosition quanto fix) + CFD order-id resolution (matchCfdOrderId — POST /tradfi/orders does not echo the order id) = 18 new
+- M20 (2026-08-17) additions: signal-only mode + SignalBoard — 6 SignalBoardTest + 2 OrderFlowTest (signal-only skips execution / manual orders still work) + 1 config loader + 2 command parser (signals, open --sl/--tp) + MCP tools 17→18 + 3 EngineServicesTest (empty board / published entries / registry) = 28 new
 - OrderFlowTest 2026-08-14 regressions: OnSignalModifiedOrderIsPlaced, OnSignalModifiedFailureReleasesReservation, FuturesQuantoKeepsFullContractQuantity, SellFillOpensShortWhenNoLong
 
 ### Milestones
@@ -114,9 +115,19 @@ Remote vcpkg change (uSockets/uWebSockets + `get_io_service()`) reverted — Lin
 - **验证**: 703 测试绿;实盘库真实迁移(user_version=1、20 列、12 旧成交保留);实盘 ticker_ticks XAUUSD|cfd ~1/s + BTC_USDT|futures 13 行,kline_bars CFD backfill 500;引擎 13:22 重启生效(systemd)
 - **提交建议**: Part A + Part B 一次提交(位置读取与 DDL 同 commit),备份 data/trades.db.bak-m18
 
+### M20 Signal-Only + SignalBoard (2026-08-17, done — 731 tests, 未提交)
+- **背景**:引擎 XAUUSD 策略(active_market=cfd 下自动运行)与 LLM 子代理双头交易风险。2026-08-17 17:06 事故实锤:旧引擎策略自动开 XAUUSD 多 0.01(entry 4397.7,exchange id 17657141),无任何 SL/TP,浮亏至 -7.5 后被用户手动平掉(CFD 账户 53.4 USD)。设计文档:`~/1_Code/commit_my_life/0_note/xauusd-signal-board-design.md`
+- **signal_only 模式**:StrategyConfig `signal_only`(默认 false,TOML `[strategy] signal_only`);OrderFlowExecutor ctor 存 `m_signalOnly`,`onSignal` 入口短路(Flat 检查之后、方向门之前),手动 `placeOrder` 不受影响;main.cpp 聚合回调无论哪种模式都 publishAggregate(复盘可审计)。trading.toml 已设 `signal_only = true`(引擎策略从此只发信号)
+- **SignalBoard**:新组件 `src/strategy/signal/SignalBoard.{hpp,cpp}` — 每 strategy_id 覆盖式保留最新 Entry(signal + ts_ms),聚合信号独立槽位(带 threshold),shared_mutex,`snapshot()` 输出 signals[] + aggregate;策略信号回调(main.cpp:919)双发 board+aggregator;TradingSignal 新增 `indicators`(json,默认 {})——四个策略已填:momentum(ema_fast/slow/diff)、mean_reversion(bb_upper/lower/mid)、supertrend(supertrend/dir/atr)、orderbook(imbalance/volumes/best bid-ask)
+- **get_signals**:EngineServices::signals()(快照 + display-tz `ts_str`)+ JsonRpcServer `reg["get_signals"]` + MCP tool(18 个)+ REPL `signals` 命令(表格:SOURCE/SYMBOL/TYPE/CONF/PRICE/TIME + aggregate 行)
+- **open_order 附加 SL/TP**:OrderRequest `sl_price`/`tp_price`(optional);buildOrderBody CFD 分支填 `price_sl`/`price_tp`(交易所原生保护,引擎挂了也止损——取代原设计的独立 place_trigger_order;备忘里的 price_orders 是期货专属,CFD 不适用);EngineServices::openOrder 解析 `sl_price`/`tp_price` 参数,**非 cfd 明确拒绝**;REPL `open --sl P --tp P` + MCP schema 两个 optional number
+- **测试**:+28(明细见 Test Summary M20 行);McpServer 工具数 17→18 两个测试同步更新
+- **部署**:systemd 重启后验收——持仓同步 0(用户手动平仓后重启同步正确)、策略运行中但零下单、信号板随 kline 回填出数据
+- **遗留观察**:① 持仓 `open_time_str` 显示为 +8h 错误偏移(1786957606000ms 被当作本地墙钟再加 UTC 标签)——display bug 家族一员,待查 ② 引擎内存持仓快照在外部手动平仓后不会自动清除,需重启触发 startup sync ③ 用户 sell@4418 触发单已不在活跃订单(去向待查 Gate 历史)
+
 ### Next Steps (2026-08-17)
-- ⏳ **提交 M18**(工作区 ~20 文件,703 绿;建议 1-2 commit)
-- ⏳ **启动黄金自动交易子代理**(用户已确认风控规则):子代理实时调 MCP(get_market XAUUSD/get_positions/get_account/get_risk)盯盘,规则——单笔 0.01 手、技术信号入场(EMA+RSI+支撑阻力)、硬止损 -5 USD、止盈 +8~10 或趋势反转、日亏 -10 USD 停手、每笔写 md 复盘到 /home/joey/1_Code/commit_my_life/0_note/;用户喂思路/新闻转达。执行前先确认 commit_my_life/0_note/ 存在
+- ⏳ **提交 M20**(工作区 ~20 文件,731 绿;含 SignalBoard/signal_only/get_signals/sl-tp)
+- ⏳ **启动黄金自动交易子代理 v2**(用户已确认风控规则,因子决策模型见 xauusd-signal-board-design.md §4):子代理调 MCP(get_signals 读因子 + get_market XAUUSD klines/ticker 自算 + get_positions/get_account/get_risk)盯盘;因子新鲜度 ≤120s;开仓 `open_order` 带 `sl_price`/`tp_price`(CFD 交易所原生保护);规则——单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 USD 停手、每笔复盘到 /home/joey/1_Code/commit_my_life/0_note/;状态落盘 xauusd-agent-state.json
 - ⏳ CFD strategy tune-up for the cost model: 0.06 USDT/0.01 lot buy-only commission + gold storage/swap (利差) — RECORDED in docs/CFD_TRADFI.md + OrderExecutor comment, not yet modeled in PnL/risk
 - ⏳ Maker-first verification: testnet first, then small live capital; watch logs "Maker-first attempt registered" / "Maker-first fallback"; consider `order_type = "maker_first"` on a futures instance (e.g. maker_timeout_ms 500)
 - ⏳ Loopback port returning awselb responses (suspected Clash TUN hijack of loopback traffic) — can investigate separately
@@ -156,8 +167,8 @@ Then: live-verified 2026-08-17 (direction switch, CFD order placement + id resol
 - **Single binary** `apps/pulsetrader/pulsetrader`, subcommands: `trade` (default; engine + control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over control socket), `mcp` (stdio MCP server bridging to control socket; auto-loads trading.toml)
 - **Control socket**: TCP 127.0.0.1:8081, newline-delimited JSON-RPC 2.0; `[control]` toml (enabled/bindAddress/port), env `PULSE_CONTROL_PORT`
 - **Security**: binds localhost-only, no auth — never expose. MCP mode forces file-only logging (stdout = protocol). REST calls serialized via shared mutex in EngineServices
-- **16 methods** (method name = MCP tool name): get_status · get_account · get_positions · get_orders · list_strategies · get_strategy_params · set_strategy_param · open_order · close_position · cancel_order · halt_trading · resume_trading · get_risk · get_market · pause_strategy · resume_strategy
-- **REPL commands**: status · account|balance · positions · orders · strategies · params <id> · set <id> <param> <value> · open <sym> <buy|sell> <qty> [--type market|limit|post_only] [--price P] [--market spot|futures] [--leverage N] [--reduce-only] [--client-id S] · close <position_id> [qty] [price] · cancel <order_id> · halt · resume · pause <id> · resume-strategy <id> · risk · market <sym> [--levels N] [--klines N] · help · quit
+- **18 methods** (method name = MCP tool name): get_status · get_account · get_positions · get_orders · list_strategies · get_strategy_params · set_strategy_param · open_order · close_position · cancel_order · halt_trading · resume_trading · get_risk · get_market · pause_strategy · resume_strategy · switch_direction · get_signals
+- **REPL commands**: status · account|balance · positions · orders · strategies · params <id> · set <id> <param> <value> · open <sym> <buy|sell> <qty> [--type market|limit|post_only] [--price P] [--market spot|futures] [--leverage N] [--reduce-only] [--client-id S] [--sl P] [--tp P] · close <position_id> [qty] [price] · cancel <order_id> · halt · resume · pause <id> · resume-strategy <id> · risk · market <sym> [--levels N] [--klines N] · signals · help · quit
 - **New capabilities**: per-strategy runtime pause (`StrategyManager::setPaused`), manual trading halt (`halt_trading`/`resume_trading`), live atomic param get/set; order flow unified in `OrderFlowExecutor` (shared by signal aggregator + manual orders)
 - **src/control/**: JsonRpcServer · CommandParser · McpServer · ControlClient · EngineServices · OrderFlowExecutor
 
@@ -169,7 +180,7 @@ Key files: `src/core/config.hpp` (all structs), `config_loader.cpp` (TOML→stru
 PulseConfig
 ├── ExchangeConfig   (apiKey, apiSecret, restBaseUrl, wsUrl, futuresWsUrl, proxyUrl, testnet)
 ├── LogConfig        (level, logDir, toConsole, toFile)
-├── StrategyConfig   (aggregator_threshold, cooldown_sec, instances[])
+├── StrategyConfig   (aggregator_threshold, cooldown_sec, signal_only, instances[])
 │   └── StrategyInstanceConfig (name, symbol, market_type, leverage, margin_mode, ...)
 ├── RiskConfig       (maxPositionNotional, maxOpenPositions, maxDailyDrawdown, max_leverage, ...)
 │   ├── StopLossConfig  (mode, fixed_pct, trailing_pct, max_hold_seconds)
