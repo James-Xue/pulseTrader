@@ -4,10 +4,13 @@
 //   1. parseDisplayTimezone — local / utc / fixed offsets (valid + invalid)
 //   2. formatEpochMs — ISO8601 output for fixed offsets, UTC, and local
 //
-// Fixed-offset cases are exact; local depends on the machine's TZ, so it is
-// only checked structurally (ISO shape + ±HH:MM suffix).
+// Fixed-offset cases are exact; the local case forces a known TZ (setenv +
+// tzset) so its exact output is deterministic on any machine.
 
 #include <gtest/gtest.h>
+
+#include <cstdlib> // setenv
+#include <ctime>   // tzset
 
 #include "core/TimeUtil.hpp"
 
@@ -99,22 +102,34 @@ TEST(FormatEpochMs, NegativeClamped)
               "1970-01-01T00:00:00.000+00:00");
 }
 
-TEST(FormatEpochMs, LocalHasShapeAndSuffix)
+TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
 {
-    // 1786856207143 ms == 2026-08-16 04:56:47.143 UTC.
-    const auto s = formatEpochMs(1786856207143LL, DisplayTimezone::local());
-    // Shape: YYYY-MM-DDTHH:MM:SS.mmm±HH:MM
-    ASSERT_EQ(s.size(), 29u);
-    EXPECT_EQ(s[4], '-');
-    EXPECT_EQ(s[7], '-');
-    EXPECT_EQ(s[10], 'T');
-    EXPECT_EQ(s[13], ':');
-    EXPECT_EQ(s[16], ':');
-    EXPECT_EQ(s[19], '.');
-    EXPECT_EQ(s[23], '+'); // machine TZ is UTC+8 (Beijing); expect '+'
-    EXPECT_EQ(s[26], ':');
-    EXPECT_EQ(s.substr(24, 2), "00"); // minutes part of offset
-    EXPECT_EQ(s.substr(27, 2), "00");
+    // Force a known timezone so the assertions are deterministic no matter
+    // which machine runs the suite. Regression: the old offset computation
+    // (mktime-based) always produced 0, labelling e.g. a Beijing wall clock
+    // as "+00:00" — the +8h display bug seen in ts_str/open_time_str.
+    //
+    // 1786856207143 ms == 2026-08-16 04:56:47.143 UTC
+    //                  == 2026-08-16 12:56:47.143 Beijing (+08:00)
+    //                  == 2026-08-16 00:56:47.143 US Eastern EDT (-04:00)
+    setenv("TZ", "Asia/Shanghai", 1);
+    tzset();
+    EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
+              "2026-08-16T12:56:47.143+08:00");
+
+    setenv("TZ", "UTC", 1);
+    tzset();
+    EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
+              "2026-08-16T04:56:47.143+00:00");
+
+    setenv("TZ", "America/New_York", 1);
+    tzset();
+    EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
+              "2026-08-16T00:56:47.143-04:00");
+
+    // Restore a neutral TZ so later tests in the same process are unaffected.
+    setenv("TZ", "UTC", 1);
+    tzset();
 }
 
 TEST(FormatIsoTimestamp, NanosecondAlias)

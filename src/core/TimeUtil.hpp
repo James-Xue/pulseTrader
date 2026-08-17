@@ -168,12 +168,13 @@ parseDisplayTimezone(std::string_view sv) noexcept
     default:
     {
         localtime_r(&seconds, &tm);
-        // Local UTC offset for the instant being rendered: localtime - gmtime.
-        std::tm tm_gm{};
-        gmtime_r(&seconds, &tm_gm);
-        const std::time_t local_secs = mktime(&tm);
-        const std::time_t gm_secs = timegm(&tm_gm);
-        offset_seconds = static_cast<int>(local_secs - gm_secs);
+        // Local UTC offset for the instant being rendered: how far the wall
+        // clock is ahead of UTC. Interpret the wall clock AS IF it were UTC
+        // (timegm) and subtract the true instant. Using mktime(&tm) instead
+        // would convert the wall clock back to the SAME instant (mktime
+        // treats tm as local time), yielding offset 0 and labelling a
+        // Beijing wall clock as "+00:00" — the old +8h display bug.
+        offset_seconds = static_cast<int>(timegm(&tm) - seconds);
         break;
     }
     }
