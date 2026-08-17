@@ -134,7 +134,15 @@ class OrderFlowExecutor
     [[nodiscard]] double quantoMultiplierFor(const Symbol &symbol) const;
 
     /// Signal-aggregator entry point (replaces the main.cpp lambda).
+    ///
+    /// In signal-only mode (config `[strategy] signal_only = true`) this is
+    /// a no-op: strategies keep computing signals, but nothing is placed.
+    /// Manual orders (placeOrder) are unaffected — they are the sub-agent's
+    /// execution path.
     void onSignal(const strategy::TradingSignal &sig);
+
+    /// Whether signal-driven orders are disabled (signal-only mode).
+    [[nodiscard]] bool signalOnly() const;
 
     /// Full risk-gated flow for manual orders (REPL/CLI/MCP).
     ///
@@ -230,6 +238,7 @@ class OrderFlowExecutor
     void eraseAttempt(const std::string &order_id);
 
     StrategyConfig m_strategyCfg;
+    const bool m_signalOnly; ///< Signal-only mode: onSignal never places orders.
     risk::RiskManager &m_riskMgr;
     risk::PositionManager &m_positionMgr;
     risk::DrawdownGuard &m_drawdownGuard;

@@ -477,6 +477,54 @@ TEST_F(OrderFlowTest, OnSignalSkipsFlat)
     EXPECT_EQ(0, m_placer->place_count);
 }
 
+TEST_F(OrderFlowTest, SignalOnlyModeSkipsSignalExecution)
+{
+    auto signal_only_cfg = m_strategyCfg;
+    signal_only_cfg.signal_only = true;
+    OrderFlowExecutor flow(signal_only_cfg, *m_riskMgr, *m_positionMgr,
+                           *m_drawdownGuard, m_spotPlacer.get(), m_placer.get(),
+                           m_cfdPlacer.get(), nullptr, m_tracker.get(),
+                           m_cfdTracker.get(), nullptr, nullptr, m_restMutex,
+                           nullptr);
+    EXPECT_TRUE(flow.signalOnly());
+
+    TradingSignal sig;
+    sig.type = SignalType::Buy;
+    sig.symbol = "BTC_USDT";
+    sig.market_type = MarketType::Futures;
+    sig.confidence = 0.9;
+    sig.price = 60000.0;
+    flow.onSignal(sig);
+
+    EXPECT_EQ(0, m_placer->place_count);
+    EXPECT_EQ(0, m_positionMgr->openPositionCount());
+}
+
+TEST_F(OrderFlowTest, SignalOnlyModeManualOrdersStillWork)
+{
+    auto signal_only_cfg = m_strategyCfg;
+    signal_only_cfg.signal_only = true;
+    OrderFlowExecutor flow(signal_only_cfg, *m_riskMgr, *m_positionMgr,
+                           *m_drawdownGuard, m_spotPlacer.get(), m_placer.get(),
+                           m_cfdPlacer.get(), nullptr, m_tracker.get(),
+                           m_cfdTracker.get(), nullptr, nullptr, m_restMutex,
+                           nullptr);
+
+    // The sub-agent's execution path: manual orders bypass the signal gate.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    auto result = flow.placeOrder(req);
+    ASSERT_TRUE(ok(result));
+    EXPECT_EQ(1, m_placer->place_count);
+}
+
 TEST_F(OrderFlowTest, OnSignalUsesStrategyConfigQuantity)
 {
     StrategyInstanceConfig inst;

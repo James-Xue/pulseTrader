@@ -73,6 +73,7 @@ OrderFlowExecutor::OrderFlowExecutor(
 #endif
 )
     : m_strategyCfg{ strategy_cfg }
+    , m_signalOnly{ strategy_cfg.signal_only }
     , m_riskMgr{ risk_mgr }
     , m_positionMgr{ position_mgr }
     , m_drawdownGuard{ drawdown_guard }
@@ -118,6 +119,11 @@ void OrderFlowExecutor::setActiveMarket(MarketType mt)
 MarketType OrderFlowExecutor::activeMarket() const
 {
     return m_activeMarket.load(std::memory_order_acquire);
+}
+
+bool OrderFlowExecutor::signalOnly() const
+{
+    return m_signalOnly;
 }
 
 std::optional<execution::OrderRequest>
@@ -208,6 +214,13 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
 
     // Skip Flat signals.
     if (strategy::SignalType::Flat == sig.type)
+    {
+        return;
+    }
+
+    // Signal-only mode: signals are published to the board by the wiring
+    // in main.cpp, but nothing may be placed from the aggregator path.
+    if (m_signalOnly)
     {
         return;
     }

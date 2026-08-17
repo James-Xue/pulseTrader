@@ -1,9 +1,11 @@
 // test_engine_services.cpp — Unit tests for EngineServices (empty-state)
 
 #include "control/EngineServices.hpp"
+#include "control/JsonRpcServer.hpp"
 #include "control/OrderFlowExecutor.hpp"
 
 #include "core/TimeUtil.hpp"
+#include "strategy/signal/SignalBoard.hpp"
 #include "execution/OrderTracker.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
@@ -63,12 +65,14 @@ class EngineServicesTest : public ::testing::Test
             m_placer.get(), nullptr, nullptr,
             nullptr, nullptr, nullptr,
             nullptr, nullptr, m_restMutex, nullptr);
+        m_board = std::make_unique<SignalBoard>(
+            m_strategyCfg.signal_aggregator_threshold);
 
         m_services = std::make_unique<EngineServices>(
             "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
             nullptr, nullptr, nullptr,
             m_restClient.get(), nullptr, nullptr,
-            nullptr, nullptr, nullptr, *m_flow, m_restMutex);
+            nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
     }
 
     ExchangeConfig m_config;
@@ -87,6 +91,7 @@ class EngineServicesTest : public ::testing::Test
     std::unique_ptr<RiskManager> m_riskMgr;
     std::unique_ptr<FakePlacer> m_placer;
     std::unique_ptr<OrderFlowExecutor> m_flow;
+    std::unique_ptr<SignalBoard> m_board;
     std::unique_ptr<EngineServices> m_services;
     std::mutex m_restMutex;
 };
@@ -117,7 +122,7 @@ TEST_F(EngineServicesTest, PositionsIncludeHumanReadableOpenTime)
         "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
         nullptr, nullptr, nullptr,
         m_restClient.get(), nullptr, nullptr,
-        nullptr, nullptr, nullptr, *m_flow, m_restMutex);
+        nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
 
     // Small qty keeps notional under the fixture's risk limits
     // (per-symbol 500 USDT).
@@ -273,4 +278,63 @@ TEST_F(EngineServicesTest, MarketSelectsFeedByMarketType)
     // lookup result (error) rather than crashing.
     const auto j = m_services->market("XAUUSD", 5, 0, "cfd");
     EXPECT_TRUE(j.contains("error"));
+}
+
+TEST_F(EngineServicesTest, SignalsEmptyBoard)
+{
+    const auto j = m_services->signals();
+    ASSERT_TRUE(j.contains("signals"));
+    EXPECT_EQ(0u, j["signals"].size());
+    EXPECT_TRUE(j["aggregate"].is_null());
+}
+
+TEST_F(EngineServicesTest, SignalsReflectPublishedEntries)
+{
+    TradingSignal sig;
+    sig.type = SignalType::Sell;
+    sig.symbol = "XAUUSD";
+    sig.confidence = 0.8;
+    sig.price = 4401.5;
+    sig.strategy_id = "momentum_scalper_XAUUSD";
+    sig.reason = "unit test";
+    sig.market_type = MarketType::Cfd;
+    sig.indicators = { { "ema_fast", 4401.0 }, { "ema_slow", 4399.0 } };
+    m_board->publish(sig);
+
+    const auto j = m_services->signals();
+    ASSERT_EQ(1u, j["signals"].size());
+    const auto &e = j["signals"][0];
+    EXPECT_EQ("momentum_scalper_XAUUSD", e["source"].get<std::string>());
+    EXPECT_EQ("sell", e["type"].get<std::string>());
+    EXPECT_DOUBLE_EQ(0.8, e["confidence"].get<double>());
+    EXPECT_EQ("cfd", e["market_type"].get<std::string>());
+    // The display-timezone companion must exist.
+    EXPECT_FALSE(e["ts_str"].get<std::string>().empty());
+    EXPECT_DOUBLE_EQ(4401.0, e["indicators"]["ema_fast"].get<double>());
+}
+
+TEST_F(EngineServicesTest, GetSignalsRegisteredInMethodRegistry)
+{
+    m_board->publishAggregate([]()
+    {
+        TradingSignal sig;
+        sig.type = SignalType::Buy;
+        sig.symbol = "XAUUSD";
+        sig.confidence = 0.72;
+        sig.price = 4402.0;
+        sig.strategy_id = "aggregate";
+        sig.reason = "unit test";
+        sig.market_type = MarketType::Cfd;
+        return sig;
+    }());
+
+    const auto reg = makeMethodRegistry(*m_services);
+    const auto it = reg.find("get_signals");
+    ASSERT_NE(reg.end(), it);
+    const auto result = it->second(nlohmann::json::object());
+    const auto payload = std::get<nlohmann::json>(result);
+    ASSERT_TRUE(payload["aggregate"].is_object());
+    EXPECT_DOUBLE_EQ(0.72, payload["aggregate"]["confidence"].get<double>());
+    // Board was constructed with StrategyConfig's default threshold (0.7).
+    EXPECT_DOUBLE_EQ(0.7, payload["aggregate"]["threshold"].get<double>());
 }

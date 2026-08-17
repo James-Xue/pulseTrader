@@ -80,6 +80,23 @@ TEST(CommandParser, OpenParsesAllFlags)
     EXPECT_EQ("abc123", cmd->params["client_order_id"]);
 }
 
+TEST(CommandParser, OpenParsesAttachedSlTp)
+{
+    const auto cmd = parseCommandLine(
+        "open XAUUSD buy 0.01 --market cfd --sl 4380.0 --tp 4420.0");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("cfd", cmd->params["market_type"]);
+    EXPECT_DOUBLE_EQ(4380.0, cmd->params["sl_price"].get<double>());
+    EXPECT_DOUBLE_EQ(4420.0, cmd->params["tp_price"].get<double>());
+}
+
+TEST(CommandParser, SignalsMapsToGetSignals)
+{
+    const auto cmd = parseCommandLine("signals");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("get_signals", cmd->method);
+}
+
 TEST(CommandParser, OpenWithBadQuantityReturnsNullopt)
 {
     EXPECT_FALSE(parseCommandLine("open BTC_USDT buy abc").has_value());

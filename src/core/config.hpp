@@ -290,6 +290,13 @@ struct StrategyConfig
     std::vector<StrategyInstanceConfig> strategies; ///< Active strategy instances.
     double signal_aggregator_threshold = 0.7;       ///< Minimum aggregated confidence to act.
     std::uint32_t signal_cooldown_sec = 30;         ///< Cooldown between signals per symbol.
+
+    /// Signal-only mode: strategies keep computing and publishing signals
+    /// (signal board), but the aggregator output never reaches the order
+    /// executor. Manual orders (REPL/CLI/MCP open_order) are unaffected —
+    /// they are the sub-agent's execution path. Default false = current
+    /// auto-trading behavior.
+    bool signal_only = false;
 };
 
 // ---------------------------------------------------------------------------

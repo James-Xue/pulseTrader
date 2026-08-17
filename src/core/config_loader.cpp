@@ -680,6 +680,8 @@ PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "signal_cooldown_sec",
                           static_cast<int>(out.signal_cooldown_sec)));
+    out.signal_only =
+        toml::find_or(sec, "signal_only", out.signal_only);
 
     if (sec.contains("instances"))
     {

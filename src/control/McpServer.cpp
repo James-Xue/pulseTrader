@@ -93,6 +93,12 @@ nlohmann::json McpServer::toolDefinitions()
         "Active orders + recent execution reports.",
         nlohmann::json::object(), {});
 
+    add("get_signals",
+        "Latest per-strategy signals + indicator snapshots + aggregator "
+        "consensus from the signal board. Entries older than ~120s should be "
+        "treated as stale by consumers.",
+        nlohmann::json::object(), {});
+
     add("list_strategies",
         "Registered strategies: id, symbol, enabled, running, paused.",
         nlohmann::json::object(), {});
@@ -148,6 +154,15 @@ nlohmann::json McpServer::toolDefinitions()
                   { "description", "Reduce-only (futures)" } } },
             { "client_order_id", stringParam("client_order_id",
                                             "Client-assigned order ID") },
+            { "sl_price", nlohmann::json{
+                  { "type", "number" },
+                  { "description",
+                    "Attached stop-loss price (CFD only; exchange-native "
+                    "protection on the entry order)" } } },
+            { "tp_price", nlohmann::json{
+                  { "type", "number" },
+                  { "description",
+                    "Attached take-profit price (CFD only)" } } },
         },
         { "symbol", "side", "quantity" });
 

@@ -93,7 +93,7 @@ TEST(McpServer, ToolsListHasAllTools)
         should_exit);
     const auto resp = nlohmann::json::parse(line);
     const auto &tools = resp["result"]["tools"];
-    EXPECT_EQ(17, tools.size());
+    EXPECT_EQ(18, tools.size());
     for (const auto &tool : tools)
     {
         EXPECT_TRUE(tool["name"].is_string());
@@ -172,7 +172,8 @@ TEST(McpServer, UnknownMethodReturns32601)
 TEST(McpServer, ToolDefinitionsAllHaveSchemas)
 {
     const auto tools = McpServer::toolDefinitions();
-    EXPECT_EQ(17, tools.size());
+    EXPECT_EQ(18, tools.size());
+    bool found_get_signals = false;
     for (const auto &tool : tools)
     {
         const auto &schema = tool["inputSchema"];
@@ -186,5 +187,18 @@ TEST(McpServer, ToolDefinitionsAllHaveSchemas)
             EXPECT_TRUE(prop.value().contains("type"));
             EXPECT_FALSE(prop.value().contains("required"));
         }
+        if ("get_signals" == tool["name"])
+        {
+            found_get_signals = true;
+            // No-arg tool: empty properties object.
+            EXPECT_EQ(0u, schema["properties"].size());
+        }
+        if ("open_order" == tool["name"])
+        {
+            // Attached SL/TP (CFD-only) must be in the schema.
+            EXPECT_TRUE(schema["properties"].contains("sl_price"));
+            EXPECT_TRUE(schema["properties"].contains("tp_price"));
+        }
     }
+    EXPECT_TRUE(found_get_signals);
 }

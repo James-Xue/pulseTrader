@@ -469,6 +469,36 @@ poll_interval_ms = 500
     EXPECT_FALSE(strat.strategies[2].enabled);
 }
 
+TEST(ConfigLoader, ParseStrategy_SignalOnly)
+{
+    // Explicit true.
+    TempToml enabled_toml(R"(
+[strategy]
+signal_only = true
+)");
+    auto enabled = loadConfigFile(enabled_toml.path());
+    ASSERT_TRUE(ok(enabled)) << error(enabled).message;
+    EXPECT_TRUE(value(enabled).strategy.signal_only);
+
+    // Omitted → default false (auto-trading behavior unchanged).
+    TempToml default_toml(R"(
+[strategy]
+signal_aggregator_threshold = 0.7
+)");
+    auto dflt = loadConfigFile(default_toml.path());
+    ASSERT_TRUE(ok(dflt)) << error(dflt).message;
+    EXPECT_FALSE(value(dflt).strategy.signal_only);
+
+    // Explicit false.
+    TempToml disabled_toml(R"(
+[strategy]
+signal_only = false
+)");
+    auto disabled = loadConfigFile(disabled_toml.path());
+    ASSERT_TRUE(ok(disabled)) << error(disabled).message;
+    EXPECT_FALSE(value(disabled).strategy.signal_only);
+}
+
 TEST(ConfigLoader, ParseControl_AllFields)
 {
     TempToml tmp(R"(

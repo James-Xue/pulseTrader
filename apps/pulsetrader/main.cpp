@@ -35,6 +35,7 @@
 #include "execution/OrderTracker.hpp"
 #include "strategy/StrategyManager.hpp"
 #include "strategy/signal/SignalAggregator.hpp"
+#include "strategy/signal/SignalBoard.hpp"
 #include "strategy/scalping/MomentumScalper.hpp"
 #include "strategy/scalping/OrderBookScalper.hpp"
 #include "strategy/scalping/MeanReversionScalper.hpp"
@@ -916,10 +917,18 @@ static int runTrade(int argc, char* argv[])
         return 1;
     }
 
-    // Wire: strategy signals → aggregator
+    // Signal board: every raw signal (with its indicator snapshot) and every
+    // consolidated aggregator output is published here for the control plane
+    // (`get_signals`) and external consumers. Pure observation — the board
+    // never triggers execution.
+    auto board = std::make_shared<pulse::strategy::SignalBoard>(
+        cfg.strategy.signal_aggregator_threshold);
+
+    // Wire: strategy signals → signal board + aggregator
     strategy_mgr.setSignalCallback(
-        [&aggregator](const pulse::strategy::TradingSignal& sig)
+        [&aggregator, board](const pulse::strategy::TradingSignal& sig)
         {
+            board->publish(sig);
             aggregator.addSignal(sig);
         });
 
@@ -1056,8 +1065,12 @@ static int runTrade(int argc, char* argv[])
     }
 
     aggregator.setOutputCallback(
-        [&order_flow](const pulse::strategy::TradingSignal& sig)
+        [&order_flow, board](const pulse::strategy::TradingSignal& sig)
         {
+            // Published in BOTH modes: in signal-only mode this is the only
+            // observable trace of the aggregator consensus.
+            board->publishAggregate(sig);
+            // In signal-only mode onSignal is a no-op (gate inside).
             order_flow.onSignal(sig);
         });
 
@@ -1086,6 +1099,7 @@ static int runTrade(int argc, char* argv[])
         futures_tracker.get(),
         cfd_tracker.get(),
         order_flow,
+        *board,
         rest_mutex);
 
     // The registry is copied into the server; the local copy is used by

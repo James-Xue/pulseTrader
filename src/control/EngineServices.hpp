@@ -19,6 +19,7 @@
 #include "risk/PositionManager.hpp"
 #include "risk/RiskManager.hpp"
 #include "strategy/StrategyManager.hpp"
+#include "strategy/signal/SignalBoard.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -51,6 +52,7 @@ class EngineServices
                    execution::OrderTracker *futures_tracker,
                    execution::OrderTracker *cfd_tracker,
                    OrderFlowExecutor &order_flow,
+                   strategy::SignalBoard &signal_board,
                    std::mutex &rest_mutex);
 
     // --- Queries (each returns ready-to-serialize JSON) ---
@@ -59,6 +61,11 @@ class EngineServices
     [[nodiscard]] nlohmann::json positions() const;
     [[nodiscard]] nlohmann::json orders() const;
     [[nodiscard]] nlohmann::json strategies() const;
+
+    /// Latest per-strategy signals + indicator snapshots + aggregator
+    /// consensus from the signal board (`get_signals`). Publish timestamps
+    /// get a display-timezone `ts_str` companion field.
+    [[nodiscard]] nlohmann::json signals() const;
     [[nodiscard]] nlohmann::json getStrategyParams(const std::string &id) const;
     [[nodiscard]] bool setStrategyParam(const std::string &id,
                                         const std::string &param,
@@ -122,6 +129,7 @@ class EngineServices
     execution::OrderTracker *m_futuresTracker;
     execution::OrderTracker *m_cfdTracker;
     OrderFlowExecutor &m_orderFlow;
+    strategy::SignalBoard &m_signalBoard;
     std::mutex &m_restMutex;
 
     /// Display timezone for human-readable *_str timestamps in JSON output

@@ -114,6 +114,7 @@ EngineServices::EngineServices(
     execution::OrderTracker *futures_tracker,
     execution::OrderTracker *cfd_tracker,
     OrderFlowExecutor &order_flow,
+    strategy::SignalBoard &signal_board,
     std::mutex &rest_mutex)
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
@@ -131,6 +132,7 @@ EngineServices::EngineServices(
     , m_futuresTracker{ futures_tracker }
     , m_cfdTracker{ cfd_tracker }
     , m_orderFlow{ order_flow }
+    , m_signalBoard{ signal_board }
     , m_restMutex{ rest_mutex }
     , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
                        .value_or(DisplayTimezone::local()) }
@@ -337,6 +339,30 @@ nlohmann::json EngineServices::strategies() const
     return m_strategyMgr.snapshot();
 }
 
+nlohmann::json EngineServices::signals() const
+{
+    auto snap = m_signalBoard.snapshot();
+
+    // Decorate every entry with a display-timezone human-readable timestamp.
+    const auto decorate = [this](nlohmann::json &entry)
+    {
+        if (entry.is_object() && entry.contains("ts_ms"))
+        {
+            entry["ts_str"] = formatEpochMs(
+                entry["ts_ms"].get<std::int64_t>(), m_displayTz);
+        }
+    };
+    for (auto &sig : snap["signals"])
+    {
+        decorate(sig);
+    }
+    if (snap.contains("aggregate") && !snap["aggregate"].is_null())
+    {
+        decorate(snap["aggregate"]);
+    }
+    return snap;
+}
+
 nlohmann::json EngineServices::getStrategyParams(const std::string &id) const
 {
     auto *params = m_strategyMgr.paramsByName(id);
@@ -510,6 +536,24 @@ EngineServices::openOrder(const nlohmann::json &params)
     if (params.contains("client_order_id"))
     {
         req.client_order_id = params["client_order_id"].get<std::string>();
+    }
+
+    // Optional: attached stop-loss / take-profit (CFD only — TradFi orders
+    // accept per-order price_sl / price_tp; futures/spot have no equivalent
+    // on this path, so reject loudly rather than silently dropping).
+    if (params.contains("sl_price"))
+    {
+        req.sl_price = params["sl_price"].get<double>();
+    }
+    if (params.contains("tp_price"))
+    {
+        req.tp_price = params["tp_price"].get<double>();
+    }
+    if ((req.sl_price.has_value() || req.tp_price.has_value())
+        && MarketType::Cfd != req.market_type)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "open_order: sl_price/tp_price are CFD-only" };
     }
 
     // Futures qty is in contracts — the risk gate needs the contract

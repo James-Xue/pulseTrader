@@ -89,6 +89,10 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
     {
         return ParsedCommand{ "get_risk", nlohmann::json::object() };
     }
+    if ("signals" == cmd)
+    {
+        return ParsedCommand{ "get_signals", nlohmann::json::object() };
+    }
 
     // --- One-arg commands ---
     if ("params" == cmd && tokens.size() >= 2)
@@ -168,7 +172,8 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
         params["quantity"] = *qty;
 
         // Flags: --type market|limit|post_only, --price P, --market spot|futures,
-        //        --leverage N, --reduce-only, --client-id S
+        //        --leverage N, --reduce-only, --client-id S,
+        //        --sl P / --tp P (CFD only: attached stop-loss / take-profit)
         for (std::size_t i = 4; i < tokens.size(); ++i)
         {
             const std::string &flag = tokens[i];
@@ -205,6 +210,24 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
             else if ("--client-id" == flag && i + 1 < tokens.size())
             {
                 params["client_order_id"] = tokens[++i];
+            }
+            else if ("--sl" == flag && i + 1 < tokens.size())
+            {
+                auto sl = parseNumber(tokens[++i]);
+                if (!sl.has_value())
+                {
+                    return std::nullopt;
+                }
+                params["sl_price"] = *sl;
+            }
+            else if ("--tp" == flag && i + 1 < tokens.size())
+            {
+                auto tp = parseNumber(tokens[++i]);
+                if (!tp.has_value())
+                {
+                    return std::nullopt;
+                }
+                params["tp_price"] = *tp;
             }
             else
             {
@@ -388,6 +411,34 @@ std::string formatStrategies(const nlohmann::json &result)
     return renderTable(rows, { "STRATEGY", "SYMBOL", "ENABLED", "STATE", "PAUSE" });
 }
 
+std::string formatSignals(const nlohmann::json &result)
+{
+    const auto &signals = result.value("signals", nlohmann::json::array());
+    std::vector<std::vector<std::string>> rows;
+    for (const auto &s : signals)
+    {
+        rows.push_back({
+            s.value("source", ""),
+            s.value("symbol", ""),
+            s.value("type", ""),
+            std::to_string(s.value("confidence", 0.0)),
+            std::to_string(s.value("price", 0.0)),
+            s.value("ts_str", ""),
+        });
+    }
+    std::string out = renderTable(
+        rows, { "SOURCE", "SYMBOL", "TYPE", "CONF", "PRICE", "TIME" });
+    const auto &agg = result.value("aggregate", nlohmann::json());
+    if (agg.is_object())
+    {
+        out += "aggregate: " + std::string(agg.value("type", "flat"))
+             + " conf=" + std::to_string(agg.value("confidence", 0.0))
+             + " (threshold " + std::to_string(agg.value("threshold", 0.0))
+             + ") " + agg.value("ts_str", "") + "\n";
+    }
+    return out;
+}
+
 } // anonymous namespace
 
 std::string formatResponse(const std::string &method,
@@ -405,6 +456,10 @@ std::string formatResponse(const std::string &method,
         || "resume_strategy" == method)
     {
         return formatStrategies(result);
+    }
+    if ("get_signals" == method)
+    {
+        return formatSignals(result);
     }
     return result.dump(2);
 }
