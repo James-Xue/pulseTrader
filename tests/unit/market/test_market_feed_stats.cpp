@@ -171,23 +171,22 @@ TEST(MarketFeedStats, FuturesKlineFrameHasContractInResult)
     EXPECT_EQ("BTC_USDT", result["n"].get<std::string>());
 }
 
-TEST(MarketFeedStats, FuturesKlineSubscriptionPayloadOrder)
+TEST(MarketFeedStats, FuturesKlineSubscriptionPerSymbol)
 {
-    // Gate.io requires payload = ["1m", "BTC_USDT"] (interval first).
-    // This test documents the expected payload structure.
-    const std::vector<std::string> symbols = { "BTC_USDT", "ETH_USDT" };
+    // Gate.io parses the candlesticks payload positionally as
+    // [interval, timezone, contract] — batching multiple symbols in one
+    // payload puts the second symbol into the timezone slot ("invalid
+    // timezone provided: <symbol>", 2026-08-18 regression with SNDK_USDT).
+    // Subscribe per symbol with exactly two elements.
+    const std::vector<std::string> symbols = { "BTC_USDT", "SNDK_USDT" };
 
-    std::vector<std::string> payload;
-    payload.push_back("1m");
-    for (const auto &s : symbols)
+    for (const auto &symbol : symbols)
     {
-        payload.push_back(s);
+        const std::vector<std::string> payload = { "1m", symbol };
+        ASSERT_EQ(2u, payload.size());
+        EXPECT_EQ("1m",      payload[0]); // Interval first.
+        EXPECT_EQ(symbol,   payload[1]);
     }
-
-    ASSERT_EQ(3u, payload.size());
-    EXPECT_EQ("1m",      payload[0]); // Interval first.
-    EXPECT_EQ("BTC_USDT", payload[1]);
-    EXPECT_EQ("ETH_USDT", payload[2]);
 }
 
 // ---------------------------------------------------------------------------

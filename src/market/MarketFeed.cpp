@@ -98,18 +98,19 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     }
 
     // K-lines: 1-minute interval.
-    // Gate.io format: payload = ["1m", "BTC_USDT"] (interval first, then symbols).
-    std::vector<std::string> kline_payload;
-    kline_payload.push_back("1m");
+    // Gate.io format: payload = ["1m", "<contract>"] — the server parses the
+    // array positionally as [interval, timezone, contract], so batching more
+    // than one symbol in a single payload puts the second symbol into the
+    // timezone slot ("invalid timezone provided: <symbol>"). Subscribe per
+    // symbol, exactly like the order-book channel below.
     for (const auto &symbol : symbols)
     {
-        kline_payload.push_back(symbol);
+        std::vector<std::string> kline_payload = { "1m", symbol };
+        m_wsClient->subscribe(candlesticks_ch,
+            kline_payload,
+            [this](const nlohmann::json &result, const nlohmann::json &full_frame)
+            { onKlineUpdate(result, full_frame); });
     }
-
-    m_wsClient->subscribe(candlesticks_ch,
-        kline_payload,
-        [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-        { onKlineUpdate(result, full_frame); });
 
     PULSE_LOG_INFO("market", "{} MarketFeed started — subscribed to {} symbols",
                    mt_label, symbols.size());
