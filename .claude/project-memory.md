@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-18 (home machine, after pulling 5 fix commits)
-> File size: 9607 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-18 (home machine, M23 shipped + SNDK grid deployed)
+> File size: 10366 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,11 +30,11 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M21 Done, 2026-08-17/18)
+## Current State (M23 Done, 2026-08-18)
 
 ### Test Summary
-- **745 tests green** (headless, 本机 8-17 实测);8-18 夜另推送 5 个修复(远程 MECHREVO 验证 751 绿,本机待重跑)
-- M21: sync/modify-sl-tp 测试;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
+- **770 tests green** (本机 8-18 实测,M22/M23 全量)
+- M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
 - **M1–M5** 九层核心 → **M6** TOML 配置 → **M7** SQLite 落库 → **M8** 合约配置 → **M9** EndpointRouter/WS ping-pong → **M10** 合约行情 → **M11** 合约风控/PnL → **M12** 合约执行+双市场 → **M13** testnet
@@ -46,6 +46,8 @@
 - **M19** (08-17) CFD 执行链 5 修复(时间窗/列表轮询/feed 过滤),717 绿
 - **M20** (08-17) signal-only + SignalBoard + get_signals,731 绿
 - **M21** (08-17) sync_positions 热同步 + modify_sl_tp 动态 SL/TP,745 绿
+- **M22** (08-18) 方向闸门放宽:手动单 futures/CFD 任意方向可执行(placeManualOrder,spot 仍闸门)+ minAvailableAfterStopUsd 风控,759 绿(用户 7e0cace + 我 bb21832)
+- **M23** (08-18) 期货触发单 price_orders 三接口(place/list/cancel_trigger_order)+ list_futures_orders 交易所侧挂单查询,770 绿(09087ae)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
@@ -145,13 +147,20 @@ PulseConfig
 - Sub-account recommended for risk isolation (max 10 for VIP0-4, inherit main VIP)
 - Futures: USDT-settled only, leverage up to 125x, simultaneous spot+futures via config
 
+## SNDK 网格(2026-08-18 部署,用户定制)
+
+- **规格**:36 格限价空 1730~1800 步进 2,每格 2 张(quanto 0.01,~35 USD/格,网格 ~1,260 USD);只做空;分格止盈 = 成交价-10 的 price_orders 触发单(rule=2,size=2);不挂止损;TP 兑现后同格循环重挂
+- **实盘状态**:45 单 = 36 网格 + 8 App 用户单(1738/1758/1788 与网格重叠,用户决定**双重加空**)+ 20@2000 引擎单;持仓空 40 张;App 全平触发单 @1692(auto_size=close,价格 ≤1692 平整个空头)
+- **代理文档**:`~/1_Code/commit_my_life/0_note/sndk-subagent-strategy.md`(网格协议)+ sndk-agent-taskbook/thinking;与黄金代理并行,各管各市场
+- **经验**:批量挂单 CLI 输出不可靠(报错走 stderr)、maxOpenPositions=4 拦网格(→40)、引擎重启后 tracker 视图丢旧单(用 list_futures_orders 交易所侧视图)、触发单必须 size=2 不能用 auto_size=close
+
 ## Next Steps (2026-08-18)
 
-- ⏳ **子代理恢复循环 + trailing 升级**(modify_sl_tp 可做移动止损)
+- ⏳ **SNDK 网格首轮实盘验证**:首格成交 → 分格 TP 触发单触发(只平 2 张)→ 同格循环重挂
 - ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
+- ⏳ **双代理并行**:SNDK 网格代理 + 黄金代理同时跑,验证互不干扰(各自独立会话/文档,共享全局熔断)
 - ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
 - ⏳ maker-first 实盘验证(先 testnet 后小资金)
 - ⏳ 已知显示 bug:futures PnL 乘杠杆(calculateUnrealizedPnl/sync leverage 处理)、open_time_str +8h 偏移
 - ⏳ loopback awselb 响应(疑似 Clash TUN 劫持)
-- ⏳ **SNDK 空单 -100 张浮盈 +32.8 待用户决策**(App 手动管理,阶梯挂单 20@1838/20@1858/30@1888;引擎无配置不干预);重启引擎 `systemctl --user start pulsetrader` + MCP 重连
 - ⏳ 规则调优候选(夜盘纸面 3W/1L +15.7):RSI<30 破位禁追空(4/4 被买回教训)、双收盘+ticker 确认纪律、ATR 动态止损
