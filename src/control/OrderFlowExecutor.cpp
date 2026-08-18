@@ -735,6 +735,47 @@ void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,
                          quantoMultiplierFor(report.symbol));
 }
 
+void OrderFlowExecutor::recordExternalClose(const execution::ExecutionReport &report,
+                                            double pnl, MarketType market_type,
+                                            double leverage)
+{
+    auto log_app = logging::Logger::get("app");
+
+    // exit price is a best-effort estimate from the last known mark — flag
+    // it so consumers never mistake it for an exchange-confirmed fill.
+    log_app->info("EXTERNAL close recorded (exit price ~estimate): id={} "
+                  "{} {} {:.6f} @ ~{:.2f} pnl={:.4f}",
+                  report.order_id,
+                  report.symbol,
+                  (Side::Buy == report.side) ? "BUY" : "SELL",
+                  report.filled_qty,
+                  report.avg_fill_price,
+                  pnl);
+
+    execution::OrderTracker *tracker = nullptr;
+    if (MarketType::Cfd == market_type)
+    {
+        tracker = m_cfdTracker;
+    }
+    else if (MarketType::Futures == market_type)
+    {
+        tracker = m_futuresTracker;
+    }
+    else
+    {
+        tracker = m_spotTracker;
+    }
+    if (tracker)
+    {
+        tracker->recordCompletedReport(report);
+    }
+    m_drawdownGuard.recordPnl(pnl);
+
+    recordCompletedTrade(report, pnl, market_type,
+                         leverage > 0.0 ? leverage : 1.0,
+                         quantoMultiplierFor(report.symbol));
+}
+
 void OrderFlowExecutor::recordCompletedTrade(
     const execution::ExecutionReport &report, double pnl, MarketType market_type,
     double leverage, double quanto_multiplier)

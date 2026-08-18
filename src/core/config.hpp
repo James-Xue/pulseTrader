@@ -201,6 +201,13 @@ struct RiskConfig
     std::optional<double> maxPositionNotionalFutures; ///< Futures notional cap override.
     std::optional<double> maxPositionNotionalCfd;     ///< CFD notional cap override.
     std::optional<double> maxPositionNotionalSpot;    ///< Spot notional cap override.
+    /// Minimum free margin (USD) that must remain AFTER a stop-loss on the
+    /// new position is paid: available - margin - stop_loss_amount >= this.
+    /// Guards against a thin account where one stop exhausts trading
+    /// capacity entirely (M22, after the 2026-08-18 -5.53 spike-through-SL
+    /// stop that left the CFD account untradeable). Unset/0 = disabled.
+    std::optional<double> minAvailableAfterStopUsd;
+
     double max_leverage = 10.0;           ///< Maximum leverage allowed per position (futures).
     double max_margin_used = 0.5;         ///< Maximum fraction of equity used as margin (futures).
     StopLossConfig stop_loss;             ///< Default stop-loss configuration.

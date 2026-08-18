@@ -582,6 +582,8 @@ PulseError parseRisk(const toml::value &root, RiskConfig &out)
         findOptionalDouble(sec, "maxPositionNotionalCfd");
     out.maxPositionNotionalSpot =
         findOptionalDouble(sec, "maxPositionNotionalSpot");
+    out.minAvailableAfterStopUsd =
+        findOptionalDouble(sec, "minAvailableAfterStopUsd");
     out.max_leverage =
         findDouble(sec, "max_leverage", out.max_leverage);
     out.max_margin_used =

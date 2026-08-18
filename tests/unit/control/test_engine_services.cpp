@@ -7,6 +7,7 @@
 #include "core/TimeUtil.hpp"
 #include "strategy/signal/SignalBoard.hpp"
 #include "execution/OrderTracker.hpp"
+#include "trade_recorder/TradeRecorder.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
 #include "risk/DrawdownGuard.hpp"
@@ -17,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <filesystem>
 
 using namespace pulse;
 using namespace pulse::control;
@@ -419,6 +421,142 @@ TEST_F(EngineServicesTest, SyncPositionsHandlesUnconfiguredRest)
     EXPECT_EQ(0, summary["cfd_synced"].get<int>());
     EXPECT_EQ(0, summary["pruned"].get<int>());
 }
+
+TEST_F(EngineServicesTest, OpenOrderCfdWithSlRejectedWhenFreeMarginFloorUnmet)
+{
+    // M22 minimum-free-margin-after-stop gate: with a floor configured, a CFD
+    // order carrying an attached SL must leave available - margin - stop-loss
+    // >= floor. The fixture's REST client has no credentials, so the balance
+    // fetch fails and available is treated as 0 — any SL order is rejected.
+    // A local flow with the fake CFD placer keeps the test off the network.
+    m_cfg.risk.minAvailableAfterStopUsd = 6.0;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),  // spot / futures / CFD rest
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4395.0 },
+        { "sl_price", 4390.0 },
+    });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("minAvailableAfterStopUsd"));
+}
+
+TEST_F(EngineServicesTest, OpenOrderCfdWithoutSlBypassesGate)
+{
+    // Same floor configured, but no attached stop-loss — the gate does not
+    // apply (nothing guarantees a bounded loss), the order flows through.
+    m_cfg.risk.minAvailableAfterStopUsd = 6.0;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4395.0 },
+    });
+    ASSERT_TRUE(ok(result));
+}
+
+TEST_F(EngineServicesTest, OpenOrderCfdWithSlGateDisabledByDefault)
+{
+    // Floor unset (0) — the gate is off entirely; SL orders pass.
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "sell" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4400.0 },
+        { "sl_price", 4405.0 },
+    });
+    ASSERT_TRUE(ok(result));
+}
+
+#ifdef PULSE_ENABLE_SQLITE
+TEST_F(EngineServicesTest, ExternalCloseTracesIntoTradesDb)
+{
+    // M22 external-close trace: recordExternalClose must land the close side
+    // in trades.db with the ext_ marker, even though the engine never saw an
+    // order for it (user manual close / exchange-side SL fill).
+    const std::string db_path = "/tmp/pulse_ext_close_test.db";
+    std::filesystem::remove(db_path);
+    std::filesystem::remove(db_path + "-wal");
+    std::filesystem::remove(db_path + "-shm");
+
+    auto recorder = trade_recorder::TradeRecorder::open(db_path);
+    ASSERT_TRUE(ok(recorder));
+
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), nullptr, nullptr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, &value(recorder));
+
+    execution::ExecutionReport report;
+    report.order_id = "ext_close_XAUUSD_Buy_1";
+    report.client_order_id = report.order_id;
+    report.symbol = "XAUUSD";
+    report.side = Side::Sell;
+    report.type = OrderType::Market;
+    report.requested_qty = 0.01;
+    report.filled_qty = 0.01;
+    report.avg_fill_price = 4390.1;
+    report.submit_mid_price = 4390.1;
+    report.slippage_bps = 0.0;
+    report.fees = 0.0;
+    report.latency = std::chrono::milliseconds{ 0 };
+    report.submit_time = Timestamp::clock::now();
+    report.fill_time = report.submit_time;
+    report.final_status = OrderStatus::Filled;
+
+    flow.recordExternalClose(report, -5.53, MarketType::Cfd, 500.0);
+
+    const auto trades = value(recorder).getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades));
+    const auto &rows = value(trades);
+    ASSERT_EQ(1, rows.size());
+    EXPECT_EQ("ext_close_XAUUSD_Buy_1", rows[0].order_id);
+    EXPECT_DOUBLE_EQ(-5.53, rows[0].pnl);
+    EXPECT_EQ("XAUUSD", rows[0].symbol);
+}
+#endif // PULSE_ENABLE_SQLITE
 
 TEST_F(EngineServicesTest, SyncPositionsAndModifySlTpRegistered)
 {

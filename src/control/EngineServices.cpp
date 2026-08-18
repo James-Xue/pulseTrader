@@ -564,6 +564,70 @@ EngineServices::openOrder(const nlohmann::json &params)
     // multiplier to compute true notional value.
     req.quanto_multiplier = m_orderFlow.quantoMultiplierFor(req.symbol);
 
+    // M22 minimum-free-margin-after-stop gate: with a thin account a single
+    // stop-loss can leave the account untradeable (2026-08-18: a -5.53
+    // spike-through-SL stop on XAUUSD left the CFD account at 5.09 < the
+    // 9.0 opening floor). When configured, a CFD order carrying an attached
+    // SL must leave available - margin - |entry-sl|*qty*quanto >= the floor.
+    if (MarketType::Cfd == req.market_type && req.sl_price.has_value()
+        && m_cfg.risk.minAvailableAfterStopUsd.has_value()
+        && m_cfg.risk.minAvailableAfterStopUsd.value() > 0.0
+        && nullptr != m_cfdRest)
+    {
+        // Reference entry: the limit price when given, else the latest
+        // CFD ticker (best effort for market orders).
+        double ref_price = req.price;
+        if (ref_price <= 0.0)
+        {
+            if (auto *feed = feedFor(MarketType::Cfd))
+            {
+                const auto tick = feed->tickerCache().get(req.symbol);
+                if (tick.has_value())
+                {
+                    ref_price = tick->last;
+                }
+            }
+        }
+        double cfd_available = 0.0;
+        {
+            std::lock_guard lock(m_restMutex);
+            auto cfd = m_cfdRest->getCfdAssets();
+            if (ok(cfd))
+            {
+                const auto &data = value(cfd).value("data", nlohmann::json::object());
+                cfd_available =
+                    safeParseDouble(data.value("margin_free", "0")).value_or(0.0);
+            }
+        }
+        if (ref_price > 0.0)
+        {
+            const double notional = ref_price * req.quantity
+                                    * req.quanto_multiplier;
+            const double leverage =
+                req.leverage > 0.0 ? req.leverage : 1.0;
+            const double margin = notional / leverage;
+            const double stop_loss_usd =
+                std::abs(ref_price - req.sl_price.value())
+                * req.quantity * req.quanto_multiplier;
+            const double free_after =
+                cfd_available - margin - stop_loss_usd;
+            const double floor = m_cfg.risk.minAvailableAfterStopUsd.value();
+            if (free_after < floor)
+            {
+                return PulseError{
+                    ErrorCode::InsufficientFreeMargin,
+                    "open_order: CFD free margin after stop-loss ("
+                        + std::to_string(free_after)
+                        + " USD) would fall below "
+                          "risk.minAvailableAfterStopUsd ("
+                        + std::to_string(floor)
+                        + "); available " + std::to_string(cfd_available)
+                        + ", margin " + std::to_string(margin)
+                        + ", stop-loss " + std::to_string(stop_loss_usd) };
+            }
+        }
+    }
+
     // Manual path: futures/CFD are executable in any active direction (M22).
     return m_orderFlow.placeManualOrder(req);
 }
@@ -1053,7 +1117,53 @@ int EngineServices::pruneGhostPositions(
         {
             continue; // Too fresh — likely a fill that has not appeared yet.
         }
-        if (m_positionMgr.removePosition(pos.position_id))
+        if (pos.quantity > 0.0)
+        {
+            // The position vanished from the exchange with no local close
+            // record — the user closed it manually in the app, or an
+            // exchange-side stop-loss/take-profit filled (native SL/TP on CFD
+            // positions fire without the engine ever seeing the order). Trace
+            // the close side through the shared record pipeline (recentReports
+            // / trades.db / drawdown guard / execution.log) so the audit trail
+            // is complete. The exit price is a best-effort estimate from the
+            // last known mark — order_id carries the "ext_" marker and the
+            // log flags the estimate so consumers can reconcile via API.
+            const double exit_price = pos.current_price > 0.0
+                                          ? pos.current_price : pos.entry_price;
+            const auto pnl = m_positionMgr.closePosition(
+                pos.position_id, pos.quantity, exit_price);
+            const double realized = pnl.has_value() ? pnl.value() : 0.0;
+
+            execution::ExecutionReport report;
+            const std::string ref = pos.exchange_position_id.empty()
+                                        ? pos.position_id
+                                        : pos.exchange_position_id;
+            report.order_id          = "ext_close_" + ref;
+            report.client_order_id   = report.order_id;
+            report.symbol            = pos.symbol;
+            report.side              = opposite(pos.side);
+            report.type              = OrderType::Market;
+            report.requested_qty     = pos.quantity;
+            report.filled_qty        = pos.quantity;
+            report.avg_fill_price    = exit_price;
+            report.submit_mid_price  = exit_price;
+            report.slippage_bps      = 0.0;
+            report.fees              = 0.0;
+            report.latency           = std::chrono::milliseconds{ 0 };
+            report.submit_time       = now();
+            report.fill_time         = now();
+            report.final_status      = OrderStatus::Filled;
+            report.exchange_position_id = pos.exchange_position_id;
+            m_orderFlow.recordExternalClose(report, realized, pos.market_type,
+                                            pos.leverage);
+
+            PULSE_LOG_INFO("app",
+                "Position sync: pruned ghost {} (absent from exchange; "
+                "external close traced, exit ~{:.2f}, pnl {:.4f})",
+                pos.position_id, exit_price, realized);
+            ++pruned;
+        }
+        else if (m_positionMgr.removePosition(pos.position_id))
         {
             PULSE_LOG_INFO("app",
                 "Position sync: pruned ghost {} (absent from exchange)",

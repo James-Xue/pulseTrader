@@ -177,6 +177,16 @@ class OrderFlowExecutor
     void recordCfdClose(const execution::ExecutionReport &report,
                         double pnl, double leverage);
 
+    /// Record an EXTERNAL close (user manual close in the app, or an
+    /// exchange-side stop-loss/take-profit fill) into the shared record
+    /// pipeline. The engine only learns about these through hot-sync ghost
+    /// pruning, so the audit trail (recentReports / trades.db / drawdown
+    /// guard / execution.log) would otherwise miss the close side entirely.
+    /// market_type picks the tracker; leverage/quanto come from the position.
+    void recordExternalClose(const execution::ExecutionReport &report,
+                             double pnl, MarketType market_type,
+                             double leverage);
+
     /// Cancel an open order; probes cfd tracker first, then futures, then spot.
     /// Must be called with the shared rest_mutex held.
     [[nodiscard]] bool cancelOrder(const std::string &order_id);

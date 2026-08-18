@@ -123,6 +123,16 @@ TEST(ConfigValidator, RejectsNegativePerMarketPositionNotional)
         EXPECT_NE(std::string::npos,
                   err.message.find("maxPositionNotionalCfd"));
     }
+
+    // M22: the free-margin-after-stop floor must be non-negative when set.
+    {
+        auto cfg = valid_config();
+        cfg.risk.minAvailableAfterStopUsd = -1.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("minAvailableAfterStopUsd"));
+    }
     {
         auto cfg = valid_config();
         cfg.risk.maxPositionNotionalSpot = -100.0;

@@ -395,6 +395,22 @@ maxPositionNotional = 1000.0
     EXPECT_FALSE(risk.maxPositionNotionalFutures.has_value());
     EXPECT_FALSE(risk.maxPositionNotionalCfd.has_value());
     EXPECT_FALSE(risk.maxPositionNotionalSpot.has_value());
+    EXPECT_FALSE(risk.minAvailableAfterStopUsd.has_value());
+}
+
+TEST(ConfigLoader, ParseRisk_MinAvailableAfterStopUsd)
+{
+    TempToml tmp(R"(
+[risk]
+minAvailableAfterStopUsd = 6.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    ASSERT_TRUE(risk.minAvailableAfterStopUsd.has_value());
+    EXPECT_DOUBLE_EQ(6.0, risk.minAvailableAfterStopUsd.value());
 }
 
 TEST(ConfigLoader, ParseRisk_WithTakeProfit)

@@ -59,6 +59,8 @@ enum class ErrorCode : std::uint32_t
     SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
     ManualHalt = 3007,         ///< Trading halted manually via CLI/MCP.
     InactiveMarket = 3008,     ///< Order market_type is not the active trading direction.
+    InsufficientFreeMargin = 3009, ///< Free margin after the attached stop-loss would
+                                   ///< fall below risk.minAvailableAfterStopUsd.
 
     // AI (4xxx)
     AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.

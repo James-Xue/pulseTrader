@@ -111,6 +111,14 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.maxPositionNotionalSpot must be > 0"};
     }
 
+    // Optional minimum-free-margin-after-stop gate — must be non-negative.
+    if (cfg.risk.minAvailableAfterStopUsd.has_value()
+        && cfg.risk.minAvailableAfterStopUsd.value() < 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.minAvailableAfterStopUsd must be >= 0"};
+    }
+
     // Futures-specific risk limits (CFD leverage ladder goes up to 500).
     if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 500.0)
     {
