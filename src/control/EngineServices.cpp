@@ -564,7 +564,8 @@ EngineServices::openOrder(const nlohmann::json &params)
     // multiplier to compute true notional value.
     req.quanto_multiplier = m_orderFlow.quantoMultiplierFor(req.symbol);
 
-    return m_orderFlow.placeOrder(req);
+    // Manual path: futures/CFD are executable in any active direction (M22).
+    return m_orderFlow.placeManualOrder(req);
 }
 
 Result<execution::OrderResponse>

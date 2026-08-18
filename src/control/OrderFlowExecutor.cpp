@@ -317,8 +317,10 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
 Result<execution::OrderResponse>
 OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
 {
-    // Direction gate (manual orders): reject non-active markets unless the
-    // order is reduce_only (closing old-direction positions stays possible).
+    // Direction gate (strategy-originated orders, maker-first fallback, close
+    // flows): reject non-active markets unless the order is reduce_only
+    // (closing old-direction positions stays possible). Manual orders take
+    // placeManualOrder(), which also allows futures/CFD in any direction.
     const MarketType active = m_activeMarket.load(std::memory_order_acquire);
     if (req.market_type != active && !req.reduce_only)
     {
@@ -327,7 +329,31 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
                                + " is not the active direction (active="
                                + toString(active) + ")" };
     }
+    return evaluateAndPlace(req);
+}
 
+Result<execution::OrderResponse>
+OrderFlowExecutor::placeManualOrder(const execution::OrderRequest &req)
+{
+    // Direction gate (manual orders, M22): futures and CFD orders are
+    // executable in any active direction — per-market notional budgets
+    // (maxPositionNotional{Futures,Cfd}) bound each market independently, so
+    // the sub-agent can execute signals from both markets without switching
+    // directions. Spot still requires the active direction (or reduce_only).
+    const MarketType active = m_activeMarket.load(std::memory_order_acquire);
+    if (req.market_type != active && !req.reduce_only
+        && MarketType::Spot == req.market_type)
+    {
+        return PulseError{ ErrorCode::InactiveMarket,
+                           std::string("order market_type=spot is not the active direction (active=")
+                               + toString(active) + ")" };
+    }
+    return evaluateAndPlace(req);
+}
+
+Result<execution::OrderResponse>
+OrderFlowExecutor::evaluateAndPlace(const execution::OrderRequest &req)
+{
     // Evaluate exactly once, then place using that evaluation. Re-evaluating
     // after a Modified result double-counts the caller's own reservation and
     // rejects orders whose quantity was capped to the notional budget.

@@ -144,14 +144,27 @@ class OrderFlowExecutor
     /// Whether signal-driven orders are disabled (signal-only mode).
     [[nodiscard]] bool signalOnly() const;
 
-    /// Full risk-gated flow for manual orders (REPL/CLI/MCP).
+    /// Full risk-gated flow for strategy-originated orders (signal path,
+    /// maker-first fallback) and close flows.
     ///
     /// Evaluates the order once, applies a Modified quantity, and places it.
     /// Single-evaluation is important: re-evaluating inside the placement
     /// step would double-count the caller's own notional reservation and
     /// reject every order whose quantity was capped to the budget limit.
+    /// Direction gate applies: only the active market may trade unless
+    /// reduce_only. Manual orders take placeManualOrder().
     [[nodiscard]] Result<execution::OrderResponse>
     placeOrder(const execution::OrderRequest &req);
+
+    /// Manual-order path (REPL/CLI/MCP) with the M22 relaxed direction gate.
+    ///
+    /// Futures and CFD orders are executable in any active direction — each
+    /// market is bounded by its own notional budget (maxPositionNotional
+    /// Futures/Cfd), so the sub-agent can act on signals from both markets
+    /// without switching directions. Spot still requires the active
+    /// direction (or reduce_only).
+    [[nodiscard]] Result<execution::OrderResponse>
+    placeManualOrder(const execution::OrderRequest &req);
 
     /// Order-completion entry point (wired to both trackers).
     void onOrderComplete(const execution::ExecutionReport &report);
@@ -174,12 +187,13 @@ class OrderFlowExecutor
     /// around the cancel only, and placeOrder() acquires it internally too.
     void sweepMakerAttempts();
 
-    // --- Single active trading direction (runtime-switchable) ---
+    // --- Active trading direction (runtime-switchable) ---
     //
-    // Only the active market's orders pass the gate: strategy signals and
-    // manual orders for any other market are rejected with InactiveMarket
-    // (3008). reduce_only orders are exempt so old-direction positions stay
-    // closeable after a switch.
+    // Gates strategy-originated orders (signals + maker-first fallback) and
+    // spot manual orders: any non-active market is rejected with InactiveMarket
+    // (3008) unless reduce_only, so old-direction positions stay closeable
+    // after a switch. Futures/CFD manual orders (placeManualOrder) bypass the
+    // gate — per-market notional budgets bound them instead.
 
     /// Set the active trading direction (atomic, lock-free).
     void setActiveMarket(MarketType mt);
@@ -216,6 +230,13 @@ class OrderFlowExecutor
     [[nodiscard]] Result<execution::OrderResponse>
     placeOrder(const execution::OrderRequest &req,
                const risk::RiskEvalResult &eval);
+
+    /// Shared tail of the gated entry points: evaluate exactly once, then
+    /// place using that evaluation. Re-evaluating after a Modified result
+    /// double-counts the caller's own reservation and rejects orders whose
+    /// quantity was capped to the notional budget.
+    [[nodiscard]] Result<execution::OrderResponse>
+    evaluateAndPlace(const execution::OrderRequest &req);
 
     /// One in-flight maker-first attempt: the placed post-only request plus
     /// the deadline after which it falls back to a taker order.

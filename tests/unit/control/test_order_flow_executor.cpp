@@ -895,6 +895,67 @@ TEST_F(OrderFlowTest, ReduceOnlyExemptFromDirectionGate)
     EXPECT_EQ(1, m_placer->place_count);
 }
 
+// ---------------------------------------------------------------------------
+// M22: manual orders may execute futures/CFD in any active direction
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, ManualCfdOrderAllowedWhileFuturesActive)
+{
+    // Active direction is futures (fixture default) — a manual CFD order must
+    // pass the gate and reach the CFD placer (M22 relaxed manual gate).
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+
+    auto result = m_flow->placeManualOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_cfdPlacer->place_count);
+    EXPECT_EQ(0, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, ManualFuturesOrderAllowedWhileCfdActive)
+{
+    // The 2026-08-18 SNDK scenario: active direction is CFD, a manual futures
+    // short must pass the gate and reach the futures placer.
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "SNDK_USDT";
+    req.side = Side::Sell;
+    req.type = OrderType::Limit;
+    req.price = 2000.0;
+    req.quantity = 20.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+
+    auto result = m_flow->placeManualOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_count);
+    EXPECT_EQ(0, m_cfdPlacer->place_count);
+}
+
+TEST_F(OrderFlowTest, ManualSpotOrderStillGatedWhenInactive)
+{
+    // Spot is not part of the M22 relaxation — a spot manual order while the
+    // active direction is futures is still rejected at the gate.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Spot;
+
+    auto result = m_flow->placeManualOrder(req);
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InactiveMarket, error(result).code);
+    EXPECT_EQ(0, m_spotPlacer->place_count);
+}
+
 TEST_F(OrderFlowTest, SignalFromInactiveMarketIsSkipped)
 {
     // A signal for the inactive direction must be dropped without consuming
