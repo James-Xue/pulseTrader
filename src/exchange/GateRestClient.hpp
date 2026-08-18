@@ -159,6 +159,35 @@ class GateRestClient
     /// Returns the order object with current status.
     [[nodiscard]] Result<nlohmann::json> getFuturesOrder(const std::string &order_id);
 
+    /// GET /api/v4/futures/usdt/orders?contract=X&status=open — list ALL open
+    /// futures orders for a contract from the exchange, including orders the
+    /// engine did not place itself (App-side orders, pre-restart leftovers).
+    /// The engine's tracker-based get_orders view misses those — M23 grid
+    /// management needs the exchange truth.
+    [[nodiscard]] Result<nlohmann::json> getFuturesOrders(const std::string &contract);
+
+    // -----------------------------------------------------------------------
+    // Futures trigger orders (price_orders) — the TP/SL attached to a futures
+    // position. They live on a SEPARATE endpoint from plain orders; the
+    // position's close_order field does NOT show them (2026-08-16 memo).
+    // -----------------------------------------------------------------------
+
+    /// POST /api/v4/futures/usdt/price_orders — create a futures trigger order.
+    ///
+    /// body: {"initial": {contract, size, price, tif, is_reduce_only, ...},
+    ///        "trigger": {price, rule (1=above / 2=below), price_type,
+    ///                    expiration}, "order_type": "close-short-position"}
+    /// Returns the trigger order object on success.
+    [[nodiscard]] Result<nlohmann::json> postFuturesPriceOrder(const nlohmann::json &body);
+
+    /// GET /api/v4/futures/usdt/price_orders?contract=X&status=open — list
+    /// open trigger orders for a contract (status=open filter hard-coded).
+    [[nodiscard]] Result<nlohmann::json> getFuturesPriceOrders(const std::string &contract);
+
+    /// DELETE /api/v4/futures/usdt/price_orders/{order_id} — cancel a trigger
+    /// order. Returns the cancelled trigger order object on success.
+    [[nodiscard]] Result<nlohmann::json> cancelFuturesPriceOrder(const std::string &order_id);
+
     // -----------------------------------------------------------------------
     // TradFi (CFD) endpoints — /api/v4/tradfi/*, MT5 account, USD settlement
     // -----------------------------------------------------------------------

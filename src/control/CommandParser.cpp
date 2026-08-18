@@ -120,6 +120,74 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
                               nlohmann::json{ { "order_id", tokens[1] } } };
     }
 
+    // --- trigger <place|list|cancel> ... (futures price_orders, M23) ---
+    if ("trigger" == cmd && tokens.size() >= 2)
+    {
+        const auto &sub = tokens[1];
+        if ("list" == sub && tokens.size() >= 3)
+        {
+            return ParsedCommand{ "list_trigger_orders",
+                                  nlohmann::json{ { "contract", tokens[2] } } };
+        }
+        if ("orders" == sub && tokens.size() >= 3)
+        {
+            // Exchange-side order list (includes App-side / pre-restart
+            // orders the tracker-based `orders` command misses).
+            return ParsedCommand{ "list_futures_orders",
+                                  nlohmann::json{ { "contract", tokens[2] } } };
+        }
+        if ("cancel" == sub && tokens.size() >= 3)
+        {
+            return ParsedCommand{ "cancel_trigger_order",
+                                  nlohmann::json{ { "order_id", tokens[2] } } };
+        }
+        if ("place" == sub && tokens.size() >= 4)
+        {
+            // trigger place <contract> <trigger_price> [--rule N] [--size N]
+            //              [--order-type close-short-position] [--tif ioc]
+            //              [--auto-size close]
+            nlohmann::json params{ { "contract", tokens[2] } };
+            auto price = parseNumber(tokens[3]);
+            if (!price.has_value())
+            {
+                return std::nullopt;
+            }
+            params["trigger_price"] = *price;
+            for (size_t i = 4; i + 1 < tokens.size(); ++i)
+            {
+                if ("--rule" == tokens[i])
+                {
+                    auto rule = parseNumber(tokens[i + 1]);
+                    if (rule.has_value())
+                    {
+                        params["rule"] = *rule;
+                    }
+                }
+                else if ("--size" == tokens[i])
+                {
+                    auto size = parseNumber(tokens[i + 1]);
+                    if (size.has_value())
+                    {
+                        params["size"] = *size;
+                    }
+                }
+                else if ("--order-type" == tokens[i])
+                {
+                    params["order_type"] = tokens[i + 1];
+                }
+                else if ("--tif" == tokens[i])
+                {
+                    params["tif"] = tokens[i + 1];
+                }
+                else if ("--auto-size" == tokens[i])
+                {
+                    params["auto_size"] = tokens[i + 1];
+                }
+            }
+            return ParsedCommand{ "place_trigger_order", params };
+        }
+    }
+
     // --- set <id> <param> <value> ---
     if ("set" == cmd && tokens.size() >= 4)
     {
@@ -523,6 +591,11 @@ std::string replHelp()
         "  pause <id> / resume-strategy <id>\n"
         "  risk                   risk snapshot (drawdown, rate limiter)\n"
         "  modify <id> [--sl P] [--tp P]   adjust CFD position SL/TP live (0 clears)\n"
+        "  trigger place <contract> <price> [--rule N] [--size N]  futures trigger\n"
+        "                          order (price_orders; rule 1=above 2=below)\n"
+        "  trigger list <contract> / trigger orders <contract> / trigger cancel <id>\n"
+        "                          (trigger orders = TP/SL triggers; trigger orders\n"
+        "                          lists exchange-side open orders incl. App ones)\n"
         "  sync                   reconcile position view with the exchange\n"
         "  market <sym> [--levels N] [--klines N] [--market spot|futures|cfd]\n"
         "  help / quit / exit\n";

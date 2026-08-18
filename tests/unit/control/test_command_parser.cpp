@@ -230,3 +230,51 @@ TEST(CommandParser, ModifyCommandRejectsUnknownFlag)
 {
     EXPECT_FALSE(parseCommandLine("modify XAUUSD_Buy_1 --wat 1").has_value());
 }
+
+TEST(CommandParser, TriggerListTakesContract)
+{
+    const auto cmd = parseCommandLine("trigger list SNDK_USDT");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("list_trigger_orders", cmd->method);
+    EXPECT_EQ("SNDK_USDT", cmd->params["contract"]);
+}
+
+TEST(CommandParser, TriggerCancelTakesId)
+{
+    const auto cmd = parseCommandLine("trigger cancel 2088850508826546176");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("cancel_trigger_order", cmd->method);
+    EXPECT_EQ("2088850508826546176", cmd->params["order_id"]);
+}
+
+TEST(CommandParser, TriggerPlaceParsesFlags)
+{
+    const auto cmd = parseCommandLine(
+        "trigger place SNDK_USDT 1720 --rule 2 --size 2 "
+        "--order-type close-short-position --tif ioc");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("place_trigger_order", cmd->method);
+    EXPECT_EQ("SNDK_USDT", cmd->params["contract"]);
+    EXPECT_DOUBLE_EQ(1720.0, cmd->params["trigger_price"].get<double>());
+    EXPECT_DOUBLE_EQ(2.0, cmd->params["rule"].get<double>());
+    EXPECT_DOUBLE_EQ(2.0, cmd->params["size"].get<double>());
+    EXPECT_EQ("close-short-position", cmd->params["order_type"]);
+    EXPECT_EQ("ioc", cmd->params["tif"]);
+}
+
+TEST(CommandParser, TriggerPlaceDefaultsOrderType)
+{
+    const auto cmd = parseCommandLine("trigger place SNDK_USDT 1720");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("place_trigger_order", cmd->method);
+    EXPECT_FALSE(cmd->params.contains("order_type"));
+    EXPECT_FALSE(cmd->params.contains("rule"));
+}
+
+TEST(CommandParser, TriggerOrdersSubcommandListsExchangeOrders)
+{
+    const auto cmd = parseCommandLine("trigger orders SNDK_USDT");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("list_futures_orders", cmd->method);
+    EXPECT_EQ("SNDK_USDT", cmd->params["contract"]);
+}

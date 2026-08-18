@@ -199,6 +199,64 @@ TEST_F(EngineServicesTest, OpenOrderRequiresValidParams)
     EXPECT_EQ("fake", value(result).order_id);
 }
 
+// ---------------------------------------------------------------------------
+// M23: futures trigger orders (price_orders)
+// ---------------------------------------------------------------------------
+TEST_F(EngineServicesTest, PlaceTriggerOrderRequiresContract)
+{
+    auto result = m_services->placeTriggerOrder(nlohmann::json::object());
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+}
+
+TEST_F(EngineServicesTest, PlaceTriggerOrderRequiresPositivePrice)
+{
+    auto result = m_services->placeTriggerOrder(
+        nlohmann::json{ { "contract", "SNDK_USDT" },
+                        { "trigger_price", 0.0 } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+}
+
+TEST_F(EngineServicesTest, PlaceTriggerOrderReachesRestLayer)
+{
+    // The fixture wires its REST client to the spot slot; build a services
+    // instance with it on the FUTURES slot. The fixture has no API
+    // credentials, so the request must fail deterministically at the REST
+    // layer ("Missing API key") — proving the body made it past validation
+    // and serialization, not with a validation error.
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_restClient.get(), nullptr,
+        nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
+
+    auto result = svc.placeTriggerOrder(
+        nlohmann::json{ { "contract", "SNDK_USDT" },
+                        { "trigger_price", 1720.0 },
+                        { "rule", 2 },
+                        { "size", 2 },
+                        { "order_type", "close-short-position" } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::HttpError, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("Missing API key"));
+}
+
+TEST_F(EngineServicesTest, ListTriggerOrdersRequiresContract)
+{
+    auto result = m_services->listTriggerOrders(nlohmann::json::object());
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+}
+
+TEST_F(EngineServicesTest, CancelTriggerOrderRequiresId)
+{
+    auto result = m_services->cancelTriggerOrder(nlohmann::json::object());
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+}
+
 TEST_F(EngineServicesTest, ClosePositionUnknownFails)
 {
     auto result = m_services->closePosition(
@@ -568,4 +626,11 @@ TEST_F(EngineServicesTest, SyncPositionsAndModifySlTpRegistered)
     const auto sync_result = reg.at("sync_positions")(nlohmann::json::object());
     const auto payload = std::get<nlohmann::json>(sync_result);
     EXPECT_TRUE(payload.is_object());
+}
+
+TEST_F(EngineServicesTest, ListFuturesOrdersRequiresContract)
+{
+    auto result = m_services->listFuturesOrders(nlohmann::json::object());
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
 }

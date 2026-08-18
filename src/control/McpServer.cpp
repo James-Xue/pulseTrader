@@ -212,6 +212,58 @@ nlohmann::json McpServer::toolDefinitions()
         },
         { "order_id" });
 
+    add("place_trigger_order",
+        "Create a futures trigger order (price_orders) — the TP/SL attached "
+        "to a futures position. rule: 1 = price crosses above (SL for shorts "
+        "/ TP for longs), 2 = price crosses below (TP for shorts / SL for "
+        "longs). For a grid short at X with TP at X-10: rule=2, "
+        "trigger_price=X-10, size=<lots>, order_type=close-short-position.",
+        nlohmann::json{
+            { "contract", stringParam("contract",
+                                      "Futures contract (e.g. SNDK_USDT)") },
+            { "trigger_price", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "Trigger price" } } },
+            { "rule", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "1 = price crosses above, 2 = below (default 2)" } } },
+            { "size", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "Contracts to close (0 + auto_size=close = whole position)" } } },
+            { "order_type", stringParam("order_type",
+                                        "close-short-position (default) / close-long-position") },
+            { "tif", stringParam("tif", "Time in force for the triggered order (default ioc)") },
+            { "auto_size", stringParam("auto_size",
+                                       "close (default) / size — close covers the whole position") },
+        },
+        { "contract", "trigger_price" });
+
+    add("list_trigger_orders",
+        "List open futures trigger orders for a contract.",
+        nlohmann::json{
+            { "contract", stringParam("contract",
+                                      "Futures contract (e.g. SNDK_USDT)") },
+        },
+        { "contract" });
+
+    add("cancel_trigger_order",
+        "Cancel a futures trigger order by ID.",
+        nlohmann::json{
+            { "order_id", stringParam("order_id", "Trigger order ID") },
+        },
+        { "order_id" });
+
+    add("list_futures_orders",
+        "List ALL open futures orders for a contract straight from the "
+        "exchange — including orders the engine did not place itself "
+        "(App-side orders, pre-restart leftovers) that the tracker-based "
+        "get_orders view misses.",
+        nlohmann::json{
+            { "contract", stringParam("contract",
+                                      "Futures contract (e.g. SNDK_USDT)") },
+        },
+        { "contract" });
+
     add("halt_trading",
         "Manually halt all trading (circuit-breaker override). Returns risk snapshot.",
         nlohmann::json::object(), {});

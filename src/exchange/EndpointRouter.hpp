@@ -132,6 +132,15 @@ class EndpointRouter
     /// uses getCfdPositions()).
     [[nodiscard]] static std::string positionsPath(MarketType mt);
 
+    /// Path to futures trigger orders (price_orders) — the TP/SL attached to
+    /// a futures position live here, NOT in the position's close_order field
+    /// (2026-08-16 memo). Futures only; spot/CFD return empty string.
+    [[nodiscard]] static std::string priceOrdersPath(MarketType mt);
+
+    /// Path to a specific futures trigger order by ID.
+    [[nodiscard]] static std::string priceOrderPath(MarketType mt,
+                                                    const std::string &order_id);
+
     // -----------------------------------------------------------------------
     // TradFi (CFD) specific endpoint builders — no WebSocket, distinct paths
     // -----------------------------------------------------------------------

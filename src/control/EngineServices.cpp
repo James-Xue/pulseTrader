@@ -823,6 +823,112 @@ nlohmann::json EngineServices::switchDirection(const std::string &direction)
     return s;
 }
 
+// ---------------------------------------------------------------------------
+// Futures trigger orders (price_orders) — M23
+// ---------------------------------------------------------------------------
+Result<nlohmann::json> EngineServices::placeTriggerOrder(const nlohmann::json &params)
+{
+    const auto contract = params.value("contract", "");
+    if (contract.empty())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "place_trigger_order: contract is required" };
+    }
+    const double trigger_price = params.value("trigger_price", 0.0);
+    if (trigger_price <= 0.0)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "place_trigger_order: trigger_price must be > 0" };
+    }
+    if (nullptr == m_futuresRest)
+    {
+        return PulseError{ ErrorCode::HttpError,
+                           "place_trigger_order: futures REST client not wired" };
+    }
+
+    // rule: 1 = price ≥ trigger (SL direction for shorts / TP for longs),
+    //       2 = price ≤ trigger (TP direction for shorts / SL for longs).
+    // default 2 matches the grid-TP use case (short fills → TP below entry).
+    const int rule = params.value("rule", 2);
+    const int size = params.value("size", 0);
+    const auto order_type =
+        params.value("order_type", std::string("close-short-position"));
+    const auto tif = params.value("tif", std::string("ioc"));
+    const auto auto_size = params.value("auto_size", std::string("close"));
+
+    nlohmann::json body{
+        { "initial", nlohmann::json{
+              { "contract", contract },
+              { "size", size },
+              { "price", "0" },
+              { "tif", tif },
+              { "is_reduce_only", true },
+              { "auto_size", auto_size },
+          } },
+        { "trigger", nlohmann::json{
+              { "price", std::to_string(trigger_price) },
+              { "rule", rule },
+              { "price_type", params.value("price_type", 0) },
+              { "expiration", 0 },
+          } },
+        { "order_type", order_type },
+    };
+
+    std::lock_guard lock(m_restMutex);
+    return m_futuresRest->postFuturesPriceOrder(body);
+}
+
+Result<nlohmann::json> EngineServices::listFuturesOrders(const nlohmann::json &params)
+{
+    const auto contract = params.value("contract", "");
+    if (contract.empty())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "list_futures_orders: contract is required" };
+    }
+    if (nullptr == m_futuresRest)
+    {
+        return PulseError{ ErrorCode::HttpError,
+                           "list_futures_orders: futures REST client not wired" };
+    }
+    std::lock_guard lock(m_restMutex);
+    return m_futuresRest->getFuturesOrders(contract);
+}
+
+Result<nlohmann::json> EngineServices::listTriggerOrders(const nlohmann::json &params)
+{
+    const auto contract = params.value("contract", "");
+    if (contract.empty())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "list_trigger_orders: contract is required" };
+    }
+    if (nullptr == m_futuresRest)
+    {
+        return PulseError{ ErrorCode::HttpError,
+                           "list_trigger_orders: futures REST client not wired" };
+    }
+    std::lock_guard lock(m_restMutex);
+    return m_futuresRest->getFuturesPriceOrders(contract);
+}
+
+Result<nlohmann::json> EngineServices::cancelTriggerOrder(const nlohmann::json &params)
+{
+    const auto order_id = params.value("order_id", "");
+    if (order_id.empty())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "cancel_trigger_order: order_id is required" };
+    }
+    if (nullptr == m_futuresRest)
+    {
+        return PulseError{ ErrorCode::HttpError,
+                           "cancel_trigger_order: futures REST client not wired" };
+    }
+    std::lock_guard lock(m_restMutex);
+    return m_futuresRest->cancelFuturesPriceOrder(order_id);
+}
+
 bool EngineServices::cancelOrder(const std::string &order_id)
 {
     if (order_id.empty())

@@ -614,6 +614,49 @@ Result<nlohmann::json> GateRestClient::getFuturesOrder(const std::string &order_
     return request("GET", EndpointRouter::orderPath(MarketType::Futures, order_id));
 }
 
+Result<nlohmann::json> GateRestClient::getFuturesOrders(const std::string &contract)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot list futures orders"};
+    }
+    const std::string query = "contract=" + contract + "&status=open";
+    return request("GET", EndpointRouter::ordersPath(MarketType::Futures), query);
+}
+
+// ---------------------------------------------------------------------------
+// Futures trigger orders (price_orders)
+// ---------------------------------------------------------------------------
+Result<nlohmann::json> GateRestClient::postFuturesPriceOrder(const nlohmann::json &body)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures trigger order"};
+    }
+    return request("POST", EndpointRouter::priceOrdersPath(MarketType::Futures), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesPriceOrders(const std::string &contract)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query futures trigger orders"};
+    }
+    // status=open: only live triggers are useful to a grid agent; finished
+    // ones are noise (each trigger creates a new object).
+    const std::string query = "contract=" + contract + "&status=open";
+    return request("GET", EndpointRouter::priceOrdersPath(MarketType::Futures), query);
+}
+
+Result<nlohmann::json> GateRestClient::cancelFuturesPriceOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel futures trigger order"};
+    }
+    return request("DELETE", EndpointRouter::priceOrderPath(MarketType::Futures, order_id));
+}
+
 Result<nlohmann::json> GateRestClient::setFuturesLeverage(const std::string &contract,
                                                           double leverage)
 {

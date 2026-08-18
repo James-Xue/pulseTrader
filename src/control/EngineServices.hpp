@@ -103,6 +103,38 @@ class EngineServices
     /// Cancel an open order; probes futures tracker first, then spot.
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
+    // --- Futures trigger orders (price_orders) — M23 ---
+    //
+    // The TP/SL attached to a futures position are INDEPENDENT trigger orders
+    // on /futures/usdt/price_orders (2026-08-16 memo) — the position's
+    // close_order field does not show them. These three methods expose
+    // create/list/cancel so the SNDK grid sub-agent can manage per-slot
+    // take-profits without the App.
+
+    /// Create a futures trigger order — `place_trigger_order`.
+    ///
+    /// Params: contract (required), trigger_price (required), rule (1 = price
+    /// crosses above → SL for shorts / TP for longs; 2 = price crosses below
+    /// → TP for shorts / SL for longs; default 2), size (contracts to close,
+    /// default 0), order_type (close-short-position / close-long-position,
+    /// default close-short-position), tif (default "ioc"), auto_size (default
+    /// "close"). Serialized through the shared REST mutex.
+    [[nodiscard]] Result<nlohmann::json> placeTriggerOrder(const nlohmann::json &params);
+
+    /// List open trigger orders for a contract — `list_trigger_orders`.
+    /// Params: contract (required). Returns the raw exchange array.
+    [[nodiscard]] Result<nlohmann::json> listTriggerOrders(const nlohmann::json &params);
+
+    /// List ALL open futures orders for a contract straight from the exchange
+    /// — `list_futures_orders`. Includes orders the engine did not place
+    /// (App-side orders, pre-restart leftovers) that the tracker-based
+    /// `orders()` view misses. Params: contract (required).
+    [[nodiscard]] Result<nlohmann::json> listFuturesOrders(const nlohmann::json &params);
+
+    /// Cancel a trigger order by ID — `cancel_trigger_order`.
+    /// Params: order_id (required).
+    [[nodiscard]] Result<nlohmann::json> cancelTriggerOrder(const nlohmann::json &params);
+
     void haltTrading();
     void resumeTrading();
     bool pauseStrategy(const std::string &id);

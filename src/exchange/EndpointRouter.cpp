@@ -159,6 +159,29 @@ std::string EndpointRouter::positionsPath(MarketType mt)
 }
 
 // ---------------------------------------------------------------------------
+// priceOrdersPath — futures only. Independent trigger orders (price_orders):
+// the TP/SL attached to a futures position live HERE, not in the position's
+// close_order field (2026-08-16 memo). Spot/CFD have no equivalent.
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::priceOrdersPath(MarketType mt)
+{
+    if (MarketType::Futures == mt)
+    {
+        return "/api/v4/futures/usdt/price_orders";
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// priceOrderPath — specific trigger order by ID
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::priceOrderPath(MarketType mt,
+                                           const std::string &order_id)
+{
+    return priceOrdersPath(mt) + "/" + order_id;
+}
+
+// ---------------------------------------------------------------------------
 // leveragePath — futures only
 // ---------------------------------------------------------------------------
 std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contract)

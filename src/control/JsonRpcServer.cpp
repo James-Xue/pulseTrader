@@ -488,6 +488,23 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
         return RpcResult{ nlohmann::json{ { "cancelled", true },
                                           { "order_id", id } } };
     };
+    // Futures trigger orders (price_orders) — M23.
+    reg["place_trigger_order"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.placeTriggerOrder(params) };
+    };
+    reg["list_trigger_orders"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.listTriggerOrders(params) };
+    };
+    reg["list_futures_orders"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.listFuturesOrders(params) };
+    };
+    reg["cancel_trigger_order"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.cancelTriggerOrder(params) };
+    };
     reg["halt_trading"] = [&services](const nlohmann::json &)
     {
         services.haltTrading();
