@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-18 (home machine, M23 shipped + SNDK grid deployed)
-> File size: 10366 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-19 (home machine, M22-fix committed 8767e8a + gate交易 reorg)
+> File size: 10711 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -57,7 +57,7 @@
 - 实测:SL/TP 附件交易所记录与发送值一致;验证单 +1.20 USD(用户手动平)
 
 ### M20 Signal-Only + SignalBoard (2026-08-17, 0041a4a..d5daf08)
-- 背景:引擎策略与 LLM 子代理双头交易风险(8-17 17:06 事故:策略自动开 XAUUSD 多 0.01 无保护,浮亏 -7.5 用户手动平);设计文档 `~/1_Code/commit_my_life/0_note/xauusd-signal-board-design.md`
+- 背景:引擎策略与 LLM 子代理双头交易风险(8-17 17:06 事故:策略自动开 XAUUSD 多 0.01 无保护,浮亏 -7.5 用户手动平);设计文档 `~/1_Code/commit_my_life/0_note/gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md`
 - **signal_only 模式**:`[strategy] signal_only = true`(已启用)→ 引擎策略只发信号不下单,手动 placeOrder 不受影响
 - **SignalBoard**:每 strategy_id 覆盖式保留最新 Entry(signal + ts_ms),聚合独立槽位;`get_signals` 输出 signals[] + aggregate
 - **open_order 附加 SL/TP**:OrderRequest sl_price/tp_price,CFD 分支填 price_sl/price_tp(交易所原生保护,引擎挂了也止损);非 cfd 明确拒绝
@@ -151,13 +151,20 @@ PulseConfig
 
 - **规格**:36 格限价空 1730~1800 步进 2,每格 2 张(quanto 0.01,~35 USD/格,网格 ~1,260 USD);只做空;分格止盈 = 成交价-10 的 price_orders 触发单(rule=2,size=2);不挂止损;TP 兑现后同格循环重挂
 - **实盘状态**:45 单 = 36 网格 + 8 App 用户单(1738/1758/1788 与网格重叠,用户决定**双重加空**)+ 20@2000 引擎单;持仓空 40 张;App 全平触发单 @1692(auto_size=close,价格 ≤1692 平整个空头)
-- **代理文档**:`~/1_Code/commit_my_life/0_note/sndk-subagent-strategy.md`(网格协议)+ sndk-agent-taskbook/thinking;与黄金代理并行,各管各市场
+- **代理文档**:`~/1_Code/commit_my_life/0_note/gate交易/闪迪/joey-Z170I-PRO-GAMING/`(策略/任务书/思考板/状态);黄金代理同构目录在 `gate交易/黄金/joey-Z170I-PRO-GAMING/`;并行各管各市场
 - **经验**:批量挂单 CLI 输出不可靠(报错走 stderr)、maxOpenPositions=4 拦网格(→40)、引擎重启后 tracker 视图丢旧单(用 list_futures_orders 交易所侧视图)、触发单必须 size=2 不能用 auto_size=close
+
+## 笔记目录 (2026-08-19 重组)
+
+`~/1_Code/commit_my_life/0_note/gate交易/` 按市场×机器×类别组织:
+黄金 & 闪迪 → 机器(joey-Z170I-PRO-GAMING / james-MECHREVO / ZhangdeMacBook-Pro)→ 任务书/思考板/状态/策略/复盘/统计
+- Gate 通用 API 备忘(期货触发单)在 gate交易/ 根目录
+- 文档内路径引用已同步更新;续接子代理会话时按新路径读取
 
 ## Next Steps (2026-08-18)
 
 - ⏳ **SNDK 网格首轮实盘验证**:首格成交 → 分格 TP 触发单触发(只平 2 张)→ 同格循环重挂
-- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
+- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
 - ⏳ **双代理并行**:SNDK 网格代理 + 黄金代理同时跑,验证互不干扰(各自独立会话/文档,共享全局熔断)
 - ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
 - ⏳ maker-first 实盘验证(先 testnet 后小资金)
