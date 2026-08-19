@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-19 (home machine, M24 shipped + UNITREE ladder live)
-> File size: 10837 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-20 (home machine)
+> File size: 11620 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -31,6 +31,13 @@
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
 ## Current State (M23 Done, 2026-08-18)
+
+### 2026-08-18~20 更新(家庭机)
+
+- **08-18 五修复已提交**(本地 HEAD 5daeaae,751 绿):CFD 平仓零痕迹(close 合成 ExecutionReport)、MCP 桥 9104 自动重连(ControlClient)、min_confidence 未 seed 致 momentum/mean_reversion 静默(0.6→0.0)、日志 flush_on(info)、+8h 偏移(TimeUtil local-mode offset 恒 0)
+- **origin/headless 已 pull 至 2a227c5(M24)**:M22 方向闸门放宽+minAvailableAfterStopUsd(759 绿)、M23 期货触发单三接口(770 绿)、M24 futures sync 外部余量去重(783 绿);公司机断网未同步,按机器名分流,见记忆 pulsetrader-multimachine-sync
+- **08-20 网络实测 + 引擎直连**:关 Clash TUN 后实测真直连可用(spot/time 200@2.4s、XAUUSD ticker 200@1.4s、fx-ws:443 TCP 通、DNS 无污染);三路径对比:TUN fake-IP 0.56s 最快 / 7897 代理 1.56s / 直连 1.4~2.4s。`trading.toml` `proxyUrl=""`,引擎直连运行中;**本次启动无爬行**(同步 REST ~1s;爬行根因未修,方案 A+C 待实施)
+- **子代理**:08-18 夜用户令停(引擎+代理+2cron);08-20 引擎已重启(直连),子代理循环未跑
 
 ### Test Summary
 - **783 tests green** (本机 8-19 实测,M22–M24 全量)
@@ -75,7 +82,7 @@
 - 编译:`build_headless`(Debug + SQLITE ON),745 绿 11.7s;旧 `build/` 已废弃
 - 配置:trading.toml 主网 CFD 黄金(XAUUSD 3 策略 + signal_only + 风控 6000/5500/4);`.env` 不入库
 - MCP 注册:`claude mcp add pulsetrader -- <repo>/run.sh mcp`;MCP 模式 stdout 必须纯 JSON-RPC(曾移除 echo 污染)
-- 引擎 systemd 管理(single instance 独占 8081);当前 **stopped**(8-18 10:43 用户停机)
+- 引擎 systemd 管理(single instance 独占 8081);08-20 已重启(家庭机 nohup 直连,见上节)
 
 ## 关键决策与事故 (M14–M16 时代,细节见 archive)
 
@@ -162,13 +169,14 @@ PulseConfig
 - Gate 通用 API 备忘(期货触发单)在 gate交易/ 根目录
 - 文档内路径引用已同步更新;续接子代理会话时按新路径读取
 
-## Next Steps (2026-08-18)
+## Next Steps (2026-08-20)
 
+- ⏳ 启动期 REST 爬行修复:方案 A+C(启动期短超时 + 符号表磁盘缓存)评估完成未实施;08-20 直连后样本 1 未复现
+- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;trailing 升级待做;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
 - ⏳ **SNDK 网格首轮实盘验证**:首格成交 → 分格 TP 触发单触发(只平 2 张)→ 同格循环重挂
-- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
 - ⏳ **双代理并行**:SNDK 网格代理 + 黄金代理同时跑,验证互不干扰(各自独立会话/文档,共享全局熔断)
 - ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
 - ⏳ maker-first 实盘验证(先 testnet 后小资金)
-- ⏳ 已知显示 bug:futures PnL 乘杠杆(calculateUnrealizedPnl/sync leverage 处理)、open_time_str +8h 偏移
-- ⏳ loopback awselb 响应(疑似 Clash TUN 劫持)
+- ✅ 显示 bug 已修:futures PnL 乘杠杆(36ee6f9)、open_time_str +8h 偏移(f94a74f)
+- ⏳ loopback awselb 响应(疑 Clash TUN 劫持;用户已关 TUN,可能已无关)
 - ⏳ 规则调优候选(夜盘纸面 3W/1L +15.7):RSI<30 破位禁追空(4/4 被买回教训)、双收盘+ticker 确认纪律、ATR 动态止损
