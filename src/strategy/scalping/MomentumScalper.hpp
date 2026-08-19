@@ -7,8 +7,10 @@
 //   3. Buy signal  — fast EMA crosses above slow EMA (bullish crossover)
 //   4. Sell signal — fast EMA crosses below slow EMA (bearish crossover)
 //
-// Confidence is derived from the distance between EMAs relative to price:
-//   confidence = clamp(|fast - slow| / slow, 0.0, 1.0)
+// Confidence is derived from the distance between EMAs normalized by ATR14:
+//   confidence = clamp(|fast - slow| / ATR14, 0.0, 1.0)
+// (ATR normalization keeps confidence comparable across price scales —
+// dividing by price gave ~0.00007 for XAUUSD, always below min_confidence)
 //
 // Data source:
 //   - onKline() reads closed candles from KlineBuffer via the context
@@ -54,6 +56,18 @@ class MomentumScalper : public StrategyBase
     /// Called on orderbook updates — not used by this strategy (kline-driven).
     void onOrderbook(const market::OrderBook &book) override;
 
+    /// Compute signal confidence from EMA separation normalized by ATR.
+    ///
+    /// confidence = clamp(|ema_fast - ema_slow| / atr, 0.0, 1.0)
+    ///
+    /// Parameters:
+    ///   1. ema_fast — fast EMA value
+    ///   2. ema_slow — slow EMA value
+    ///   3. atr      — average true range (same price units); must be > 0
+    ///
+    /// Returns 0.0 when atr is non-positive (flat market, no conviction).
+    [[nodiscard]] static double computeConfidence(double ema_fast, double ema_slow, double atr);
+
   private:
     StrategyParams m_params;
 
@@ -76,6 +90,13 @@ class MomentumScalper : public StrategyBase
     [[nodiscard]] double computeEma(const std::vector<double> &closes,
         double period,
         double prev_ema) const;
+
+    /// Compute ATR (average true range) over the last `period` candles.
+    ///
+    /// TR = max(high - low, |high - prev_close|, |low - prev_close|).
+    /// Returns 0.0 when fewer than `period + 1` candles are available.
+    [[nodiscard]] double computeAtr(const std::vector<market::Kline> &candles,
+        std::size_t period) const;
 };
 
 } // namespace pulse::strategy

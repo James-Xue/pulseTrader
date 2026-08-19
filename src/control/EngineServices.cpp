@@ -603,8 +603,28 @@ EngineServices::openOrder(const nlohmann::json &params)
         {
             const double notional = ref_price * req.quantity
                                     * req.quanto_multiplier;
-            const double leverage =
-                req.leverage > 0.0 ? req.leverage : 1.0;
+            // CFD manual orders don't carry a leverage field — fall back to
+            // the configured instance leverage for this symbol. Assuming 1:1
+            // (full notional) would block every 0.01-lot order (2026-08-18
+            // round 152: XAUUSD 0.01 rejected with 4400 margin instead of
+            // the exchange's ~8.8 at 500x).
+            double leverage = req.leverage;
+            if (leverage <= 0.0)
+            {
+                for (const auto &inst : m_cfg.strategy.strategies)
+                {
+                    if (inst.enabled && MarketType::Cfd == inst.market_type
+                        && inst.symbol == req.symbol)
+                    {
+                        leverage = inst.leverage;
+                        break;
+                    }
+                }
+            }
+            if (leverage <= 0.0)
+            {
+                leverage = 1.0;
+            }
             const double margin = notional / leverage;
             const double stop_loss_usd =
                 std::abs(ref_price - req.sl_price.value())
@@ -856,10 +876,23 @@ Result<nlohmann::json> EngineServices::placeTriggerOrder(const nlohmann::json &p
     const auto tif = params.value("tif", std::string("ioc"));
     const auto auto_size = params.value("auto_size", std::string("close"));
 
+    // Gate price_orders closes the WHOLE position only (2026-08-18 live
+    // probes): for close-*-position order types the exchange requires
+    // auto_size non-empty (1017) and rejects non-zero size alongside it
+    // (1014), and unknown auto_size enums are rejected (1021). Partial
+    // closes (grid per-level TP) must use open_order with reduce_only.
+    if (size > 0)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "place_trigger_order: Gate price_orders supports "
+                           "whole-position closes only (size must be 0); for "
+                           "partial closes use open_order with reduce_only" };
+    }
+
     nlohmann::json body{
         { "initial", nlohmann::json{
               { "contract", contract },
-              { "size", size },
+              { "size", 0 },
               { "price", "0" },
               { "tif", tif },
               { "is_reduce_only", true },

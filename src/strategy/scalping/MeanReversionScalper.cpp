@@ -142,20 +142,16 @@ void MeanReversionScalper::onKline(const market::Kline & /*kline*/)
         return;
     }
 
-    // 10. Compute confidence: how far price has penetrated beyond the band.
-    double confidence = 0.0;
-    if (band_width > 0.0)
-    {
-        if (oversold)
-        {
-            confidence = (lower_band - current_price) / band_width;
-        }
-        else
-        {
-            confidence = (current_price - upper_band) / band_width;
-        }
-    }
-    confidence = std::clamp(confidence, 0.0, 1.0);
+    // 10. Compute confidence: band penetration normalized by ATR14.
+    //     ATR normalization keeps confidence meaningful across price scales
+    //     (band-width ratio required ~60% of a 2σ band for 0.6 — near-unreachable
+    //     on 1m gold, so signals were silently dropped by min_confidence).
+    //     Falls back to the band-width ratio when ATR is unavailable.
+    const double atr = computeAtr(candles, 14);
+    const double penetration = oversold
+        ? (lower_band - current_price)
+        : (current_price - upper_band);
+    const double confidence = computeConfidence(penetration, atr, band_width);
 
     // 11. Build and emit signal.
     TradingSignal signal;
@@ -172,6 +168,7 @@ void MeanReversionScalper::onKline(const market::Kline & /*kline*/)
         { "bb_upper", upper_band },
         { "bb_lower", lower_band },
         { "bb_mid", sma },
+        { "atr", atr },
     };
 
     PULSE_LOG_INFO("strategy", "[{}] {} signal: price={:.2f}, upper={:.2f}, lower={:.2f}, sma={:.2f}",
@@ -179,6 +176,45 @@ void MeanReversionScalper::onKline(const market::Kline & /*kline*/)
 
     emitSignal(signal);
     m_lastSignalTimeMs = nowMs;
+}
+
+double MeanReversionScalper::computeConfidence(const double penetration,
+    const double atr,
+    const double band_width)
+{
+    if (atr > 0.0)
+    {
+        return std::clamp(penetration / atr, 0.0, 1.0);
+    }
+    if (band_width > 0.0)
+    {
+        return std::clamp(penetration / band_width, 0.0, 1.0);
+    }
+    return 0.0;
+}
+
+double MeanReversionScalper::computeAtr(const std::vector<market::Kline> &candles,
+    std::size_t period) const
+{
+    // Need at least period + 1 candles to compute `period` true ranges.
+    if (candles.size() < period + 1)
+    {
+        return 0.0;
+    }
+
+    // Compute True Range for the last `period` candles.
+    // TR = max(high - low, |high - prev_close|, |low - prev_close|)
+    double sum_tr = 0.0;
+    const auto start = candles.size() - period;
+    for (std::size_t i = start; i < candles.size(); ++i)
+    {
+        const double hl = candles[i].high - candles[i].low;
+        const double hpc = std::abs(candles[i].high - candles[i - 1].close);
+        const double lpc = std::abs(candles[i].low - candles[i - 1].close);
+        sum_tr += std::max({ hl, hpc, lpc });
+    }
+
+    return sum_tr / static_cast<double>(period);
 }
 
 } // namespace pulse::strategy

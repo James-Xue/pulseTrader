@@ -69,8 +69,9 @@ void MomentumScalper::onKline(const market::Kline & /*kline*/)
     const auto slow_period = static_cast<std::size_t>(
         m_params.ema_slow_period.load(std::memory_order_acquire));
 
-    // 2. Fetch enough candles to compute both EMAs.
-    const auto needed = slow_period + 1; // +1 for initial SMA seed
+    // 2. Fetch enough candles to compute both EMAs (and ATR14 for confidence
+    //    normalization).
+    const auto needed = std::max(slow_period + 1, std::size_t{ 15 }); // +1 for EMA SMA seed; 15 for ATR14
     auto *feed = m_context.market_feed;
     if (nullptr == feed)
     {
@@ -114,13 +115,12 @@ void MomentumScalper::onKline(const market::Kline & /*kline*/)
 
         if (bullish_cross || bearish_cross)
         {
-            // 6. Compute confidence: normalized distance between EMAs.
-            double confidence = 0.0;
-            if (0.0 != ema_slow)
-            {
-                confidence = std::abs(ema_fast - ema_slow) / ema_slow;
-            }
-            confidence = std::clamp(confidence, 0.0, 1.0);
+            // 6. Compute confidence: EMA separation normalized by ATR14.
+            //    ATR normalization keeps confidence meaningful across price
+            //    scales (dividing by price gave ~0.00007 for XAUUSD — always
+            //    below min_confidence, so signals were silently dropped).
+            const double atr = computeAtr(candles, 14);
+            const double confidence = computeConfidence(ema_fast, ema_slow, atr);
 
             // 7. Build and emit signal.
             TradingSignal signal;
@@ -137,6 +137,7 @@ void MomentumScalper::onKline(const market::Kline & /*kline*/)
                 { "ema_fast", ema_fast },
                 { "ema_slow", ema_slow },
                 { "ema_diff", ema_fast - ema_slow },
+                { "atr", atr },
             };
 
             PULSE_LOG_INFO("strategy", "[{}] {} signal: confidence={:.4f}, price={:.2f}",
@@ -186,6 +187,39 @@ double MomentumScalper::computeEma(const std::vector<double> &closes,
     }
 
     return ema;
+}
+
+double MomentumScalper::computeConfidence(const double ema_fast, const double ema_slow, const double atr)
+{
+    if (atr <= 0.0)
+    {
+        return 0.0; // Flat market — no meaningful conviction.
+    }
+    return std::clamp(std::abs(ema_fast - ema_slow) / atr, 0.0, 1.0);
+}
+
+double MomentumScalper::computeAtr(const std::vector<market::Kline> &candles,
+    std::size_t period) const
+{
+    // Need at least period + 1 candles to compute `period` true ranges.
+    if (candles.size() < period + 1)
+    {
+        return 0.0;
+    }
+
+    // Compute True Range for the last `period` candles.
+    // TR = max(high - low, |high - prev_close|, |low - prev_close|)
+    double sum_tr = 0.0;
+    const auto start = candles.size() - period;
+    for (std::size_t i = start; i < candles.size(); ++i)
+    {
+        const double hl = candles[i].high - candles[i].low;
+        const double hpc = std::abs(candles[i].high - candles[i - 1].close);
+        const double lpc = std::abs(candles[i].low - candles[i - 1].close);
+        sum_tr += std::max({ hl, hpc, lpc });
+    }
+
+    return sum_tr / static_cast<double>(period);
 }
 
 } // namespace pulse::strategy

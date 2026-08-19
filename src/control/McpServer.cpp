@@ -216,8 +216,9 @@ nlohmann::json McpServer::toolDefinitions()
         "Create a futures trigger order (price_orders) — the TP/SL attached "
         "to a futures position. rule: 1 = price crosses above (SL for shorts "
         "/ TP for longs), 2 = price crosses below (TP for shorts / SL for "
-        "longs). For a grid short at X with TP at X-10: rule=2, "
-        "trigger_price=X-10, size=<lots>, order_type=close-short-position.",
+        "longs). WHOLE-POSITION CLOSE ONLY: Gate price_orders requires "
+        "auto_size (non-empty) and rejects any non-zero size — for partial "
+        "closes (e.g. a grid level's TP) use open_order with reduce_only.",
         nlohmann::json{
             { "contract", stringParam("contract",
                                       "Futures contract (e.g. SNDK_USDT)") },
@@ -229,12 +230,12 @@ nlohmann::json McpServer::toolDefinitions()
                   { "description", "1 = price crosses above, 2 = below (default 2)" } } },
             { "size", nlohmann::json{
                   { "type", "number" },
-                  { "description", "Contracts to close (0 + auto_size=close = whole position)" } } },
+                  { "description", "Must be 0 — whole-position close only" } } },
             { "order_type", stringParam("order_type",
                                         "close-short-position (default) / close-long-position") },
             { "tif", stringParam("tif", "Time in force for the triggered order (default ioc)") },
             { "auto_size", stringParam("auto_size",
-                                       "close (default) / size — close covers the whole position") },
+                                       "Whole-position close mode: close (default) / close_long / close_short") },
         },
         { "contract", "trigger_price" });
 

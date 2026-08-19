@@ -9,8 +9,11 @@
 //   5. Buy signal  — price touches or falls below lower band (oversold)
 //   6. Sell signal — price touches or rises above upper band (overbought)
 //
-// Confidence is derived from how far price has penetrated beyond the band:
-//   confidence = clamp(|price - band| / (upper - lower), 0.0, 1.0)
+// Confidence is derived from how far price has penetrated beyond the band,
+// normalized by ATR14 (falls back to band width when ATR is unavailable):
+//   confidence = clamp(|price - band| / ATR14, 0.0, 1.0)
+// (ATR normalization keeps confidence meaningful across price scales —
+// band-width ratio required ~60% of a 2σ band, near-unreachable on 1m gold)
 //
 // Data source:
 //   - onKline() reads closed candles from KlineBuffer
@@ -54,12 +57,32 @@ class MeanReversionScalper : public StrategyBase
     /// Called on orderbook updates — not used by this strategy.
     void onOrderbook(const market::OrderBook &book) override;
 
+    /// Compute signal confidence from band penetration normalized by ATR.
+    ///
+    /// confidence = clamp(penetration / atr, 0.0, 1.0) when atr > 0,
+    /// otherwise falls back to clamp(penetration / band_width, 0.0, 1.0).
+    ///
+    /// Parameters:
+    ///   1. penetration — distance beyond the band (positive)
+    ///   2. atr         — average true range (same price units)
+    ///   3. band_width  — upper - lower band distance (fallback normalizer)
+    [[nodiscard]] static double computeConfidence(double penetration,
+        double atr,
+        double band_width);
+
   private:
     StrategyParams m_params;
 
     std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last signal timestamp (ms) for cooldown.
     std::int64_t m_lastWarmupLogMs{ 0 };  ///< Throttle warmup log to every 30 s.
     std::int64_t m_lastNoDataLogMs{ 0 }; ///< Throttle "no data" log to every 30 s.
+
+    /// Compute ATR (average true range) over the last `period` candles.
+    ///
+    /// TR = max(high - low, |high - prev_close|, |low - prev_close|).
+    /// Returns 0.0 when fewer than `period + 1` candles are available.
+    [[nodiscard]] double computeAtr(const std::vector<market::Kline> &candles,
+        std::size_t period) const;
 };
 
 } // namespace pulse::strategy

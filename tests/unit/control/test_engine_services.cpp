@@ -218,6 +218,31 @@ TEST_F(EngineServicesTest, PlaceTriggerOrderRequiresPositivePrice)
     EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
 }
 
+TEST_F(EngineServicesTest, PlaceTriggerOrderRejectsNonZeroSize)
+{
+    // Gate price_orders supports whole-position closes only (2026-08-18
+    // live probes: 1017/1014/1021). Partial closes go through open_order
+    // with reduce_only — reject non-zero size with clear guidance. Wire the
+    // REST client onto the futures slot so the size check (which sits after
+    // the wiring check) is reached.
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_restClient.get(), nullptr,
+        nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
+
+    auto result = svc.placeTriggerOrder(
+        nlohmann::json{ { "contract", "SNDK_USDT" },
+                        { "trigger_price", 1720.0 },
+                        { "rule", 2 },
+                        { "size", 2 },
+                        { "order_type", "close-short-position" } });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("whole-position closes only"));
+}
+
 TEST_F(EngineServicesTest, PlaceTriggerOrderReachesRestLayer)
 {
     // The fixture wires its REST client to the spot slot; build a services
@@ -235,7 +260,7 @@ TEST_F(EngineServicesTest, PlaceTriggerOrderReachesRestLayer)
         nlohmann::json{ { "contract", "SNDK_USDT" },
                         { "trigger_price", 1720.0 },
                         { "rule", 2 },
-                        { "size", 2 },
+                        { "size", 0 },
                         { "order_type", "close-short-position" } });
     ASSERT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::HttpError, error(result).code);
@@ -512,6 +537,77 @@ TEST_F(EngineServicesTest, OpenOrderCfdWithSlRejectedWhenFreeMarginFloorUnmet)
     EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(result).code);
     EXPECT_NE(std::string::npos,
               error(result).message.find("minAvailableAfterStopUsd"));
+}
+
+TEST_F(EngineServicesTest, OpenOrderCfdWithSlUsesConfiguredLeverageForMargin)
+{
+    // Regression (2026-08-18 round 152): manual CFD orders don't carry a
+    // leverage field; the gate assumed 1:1 and computed the full notional as
+    // margin (43.95 USD here with the fixture's 1.0 quanto), blocking every
+    // order. The margin must fall back to the configured instance leverage
+    // (500x → 0.0879 USD in this fixture, 8.79 USD live at quanto 100).
+    StrategyInstanceConfig inst;
+    inst.name = "momentum_scalper";
+    inst.symbol = "XAUUSD";
+    inst.market_type = MarketType::Cfd;
+    inst.leverage = 500.0;
+    inst.enabled = true;
+    m_cfg.strategy.strategies.push_back(inst);
+    m_cfg.risk.minAvailableAfterStopUsd = 6.0;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4395.0 },
+        { "sl_price", 4390.0 },
+    });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(result).code);
+    // 4395 * 0.01 * 1.0 (fixture quanto) / 500 = 0.0879 — not 43.95 full notional.
+    EXPECT_NE(std::string::npos, error(result).message.find("margin 0.087900"));
+}
+
+TEST_F(EngineServicesTest, OpenOrderCfdWithSlNoInstanceFallsBackToFullNotional)
+{
+    // No matching CFD instance configured: the gate conservatively assumes
+    // 1:1 margin (full notional) rather than guessing a leverage.
+    m_cfg.risk.minAvailableAfterStopUsd = 6.0;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4395.0 },
+        { "sl_price", 4390.0 },
+    });
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(result).code);
+    EXPECT_NE(std::string::npos, error(result).message.find("margin 43.950000"));
 }
 
 TEST_F(EngineServicesTest, OpenOrderCfdWithoutSlBypassesGate)
