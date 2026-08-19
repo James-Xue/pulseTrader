@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-19 (home machine, M22-fix committed 8767e8a + gate交易 reorg)
-> File size: 10711 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-19 (home machine, M24 shipped + UNITREE ladder live)
+> File size: 10837 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -33,7 +33,7 @@
 ## Current State (M23 Done, 2026-08-18)
 
 ### Test Summary
-- **770 tests green** (本机 8-18 实测,M22/M23 全量)
+- **783 tests green** (本机 8-19 实测,M22–M24 全量)
 - M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
@@ -48,6 +48,7 @@
 - **M21** (08-17) sync_positions 热同步 + modify_sl_tp 动态 SL/TP,745 绿
 - **M22** (08-18) 方向闸门放宽:手动单 futures/CFD 任意方向可执行(placeManualOrder,spot 仍闸门)+ minAvailableAfterStopUsd 风控,759 绿(用户 7e0cace + 我 bb21832)
 - **M23** (08-18) 期货触发单 price_orders 三接口(place/list/cancel_trigger_order)+ list_futures_orders 交易所侧挂单查询,770 绿(09087ae)
+- **M24** (08-19) futures sync 外部余量去重:引擎自营成交与 synced 仓同品种同向合并后不再重复计数(UNITREE 实证:交易所 20 张,引擎视图 30);_sync 只存外部余量,零余量删条目;783 绿(c84cd2a)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
