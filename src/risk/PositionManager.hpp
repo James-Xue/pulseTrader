@@ -118,7 +118,14 @@ class PositionManager
     ///      existing entry is updated IN PLACE — its position_id, strategy_id
     ///      and open_time survive. Without this, a fill-tracked CFD position
     ///      and its exchange twin would both show in get_positions.
-    ///   2. Otherwise, idempotent per (symbol, side): re-syncing updates the
+    ///   2. If exchange_position_id is EMPTY (futures), the exchange entry
+    ///      merges engine fills with external lots on the same
+    ///      (symbol, side, market). The synced entry then holds only the
+    ///      EXTERNAL remainder (exchange qty minus the summed fill-tracked
+    ///      quantities) so the total view equals the exchange quantity; a
+    ///      zero remainder drops the synced entry entirely (2026-08-19
+    ///      UNITREE double-count fix).
+    ///   3. Otherwise, idempotent per (symbol, side): re-syncing updates the
     ///      existing synced entry (fresh prices/quantity). Synced positions
     ///      use the id "<symbol>_<Buy|Sell>_sync", which cannot collide with
     ///      engine-opened ids ("<symbol>_<Buy|Sell>_<n>").

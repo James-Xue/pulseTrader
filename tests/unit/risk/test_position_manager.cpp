@@ -910,3 +910,103 @@ TEST(PositionManager, UpdateExchangeStopsRefreshesAttachedPrices)
     EXPECT_DOUBLE_EQ(4392.50, pos->sl_price);
     EXPECT_DOUBLE_EQ(4406.00, pos->tp_price);
 }
+
+// ---------------------------------------------------------------------------
+// syncPositionFromExchange — futures external-remainder dedup (2026-08-19)
+//
+// Futures positions carry no exchange id, so the exchange entry merges the
+// engine's own fills with external lots. The _sync entry must hold only the
+// EXTERNAL remainder — otherwise the merged quantity is double-counted
+// (UNITREE live case: exchange 20 vs engine view 30).
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, SyncFuturesNoExchangeIdSyncsExternalRemainderOnly)
+{
+    PositionManager pm(make_config());
+
+    // Engine fill: 10 contracts tracked (1 contract = 0.1 UNITREE).
+    auto fill = pm.openPosition("UNITREE_USDT", Side::Sell, 10.0, 130.275,
+        "unitree-ladder-130", MarketType::Futures, 10.0, MarginMode::Cross,
+        0.1, 0.0);
+    ASSERT_TRUE(ok(fill));
+
+    // Exchange merged view: 20 short (engine fill 10 + external 10).
+    pm.syncPositionFromExchange(
+        "UNITREE_USDT", Side::Sell, 20.0, 130.1375, 129.6,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.1, 0.005, 426.86,
+        Timestamp{}, 0.0, 0.0, "");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(2, all.size());
+
+    double total_qty = 0.0;
+    for (const auto &p : all)
+    {
+        total_qty += p.quantity;
+        if ("UNITREE_USDT_Sell_sync" == p.position_id)
+        {
+            // Only the external slice — the engine fill is tracked separately.
+            EXPECT_NEAR(10.0, p.quantity, 1e-9);
+        }
+        if ("UNITREE_USDT_Sell_1" == p.position_id)
+        {
+            EXPECT_NEAR(10.0, p.quantity, 1e-9);
+            EXPECT_NEAR(130.275, p.entry_price, 1e-9);
+            EXPECT_EQ("unitree-ladder-130", p.strategy_id);
+        }
+    }
+    // Total view equals the exchange quantity — no double count.
+    EXPECT_NEAR(20.0, total_qty, 1e-9);
+}
+
+TEST(PositionManager, SyncFuturesNoExchangeIdFullyExplainedByFillDropsSyncEntry)
+{
+    PositionManager pm(make_config());
+
+    auto fill = pm.openPosition("UNITREE_USDT", Side::Sell, 10.0, 130.275,
+        "unitree-ladder-130", MarketType::Futures, 10.0, MarginMode::Cross,
+        0.1, 0.0);
+    ASSERT_TRUE(ok(fill));
+
+    // Exchange quantity == engine fill quantity: nothing external remains.
+    pm.syncPositionFromExchange(
+        "UNITREE_USDT", Side::Sell, 10.0, 130.275, 130.1,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.1, 0.005, 300.0,
+        Timestamp{}, 0.0, 0.0, "");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size()); // no _sync twin
+    EXPECT_EQ("UNITREE_USDT_Sell_1", all[0].position_id);
+    EXPECT_NEAR(10.0, all[0].quantity, 1e-9);
+}
+
+TEST(PositionManager, SyncFuturesNoExchangeIdExternalCloseDropsSyncEntry)
+{
+    PositionManager pm(make_config());
+
+    // Exchange-only position first: external 20 short.
+    pm.syncPositionFromExchange(
+        "UNITREE_USDT", Side::Sell, 20.0, 130.0, 130.0,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.1, 0.005, 400.0,
+        Timestamp{}, 0.0, 0.0, "");
+    const auto synced = pm.getPosition("UNITREE_USDT_Sell_sync");
+    ASSERT_TRUE(synced.has_value());
+    EXPECT_NEAR(20.0, synced->quantity, 1e-9);
+
+    // Then an engine fill joins the merged position.
+    auto fill = pm.openPosition("UNITREE_USDT", Side::Sell, 10.0, 130.275,
+        "unitree-ladder-130", MarketType::Futures, 10.0, MarginMode::Cross,
+        0.1, 0.0);
+    ASSERT_TRUE(ok(fill));
+
+    // User closes 10 of the 20 externally: exchange now 10 == engine fill.
+    pm.syncPositionFromExchange(
+        "UNITREE_USDT", Side::Sell, 10.0, 130.275, 130.1,
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.1, 0.005, 400.0,
+        Timestamp{}, 0.0, 0.0, "");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1, all.size()); // _sync dropped — nothing external remains
+    EXPECT_EQ("UNITREE_USDT_Sell_1", all[0].position_id);
+    EXPECT_NEAR(10.0, all[0].quantity, 1e-9);
+}

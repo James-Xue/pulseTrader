@@ -68,27 +68,65 @@ void PositionManager::syncPositionFromExchange(
         }
     }
 
+    // Futures positions carry no exchange id: the exchange entry merges the
+    // engine's own fills with any external position on the same
+    // (symbol, side, market). Sync the _sync entry with only the EXTERNAL
+    // remainder so fill-tracked entries + _sync sum to the exchange
+    // quantity. Without this, the merged quantity is counted twice
+    // (2026-08-19 UNITREE: exchange 20 vs engine view 30).
+    double synced_qty = qty;
+    if (exchange_position_id.empty())
+    {
+        double tracked_qty = 0.0;
+        for (const auto &[candidate_id, candidate] : m_positions)
+        {
+            if (candidate_id != pos_id
+                && candidate.symbol == symbol
+                && candidate.side == side
+                && candidate.market_type == market_type)
+            {
+                tracked_qty += candidate.quantity;
+            }
+        }
+        synced_qty = std::max(0.0, qty - tracked_qty);
+    }
+
     auto it = m_positions.find(pos_id);
     if (m_positions.end() != it)
     {
+        if (synced_qty <= 0.0)
+        {
+            // Fully explained by engine fills (or fully closed) — keeping a
+            // zero _sync entry would double-count the fill-tracked exposure.
+            m_positions.erase(it);
+            PULSE_LOG_INFO("risk",
+                "Position sync: dropped {} ({}, {} {} — fully covered by "
+                "engine fills)",
+                pos_id, symbol, (Side::Buy == side ? "long" : "short"), qty);
+            return;
+        }
         // Re-sync: refresh prices/quantity in place; keep the original
         // position_id, strategy_id (may be an engine fill) and open_time.
+        // entry_price stays the exchange average — the per-slice split
+        // between external and engine-filled lots is unknowable from the
+        // merged view (PnL of the external slice is an approximation).
         auto &pos = it->second;
         pos.side = side;
-        pos.quantity = qty;
+        pos.quantity = synced_qty;
         pos.entry_price = entry_price;
         pos.market_type = market_type;
         pos.leverage = leverage;
         pos.margin_mode = margin_mode;
         pos.quanto_multiplier = quanto_multiplier;
         pos.margin_used = (leverage > 0.0)
-            ? qty * entry_price * quanto_multiplier / leverage
+            ? synced_qty * entry_price * quanto_multiplier / leverage
             : 0.0;
         pos.liquidation_price = liquidation_price;
         pos.current_price = mark_price;
-        pos.notional_value = qty * mark_price * quanto_multiplier;
+        pos.notional_value = synced_qty * mark_price * quanto_multiplier;
         pos.unrealized_pnl = calculateUnrealizedPnl(
-            side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+            side, entry_price, mark_price, synced_qty, leverage,
+            quanto_multiplier);
         pos.sl_price = sl_price;
         pos.tp_price = tp_price;
         if (!exchange_position_id.empty())
@@ -98,14 +136,21 @@ void PositionManager::syncPositionFromExchange(
         return;
     }
 
+    if (synced_qty <= 0.0)
+    {
+        // Nothing external to represent — the engine's fill-tracked
+        // positions already account for the whole exchange position.
+        return;
+    }
+
     Position pos;
     pos.position_id = pos_id;
     pos.symbol = symbol;
     pos.side = side;
-    pos.quantity = qty;
+    pos.quantity = synced_qty;
     pos.entry_price = entry_price;
     pos.current_price = mark_price;
-    pos.notional_value = qty * mark_price * quanto_multiplier;
+    pos.notional_value = synced_qty * mark_price * quanto_multiplier;
     pos.open_time = (Timestamp{} == open_time) ? now() : open_time;
     pos.strategy_id = ""; // Exchange-side position — no owning strategy.
     pos.market_type = market_type;
@@ -113,11 +158,11 @@ void PositionManager::syncPositionFromExchange(
     pos.margin_mode = margin_mode;
     pos.quanto_multiplier = quanto_multiplier;
     pos.margin_used = (leverage > 0.0)
-        ? qty * entry_price * quanto_multiplier / leverage
+        ? synced_qty * entry_price * quanto_multiplier / leverage
         : 0.0;
     pos.liquidation_price = liquidation_price;
     pos.unrealized_pnl = calculateUnrealizedPnl(
-        side, entry_price, mark_price, qty, leverage, quanto_multiplier);
+        side, entry_price, mark_price, synced_qty, leverage, quanto_multiplier);
     pos.sl_price = sl_price;
     pos.tp_price = tp_price;
     pos.exchange_position_id = exchange_position_id;
@@ -125,7 +170,7 @@ void PositionManager::syncPositionFromExchange(
     m_positions[pos_id] = pos;
     PULSE_LOG_INFO("risk",
         "Synced exchange position {}: {} {} {} @ {} (mark {}, liq {})",
-        pos_id, symbol, (Side::Buy == side ? "long" : "short"), qty,
+        pos_id, symbol, (Side::Buy == side ? "long" : "short"), synced_qty,
         entry_price, mark_price, liquidation_price);
 }
 
