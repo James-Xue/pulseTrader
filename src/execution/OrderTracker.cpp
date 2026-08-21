@@ -783,6 +783,7 @@ std::vector<OrderSnapshot> OrderTracker::activeOrders() const
         {
             OrderSnapshot snap;
             snap.order_id = order.order_id;
+            snap.client_order_id = order.client_order_id;
             snap.symbol = order.symbol;
             snap.side = order.side;
             snap.type = order.type;
@@ -793,6 +794,38 @@ std::vector<OrderSnapshot> OrderTracker::activeOrders() const
             snap.last_update_time = order.last_update_time;
             result.push_back(std::move(snap));
         }
+    }
+    return result;
+}
+
+std::vector<OrderSnapshot> OrderTracker::findByClientIdPrefix(
+    const std::string &prefix) const
+{
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    std::vector<OrderSnapshot> result;
+    result.reserve(m_trackedOrders.size());
+    for (const auto &[id, order] : m_trackedOrders)
+    {
+        if (isTerminalStatus(order.status))
+        {
+            continue;
+        }
+        if (order.client_order_id.rfind(prefix, 0) != 0)
+        {
+            continue;
+        }
+        OrderSnapshot snap;
+        snap.order_id = order.order_id;
+        snap.client_order_id = order.client_order_id;
+        snap.symbol = order.symbol;
+        snap.side = order.side;
+        snap.type = order.type;
+        snap.requested_qty = order.requested_qty;
+        snap.filled_qty = order.filled_qty;
+        snap.status = order.status;
+        snap.submit_time = order.submit_time;
+        snap.last_update_time = order.last_update_time;
+        result.push_back(std::move(snap));
     }
     return result;
 }

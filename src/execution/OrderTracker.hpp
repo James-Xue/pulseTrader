@@ -32,6 +32,7 @@ namespace pulse::execution
 struct OrderSnapshot
 {
     std::string order_id;
+    std::string client_order_id; ///< M27: client-assigned id (e.g. "eth-grid-2100").
     Symbol symbol;
     Side side;
     OrderType type;
@@ -43,6 +44,7 @@ struct OrderSnapshot
 
     OrderSnapshot()
         : order_id{}
+        , client_order_id{}
         , symbol{}
         , side{ Side::Buy }
         , type{ OrderType::Market }
@@ -167,6 +169,12 @@ class OrderTracker
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
     [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
+
+    /// M27: active orders whose client_order_id starts with `prefix`
+    /// (e.g. "eth-grid-" for the grid service). Linear scan — tracked order
+    /// volume is small (<100). Empty prefix matches everything.
+    [[nodiscard]] std::vector<OrderSnapshot> findByClientIdPrefix(
+        const std::string &prefix) const;
 
     /// Returns the N most recent execution reports (completed orders).
     /// Thread-safe: takes shared read lock.

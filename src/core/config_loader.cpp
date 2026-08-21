@@ -797,6 +797,55 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
     return {};
 }
 
+PulseError parseGrid(const toml::value &root, GridConfig &out)
+{
+    if (!root.contains("grid"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("grid");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.symbol = toml::find_or(sec, "symbol", out.symbol);
+    out.market_type = toml::find_or(sec, "market_type", out.market_type);
+    out.levels = toml::find_or(sec, "levels", out.levels);
+    out.qty_per_level = toml::find_or(sec, "qty_per_level", out.qty_per_level);
+    out.step_mode = toml::find_or(sec, "step_mode", out.step_mode);
+    out.step_fixed = toml::find_or(sec, "step_fixed", out.step_fixed);
+    out.step_atr_mult = toml::find_or(sec, "step_atr_mult", out.step_atr_mult);
+    out.step_min = toml::find_or(sec, "step_min", out.step_min);
+    out.step_max = toml::find_or(sec, "step_max", out.step_max);
+    out.atr_period = toml::find_or(sec, "atr_period", out.atr_period);
+    out.tp_distance_steps = toml::find_or(
+        sec, "tp_distance_steps", out.tp_distance_steps);
+    out.anchor_offset_steps = toml::find_or(
+        sec, "anchor_offset_steps", out.anchor_offset_steps);
+    out.lower_reanchor_steps = toml::find_or(
+        sec, "lower_reanchor_steps", out.lower_reanchor_steps);
+    out.upper_reanchor_steps = toml::find_or(
+        sec, "upper_reanchor_steps", out.upper_reanchor_steps);
+    out.protect_line_a_steps = toml::find_or(
+        sec, "protect_line_a_steps", out.protect_line_a_steps);
+    out.protect_line_b_usd = toml::find_or(
+        sec, "protect_line_b_usd", out.protect_line_b_usd);
+    out.daily_loss_limit_usd = toml::find_or(
+        sec, "daily_loss_limit_usd", out.daily_loss_limit_usd);
+    out.daily_reset_hour = toml::find_or(
+        sec, "daily_reset_hour", out.daily_reset_hour);
+    out.reanchor_cooldown_min = toml::find_or(
+        sec, "reanchor_cooldown_min", out.reanchor_cooldown_min);
+    out.spike_freeze_min = toml::find_or(
+        sec, "spike_freeze_min", out.spike_freeze_min);
+    out.spike_pct = toml::find_or(sec, "spike_pct", out.spike_pct);
+    out.spike_atr_mult = toml::find_or(
+        sec, "spike_atr_mult", out.spike_atr_mult);
+    out.state_file = toml::find_or(sec, "state_file", out.state_file);
+    out.force = toml::find_or(sec, "force", out.force);
+
+    return {};
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -904,6 +953,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseSqlite(root, cfg.sqlite);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseGrid(root, cfg.grid);
 
     if (ErrorCode::Ok != err.code)
     {

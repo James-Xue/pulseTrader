@@ -689,3 +689,45 @@ TEST_F(OrderTrackerCfdTest, ResolveExchangeId_ReturnsAliasOrInput)
     EXPECT_EQ("47777", tracker_->resolveExchangeId("47777"));
     EXPECT_FALSE(callback_invoked);
 }
+
+// ---------------------------------------------------------------------------
+// M27 — client_order_id prefix query (grid service)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderTrackerSnapshotTest, FindByClientIdPrefixMatchesOnlyPrefix)
+{
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                         0.001, 50000.0, "eth-grid-2100");
+    tracker_->trackOrder("order_2", "ETH_USDT", Side::Sell, OrderType::Limit,
+                         2.0, 3000.0, "eth-grid-tp-2100");
+    tracker_->trackOrder("order_3", "ETH_USDT", Side::Sell, OrderType::Limit,
+                         2.0, 3000.0, "app-manual-1");
+
+    const auto grid = tracker_->findByClientIdPrefix("eth-grid-");
+    ASSERT_EQ(2u, grid.size());
+    for (const auto &o : grid)
+    {
+        EXPECT_EQ(0u, o.client_order_id.rfind("eth-grid-", 0));
+    }
+
+    const auto tps = tracker_->findByClientIdPrefix("eth-grid-tp-");
+    ASSERT_EQ(1u, tps.size());
+    EXPECT_EQ("eth-grid-tp-2100", tps.front().client_order_id);
+
+    const auto none = tracker_->findByClientIdPrefix("no-such-prefix-");
+    EXPECT_TRUE(none.empty());
+
+    // Empty prefix matches everything (documented behavior).
+    const auto all = tracker_->findByClientIdPrefix("");
+    EXPECT_EQ(3u, all.size());
+}
+
+TEST_F(OrderTrackerSnapshotTest, ActiveOrdersSnapshotCarriesClientOrderId)
+{
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                         0.001, 50000.0, "eth-grid-2100");
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(1u, orders.size());
+    EXPECT_EQ("eth-grid-2100", orders.front().client_order_id);
+}

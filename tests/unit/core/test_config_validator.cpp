@@ -508,5 +508,82 @@ TEST(ConfigValidator, AcceptsPostOnlyWithoutTimeout)
     EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
 }
 
+// ---------------------------------------------------------------------------
+// M27 — [grid] section validation
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, GridDisabledSkipsChecks)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = false;
+    cfg.grid.symbol = "";        // would be invalid if enabled
+    cfg.grid.levels = 0;         // would be invalid if enabled
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, GridEnabledAcceptsValidConfig)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.symbol = "ETH_USDT";
+    cfg.grid.levels = 12;
+    cfg.grid.qty_per_level = 0.02;
+    cfg.grid.step_mode = "atr";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, GridEnabledRejectsEmptySymbol)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.symbol = "";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("grid.symbol"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsNonFuturesMarket)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.market_type = "cfd";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("futures"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsBadLevels)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.levels = 25; // > 24
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("levels"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsBadStepMode)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.step_mode = "warp";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("step_mode"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsInvertedAtrClamps)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.step_mode = "atr";
+    cfg.grid.step_min = 8.0;
+    cfg.grid.step_max = 3.0; // min > max
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("step_min"));
+}
 } // namespace
 } // namespace pulse

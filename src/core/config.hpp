@@ -328,6 +328,44 @@ struct SqliteConfig
 };
 
 // ---------------------------------------------------------------------------
+// GridConfig — [grid] section: engine-native grid execution service (M27)
+//
+// The GridManager runs a short-only futures grid (levels of reduce-only TP
+// buy orders) inside the engine, replacing the Python toolchain. Rules mirror
+// the ETH grid v2 strategy document (commit_my_life gate交易/以太坊):
+// trend gate (EMA bearish only), spike freeze, protection lines A/B, daily
+// loss stop (Beijing-day reset), re-anchor with cooldown.
+// ---------------------------------------------------------------------------
+struct GridConfig
+{
+    bool enabled = false;            ///< Grid service active at startup (grid_start can override).
+    std::string symbol = "ETH_USDT"; ///< Futures contract the grid trades.
+    std::string market_type = "futures"; ///< "futures" only (validated).
+    int levels = 12;                 ///< Number of grid levels.
+    double qty_per_level = 0.02;     ///< Contracts per level (2 × 0.01 ETH).
+    std::string step_mode = "atr";   ///< "atr" (clamp(0.5×ATR15m)) | "fixed".
+    double step_fixed = 5.0;         ///< Fixed step when step_mode = "fixed".
+    double step_atr_mult = 0.5;      ///< ATR multiplier for adaptive step.
+    double step_min = 3.0;           ///< ATR-step lower clamp.
+    double step_max = 8.0;           ///< ATR-step upper clamp.
+    int atr_period = 40;             ///< ATR15m: mean of 1m TR over this many candles.
+    double tp_distance_steps = 2.0;  ///< TP limit = fill_price - n×step.
+    double anchor_offset_steps = 1.0; ///< Anchor = round(mid + n×step, step).
+    double lower_reanchor_steps = 3.0; ///< mid < anchor - n×step → follow down.
+    double upper_reanchor_steps = 1.0; ///< mid > top + n×step → protection A.
+    double protect_line_a_steps = 2.0; ///< 15m/1m close > top + n×step → flatten grid share.
+    double protect_line_b_usd = -30.0; ///< Grid floating loss ≤ this → flatten.
+    double daily_loss_limit_usd = -10.0; ///< Realized ≤ this → freeze new levels.
+    int daily_reset_hour = 8;        ///< Local+8 day boundary (Beijing 08:00 == UTC 00:00).
+    int reanchor_cooldown_min = 30;  ///< Minutes between re-anchors.
+    int spike_freeze_min = 30;       ///< Minutes new levels stay frozen after a spike.
+    double spike_pct = 0.01;         ///< 1m gain > this fraction → spike freeze.
+    double spike_atr_mult = 3.0;     ///< 1m gain > n×ATR15m → spike freeze.
+    std::string state_file = "data/grid_state.json"; ///< Persistent state (tmp+rename).
+    bool force = false;              ///< grid_start proceeds even with non-grid positions on the symbol.
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
@@ -341,6 +379,7 @@ struct PulseConfig
     LogConfig log;
     ControlConfig control;              ///< JSON-RPC control socket.
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
+    GridConfig grid;                    ///< [grid] engine-native grid service (M27).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
     MarketType active_market = MarketType::Futures; ///< Single active trading direction at startup; runtime switch is ephemeral (restart returns here).

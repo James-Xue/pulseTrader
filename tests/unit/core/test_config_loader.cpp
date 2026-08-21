@@ -1049,5 +1049,83 @@ custom_params = 5
     EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
 }
 
+TEST(ConfigLoader, ParseGrid_AllFields)
+{
+    TempToml tmp(R"(
+[grid]
+enabled = true
+symbol = "ETH_USDT"
+market_type = "futures"
+levels = 12
+qty_per_level = 0.02
+step_mode = "atr"
+step_fixed = 5.0
+step_atr_mult = 0.5
+step_min = 3.0
+step_max = 8.0
+atr_period = 40
+tp_distance_steps = 2.0
+anchor_offset_steps = 1.0
+lower_reanchor_steps = 3.0
+upper_reanchor_steps = 1.0
+protect_line_a_steps = 2.0
+protect_line_b_usd = -30.0
+daily_loss_limit_usd = -10.0
+daily_reset_hour = 8
+reanchor_cooldown_min = 30
+spike_freeze_min = 30
+spike_pct = 0.01
+spike_atr_mult = 3.0
+state_file = "data/grid_state_ETH_USDT.json"
+force = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &g = value(result).grid;
+    EXPECT_TRUE(g.enabled);
+    EXPECT_EQ("ETH_USDT", g.symbol);
+    EXPECT_EQ("futures", g.market_type);
+    EXPECT_EQ(12, g.levels);
+    EXPECT_DOUBLE_EQ(0.02, g.qty_per_level);
+    EXPECT_EQ("atr", g.step_mode);
+    EXPECT_DOUBLE_EQ(5.0, g.step_fixed);
+    EXPECT_DOUBLE_EQ(0.5, g.step_atr_mult);
+    EXPECT_DOUBLE_EQ(3.0, g.step_min);
+    EXPECT_DOUBLE_EQ(8.0, g.step_max);
+    EXPECT_EQ(40, g.atr_period);
+    EXPECT_DOUBLE_EQ(2.0, g.tp_distance_steps);
+    EXPECT_DOUBLE_EQ(1.0, g.anchor_offset_steps);
+    EXPECT_DOUBLE_EQ(3.0, g.lower_reanchor_steps);
+    EXPECT_DOUBLE_EQ(1.0, g.upper_reanchor_steps);
+    EXPECT_DOUBLE_EQ(2.0, g.protect_line_a_steps);
+    EXPECT_DOUBLE_EQ(-30.0, g.protect_line_b_usd);
+    EXPECT_DOUBLE_EQ(-10.0, g.daily_loss_limit_usd);
+    EXPECT_EQ(8, g.daily_reset_hour);
+    EXPECT_EQ(30, g.reanchor_cooldown_min);
+    EXPECT_EQ(30, g.spike_freeze_min);
+    EXPECT_DOUBLE_EQ(0.01, g.spike_pct);
+    EXPECT_DOUBLE_EQ(3.0, g.spike_atr_mult);
+    EXPECT_EQ("data/grid_state_ETH_USDT.json", g.state_file);
+    EXPECT_TRUE(g.force);
+}
+
+TEST(ConfigLoader, ParseGrid_AbsentSectionKeepsDefaults)
+{
+    TempToml tmp(R"(
+[log]
+level = "info"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &g = value(result).grid;
+    EXPECT_FALSE(g.enabled);
+    EXPECT_EQ("ETH_USDT", g.symbol);
+    EXPECT_EQ(12, g.levels);
+}
+
 } // namespace
 } // namespace pulse

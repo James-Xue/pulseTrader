@@ -403,6 +403,52 @@ PulseError validateConfig(const PulseConfig &cfg)
         }
     }
 
+    // [grid] section (M27 grid service). Validated when enabled — the grid
+    // trades real money on a futures contract, so bad geometry must fail
+    // loudly at startup, not mid-run.
+    if (cfg.grid.enabled)
+    {
+        if (cfg.grid.symbol.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.symbol must not be empty when grid.enabled"};
+        }
+        if (cfg.grid.market_type != "futures")
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.market_type must be \"futures\" (got \""
+                                  + cfg.grid.market_type + "\")"};
+        }
+        if (cfg.grid.levels < 1 || cfg.grid.levels > 24)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.levels must be in [1, 24] (got "
+                                  + std::to_string(cfg.grid.levels) + ")"};
+        }
+        if (cfg.grid.qty_per_level <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.qty_per_level must be > 0"};
+        }
+        if (cfg.grid.step_mode != "atr" && cfg.grid.step_mode != "fixed")
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_mode must be \"atr\" or \"fixed\" "
+                              "(got \"" + cfg.grid.step_mode + "\")"};
+        }
+        if (cfg.grid.step_mode == "atr"
+            && (cfg.grid.step_min <= 0.0 || cfg.grid.step_max < cfg.grid.step_min))
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_min/step_max invalid for atr mode"};
+        }
+        if (cfg.grid.step_mode == "fixed" && cfg.grid.step_fixed <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_fixed must be > 0 in fixed mode"};
+        }
+    }
+
     return {}; // All checks passed.
 }
 
