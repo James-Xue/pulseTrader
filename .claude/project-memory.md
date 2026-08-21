@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-20 (synced 08-20 events: SNDK v2.1 上扩 + ETH 网格部署 + 黄金代理停摆修复)
-> File size: 12535 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-21 (M26.1: EthScalper v2 状态闸门 + futures 幽灵仓剪枝 + ETH 网格复盘升级)
+> File size: 15258 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,7 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24/M25, 2026-08-19/20)
+## Current State (M24–M26, 2026-08-21)
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -40,7 +40,7 @@
 - **子代理**:08-18 夜用户令停(引擎+代理+2cron);08-20 引擎已重启(直连),子代理循环未跑
 
 ### Test Summary
-- **783 tests green** (本机 8-19 实测,M22–M24 全量)
+- **817 tests green** (本机 8-21 实测,M22–M26 全量)
 - M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
@@ -57,6 +57,7 @@
 - **M23** (08-18) 期货触发单 price_orders 三接口(place/list/cancel_trigger_order)+ list_futures_orders 交易所侧挂单查询,770 绿(09087ae)
 - **M24** (08-19) futures sync 外部余量去重:引擎自营成交与 synced 仓同品种同向合并后不再重复计数(UNITREE 实证:交易所 20 张,引擎视图 30);_sync 只存外部余量,零余量删条目;783 绿(c84cd2a)
 - **M25** (08-19 定稿) 黄金代理收官:gate_ledger.py 沉淀 + 接力重建(cron */3 + flock);Gate 权威对账净 +3.69(原 +5.88 虚高,转账 3 笔实锤)
+- **M26** (08-21) 策略架构:UnifiedScalper 基类 + StrategyRegistry 兜底 + custom_params 通道 + EthScalper 币种策略示范,817 绿(ff616b6/8fb4021)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
@@ -84,6 +85,17 @@
 - 配置:trading.toml 主网 CFD 黄金(XAUUSD 3 策略 + signal_only + 风控 6000/5500/4);`.env` 不入库
 - MCP 注册:`claude mcp add pulsetrader -- <repo>/run.sh mcp`;MCP 模式 stdout 必须纯 JSON-RPC(曾移除 echo 污染)
 - 引擎 systemd 管理(single instance 独占 8081);08-20 已重启(家庭机 nohup 直连,见上节)
+
+### M26 策略架构:UnifiedScalper + Registry 兜底 + 币种策略 (2026-08-21, ff616b6/8fb4021)
+
+- **UnifiedScalper**(`src/strategy/scalping/`):kline 驱动策略的模板方法基类——onKline/onTick final,computeAtr/warmup/cooldown/no-data 日志从 3 处逐字重复收敛为一处;momentum/mean_reversion/supertrend 已迁移继承,**行为逐字节等价**(strategy_id/日志文案/cooldown 语义——Momentum 显式禁用/ATR 归一化置信度均不变);orderbook_scalper 保持独立(数据源不同)
+- **StrategyRegistry**(`src/strategy/StrategyRegistry.{hpp,cpp}`):TOML `name` = 注册键,`makeBuiltinStrategyRegistry()` 集中注册;**未注册名 → 被动 UnifiedScalper(默认 evaluateEntry→nullopt,永不发信号)+ WARN 列已注册名**(不再 warn+skip,引擎不会因拼错配置退出);重名注册拒绝;替代 main.cpp 硬编码 if-chain 工厂
+- **custom_params**:实例级 TOML 内联表 `custom_params = { key = value }`(array-of-tables 下唯一合法子表形式)→ `StrategyInstanceConfig.custom_params` map;严格类型校验(非 table/非数字报 ConfigInvalidValue,缺键空 map 向后兼容);`UnifiedScalper::customParam(key, fallback)` 静态读取,无热更新
+- **EthScalper**(注册键 `"eth_scalper"`):首个币种策略示范——追空 EMA bearish cross(只做空)+ 暴拉过滤 + ATR 自适应止盈(`eth_atr_step` 默认 0.05,suggested_tp = close - step×atr)+ 置信度缩放(`eth_min_confidence_scale`);**主网 trading.toml 未启用**(启用 = 参考 trading.toml.example 注释块)
+- **EthScalper v2**(08-21,M26.1,ETH 网格复盘后升级,819 绿):① 每 candle 发布 Flat+conf=0 **状态信号**,indicators 恒带 `trend_state`(bullish/bearish/neutral)+ `spike`(0/1)——信号板永远有最新趋势状态,网格子代理读 get_signals 即得挂格闸门(不需自算 EMA);② 暴拉过滤**三口径**:`eth_spike_filter_usd`(120)+ `eth_spike_filter_pct`(1.5%)+ `eth_spike_filter_atr`(3×ATR),任一触发即过滤,设 0 禁用(复盘教训:USD 单口径挡不住 04:50 1m +4.4% 暴拉);③ 真信号语义不变(bearish cross 且非 spike 才 Sell);④ trading.toml 已配实例(custom_params 齐全,5 参数),**待引擎重启生效**
+- **futures 幽灵仓剪枝**(08-21,M26.1):syncFuturesPositionsFromExchange 收集 live_contracts,`pruneGhostFuturesByContract` 剪掉交易所已无持仓合约上的 fill-tracked 仓(60s 宽限;同步失败绝不剪)。背景:08-19 ETH 网格 15 个 eth-grid-* 仓被用户 App 04:51 全平后,因 exchange_position_id 为空永久残留 + 假 upnl +623;**重启后 15 个幽灵仓自动清理(get_positions 验收)**
+- **加新币种策略套路**:继承 UnifiedScalper 覆写钩子(className/idPrefix/klineNeeded/warmupThreshold/cooldownEnabled/evaluateEntry/buildSignal/logSignal)→ StrategyRegistry.cpp 注册一行 → src/strategy + tests/unit/strategy 两个 CMakeLists 各一行 → FeedHarness kline 全链路测试(模式见 tests/unit/market/test_market_feed_sink.cpp:55-71,MarketFeed 构造无 I/O,getKlineBuffer(symbol).push 注入蜡烛)
+- 已知:clangd 对 PULSE_LOG_INFO 格式串报 invalid_consteval_call 是 LSP 误报(新文件未入编译数据库),真实编译零警告
 
 ## 关键决策与事故 (M14–M16 时代,细节见 archive)
 
@@ -187,9 +199,11 @@ PulseConfig
 - Gate 通用 API 备忘(期货触发单)在 gate交易/ 根目录
 - 文档内路径引用已同步更新;续接子代理会话时按新路径读取
 
-## Next Steps (2026-08-20)
+## Next Steps (2026-08-21)
 
-- ✅ SNDK 网格首轮实盘验证(通宵 59 兑现 +11.8 USD)✅ 双代理/三市场并行(三机通宵托管收官)
+- ✅ SNDK 网格首轮实盘验证(通宵 59 兑现 +11.8 USD)✅ 双代理/三市场并行(三机通宵托管收官)✅ M26 策略架构落地(817 绿)
+- ⏳ **eth_scalper 已入 trading.toml(v2 参数),待引擎重启生效**:重启后 get_signals 可见 eth_scalper_ETH_USDT(含 trend_state/spike 状态信号);15 个 ETH 幽灵仓同步清理可一并验收;9103 预算已改 12000/6500
+- ⏳ 后续币种策略:SNDK 网格联动 / XAU 时段窗口可代码化(继承 UnifiedScalper 套路已固化);ETH 网格 v2(趋势闸门/暴拉冻结/保护线前置)文档与 watchdog 已升级,重启部署待拍板(见 commit_my_life 以太坊目录)
 - ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
 - ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
 - ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
