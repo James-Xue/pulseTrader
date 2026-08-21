@@ -1010,3 +1010,105 @@ TEST(PositionManager, SyncFuturesNoExchangeIdExternalCloseDropsSyncEntry)
     EXPECT_EQ("UNITREE_USDT_Sell_1", all[0].position_id);
     EXPECT_NEAR(10.0, all[0].quantity, 1e-9);
 }
+
+// ---------------------------------------------------------------------------
+// M27 — reduce-only reservation semantics (9103 root-cause fix)
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, ReduceOnly_CloseOrderApprovedAtFullBudget)
+{
+    // The 9103 grid-freeze scenario: futures budget is almost consumed by an
+    // existing short. A reduce-only buy closing THAT short must be Approved
+    // in full — the old behavior counted it as fresh notional and blocked
+    // (3002), freezing the grid's TP re-hang cycle.
+    PositionManager pm(make_config(6000.0, 40, 6500.0));
+    open_skhy_futures(pm); // SKHY short, notional 5099.1, budget left ~900.9
+
+    const auto res = pm.reserveNotional(
+        "SKHY_USDT", 1.0, 5099.0, 1.0, MarketType::Futures,
+        /*reduce_only=*/true, Side::Buy);
+    ASSERT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Approved, res.decision);
+    EXPECT_DOUBLE_EQ(1.0, res.approved_qty); // never Modified when covered
+}
+
+TEST(PositionManager, ReduceOnly_SellClosesBuyApprovedAtFullBudget)
+{
+    // Direction symmetry: a reduce-only sell closing a long is equally
+    // exempt — the position count and budget are already saturated.
+    PositionManager pm(make_config(1000.0, 1, 1000.0));
+    auto opened = pm.openPosition("BTC_USDT", Side::Buy, 0.02, 50000.0, "s1",
+                                  MarketType::Spot, 1.0, MarginMode::Cross,
+                                  1.0, 0.0);
+    ASSERT_TRUE(ok(opened)); // notional 1000 = full budget, 1/1 slot used
+
+    const auto res = pm.reserveNotional(
+        "BTC_USDT", 0.01, 50000.0, 1.0, MarketType::Spot,
+        /*reduce_only=*/true, Side::Sell);
+    ASSERT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Approved, res.decision);
+    EXPECT_DOUBLE_EQ(0.01, res.approved_qty);
+}
+
+TEST(PositionManager, ReduceOnly_SkipsSlotLimit)
+{
+    // maxOpenPositions = 1 with the slot taken: reduce-only still passes,
+    // a fresh open order is hard-rejected (3002).
+    PositionManager pm(make_config(1000.0, 1, 500.0));
+    auto opened = pm.openPosition("BTC_USDT", Side::Buy, 0.01, 50000.0, "s1",
+                                  MarketType::Spot, 1.0, MarginMode::Cross,
+                                  1.0, 0.0);
+    ASSERT_TRUE(ok(opened));
+
+    const auto close_res = pm.reserveNotional(
+        "BTC_USDT", 0.01, 50000.0, 1.0, MarketType::Spot,
+        /*reduce_only=*/true, Side::Sell);
+    ASSERT_TRUE(close_res.approved);
+    EXPECT_EQ(RiskDecision::Approved, close_res.decision);
+
+    const auto open_res = pm.reserveNotional(
+        "BTC_USDT", 0.01, 50000.0, 1.0, MarketType::Spot,
+        /*reduce_only=*/false, Side::Buy);
+    ASSERT_FALSE(open_res.approved);
+    EXPECT_EQ(RiskDecision::Rejected, open_res.decision);
+    EXPECT_EQ(ErrorCode::PositionLimitHit, open_res.reason_code);
+}
+
+TEST(PositionManager, ReduceOnly_ExcessModifiedNotReverseCoveredQty)
+{
+    // reduce-only buy of 0.02 @50000 (notional 10) against a 5-notional
+    // short: the reverse-covered 5 is always granted; the excess 5 is
+    // clamped by the remaining budget. Approved with the covered qty intact.
+    PositionManager pm(make_config(1000.0, 5, 6.0)); // tight symbol cap
+    auto opened = pm.openPosition("BTC_USDT", Side::Sell, 0.01, 50000.0, "s1",
+                                  MarketType::Futures, 10.0,
+                                  MarginMode::Cross, 0.01, 0.0);
+    ASSERT_TRUE(ok(opened)); // notional 5
+
+    const auto res = pm.reserveNotional(
+        "BTC_USDT", 0.02, 50000.0, 0.01, MarketType::Futures,
+        /*reduce_only=*/true, Side::Buy);
+    ASSERT_TRUE(res.approved);
+    // 0.01 (reverse-covered) is always granted; the excess 0.01 (notional 5)
+    // exceeds the 1-notional symbol budget left, so it is fully cut.
+    EXPECT_DOUBLE_EQ(0.01, res.approved_qty);
+    EXPECT_EQ(RiskDecision::Modified, res.decision);
+}
+
+TEST(PositionManager, ReduceOnly_NoExposureBehavesLikeNormalOrder)
+{
+    // No opposite-side exposure: reduce_only degenerates to the ordinary
+    // budget check (regression anchor — the exemption must not be absolute).
+    PositionManager pm(make_config(1000.0, 5, 1000.0));
+    auto opened = pm.openPosition("BTC_USDT", Side::Buy, 0.02, 50000.0, "s1",
+                                  MarketType::Spot, 1.0, MarginMode::Cross,
+                                  1.0, 0.0);
+    ASSERT_TRUE(ok(opened)); // 1000 notional = full budget
+
+    const auto res = pm.reserveNotional(
+        "BTC_USDT", 0.02, 50000.0, 1.0, MarketType::Spot,
+        /*reduce_only=*/true, Side::Buy); // same side — closes nothing
+    ASSERT_FALSE(res.approved);
+    EXPECT_EQ(RiskDecision::Rejected, res.decision);
+    EXPECT_EQ(ErrorCode::PositionLimitHit, res.reason_code);
+}

@@ -248,10 +248,24 @@ class PositionManager
     /// market_type and compared against the per-market cap (maxPositionNotional
     /// <Futures|Cfd|Spot>, falling back to maxPositionNotional), so a futures
     /// position does not consume the CFD budget.
+    ///
+    /// reduce_only (M27): closing orders must never be blocked by the budget
+    /// they themselves created. When true:
+    ///   - the position-count limit (maxOpenPositions) is skipped entirely;
+    ///   - notional checks apply only to the EXCESS over the same-symbol
+    ///     opposite-side positions (excess = max(0, proposed - reverse));
+    ///   - excess <= 0 → Approved as-is (never Modified — shrinking a close
+    ///     order would leave the position half-uncovered);
+    ///   - excess > 0 → Modified/rejected against the remaining budget,
+    ///     with the reverse-covered quantity always granted.
+    /// This is the 9103 root-cause fix (2026-08-21 ETH grid review): the old
+    /// behavior counted reduce-only buy orders as fresh notional, freezing
+    /// the grid's TP re-hang cycle when the futures budget filled up.
     [[nodiscard]] NotionalReservation reserveNotional(
         const Symbol &symbol, Quantity qty, Price price,
         double quanto_multiplier = 1.0,
-        MarketType market_type = MarketType::Spot);
+        MarketType market_type = MarketType::Spot,
+        bool reduce_only = false, Side side = Side::Buy);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.
@@ -274,6 +288,7 @@ class PositionManager
         double notional;
         double qty;
         MarketType market_type;
+        bool reduce_only{ false }; ///< Close orders don't count toward the slot limit.
     };
     std::unordered_map<std::uint64_t, PendingReservation> m_pendingReservations;
     std::uint64_t m_nextReservationId{ 1 }; ///< Monotonic reservation counter.

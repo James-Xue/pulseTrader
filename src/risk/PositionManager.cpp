@@ -645,7 +645,7 @@ int PositionManager::openPositionCount() const
 
 NotionalReservation PositionManager::reserveNotional(
     const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier,
-    MarketType market_type)
+    MarketType market_type, bool reduce_only, Side side)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -700,13 +700,60 @@ NotionalReservation PositionManager::reserveNotional(
         }
     }
 
+    // M27 reduce_only semantics: a close order is offset against the
+    // same-symbol opposite-side exposure — only the excess over that
+    // exposure consumes budget, and the position-count limit is skipped
+    // entirely (closing can never make the account MORE exposed).
+    double budgeted_notional = proposed_notional; // notional that must fit
+    double reverse_qty = 0.0;                     // qty covered by exposure
+    if (reduce_only)
+    {
+        // A reduce-only order closes the OPPOSITE side of the position
+        // (a reduce-only buy closes sells; a reduce-only sell closes buys).
+        double reverse_notional = 0.0;
+        for (const auto &[id, pos] : m_positions)
+        {
+            if (pos.symbol != symbol || pos.market_type != market_type)
+            {
+                continue;
+            }
+            if (opposite(pos.side) == side)
+            {
+                reverse_notional += pos.notional_value;
+            }
+        }
+        const double excess = std::max(0.0, proposed_notional - reverse_notional);
+        budgeted_notional = excess;
+        reverse_qty = (notional_per_unit > 0.0)
+                          ? std::min(qty, reverse_notional / notional_per_unit)
+                          : 0.0;
+        if (excess <= 0.0)
+        {
+            // Fully covered by existing exposure — approve as-is. NEVER
+            // Modified: shrinking a close order would leave the position
+            // half-uncovered (the 9103 grid freeze root cause).
+            res.approved = true;
+            res.decision = RiskDecision::Approved;
+            res.approved_qty = qty;
+            res.reserved_notional = proposed_notional;
+            res.reason_code = ErrorCode::Ok;
+            res.reason_message = "";
+            m_pendingReservations[res.reservation_id] = {
+                symbol, res.reserved_notional, res.approved_qty, market_type,
+                reduce_only };
+            return res;
+        }
+    }
+
     const int open_count = static_cast<int>(m_positions.size())
                          + static_cast<int>(m_pendingReservations.size());
 
+    const bool slot_ok = reduce_only || open_count < m_config.maxOpenPositions;
+
     // Check if the full order fits within all limits.
-    if (total_notional + proposed_notional <= notional_limit
-        && open_count < m_config.maxOpenPositions
-        && sym_notional + proposed_notional <= m_config.maxSymbolNotional)
+    if (slot_ok
+        && total_notional + budgeted_notional <= notional_limit
+        && sym_notional + budgeted_notional <= m_config.maxSymbolNotional)
     {
         res.approved = true;
         res.decision = RiskDecision::Approved;
@@ -715,7 +762,7 @@ NotionalReservation PositionManager::reserveNotional(
         res.reason_code = ErrorCode::Ok;
         res.reason_message = "";
     }
-    else if (open_count >= m_config.maxOpenPositions)
+    else if (!slot_ok)
     {
         // Hard reject: position count limit reached.
         res.approved = false;
@@ -734,7 +781,12 @@ NotionalReservation PositionManager::reserveNotional(
 
         if (budget > 0.0 && notional_per_unit > 0.0)
         {
-            const double reduced_qty = budget / notional_per_unit;
+            // reduce_only: the reverse-covered qty is always granted; only
+            // the excess gets shrunk to the remaining budget.
+            const double excess_budget = std::max(0.0, budget - reverse_qty * notional_per_unit);
+            const double reduced_qty = reduce_only
+                                           ? reverse_qty + excess_budget / notional_per_unit
+                                           : budget / notional_per_unit;
             if (reduced_qty > 0.0 && reduced_qty < qty)
             {
                 res.approved = true;
@@ -745,9 +797,11 @@ NotionalReservation PositionManager::reserveNotional(
                 // subsequent reserveNotional() calls see a negative remaining
                 // budget and reject every later order (3002 reject loop).
                 res.reserved_notional = std::min(
-                    reduced_qty * notional_per_unit, budget);
+                    reduced_qty * notional_per_unit, budget + reverse_qty * notional_per_unit);
                 res.reason_code = ErrorCode::Ok;
-                res.reason_message = "Quantity reduced to fit position limit";
+                res.reason_message = reduce_only
+                                         ? "Reduce-only excess quantity reduced to fit position limit"
+                                         : "Quantity reduced to fit position limit";
             }
             else
             {
@@ -774,7 +828,8 @@ NotionalReservation PositionManager::reserveNotional(
     if (res.approved)
     {
         m_pendingReservations[res.reservation_id] = {
-            symbol, res.reserved_notional, res.approved_qty, market_type };
+            symbol, res.reserved_notional, res.approved_qty, market_type,
+            reduce_only };
 
         PULSE_LOG_INFO("risk",
             "Reserved notional: id={} {} qty={} notional={:.2f} (decision: {})",
