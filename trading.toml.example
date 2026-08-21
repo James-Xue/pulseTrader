@@ -112,6 +112,26 @@ poll_interval_ms = 500
 # min_confidence  = 0.65
 # enabled         = true
 # poll_interval_ms = 200
+
+# ── 币种定制策略示例: eth_scalper（M26, 追空 + 自定义参数）────────────
+# 未注册的 name 会兜底为被动 UnifiedScalper(不发信号)并在启动日志 WARN;
+# 新增币种策略 = 继承 UnifiedScalper + 在 StrategyRegistry 注册 name。
+# custom_params 为币种专属参数表(静态, 无热更新), 缺省走策略默认值:
+#   eth_atr_step             (默认 0.05) — ATR 自适应止盈距离 suggested_tp = close - step×atr
+#   eth_spike_filter_usd     (默认 120.0) — 单根 kline 振幅超过此值视为暴拉/插针, 不追空
+#   eth_min_confidence_scale (默认 1.0)   — 置信度缩放系数
+#
+# [[strategy.instances]]
+# name            = "eth_scalper"
+# symbol          = "ETH_USDT"
+# market_type     = "futures"
+# leverage        = 10
+# margin_mode     = "cross"
+# order_quantity  = 20               # 1 合约 = 0.01 ETH (~20 USD @2011)
+# min_confidence  = 0.6
+# enabled         = true
+# poll_interval_ms = 500
+# custom_params  = { eth_atr_step = 0.05, eth_spike_filter_usd = 120.0, eth_min_confidence_scale = 1.0 }
 # order_type      = "maker_first"   # "market"（默认）| "post_only" | "maker_first"
 # maker_timeout_ms = 500            # 挂单超时毫秒，超时撤单改市价（仅 maker_first）
 
