@@ -30,7 +30,18 @@ target_link_libraries(test_config_validator
         GTest::gtest_main
 )
 
+add_executable(test_param_change_log
+    test_param_change_log.cpp
+)
+
+target_link_libraries(test_param_change_log
+    PRIVATE
+        pulse::core
+        GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(test_core)
 gtest_discover_tests(test_config_loader)
 gtest_discover_tests(test_config_validator)
+gtest_discover_tests(test_param_change_log)

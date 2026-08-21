@@ -51,4 +51,17 @@ struct TradeSummary
     double total_volume;         ///< Sum of filled_qty * avg_fill_price.
 };
 
+// ---------------------------------------------------------------------------
+// StrategyTradeSummary — per-strategy aggregate (AI feedback / observability)
+// ---------------------------------------------------------------------------
+struct StrategyTradeSummary
+{
+    std::string strategy_name;
+    std::string market_type;     ///< "spot", "futures", or "cfd".
+    std::int64_t trade_count;
+    double total_pnl;
+    double win_rate;             ///< Fraction of trades with pnl > 0.
+    double total_fees;
+};
+
 } // namespace pulse::trade_recorder

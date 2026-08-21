@@ -20,6 +20,7 @@
 //   - m_signalCallback is set once before threads start (no race)
 
 #include "strategy/StrategyBase.hpp"
+#include "strategy/StrategyHandle.hpp"
 
 #include <functional>
 #include <memory>
@@ -127,6 +128,13 @@ class StrategyManager
     /// NOTE: HeartbeatScheduler move-consumes the returned vector — the
     /// control plane must use paramsByName() instead.
     [[nodiscard]] std::vector<StrategyParams *> allParams();
+
+    /// Identity + mutable-params handles for every registered strategy.
+    ///
+    /// Used by the AI snapshot collector and the audit layer (same iteration
+    /// as snapshot() but with the params pointer attached). Safe to call
+    /// while strategy threads are running.
+    [[nodiscard]] std::vector<StrategyHandle> allHandles();
 
     /// Pause or resume a single strategy by instance ID.
     ///

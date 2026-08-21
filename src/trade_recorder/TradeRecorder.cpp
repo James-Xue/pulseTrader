@@ -524,6 +524,74 @@ Result<TradeSummary> TradeRecorder::getSummary(
     }
 }
 
+Result<std::vector<StrategyTradeSummary>> TradeRecorder::getStrategySummary(
+    std::int64_t from_ns,
+    std::int64_t to_ns) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_db)
+    {
+        return PulseError{ErrorCode::TradeRecorderNotOpen,
+                          "database is not open"};
+    }
+
+    try
+    {
+        std::string sql =
+            "SELECT strategy_name, market_type, COUNT(*), "
+            "COALESCE(SUM(pnl), 0), "
+            "COALESCE(AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END), 0), "
+            "COALESCE(SUM(fees), 0) "
+            "FROM trades WHERE 1=1";
+
+        if (0 < from_ns)
+        {
+            sql += " AND timestamp >= ?";
+        }
+
+        if (0 < to_ns)
+        {
+            sql += " AND timestamp <= ?";
+        }
+
+        sql += " GROUP BY strategy_name, market_type ORDER BY strategy_name";
+
+        SQLite::Statement stmt(*m_db, sql);
+
+        int idx = 1;
+
+        if (0 < from_ns)
+        {
+            stmt.bind(idx++, from_ns);
+        }
+
+        if (0 < to_ns)
+        {
+            stmt.bind(idx++, to_ns);
+        }
+
+        std::vector<StrategyTradeSummary> results;
+        while (stmt.executeStep())
+        {
+            StrategyTradeSummary s;
+            s.strategy_name = stmt.getColumn(0).getText();
+            s.market_type = stmt.getColumn(1).getText();
+            s.trade_count = stmt.getColumn(2).getInt64();
+            s.total_pnl = stmt.getColumn(3).getDouble();
+            s.win_rate = stmt.getColumn(4).getDouble();
+            s.total_fees = stmt.getColumn(5).getDouble();
+            results.push_back(std::move(s));
+        }
+
+        return results;
+    }
+    catch (const SQLite::Exception &e)
+    {
+        return PulseError{ErrorCode::TradeRecorderQueryFailed, e.what()};
+    }
+}
+
 Result<double> TradeRecorder::getDailyPnl(std::int64_t date_ns) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);

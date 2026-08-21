@@ -176,6 +176,19 @@ std::vector<StrategyParams *> StrategyManager::allParams()
     return result;
 }
 
+std::vector<StrategyHandle> StrategyManager::allHandles()
+{
+    std::vector<StrategyHandle> result;
+    result.reserve(m_strategies.size());
+    for (const auto &s : m_strategies)
+    {
+        const auto &cfg = s->context().config;
+        result.push_back({ s->id(), s->name(), cfg.symbol,
+                           toString(cfg.market_type), &s->params() });
+    }
+    return result;
+}
+
 bool StrategyManager::setPaused(const std::string &id, bool paused)
 {
     for (const auto &s : m_strategies)

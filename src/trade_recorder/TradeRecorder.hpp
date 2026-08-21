@@ -82,6 +82,12 @@ class TradeRecorder
     [[nodiscard]] Result<double> getDailyPnl(
         std::int64_t date_ns) const;
 
+    /// Per-strategy aggregates over a time range — the AI tuning feedback
+    /// signal (GROUP BY strategy_name, market_type). Empty window = all.
+    [[nodiscard]] Result<std::vector<StrategyTradeSummary>> getStrategySummary(
+        std::int64_t from_ns = 0,
+        std::int64_t to_ns = 0) const;
+
     /// Total number of recorded trades.
     [[nodiscard]] std::int64_t tradeCount() const;
 
