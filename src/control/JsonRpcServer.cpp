@@ -427,6 +427,22 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.signals() };
     };
+    reg["grid_start"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.gridStart(params) };
+    };
+    reg["grid_status"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.gridStatus() };
+    };
+    reg["grid_pause"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.gridPause() };
+    };
+    reg["grid_stop"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.gridStop() };
+    };
     reg["sync_positions"] = [&services](const nlohmann::json &)
     {
         return RpcResult{ services.syncPositions() };

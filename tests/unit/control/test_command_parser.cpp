@@ -278,3 +278,41 @@ TEST(CommandParser, TriggerOrdersSubcommandListsExchangeOrders)
     EXPECT_EQ("list_futures_orders", cmd->method);
     EXPECT_EQ("SNDK_USDT", cmd->params["contract"]);
 }
+
+// ---------------------------------------------------------------------------
+// M27 — grid commands
+// ---------------------------------------------------------------------------
+
+TEST(CommandParser, GridStartParsesOverrides)
+{
+    const auto cmd = parseCommandLine("grid start --levels 12 --qty 2 --step 5 --anchor 2100");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("grid_start", cmd->method);
+    EXPECT_EQ(12, cmd->params["levels"].get<int>());
+    EXPECT_DOUBLE_EQ(2.0, cmd->params["qty_per_level"].get<double>());
+    EXPECT_DOUBLE_EQ(5.0, cmd->params["step"].get<double>());
+    EXPECT_DOUBLE_EQ(2100.0, cmd->params["anchor"].get<double>());
+}
+
+TEST(CommandParser, GridStartWithoutOverrides)
+{
+    const auto cmd = parseCommandLine("grid start");
+    ASSERT_TRUE(cmd.has_value());
+    EXPECT_EQ("grid_start", cmd->method);
+    EXPECT_TRUE(cmd->params.empty());
+}
+
+TEST(CommandParser, GridStatusPauseStop)
+{
+    const auto status = parseCommandLine("grid status");
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ("grid_status", status->method);
+
+    const auto pause = parseCommandLine("grid pause");
+    ASSERT_TRUE(pause.has_value());
+    EXPECT_EQ("grid_pause", pause->method);
+
+    const auto stop = parseCommandLine("grid stop");
+    ASSERT_TRUE(stop.has_value());
+    EXPECT_EQ("grid_stop", stop->method);
+}

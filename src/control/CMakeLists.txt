@@ -32,6 +32,7 @@ target_link_libraries(pulse_control
         pulse::execution
         pulse::market
         pulse::exchange
+        pulse::grid
         nlohmann_json::nlohmann_json
     PRIVATE
         spdlog::spdlog

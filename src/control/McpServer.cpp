@@ -99,6 +99,31 @@ nlohmann::json McpServer::toolDefinitions()
         "treated as stale by consumers.",
         nlohmann::json::object(), {});
 
+    add("grid_start",
+        "Start the engine-native futures grid (M27): levels of short limit "
+        "orders with per-level reduce-only TP, trend-gated. Refused when "
+        "non-grid positions exist on the symbol unless force is configured. "
+        "Optional params: levels, qty_per_level, step, anchor.",
+        nlohmann::json{ { "levels", nlohmann::json{ { "type", "number" } } },
+                        { "qty_per_level", nlohmann::json{ { "type", "number" } } },
+                        { "step", nlohmann::json{ { "type", "number" } } },
+                        { "anchor", nlohmann::json{ { "type", "number" } } } },
+        {});
+
+    add("grid_status",
+        "Full grid snapshot: phase, anchor/step/top, per-level state, "
+        "realized/unrealized PnL, trend gate, spike/daily-loss freezes.",
+        nlohmann::json::object(), {});
+
+    add("grid_pause",
+        "Pause the grid: existing orders stay on the exchange, no new "
+        "actions until grid_resume/grid_start.",
+        nlohmann::json::object(), {});
+
+    add("grid_stop",
+        "Stop the grid and cancel ALL eth-grid-* orders on the symbol.",
+        nlohmann::json::object(), {});
+
     add("sync_positions",
         "Reconcile the engine position view against the exchange (futures + "
         "CFD): imports missing positions and prunes local ghosts no longer "

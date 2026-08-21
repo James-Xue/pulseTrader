@@ -98,6 +98,49 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
         return ParsedCommand{ "sync_positions", nlohmann::json::object() };
     }
 
+    // --- M27 grid commands ---
+    if ("grid" == cmd && tokens.size() >= 2)
+    {
+        const auto &sub = tokens[1];
+        if ("start" == sub)
+        {
+            nlohmann::json params = nlohmann::json::object();
+            for (std::size_t i = 2; i + 1 < tokens.size(); i += 2)
+            {
+                if ("--levels" == tokens[i])
+                {
+                    params["levels"] = std::stoi(tokens[i + 1]);
+                }
+                else if ("--qty" == tokens[i])
+                {
+                    params["qty_per_level"] = std::stod(tokens[i + 1]);
+                }
+                else if ("--step" == tokens[i])
+                {
+                    params["step"] = std::stod(tokens[i + 1]);
+                }
+                else if ("--anchor" == tokens[i])
+                {
+                    params["anchor"] = std::stod(tokens[i + 1]);
+                }
+            }
+            return ParsedCommand{ "grid_start", std::move(params) };
+        }
+        if ("status" == sub)
+        {
+            return ParsedCommand{ "grid_status", nlohmann::json::object() };
+        }
+        if ("pause" == sub)
+        {
+            return ParsedCommand{ "grid_pause", nlohmann::json::object() };
+        }
+        if ("stop" == sub)
+        {
+            return ParsedCommand{ "grid_stop", nlohmann::json::object() };
+        }
+        return ParsedCommand{ "grid_status", nlohmann::json::object() };
+    }
+
     // --- One-arg commands ---
     if ("params" == cmd && tokens.size() >= 2)
     {

@@ -3,6 +3,7 @@
 #include "control/EngineServices.hpp"
 
 #include "control/OrderFlowExecutor.hpp"
+#include "grid/GridManager.hpp"
 #include "core/snapshot_types.hpp"
 #include "core/types.hpp"
 #include "execution/ExecutionReport.hpp"
@@ -118,7 +119,8 @@ EngineServices::EngineServices(
     OrderFlowExecutor &order_flow,
     strategy::SignalBoard &signal_board,
     std::mutex &rest_mutex,
-    const std::shared_ptr<market::SymbolRegistry> &registry)
+    const std::shared_ptr<market::SymbolRegistry> &registry,
+    grid::GridManager *grid)
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
     , m_cfg{ cfg }
@@ -135,6 +137,7 @@ EngineServices::EngineServices(
     , m_futuresTracker{ futures_tracker }
     , m_cfdTracker{ cfd_tracker }
     , m_orderFlow{ order_flow }
+    , m_grid{ grid }
     , m_signalBoard{ signal_board }
     , m_restMutex{ rest_mutex }
     , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
@@ -971,6 +974,66 @@ bool EngineServices::cancelOrder(const std::string &order_id)
 
     std::lock_guard lock(m_restMutex);
     return m_orderFlow.cancelOrder(order_id);
+}
+
+Result<nlohmann::json> EngineServices::gridStart(
+    const nlohmann::json &params)
+{
+    if (nullptr == m_grid)
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           "grid service not configured in this build" };
+    }
+    const auto result = m_grid->start(params);
+    if (!ok(result))
+    {
+        return PulseError{ ErrorCode::GridAlreadyRunning,
+                           error(result).message };
+    }
+    return pulse::grid::gridSnapshotToJson(value(result));
+}
+
+nlohmann::json EngineServices::gridStatus() const
+{
+    if (nullptr == m_grid)
+    {
+        return nlohmann::json{ { "phase", 0 },
+                               { "phase_name", "disabled" },
+                               { "error", "grid service not configured" } };
+    }
+    return pulse::grid::gridSnapshotToJson(m_grid->status());
+}
+
+Result<nlohmann::json> EngineServices::gridPause()
+{
+    if (nullptr == m_grid)
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           "grid service not configured in this build" };
+    }
+    const auto result = m_grid->pause();
+    if (!ok(result))
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           error(result).message };
+    }
+    return pulse::grid::gridSnapshotToJson(value(result));
+}
+
+Result<nlohmann::json> EngineServices::gridStop()
+{
+    if (nullptr == m_grid)
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           "grid service not configured in this build" };
+    }
+    const auto result = m_grid->stop();
+    if (!ok(result))
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           error(result).message };
+    }
+    return pulse::grid::gridSnapshotToJson(value(result));
 }
 
 void EngineServices::haltTrading()

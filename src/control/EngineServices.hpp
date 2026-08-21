@@ -32,6 +32,11 @@
 #include <string>
 #include <vector>
 
+namespace pulse::grid
+{
+class GridManager;
+}
+
 namespace pulse::control
 {
 
@@ -59,7 +64,8 @@ class EngineServices
                    strategy::SignalBoard &signal_board,
                    std::mutex &rest_mutex,
                    const std::shared_ptr<market::SymbolRegistry> &registry =
-                       nullptr);
+                       nullptr,
+                   grid::GridManager *grid = nullptr);
 
     // --- Queries (each returns ready-to-serialize JSON) ---
     [[nodiscard]] nlohmann::json status() const;
@@ -136,6 +142,18 @@ class EngineServices
     /// Params: order_id (required).
     [[nodiscard]] Result<nlohmann::json> cancelTriggerOrder(const nlohmann::json &params);
 
+    // --- M27 grid service ---
+    /// Start the engine-native grid (`grid_start`). Optional params:
+    /// levels / qty_per_level / step / anchor (overrides, PR-4 formal).
+    [[nodiscard]] Result<nlohmann::json> gridStart(
+        const nlohmann::json &params);
+    /// Full grid snapshot (`grid_status`).
+    [[nodiscard]] nlohmann::json gridStatus() const;
+    /// Pause the grid (`grid_pause`) — orders stay, no new action.
+    [[nodiscard]] Result<nlohmann::json> gridPause();
+    /// Stop the grid (`grid_stop`) — cancels all eth-grid-* orders.
+    [[nodiscard]] Result<nlohmann::json> gridStop();
+
     void haltTrading();
     void resumeTrading();
     bool pauseStrategy(const std::string &id);
@@ -179,6 +197,7 @@ class EngineServices
     execution::OrderTracker *m_futuresTracker;
     execution::OrderTracker *m_cfdTracker;
     OrderFlowExecutor &m_orderFlow;
+    grid::GridManager *m_grid{ nullptr }; ///< M27 grid service (nullable).
     strategy::SignalBoard &m_signalBoard;
     std::mutex &m_restMutex;
 

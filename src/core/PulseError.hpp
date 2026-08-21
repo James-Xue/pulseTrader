@@ -104,6 +104,10 @@ enum class ErrorCode : std::uint32_t
     ControlProtocolError = 9103,   ///< JSON-RPC/MCP protocol violation.
     ControlEngineUnreachable = 9104, ///< Control socket cannot reach the engine.
 
+    // Grid service (92xx) — M27 engine-native grid execution service.
+    GridNotStarted = 9200,         ///< grid_status/pause/stop before grid_start.
+    GridAlreadyRunning = 9201,     ///< grid_start while already running.
+
     // Internal (9xxx)
     InternalError = 9000,
     NotImplemented = 9001,
