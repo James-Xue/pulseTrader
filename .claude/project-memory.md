@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-21 (M26.1: EthScalper v2 状态闸门 + futures 幽灵仓剪枝 + ETH 网格复盘升级)
-> File size: 15258 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-21 (M27: 引擎内网格服务 GridManager 落地,848 绿)
+> File size: 15372 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -202,8 +202,7 @@ PulseConfig
 ## Next Steps (2026-08-21)
 
 - ✅ SNDK 网格首轮实盘验证(通宵 59 兑现 +11.8 USD)✅ 双代理/三市场并行(三机通宵托管收官)✅ M26 策略架构落地(817 绿)
-- ⏳ **eth_scalper 已入 trading.toml(v2 参数),待引擎重启生效**:重启后 get_signals 可见 eth_scalper_ETH_USDT(含 trend_state/spike 状态信号);15 个 ETH 幽灵仓同步清理可一并验收;9103 预算已改 12000/6500
-- ⏳ 后续币种策略:SNDK 网格联动 / XAU 时段窗口可代码化(继承 UnifiedScalper 套路已固化);ETH 网格 v2(趋势闸门/暴拉冻结/保护线前置)文档与 watchdog 已升级,重启部署待拍板(见 commit_my_life 以太坊目录)
+- ⏳ **M27 引擎内网格服务已落地(5 PR,848 绿),待重启+testnet 演练**:grid_start/status/pause/stop 控制面命令;GridManager 状态机(挂格/TP 循环/重锚/保护线 A+B/趋势闸门/暴拉冻结/日亏北京日);IGridGateway 抽象(GridGateway 生产实现走 placeManualOrder 全风控);reduce-only 名义语义修复(9103 根因);[grid] TOML 段;重启后 get_signals 可见 eth_scalper_ETH_USDT(含 trend_state/spike)+ 15 个 ETH 幽灵仓清理 + 预算 12000/6500 一并验收;ETH 网格 v2 文档与 watchdog 已升级(commit_my_life 以太坊目录),引擎内网格启用后 eth_watch.py 退役
 - ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
 - ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
 - ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
