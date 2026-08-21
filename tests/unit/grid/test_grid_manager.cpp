@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -888,4 +889,148 @@ TEST_F(GridManagerTest, AtrStepModeClamps)
         m_cfg, m_gateway, *m_board, &m_harness->feed, m_restMutex, m_stateDir);
     ASSERT_TRUE(ok(m_manager->start(nlohmann::json::object())));
     EXPECT_DOUBLE_EQ(8.0, m_manager->status().step);
+}
+
+// ---------------------------------------------------------------------------
+// Persistence (schema 2 — PR-7)
+// ---------------------------------------------------------------------------
+
+TEST_F(GridManagerTest, SaveLoadRoundTripRestoresPausedState)
+{
+    setMid(2000.0);
+    pushCandles(2000.0);
+    setTrendGate("bearish");
+    ASSERT_TRUE(ok(m_manager->start(nlohmann::json::object())));
+    driveTicks(250, baseMs());
+    ASSERT_EQ(4u, m_gateway.placed.size());
+
+    // Fill one level, hang its TP, then pause — the pause must persist so a
+    // restart does NOT auto-resume a grid the operator deliberately held.
+    const auto &sell = m_gateway.live[0];
+    m_gateway.simulateFill(sell.order_id);
+    driveTicks(250, baseMs() + 60000);
+    ASSERT_TRUE(ok(m_manager->pause()));
+    const auto before = m_manager->status();
+
+    // New manager on the same state dir — as after an engine restart.
+    m_manager = std::make_unique<GridManager>(
+        m_cfg, m_gateway, *m_board, &m_harness->feed, m_restMutex, m_stateDir);
+    ASSERT_TRUE(m_manager->loadState());
+
+    const auto after = m_manager->status();
+    EXPECT_EQ(GridPhase::Paused, after.phase);
+    EXPECT_DOUBLE_EQ(before.anchor, after.anchor);
+    EXPECT_DOUBLE_EQ(before.step, after.step);
+    EXPECT_DOUBLE_EQ(before.realized_pnl_today, after.realized_pnl_today);
+    ASSERT_EQ(before.levels.size(), after.levels.size());
+    for (std::size_t i = 0; i < before.levels.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(before.levels[i].price, after.levels[i].price);
+        EXPECT_EQ(before.levels[i].filled, after.levels[i].filled);
+        EXPECT_DOUBLE_EQ(before.levels[i].fill_price,
+                         after.levels[i].fill_price);
+        EXPECT_EQ(before.levels[i].tp_resting, after.levels[i].tp_resting);
+    }
+}
+
+TEST_F(GridManagerTest, RestoredRunningResumesAndAdopts)
+{
+    // Hand-write a schema-2 state: Running, level 0 filled with its TP still
+    // resting on the exchange (crash survivor), level 1 filled with NO TP
+    // order (the crash hit between fill and TP placement).
+    std::filesystem::create_directories(m_stateDir);
+    {
+        std::ofstream out{ m_stateDir / "grid_test_state.json" };
+        out << nlohmann::json{
+            { "schema", 2 },
+            { "phase", 2 }, // Running
+            { "anchor", 2005.0 },
+            { "step", 5.0 },
+            { "realized_pnl_today", 0.5 },
+            { "day_start_sec", (baseMs() / 1000 / 86400) * 86400 },
+            { "spike_until_ms", 0 },
+            { "reanchor_until_ms", 0 },
+            { "daily_frozen", false },
+            { "levels", nlohmann::json::array({
+                  { { "price", 2005.0 }, { "filled", 2 },
+                    { "fill_price", 2005.0 }, { "tp_filled", false },
+                    { "tp_resting", true } },
+                  { { "price", 2010.0 }, { "filled", 2 },
+                    { "fill_price", 2010.0 }, { "tp_filled", false },
+                    { "tp_resting", false } },
+                  { { "price", 2015.0 }, { "filled", 0 },
+                    { "fill_price", 0.0 }, { "tp_filled", false },
+                    { "tp_resting", false } },
+                  { { "price", 2020.0 }, { "filled", 0 },
+                    { "fill_price", 0.0 }, { "tp_filled", false },
+                    { "tp_resting", false } },
+              }) },
+        }.dump(2);
+    }
+    // The exchange still holds the level-0 TP (eth-grid-tp-1995 = 2005-2×5).
+    m_gateway.live.push_back(
+        { "ord-9", "eth-grid-tp-1995", 1995.0, 2.0, true, "open" });
+
+    setMid(2000.0);
+    pushCandles(2000.0);
+    setTrendGate("bearish");
+    m_manager = std::make_unique<GridManager>(
+        m_cfg, m_gateway, *m_board, &m_harness->feed, m_restMutex, m_stateDir);
+    ASSERT_TRUE(m_manager->loadState());
+    EXPECT_EQ(GridPhase::Running, m_manager->status().phase);
+    EXPECT_NEAR(0.5, m_manager->status().realized_pnl_today, 1e-9);
+
+    driveTicks(250, baseMs());
+
+    // The adopted TP counts as resting (no duplicate), the missing TP for
+    // the level-1 fill is re-hung, and the two free levels re-hang.
+    const auto snap = m_manager->status();
+    ASSERT_EQ(4u, snap.levels.size());
+    EXPECT_TRUE(snap.levels[0].tp_resting);
+    EXPECT_TRUE(snap.levels[1].tp_resting); // re-hung this pass
+    const auto tp_it = std::find_if(m_gateway.placed.begin(),
+        m_gateway.placed.end(),
+        [](const execution::OrderRequest &r)
+        { return r.client_order_id.rfind("eth-grid-tp-", 0) == 0; });
+    ASSERT_NE(m_gateway.placed.end(), tp_it);
+    EXPECT_DOUBLE_EQ(2000.0, tp_it->price); // 2010 - 2×5
+    EXPECT_EQ(3u, m_gateway.placed.size()); // TP + 2 re-hung sells (2015/2020)
+}
+
+TEST_F(GridManagerTest, LegacyStateFileRestoresPaused)
+{
+    // schema=1 (pre-PR-7): the phase is never auto-activated — an operator
+    // starts the grid explicitly after an upgrade.
+    std::filesystem::create_directories(m_stateDir);
+    {
+        std::ofstream out{ m_stateDir / "grid_test_state.json" };
+        out << nlohmann::json{
+            { "schema", 1 },
+            { "anchor", 2005.0 },
+            { "step", 5.0 },
+            { "realized_pnl_today", 0.0 },
+            { "day_start_sec", (baseMs() / 1000 / 86400) * 86400 },
+            { "spike_until_ms", 0 },
+            { "reanchor_until_ms", 0 },
+            { "daily_frozen", false },
+            { "levels", nlohmann::json::array({
+                  { { "price", 2005.0 }, { "filled", 2 },
+                    { "fill_price", 2005.0 }, { "tp_filled", false } },
+                  { { "price", 2010.0 }, { "filled", 0 },
+                    { "fill_price", 0.0 }, { "tp_filled", false } },
+              }) },
+        }.dump(2);
+    }
+    setMid(2000.0);
+    pushCandles(2000.0);
+    m_manager = std::make_unique<GridManager>(
+        m_cfg, m_gateway, *m_board, &m_harness->feed, m_restMutex, m_stateDir);
+    ASSERT_TRUE(m_manager->loadState());
+
+    // Restored as Paused — the state is kept, nothing trades until the
+    // operator resumes/starts.
+    EXPECT_EQ(GridPhase::Paused, m_manager->status().phase);
+    driveTicks(250, baseMs());
+    EXPECT_TRUE(m_gateway.placed.empty());
+    EXPECT_EQ(2, m_manager->status().levels_filled);
 }

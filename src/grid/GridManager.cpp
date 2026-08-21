@@ -242,6 +242,10 @@ Result<GridSnapshot> GridManager::pause()
     }
     m_phase = GridPhase::Paused;
     setLastAction(GridAction::None, nowMs());
+    // Persist the pause: a killed engine must NOT auto-resume a grid the
+    // operator deliberately paused (schema-2 phase restore).
+    m_stateDirty = true;
+    (void)saveState();
     return statusLocked();
 }
 
@@ -1078,6 +1082,8 @@ bool GridManager::loadState()
         return false;
     }
 
+    const int schema = j.value("schema", 1);
+
     m_anchor = j.value("anchor", 0.0);
     m_step = j.value("step", m_cfg.step_fixed);
     m_realizedToday = j.value("realized_pnl_today", 0.0);
@@ -1094,7 +1100,37 @@ bool GridManager::loadState()
         lv.filled = lj.value("filled", 0);
         lv.fill_price = lj.value("fill_price", 0.0);
         lv.tp_filled = lj.value("tp_filled", false);
+        lv.tp_resting = lj.value("tp_resting", false);
         m_levels.push_back(lv);
+    }
+
+    // Phase restore (schema 2+): Running/Paused come back exactly as saved —
+    // an engine crash then auto-resumes the grid on boot (the first slow
+    // pass reconciles with the exchange before any action; mid=0 or a stale
+    // trend signal degrade to FreezeNew, and the persisted re-anchor cooldown
+    // is the extra belt). Anything unexpected → Paused. Legacy (schema ≤ 1)
+    // states never auto-activate — the operator starts the grid explicitly.
+    m_phase = GridPhase::Paused;
+    if (schema >= 2 && j.contains("phase"))
+    {
+        const int phase = j.value("phase", static_cast<int>(GridPhase::Paused));
+        if (phase == static_cast<int>(GridPhase::Running)
+            || phase == static_cast<int>(GridPhase::Paused))
+        {
+            m_phase = static_cast<GridPhase>(phase);
+        }
+    }
+
+    // Geometry overrides survive a restart (schema 2+): re-anchors keep the
+    // operator's grid shape. A deleted state file reverts to the toml.
+    if (schema >= 2 && j.contains("geometry"))
+    {
+        const auto &g = j["geometry"];
+        m_cfg.levels = g.value("levels", m_cfg.levels);
+        m_cfg.qty_per_level = g.value("qty_per_level", m_cfg.qty_per_level);
+        m_cfg.step_mode = g.value("step_mode", m_cfg.step_mode);
+        m_cfg.step_fixed = g.value("step_fixed", m_cfg.step_fixed);
+        m_geometryOverridden = true;
     }
     if (m_levels.empty())
     {
@@ -1109,8 +1145,20 @@ bool GridManager::loadState()
 bool GridManager::saveState() const
 {
     nlohmann::json j;
-    j["schema"] = 1;
+    j["schema"] = 2;
     j["symbol"] = m_symbol;
+    // Phase: only Running/Paused are meaningful to restore. Protecting is a
+    // transient action phase — persist it as Running (equivalent once the
+    // flatten lands). Disabled never reaches saveState via tick (tickFast
+    // skips disabled grids) but keep the mapping honest anyway.
+    if (GridPhase::Paused == m_phase)
+    {
+        j["phase"] = static_cast<int>(GridPhase::Paused);
+    }
+    else
+    {
+        j["phase"] = static_cast<int>(GridPhase::Running);
+    }
     j["anchor"] = m_anchor;
     j["step"] = m_step;
     j["realized_pnl_today"] = m_realizedToday;
@@ -1124,9 +1172,21 @@ bool GridManager::saveState() const
         levels.push_back({ { "price", lv.price },
                            { "filled", lv.filled },
                            { "fill_price", lv.fill_price },
-                           { "tp_filled", lv.tp_filled } });
+                           { "tp_filled", lv.tp_filled },
+                           { "tp_resting", lv.tp_resting } });
     }
     j["levels"] = levels;
+
+    // Geometry overrides (grid_start --levels/--qty/--step) must survive a
+    // restart: re-anchors after boot would otherwise silently revert to the
+    // toml geometry. Deleted state file → geometry comes back from the toml.
+    if (m_geometryOverridden)
+    {
+        j["geometry"] = { { "levels", m_cfg.levels },
+                          { "qty_per_level", m_cfg.qty_per_level },
+                          { "step_mode", m_cfg.step_mode },
+                          { "step_fixed", m_cfg.step_fixed } };
+    }
 
     // Atomic write: tmp + rename so a crash mid-write never corrupts state.
     try

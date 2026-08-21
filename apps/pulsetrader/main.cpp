@@ -1043,7 +1043,11 @@ static int runTrade(int argc, char* argv[])
     // M27 engine-native grid service: exchange-facing gateway + state machine.
     // Starts disabled; `grid_start` (REPL/MCP) activates it. The gateway
     // forwards to placeManualOrder (full risk gate) and the futures REST
-    // client (exchange-order truth view).
+    // client (exchange-order truth view). With `[grid] enabled = true` and a
+    // saved Running state (schema 2) the grid resumes automatically on boot —
+    // the crash-survival point of the engine-native grid. To take over
+    // manually: `grid pause` BEFORE stopping the engine (the pause is
+    // persisted); legacy state files (schema 1) restore as Paused.
     pulse::grid::GridGateway grid_gateway{
         order_flow, futures_rest.get(), position_mgr, rest_mutex };
     pulse::grid::GridManager grid_mgr{

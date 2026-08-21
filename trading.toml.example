@@ -201,3 +201,36 @@ maxClients  = 4                    # 最大 WebSocket 连接数
 enabled = true
 dbPath  = "data/trades.db"         # SQLite 数据库文件路径
 record_market = false             # M18: 行情(ticker/kline)落库,同文件第二连接
+
+# ── 引擎内网格服务 (M27) ─────────────────────────────────────────────
+# ETH 网格 v2 规则(commit_my_life gate交易/以太坊 策略文档 v2)的引擎原生实现。
+# 默认全部走 GridConfig 缺省值(enabled=false),此处为全字段示例。
+# 启用:enabled = true → 引擎重启时自动加载 data/grid_state.json;
+#   若状态为 Running(schema 2)→ 自动恢复运行(崩溃存活卖点);
+#   要手动接管:先 grid_pause 再停机(pause 会落盘)。
+[grid]
+enabled = false                    # true 时引擎启动即加载网格状态
+symbol = "ETH_USDT"                # 期货合约
+market_type = "futures"            # 仅支持 futures
+levels = 12                        # 网格格数
+qty_per_level = 0.02               # 每格张数(2 × 0.01 ETH)
+step_mode = "atr"                  # "atr"(clamp(0.5×ATR15m)) | "fixed"
+step_fixed = 5.0                   # fixed 模式的固定步进
+step_atr_mult = 0.5                # ATR 自适应步进系数
+step_min = 3.0                     # ATR 步进下限
+step_max = 8.0                     # ATR 步进上限
+atr_period = 40                    # ATR15m:1m TR 均值所用根数
+tp_distance_steps = 2.0            # 分格止盈 = 成交价 - n×step(reduce-only 限价买)
+anchor_offset_steps = 1.0          # 锚 = round(mid + n×step, step)
+lower_reanchor_steps = 3.0         # mid < 锚 - n×step → 下移重锚
+# (无 upper_reanchor_steps:涨穿网格不自动重锚 — v2 §3.1b 转保护线 A)
+protect_line_a_steps = 2.0         # 1m 收盘 > 顶 + n×step → 平网格份额+按 §3.1 重挂
+protect_line_b_usd = -30.0         # 网格浮亏 ≤ 此值 → 同保护线 A
+daily_loss_limit_usd = -10.0       # 日已实现亏损 ≤ 此值 → 冻结新格/重锚(存量 TP 照常)
+daily_reset_hour = 8               # 日界(北京 08:00 == UTC 00:00)
+reanchor_cooldown_min = 30         # 重锚冷却
+spike_freeze_min = 30              # 暴拉冻结期
+spike_pct = 0.01                   # 1m 涨幅 > 1%
+spike_atr_mult = 3.0               # 或 > 3×ATR15m,任一触发即冻结
+state_file = "data/grid_state.json" # 状态文件(tmp+rename 原子写)
+force = false                      # 有非网格持仓时仍允许 grid_start
