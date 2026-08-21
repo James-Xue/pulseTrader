@@ -9,6 +9,7 @@
 // All component accessors are internally synchronized (shared_mutex /
 // atomics / seqlock), so concurrent control sessions are safe.
 
+#include "core/ParamChangeLog.hpp"
 #include "core/PulseError.hpp"
 #include "core/TimeUtil.hpp"
 #include "core/config.hpp"
@@ -35,6 +36,11 @@
 namespace pulse::grid
 {
 class GridManager;
+}
+
+namespace pulse::trade_recorder
+{
+class TradeRecorder;
 }
 
 namespace pulse::control
@@ -65,7 +71,9 @@ class EngineServices
                    std::mutex &rest_mutex,
                    const std::shared_ptr<market::SymbolRegistry> &registry =
                        nullptr,
-                   grid::GridManager *grid = nullptr);
+                   grid::GridManager *grid = nullptr,
+                   core::ParamChangeLog *param_change_log = nullptr,
+                   trade_recorder::TradeRecorder *trade_recorder = nullptr);
 
     // --- Queries (each returns ready-to-serialize JSON) ---
     [[nodiscard]] nlohmann::json status() const;
@@ -157,6 +165,15 @@ class EngineServices
     /// Stop the grid (`grid_stop`) — cancels all eth-grid-* orders.
     [[nodiscard]] Result<nlohmann::json> gridStop();
 
+    // --- AI tuning observability ---
+
+    /// Parameter-change audit history, newest first (`get_param_history`).
+    [[nodiscard]] nlohmann::json paramHistory() const;
+
+    /// Per-strategy trade performance over the last `hours`
+    /// (`get_strategy_performance`). Requires a wired TradeRecorder (SQLite).
+    [[nodiscard]] Result<nlohmann::json> strategyPerformance(int hours) const;
+
     void haltTrading();
     void resumeTrading();
     bool pauseStrategy(const std::string &id);
@@ -203,6 +220,8 @@ class EngineServices
     grid::GridManager *m_grid{ nullptr }; ///< M27 grid service (nullable).
     strategy::SignalBoard &m_signalBoard;
     std::mutex &m_restMutex;
+    core::ParamChangeLog *m_paramChangeLog{ nullptr }; ///< Audit (nullable).
+    trade_recorder::TradeRecorder *m_tradeRecorder{ nullptr }; ///< Stats (nullable).
 
     /// Display timezone for human-readable *_str timestamps in JSON output
     /// (from [control] display_timezone; default = machine local time).

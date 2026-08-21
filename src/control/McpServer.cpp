@@ -126,6 +126,21 @@ nlohmann::json McpServer::toolDefinitions()
         "before any action.",
         nlohmann::json::object(), {});
 
+    add("get_param_history",
+        "Recent strategy parameter changes (newest first): who changed what, "
+        "when, from what to what, via which channel (ai/manual).",
+        nlohmann::json::object(), {});
+
+    add("get_strategy_performance",
+        "Per-strategy trade performance over the last N hours (trades DB): "
+        "trade count, total pnl, win rate, fees.",
+        nlohmann::json{
+            { "hours", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "Lookback window in hours (default 24)" } } },
+        },
+        {});
+
     add("grid_stop",
         "Stop the grid and cancel ALL eth-grid-* orders on the symbol.",
         nlohmann::json::object(), {});

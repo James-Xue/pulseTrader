@@ -364,6 +364,8 @@ PulseError parseAi(const toml::value &root, AiConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "heartbeatIntervalSec",
                           static_cast<int>(out.heartbeatIntervalSec)));
+    out.stats_lookback_hours = toml::find_or(
+        sec, "stats_lookback_hours", out.stats_lookback_hours);
     out.requestTimeoutMs =
         static_cast<std::uint32_t>(
             toml::find_or(sec, "requestTimeoutMs",

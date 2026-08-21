@@ -93,7 +93,7 @@ TEST(McpServer, ToolsListHasAllTools)
         should_exit);
     const auto resp = nlohmann::json::parse(line);
     const auto &tools = resp["result"]["tools"];
-    EXPECT_EQ(29, tools.size()); // +1: grid_resume (M27 PR-6)
+    EXPECT_EQ(31, tools.size()); // +2: get_param_history / get_strategy_performance
     for (const auto &tool : tools)
     {
         EXPECT_TRUE(tool["name"].is_string());
@@ -172,7 +172,7 @@ TEST(McpServer, UnknownMethodReturns32601)
 TEST(McpServer, ToolDefinitionsAllHaveSchemas)
 {
     const auto tools = McpServer::toolDefinitions();
-    EXPECT_EQ(29, tools.size()); // +1: grid_resume (M27 PR-6)
+    EXPECT_EQ(31, tools.size()); // +2: get_param_history / get_strategy_performance
     bool found_get_signals = false;
     for (const auto &tool : tools)
     {

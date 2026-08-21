@@ -4,13 +4,20 @@
 
 #include "control/OrderFlowExecutor.hpp"
 #include "grid/GridManager.hpp"
+#include "ai/ParamBounds.hpp"
 #include "core/snapshot_types.hpp"
 #include "core/types.hpp"
 #include "execution/ExecutionReport.hpp"
 #include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
 
+#ifdef PULSE_ENABLE_SQLITE
+#include "trade_recorder/TradeRecorder.hpp"
+#endif
+
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <vector>
 
 namespace pulse::control
@@ -120,7 +127,9 @@ EngineServices::EngineServices(
     strategy::SignalBoard &signal_board,
     std::mutex &rest_mutex,
     const std::shared_ptr<market::SymbolRegistry> &registry,
-    grid::GridManager *grid)
+    grid::GridManager *grid,
+    core::ParamChangeLog *param_change_log,
+    trade_recorder::TradeRecorder *trade_recorder)
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
     , m_cfg{ cfg }
@@ -140,6 +149,8 @@ EngineServices::EngineServices(
     , m_grid{ grid }
     , m_signalBoard{ signal_board }
     , m_restMutex{ rest_mutex }
+    , m_paramChangeLog{ param_change_log }
+    , m_tradeRecorder{ trade_recorder }
     , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
                        .value_or(DisplayTimezone::local()) }
     , m_registry{ registry }
@@ -395,8 +406,94 @@ bool EngineServices::setStrategyParam(const std::string &id,
     {
         return false;
     }
-    it->second(*params, value);
+
+    // Clamp to the shared safety bounds (same table the AI pipeline uses) —
+    // parameters without an entry (ob_depth/supertrend_*) pass through.
+    const auto &bounds = ai::defaultParamBounds();
+    const auto bit = bounds.find(param);
+    double clamped = value;
+    if (bounds.end() != bit)
+    {
+        const auto &b = bit->second;
+        clamped = std::clamp(value, b.hard_min, b.hard_max);
+        if (std::abs(clamped - value) > 1e-12)
+        {
+            PULSE_LOG_WARN("control", "set_strategy_param {} {}: {:.6f} clamped "
+                           "to [{:.6f}, {:.6f}] → {:.6f}", id, param, value,
+                           b.hard_min, b.hard_max, clamped);
+        }
+    }
+
+    // Audit before writing (read the old value first).
+    const auto old_value = paramGetters().at(param)(*params);
+    it->second(*params, clamped);
+    if (m_paramChangeLog != nullptr)
+    {
+        const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        m_paramChangeLog->record({ now_ns, id, param, old_value, clamped,
+                                   "manual" });
+    }
     return true;
+}
+
+nlohmann::json EngineServices::paramHistory() const
+{
+    nlohmann::json arr = nlohmann::json::array();
+    if (nullptr == m_paramChangeLog)
+    {
+        return arr;
+    }
+    for (const auto &entry : m_paramChangeLog->snapshot())
+    {
+        arr.push_back({ { "ts_ns", entry.ts_ns },
+                        { "strategy_id", entry.strategy_id },
+                        { "param_name", entry.param_name },
+                        { "old_value", entry.old_value },
+                        { "new_value", entry.new_value },
+                        { "source", entry.source } });
+    }
+    return arr;
+}
+
+Result<nlohmann::json> EngineServices::strategyPerformance(int hours) const
+{
+#ifdef PULSE_ENABLE_SQLITE
+    if (nullptr == m_tradeRecorder)
+    {
+        return PulseError{ ErrorCode::TradeRecorderNotOpen,
+                           "trade recorder not wired (SQLite disabled?)" };
+    }
+    if (hours < 1)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "get_strategy_performance: hours must be ≥ 1" };
+    }
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto summary = m_tradeRecorder->getStrategySummary(
+        now_ns - static_cast<std::int64_t>(hours) * 3600LL * 1000'000'000LL,
+        now_ns);
+    if (!ok(summary))
+    {
+        return error(summary);
+    }
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto &row : value(summary))
+    {
+        arr.push_back({ { "strategy_name", row.strategy_name },
+                        { "market_type", row.market_type },
+                        { "trade_count", row.trade_count },
+                        { "total_pnl", row.total_pnl },
+                        { "win_rate", row.win_rate },
+                        { "total_fees", row.total_fees } });
+    }
+    return arr;
+#else
+    (void)hours;
+    return PulseError{ ErrorCode::TradeRecorderNotOpen,
+                       "built without PULSE_ENABLE_SQLITE" };
+#endif
 }
 
 nlohmann::json EngineServices::risk() const

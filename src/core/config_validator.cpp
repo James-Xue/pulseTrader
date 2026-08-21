@@ -320,6 +320,20 @@ PulseError validateConfig(const PulseConfig &cfg)
     // -----------------------------------------------------------------------
     if (cfg.ai.heartbeatIntervalSec > 0)
     {
+        if (cfg.ai.stats_lookback_hours < 1)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "ai.stats_lookback_hours must be ≥ 1 when AI is enabled"};
+        }
+
+        if (cfg.ai.apiKey.empty())
+        {
+            // No key → the AI stays offline (main.cpp gates the scheduler on
+            // !apiKey.empty()). The config remains valid so the key can be
+            // dropped into .env later without touching the toml.
+            return {};
+        }
+
         if ("openai" != cfg.ai.backend && "claude" != cfg.ai.backend)
         {
             return PulseError{ErrorCode::ConfigValidationError,
@@ -330,12 +344,6 @@ PulseError validateConfig(const PulseConfig &cfg)
         {
             return PulseError{ErrorCode::ConfigValidationError,
                               "ai.model must not be empty when AI is enabled"};
-        }
-
-        if (cfg.ai.apiKey.empty())
-        {
-            return PulseError{ErrorCode::ConfigValidationError,
-                              "ai.apiKey must not be empty when AI is enabled"};
         }
     }
 

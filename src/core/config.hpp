@@ -127,6 +127,7 @@ struct AiConfig
     std::uint32_t heartbeatIntervalSec = 300; ///< AI cycle period (default 5 min).
     std::uint32_t requestTimeoutMs = 30'000;  ///< Max wait for a single LLM request.
     std::uint32_t maxRetries = 2;   ///< Retry count for transient LLM failures.
+    int stats_lookback_hours = 24;  ///< Per-strategy performance window for the AI prompt.
 };
 
 // ---------------------------------------------------------------------------

@@ -447,6 +447,15 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.gridResume() };
     };
+    reg["get_param_history"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.paramHistory() };
+    };
+    reg["get_strategy_performance"] = [&services](const nlohmann::json &params)
+    {
+        const int hours = params.value("hours", 24);
+        return RpcResult{ services.strategyPerformance(hours) };
+    };
     reg["sync_positions"] = [&services](const nlohmann::json &)
     {
         return RpcResult{ services.syncPositions() };

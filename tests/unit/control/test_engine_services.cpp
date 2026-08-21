@@ -766,3 +766,159 @@ TEST_F(EngineServicesTest, GridResumeWhenNotConfiguredFails)
     ASSERT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::GridNotStarted, error(result).code);
 }
+
+// ---------------------------------------------------------------------------
+// AI tuning observability — bounds clamping + audit log
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+class MockScalper : public strategy::StrategyBase
+{
+  public:
+    explicit MockScalper(const strategy::StrategyContext &ctx)
+    {
+        m_context = ctx;
+    }
+
+    [[nodiscard]] std::string name() const override
+    {
+        return "MockScalper";
+    }
+
+    [[nodiscard]] std::string id() const override
+    {
+        return "mock_scalper_" + m_context.config.symbol;
+    }
+
+    [[nodiscard]] strategy::StrategyParams &params() override
+    {
+        return m_params;
+    }
+
+    void onTick(const market::Ticker &) override
+    {
+    }
+
+    void onKline(const market::Kline &) override
+    {
+    }
+
+    void onOrderbook(const market::OrderBook &) override
+    {
+    }
+
+    strategy::StrategyParams m_params;
+};
+
+} // anonymous namespace
+
+TEST_F(EngineServicesTest, SetParamClampsToHardBounds)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    // min_confidence hard_max = 0.95; hard_min = 0.1.
+    EXPECT_TRUE(svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.99));
+    const auto params = svc.getStrategyParams("mock_scalper_BTC_USDT");
+    EXPECT_DOUBLE_EQ(0.95, params["min_confidence"].get<double>());
+
+    EXPECT_TRUE(svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.05));
+    EXPECT_DOUBLE_EQ(0.1, svc.getStrategyParams("mock_scalper_BTC_USDT")["min_confidence"].get<double>());
+}
+
+TEST_F(EngineServicesTest, SetParamWithinBoundsPassThrough)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    EXPECT_TRUE(svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.5));
+    EXPECT_DOUBLE_EQ(0.5, svc.getStrategyParams("mock_scalper_BTC_USDT")["min_confidence"].get<double>());
+}
+
+TEST_F(EngineServicesTest, SetParamUnboundedPassThrough)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    // supertrend_period has no entry in the shared bounds table → passthrough.
+    EXPECT_TRUE(svc.setStrategyParam("mock_scalper_BTC_USDT", "supertrend_period", 500.0));
+    EXPECT_DOUBLE_EQ(500.0, svc.getStrategyParams("mock_scalper_BTC_USDT")["supertrend_period"].get<double>());
+}
+
+TEST_F(EngineServicesTest, SetParamRecordsManualAudit)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    EXPECT_TRUE(svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.7));
+    const auto snap = change_log.snapshot();
+    ASSERT_EQ(1u, snap.size());
+    EXPECT_EQ("manual", snap[0].source);
+    EXPECT_EQ("mock_scalper_BTC_USDT", snap[0].strategy_id);
+    EXPECT_EQ("min_confidence", snap[0].param_name);
+    EXPECT_DOUBLE_EQ(0.6, snap[0].old_value); // default min_confidence
+    EXPECT_DOUBLE_EQ(0.7, snap[0].new_value);
+}
+
+TEST_F(EngineServicesTest, ParamHistoryReturnsRecentFirst)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    (void)svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.61);
+    (void)svc.setStrategyParam("mock_scalper_BTC_USDT", "min_confidence", 0.62);
+
+    const auto history = svc.paramHistory();
+    ASSERT_TRUE(history.is_array());
+    ASSERT_EQ(2u, history.size());
+    EXPECT_DOUBLE_EQ(0.62, history[0]["new_value"].get<double>()); // newest first
+    EXPECT_DOUBLE_EQ(0.61, history[1]["new_value"].get<double>());
+    EXPECT_EQ("manual", history[0]["source"].get<std::string>());
+}
