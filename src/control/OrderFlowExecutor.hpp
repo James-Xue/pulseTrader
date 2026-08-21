@@ -121,7 +121,7 @@ class OrderFlowExecutor
 #ifdef PULSE_ENABLE_SQLITE
                       trade_recorder::TradeRecorder *trade_recorder
 #else
-                      int /*trade_recorder*/
+                      std::nullptr_t /*trade_recorder*/
 #endif
     );
 

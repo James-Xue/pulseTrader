@@ -55,6 +55,12 @@
 #ifdef PULSE_ENABLE_SQLITE
 #include "trade_recorder/MarketRecorder.hpp"
 #include "trade_recorder/TradeRecorder.hpp"
+#else
+// Forward declaration keeps the non-SQLite call sites uniform (null recorder).
+namespace pulse::trade_recorder
+{
+class TradeRecorder;
+}
 #endif
 
 #include <atomic>
@@ -767,6 +773,14 @@ static int runTrade(int argc, char* argv[])
               "(compile with -DPULSE_ENABLE_SQLITE=ON)");
 #endif
 
+// Uniform raw pointer for the AI snapshot collector / EngineServices call
+// sites (null in non-SQLite builds).
+#ifdef PULSE_ENABLE_SQLITE
+    pulse::trade_recorder::TradeRecorder *trade_recorder_ptr = trade_recorder.get();
+#else
+    pulse::trade_recorder::TradeRecorder *trade_recorder_ptr = nullptr;
+#endif
+
 #ifdef PULSE_ENABLE_SQLITE
     // Market data recorder (M18): persists ticker/kline to the same SQLite
     // file via a second connection (WAL). Failure is warn-only — the engine
@@ -913,18 +927,25 @@ static int runTrade(int argc, char* argv[])
     // ------------------------------------------------------------------
     // 8. L4 + L5: AI Pipeline + Heartbeat
     // ------------------------------------------------------------------
-    pulse::ai::AiPipeline ai_pipeline(cfg.ai, cfg.twitter, cfg.news);
+    // Param-change audit log shared by the AI pipeline and the manual
+    // control-plane channel (get_param_history).
+    pulse::core::ParamChangeLog param_change_log;
+
+    pulse::ai::AiPipeline ai_pipeline(cfg.ai, cfg.twitter, cfg.news,
+                                      nullptr, &param_change_log);
 
     std::unique_ptr<pulse::heartbeat::HeartbeatScheduler> heartbeat;
     if (cfg.ai.heartbeatIntervalSec > 0 && !cfg.ai.apiKey.empty())
     {
         // Wire AI to each strategy's actual handles (identity + params) and
-        // a live snapshot collector (real feeds + per-strategy performance).
+        // a live snapshot collector (real feeds + per-strategy performance
+        // from the trades DB when SQLite is enabled).
         auto handles = strategy_mgr.allHandles();
         pulse::ai::EngineSnapshotCollector collector(
             spot_feed.get(), futures_feed.get(), cfd_feed.get(), handles,
-            nullptr, // recorder wired in SQLite builds (C4)
-            24LL * 3600 * 1000'000'000);
+            trade_recorder_ptr,
+            static_cast<std::int64_t>(cfg.ai.stats_lookback_hours) * 3600LL
+                * 1000'000'000LL);
         pulse::ai::SnapshotProvider provider = [&collector]()
         {
             return collector.collect();
@@ -980,6 +1001,8 @@ static int runTrade(int argc, char* argv[])
         rest_mutex
 #ifdef PULSE_ENABLE_SQLITE
         , trade_recorder.get()
+#else
+        , nullptr
 #endif
     );
 
@@ -1089,7 +1112,9 @@ static int runTrade(int argc, char* argv[])
         *board,
         rest_mutex,
         symbol_registry,
-        &grid_mgr);
+        &grid_mgr,
+        &param_change_log,
+        trade_recorder_ptr);
 
     // Reconcile positions that already exist on the exchange (previous
     // engine run, manual trading) so risk limits and displays reflect the

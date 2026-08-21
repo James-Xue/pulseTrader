@@ -69,7 +69,7 @@ OrderFlowExecutor::OrderFlowExecutor(
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *trade_recorder
 #else
-    int
+    std::nullptr_t /*trade_recorder*/
 #endif
 )
     : m_strategyCfg{ strategy_cfg }

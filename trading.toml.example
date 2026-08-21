@@ -162,10 +162,13 @@ fractions   = [0.33, 0.33, 0.34]   # 每档平仓比例（总和 ≤ 1.0）
 # ── AI 分析 ──────────────────────────────────────────────────────────
 # heartbeatIntervalSec = 0 关闭 AI 调参（推荐初期关闭）
 [ai]
-backend              = "openai"    # "openai" 或 "claude"
-model                = "gpt-4o"
-apiKey               = "from_env:OPENAI_API_KEY"
-heartbeatIntervalSec = 0           # AI 分析间隔（秒），0 = 关闭
+# AI 定期调参闭环:LLM 每 heartbeatIntervalSec 秒评估市场 + 每策略近期表现,
+# 经安全边界微调全部策略参数(变更可在 get_param_history 审计)。
+backend              = "claude"              # "claude" 或 "openai";可配 baseUrl 指向兼容网关
+model                = "claude-sonnet-4-6"
+apiKey               = "from_env:AI_API_KEY" # 无 key → AI 离线(安全禁用),key 一填即通电
+heartbeatIntervalSec = 300                   # AI 调参节奏(秒),0 = 关闭
+stats_lookback_hours = 24                    # AI prompt 中每策略表现统计窗口(小时)
 requestTimeoutMs     = 30000
 maxRetries           = 2
 
