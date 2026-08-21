@@ -823,8 +823,9 @@ PulseError parseGrid(const toml::value &root, GridConfig &out)
         sec, "anchor_offset_steps", out.anchor_offset_steps);
     out.lower_reanchor_steps = toml::find_or(
         sec, "lower_reanchor_steps", out.lower_reanchor_steps);
-    out.upper_reanchor_steps = toml::find_or(
-        sec, "upper_reanchor_steps", out.upper_reanchor_steps);
+    // upper_reanchor_steps removed (M27 PR-6): no upward re-anchor exists in
+    // the v2 spec — a breakout goes to protection line A instead. A leftover
+    // key in a toml is silently ignored by find_or.
     out.protect_line_a_steps = toml::find_or(
         sec, "protect_line_a_steps", out.protect_line_a_steps);
     out.protect_line_b_usd = toml::find_or(

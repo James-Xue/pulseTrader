@@ -107,6 +107,7 @@ enum class ErrorCode : std::uint32_t
     // Grid service (92xx) — M27 engine-native grid execution service.
     GridNotStarted = 9200,         ///< grid_status/pause/stop before grid_start.
     GridAlreadyRunning = 9201,     ///< grid_start while already running.
+    GridNotPaused = 9202,          ///< grid_resume when the grid is not paused.
 
     // Internal (9xxx)
     InternalError = 9000,

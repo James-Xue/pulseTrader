@@ -134,6 +134,10 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
         {
             return ParsedCommand{ "grid_pause", nlohmann::json::object() };
         }
+        if ("resume" == sub)
+        {
+            return ParsedCommand{ "grid_resume", nlohmann::json::object() };
+        }
         if ("stop" == sub)
         {
             return ParsedCommand{ "grid_stop", nlohmann::json::object() };

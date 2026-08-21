@@ -443,6 +443,10 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.gridStop() };
     };
+    reg["grid_resume"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.gridResume() };
+    };
     reg["sync_positions"] = [&services](const nlohmann::json &)
     {
         return RpcResult{ services.syncPositions() };

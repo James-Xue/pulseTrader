@@ -1067,7 +1067,6 @@ atr_period = 40
 tp_distance_steps = 2.0
 anchor_offset_steps = 1.0
 lower_reanchor_steps = 3.0
-upper_reanchor_steps = 1.0
 protect_line_a_steps = 2.0
 protect_line_b_usd = -30.0
 daily_loss_limit_usd = -10.0
@@ -1098,7 +1097,6 @@ force = true
     EXPECT_DOUBLE_EQ(2.0, g.tp_distance_steps);
     EXPECT_DOUBLE_EQ(1.0, g.anchor_offset_steps);
     EXPECT_DOUBLE_EQ(3.0, g.lower_reanchor_steps);
-    EXPECT_DOUBLE_EQ(1.0, g.upper_reanchor_steps);
     EXPECT_DOUBLE_EQ(2.0, g.protect_line_a_steps);
     EXPECT_DOUBLE_EQ(-30.0, g.protect_line_b_usd);
     EXPECT_DOUBLE_EQ(-10.0, g.daily_loss_limit_usd);

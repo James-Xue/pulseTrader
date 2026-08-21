@@ -1301,7 +1301,10 @@ static int runTrade(int argc, char* argv[])
         // loop body holds no locks at this point (logSystemHeartbeat locks
         // internally).
         order_flow.sweepMakerAttempts();
-        grid_mgr.tick(now_ms);
+        // GridManager::tick takes wall-clock epoch ms (daily boundary, spike
+        // windows, signal freshness all use it).
+        grid_mgr.tick(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
 
         // Periodic position sync (every ~10s): imports exchange-side
         // positions and prunes local ghosts. Takes rest_mutex internally.

@@ -995,8 +995,7 @@ Result<nlohmann::json> EngineServices::gridStart(
     const auto result = m_grid->start(params);
     if (!ok(result))
     {
-        return PulseError{ ErrorCode::GridAlreadyRunning,
-                           error(result).message };
+        return error(result); // 9201 already-running / 9101 validation, as-is
     }
     return pulse::grid::gridSnapshotToJson(value(result));
 }
@@ -1040,6 +1039,21 @@ Result<nlohmann::json> EngineServices::gridStop()
     {
         return PulseError{ ErrorCode::GridNotStarted,
                            error(result).message };
+    }
+    return pulse::grid::gridSnapshotToJson(value(result));
+}
+
+Result<nlohmann::json> EngineServices::gridResume()
+{
+    if (nullptr == m_grid)
+    {
+        return PulseError{ ErrorCode::GridNotStarted,
+                           "grid service not configured in this build" };
+    }
+    const auto result = m_grid->resume();
+    if (!ok(result))
+    {
+        return PulseError{ ErrorCode::GridNotPaused, error(result).message };
     }
     return pulse::grid::gridSnapshotToJson(value(result));
 }

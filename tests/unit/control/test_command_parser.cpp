@@ -316,3 +316,17 @@ TEST(CommandParser, GridStatusPauseStop)
     ASSERT_TRUE(stop.has_value());
     EXPECT_EQ("grid_stop", stop->method);
 }
+
+TEST(CommandParser, GridResume)
+{
+    const auto resume = parseCommandLine("grid resume");
+    ASSERT_TRUE(resume.has_value());
+    EXPECT_EQ("grid_resume", resume->method);
+    EXPECT_TRUE(resume->params.empty());
+
+    // start-only flags on resume are ignored (params stay empty).
+    const auto with_flags = parseCommandLine("grid resume --levels 6");
+    ASSERT_TRUE(with_flags.has_value());
+    EXPECT_EQ("grid_resume", with_flags->method);
+    EXPECT_TRUE(with_flags->params.empty());
+}

@@ -112,11 +112,18 @@ class GridManager
 
     // --- Control plane (thread-safe; same m_mutex as tick) ---
 
-    /// Start the grid. Optional JSON overrides (levels/qty/step/anchor).
-    /// Rejected when the symbol has non-grid positions unless cfg.force.
+    /// Start the grid. Optional JSON overrides (levels/qty/step/anchor);
+    /// geometric overrides (levels/qty/step) persist for the grid's lifetime
+    /// — re-anchors and protection-line rebuilds keep the overridden
+    /// geometry (persisted with the state file). Rejected when the symbol
+    /// has non-grid positions unless cfg.force.
     [[nodiscard]] Result<GridSnapshot> start(const nlohmann::json &overrides);
     [[nodiscard]] GridSnapshot status() const;
     [[nodiscard]] Result<GridSnapshot> pause();
+    /// Resume a paused grid: Paused → Running. Orders were kept during the
+    /// pause; the next slow pass reconciles with the exchange before any
+    /// action, so resuming never moves orders blindly.
+    [[nodiscard]] Result<GridSnapshot> resume();
     [[nodiscard]] Result<GridSnapshot> stop();
 
     /// Periodic reconciliation — main loop, every ~200ms.
@@ -156,13 +163,13 @@ class GridManager
     void cancelAllGridOrders();
     void recordTpFill(double sell_price, double tp_fill_price, double qty);
     void recordFlattenLoss(double loss_usd);
-    void recomputeLevels(std::int64_t now_ms);
+    void recomputeLevels(std::int64_t now_ms, double anchor_override = 0.0);
     void refreshUserPositionWarn();
     void setLastAction(GridAction action, std::int64_t now_ms);
     void markSpikeIfNeeded(std::int64_t now_ms);
 
     // --- Members ---
-    const GridConfig &m_cfg;
+    GridConfig m_cfg; ///< Value copy — start overrides mutate geometry fields.
     IGridGateway &m_gw;
     strategy::SignalBoard &m_board;
     market::MarketFeed *m_feed; ///< Futures feed (nullable in tests without one).
@@ -197,6 +204,8 @@ class GridManager
     std::int64_t m_lastTickMs{ 0 };
     int m_tickCounter{ 0 };
     bool m_stateDirty{ false };
+    bool m_geometryOverridden{ false }; ///< start() geometry overrides active —
+                                        ///< re-anchors keep them (persisted).
 };
 
 /// Serialize a GridSnapshot for the control plane (grid_status JSON).

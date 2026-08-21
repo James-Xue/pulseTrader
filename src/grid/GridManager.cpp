@@ -81,9 +81,10 @@ Result<GridSnapshot> GridManager::start(const nlohmann::json &overrides)
 
     if (GridPhase::Disabled != m_phase)
     {
-        return PulseError{ ErrorCode::ControlInvalidRequest,
+        return PulseError{ ErrorCode::GridAlreadyRunning,
                            "grid already running (phase="
-                               + std::to_string(static_cast<int>(m_phase)) + ")" };
+                               + std::to_string(static_cast<int>(m_phase))
+                               + "); grid resume continues a paused grid" };
     }
 
     // Pre-check: a non-grid position on the symbol means the grid share is
@@ -98,16 +99,90 @@ Result<GridSnapshot> GridManager::start(const nlohmann::json &overrides)
                                  "set grid.force = true to proceed" };
     }
 
-    // Overrides (grid_start --levels/--qty/--step/--anchor) — formal support
-    // lands with the control-plane wiring (PR-4); here they are logged only.
+    // Overrides (grid_start --levels/--qty/--step/--anchor): formal since
+    // PR-6. Geometric overrides (levels/qty/step) mutate the config copy and
+    // persist for the grid's lifetime — re-anchors and protection-line
+    // rebuilds recompute from the overridden values. Validate everything
+    // first: a bad value rejects the whole start with no partial geometry.
+    int override_levels = -1;
+    double override_qty = -1.0;
+    double override_step = -1.0;
+    double anchor_override = 0.0;
     if (!overrides.is_null() && !overrides.empty())
     {
-        PULSE_LOG_INFO("grid", "{}: start overrides noted ({} keys)",
+        try
+        {
+            if (overrides.contains("levels"))
+            {
+                const int levels
+                    = static_cast<int>(overrides["levels"].get<double>());
+                if (levels < 1)
+                {
+                    return PulseError{ ErrorCode::ControlInvalidRequest,
+                                       "grid start: levels must be ≥ 1" };
+                }
+                override_levels = levels;
+            }
+            if (overrides.contains("qty_per_level"))
+            {
+                const double qty = overrides["qty_per_level"].get<double>();
+                if (qty <= 0.0)
+                {
+                    return PulseError{ ErrorCode::ControlInvalidRequest,
+                                       "grid start: qty_per_level must be > 0" };
+                }
+                override_qty = qty;
+            }
+            if (overrides.contains("step"))
+            {
+                const double step = overrides["step"].get<double>();
+                if (step <= 0.0)
+                {
+                    return PulseError{ ErrorCode::ControlInvalidRequest,
+                                       "grid start: step must be > 0" };
+                }
+                override_step = step;
+            }
+            if (overrides.contains("anchor"))
+            {
+                const double anchor = overrides["anchor"].get<double>();
+                if (anchor <= 0.0)
+                {
+                    return PulseError{ ErrorCode::ControlInvalidRequest,
+                                       "grid start: anchor must be > 0" };
+                }
+                anchor_override = anchor;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            return PulseError{ ErrorCode::ControlInvalidRequest,
+                               "grid start: malformed override value: " + std::string{ e.what() } };
+        }
+
+        if (override_levels >= 1)
+        {
+            m_cfg.levels = override_levels;
+        }
+        if (override_qty > 0.0)
+        {
+            m_cfg.qty_per_level = override_qty;
+        }
+        if (override_step > 0.0)
+        {
+            m_cfg.step_mode = "fixed"; // a step override wins over ATR mode
+            m_cfg.step_fixed = override_step;
+        }
+        if (override_levels >= 1 || override_qty > 0.0 || override_step > 0.0)
+        {
+            m_geometryOverridden = true;
+        }
+        PULSE_LOG_INFO("grid", "{}: start overrides applied ({} keys)",
                        m_symbol, overrides.size());
     }
 
     const auto now_ms = nowMs();
-    recomputeLevels(now_ms); // sets m_anchor / m_step from current mid
+    recomputeLevels(now_ms, anchor_override); // sets m_anchor / m_step
     m_phase = GridPhase::Running;
     setLastAction(GridAction::HangLevels, now_ms);
     m_stateDirty = true;
@@ -168,6 +243,25 @@ Result<GridSnapshot> GridManager::pause()
     m_phase = GridPhase::Paused;
     setLastAction(GridAction::None, nowMs());
     return statusLocked();
+}
+
+Result<GridSnapshot> GridManager::resume()
+{
+    std::lock_guard lock{ m_mutex };
+    if (GridPhase::Paused != m_phase)
+    {
+        return PulseError{ ErrorCode::GridNotPaused,
+                           "grid not paused (phase="
+                               + std::to_string(static_cast<int>(m_phase)) + ")" };
+    }
+    // Phase flip only — pause kept the orders on the exchange, and the next
+    // slow pass reconciles with the exchange before any action, so resuming
+    // never moves orders blindly.
+    m_phase = GridPhase::Running;
+    setLastAction(GridAction::None, nowMs());
+    m_stateDirty = true;
+    (void)saveState();
+    return statusLocked(); // lock already held
 }
 
 Result<GridSnapshot> GridManager::stop()
@@ -430,12 +524,22 @@ GridAction GridManager::decideAction(std::int64_t now_ms) const
         return GridAction::ProtectB;
     }
 
+    // Daily loss stop (v2 §4): realized ≤ -10 → no new levels AND no
+    // re-anchoring (the spec freezes 重挂 too). Existing TP/protection still
+    // run — manageTp executes before decideAction in the slow pass.
+    if (dailyLossFrozen(now_ms))
+    {
+        return GridAction::DailyStop;
+    }
+
     // Re-anchor: price fell far below the grid → follow down (cooldown +
-    // bearish trend gate). A breakout above the top never auto-re-anchors —
-    // it either trips protection A (already checked) or freezes new levels.
+    // bearish trend gate + spike freeze — v2 §3.1a/§3.1d). A breakout above
+    // the top never auto-re-anchors — it either trips protection A (already
+    // checked) or freezes new levels.
     if (mid > 0.0 && mid < m_anchor - m_cfg.lower_reanchor_steps * m_step)
     {
-        if (now_ms >= m_reanchorUntil && m_trendGate == "bearish")
+        if (now_ms >= m_reanchorUntil && m_trendGate == "bearish"
+            && now_ms >= m_spikeUntil)
         {
             return GridAction::Reanchor;
         }
@@ -443,8 +547,7 @@ GridAction GridManager::decideAction(std::int64_t now_ms) const
     }
 
     // Freeze conditions (new levels only — existing TP/protection still run).
-    if (dailyLossFrozen(now_ms) || now_ms < m_spikeUntil
-        || m_trendGate != "bearish")
+    if (now_ms < m_spikeUntil || m_trendGate != "bearish")
     {
         return GridAction::FreezeNew;
     }
@@ -477,8 +580,10 @@ void GridManager::executeAction(GridAction action, std::int64_t now_ms)
         flattenGridShare(now_ms, "B");
         break;
     case GridAction::FreezeNew:
-    case GridAction::DailyStop:
         setLastAction(GridAction::FreezeNew, now_ms);
+        break;
+    case GridAction::DailyStop:
+        setLastAction(GridAction::DailyStop, now_ms);
         break;
     case GridAction::None:
         break;
@@ -780,7 +885,11 @@ void GridManager::flattenGridShare(std::int64_t now_ms, const char *line)
     }
     recordFlattenLoss(loss);
 
-    // Zero the share ledger and rebuild levels per the rules (trend-gated).
+    // Zero the share ledger and rebuild levels per the rules. The re-hang
+    // after a protection flatten is itself gated by §3.1 (v2 spec: "按 §3.1
+    // 含趋势闸门/暴拉冻结决定是否重新锚定挂格") — daily stop, spike freeze and a
+    // bullish trend all hold the re-hang; the next decideAction pass resumes
+    // it once the gate clears.
     for (auto &lv : m_levels)
     {
         lv.filled = 0;
@@ -791,7 +900,16 @@ void GridManager::flattenGridShare(std::int64_t now_ms, const char *line)
     cancelAllGridOrders();
     m_levelByOrderId.clear();
     recomputeLevels(now_ms);
-    hangLevels();
+    if (dailyLossFrozen(now_ms) || now_ms < m_spikeUntil
+        || m_trendGate != "bearish")
+    {
+        PULSE_LOG_INFO("grid", "{}: post-protection re-hang held "
+                       "(daily/spike/trend gate)", m_symbol);
+    }
+    else
+    {
+        hangLevels();
+    }
     m_stateDirty = true;
 }
 
@@ -822,7 +940,7 @@ void GridManager::cancelAllGridOrders()
     {
         if (startsWith(o.client_order_id, "eth-grid-"))
         {
-            m_gw.cancel(o.order_id);
+            (void)m_gw.cancel(o.order_id); // best-effort sweep
         }
     }
 }
@@ -844,7 +962,7 @@ void GridManager::recordTpFill(double sell_price, double tp_fill_price, double q
     }
 }
 
-void GridManager::recomputeLevels(std::int64_t now_ms)
+void GridManager::recomputeLevels(std::int64_t now_ms, double anchor_override)
 {
     // Step: ATR-adaptive (clamp(0.5×ATR15m, min, max)) or fixed.
     if (m_cfg.step_mode == "atr")
@@ -862,16 +980,25 @@ void GridManager::recomputeLevels(std::int64_t now_ms)
         m_step = m_cfg.step_fixed;
     }
 
-    // Anchor: round(mid + 1×step, step). Grid sits ABOVE price (chase-short
-    // regime — the grid waits for a rebound into the level band).
-    const double mid = computeMid();
-    if (mid > 0.0 && m_step > 0.0)
+    // Anchor: round(mid + 1×step, step) by default; grid_start --anchor
+    // overrides it. Grid sits ABOVE price (chase-short regime — the grid
+    // waits for a rebound into the level band).
+    if (anchor_override > 0.0 && m_step > 0.0)
     {
-        m_anchor = roundToStep(mid + m_cfg.anchor_offset_steps * m_step, m_step);
+        m_anchor = roundToStep(anchor_override, m_step);
     }
     else
     {
-        m_anchor = 0.0;
+        const double mid = computeMid();
+        if (mid > 0.0 && m_step > 0.0)
+        {
+            m_anchor = roundToStep(mid + m_cfg.anchor_offset_steps * m_step,
+                                   m_step);
+        }
+        else
+        {
+            m_anchor = 0.0;
+        }
     }
 
     m_levels.clear();

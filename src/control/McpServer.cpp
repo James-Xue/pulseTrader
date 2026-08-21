@@ -120,6 +120,12 @@ nlohmann::json McpServer::toolDefinitions()
         "actions until grid_resume/grid_start.",
         nlohmann::json::object(), {});
 
+    add("grid_resume",
+        "Resume a paused grid: phase Paused → Running. Orders were kept "
+        "during the pause; the next slow pass reconciles with the exchange "
+        "before any action.",
+        nlohmann::json::object(), {});
+
     add("grid_stop",
         "Stop the grid and cancel ALL eth-grid-* orders on the symbol.",
         nlohmann::json::object(), {});

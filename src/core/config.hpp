@@ -352,7 +352,8 @@ struct GridConfig
     double tp_distance_steps = 2.0;  ///< TP limit = fill_price - n×step.
     double anchor_offset_steps = 1.0; ///< Anchor = round(mid + n×step, step).
     double lower_reanchor_steps = 3.0; ///< mid < anchor - n×step → follow down.
-    double upper_reanchor_steps = 1.0; ///< mid > top + n×step → protection A.
+    // (No upper_reanchor_steps: a breakout through the top never auto-re-anchors —
+    // v2 spec §3.1b routes it to protection line A, covered by protect_line_a_steps.)
     double protect_line_a_steps = 2.0; ///< 15m/1m close > top + n×step → flatten grid share.
     double protect_line_b_usd = -30.0; ///< Grid floating loss ≤ this → flatten.
     double daily_loss_limit_usd = -10.0; ///< Realized ≤ this → freeze new levels.

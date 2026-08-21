@@ -151,6 +151,9 @@ class EngineServices
     [[nodiscard]] nlohmann::json gridStatus() const;
     /// Pause the grid (`grid_pause`) — orders stay, no new action.
     [[nodiscard]] Result<nlohmann::json> gridPause();
+    /// Resume a paused grid (`grid_resume`) — Paused → Running; orders were
+    /// kept during the pause, the next slow pass reconciles before acting.
+    [[nodiscard]] Result<nlohmann::json> gridResume();
     /// Stop the grid (`grid_stop`) — cancels all eth-grid-* orders.
     [[nodiscard]] Result<nlohmann::json> gridStop();
 

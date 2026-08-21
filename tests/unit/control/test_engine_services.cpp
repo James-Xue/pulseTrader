@@ -757,3 +757,12 @@ TEST_F(EngineServicesTest, ListFuturesOrdersRequiresContract)
     ASSERT_FALSE(ok(result));
     EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
 }
+
+TEST_F(EngineServicesTest, GridResumeWhenNotConfiguredFails)
+{
+    // The fixture wires no GridManager — the service must fail cleanly with
+    // 9200 before touching the manager.
+    const auto result = m_services->gridResume();
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::GridNotStarted, error(result).code);
+}
