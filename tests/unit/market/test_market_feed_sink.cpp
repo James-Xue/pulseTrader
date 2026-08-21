@@ -183,6 +183,48 @@ TEST(MarketFeedSink, SpotKlineDispatchedToSink)
     EXPECT_EQ(0u, sink.tickers.size());
 }
 
+TEST(MarketFeedSink, FuturesKlineRoutesToPerSymbolBuffer)
+{
+    // Futures candlestick pushes carry the contract in "n" as
+    // "<interval>_<contract>" (see FuturesKlineFrameCarriesSymbolInInterval
+    // Field) — each pushed candle must land in ITS OWN buffer. Regression
+    // for the 08-21 bug where every futures kline fell into the first
+    // subscribed symbol's buffer.
+    FeedHarness harness{ MarketType::Futures };
+    auto &feed = harness.feed;
+
+    const nlohmann::json eth_frame = nlohmann::json::parse(R"({
+        "time": 1542162490,
+        "channel": "futures.candlesticks",
+        "event": "update",
+        "result": [ { "t": 1542162480, "o": "6350.1", "c": "6350.2",
+                      "h": "6350.2", "l": "6350.1", "v": 120,
+                      "n": "1m_ETH_USDT", "w": false } ]
+    })");
+    const nlohmann::json sndk_frame = nlohmann::json::parse(R"({
+        "time": 1542162490,
+        "channel": "futures.candlesticks",
+        "event": "update",
+        "result": [ { "t": 1542162480, "o": "98.1", "c": "98.9",
+                      "h": "99.1", "l": "98.0", "v": 120,
+                      "n": "1m_SNDK_USDT", "w": false } ]
+    })");
+
+    // No fallback symbol passed — the "n" field must route each candle.
+    feed.onKlineUpdate(eth_frame["result"], eth_frame);
+    feed.onKlineUpdate(sndk_frame["result"], sndk_frame);
+
+    const auto eth = feed.getKlineBuffer("ETH_USDT").snapshot(1);
+    const auto sndk = feed.getKlineBuffer("SNDK_USDT").snapshot(1);
+    ASSERT_EQ(1u, eth.size());
+    ASSERT_EQ(1u, sndk.size());
+    EXPECT_DOUBLE_EQ(6350.2, eth[0].close);
+    EXPECT_DOUBLE_EQ(98.9, sndk[0].close);
+
+    // No stray candle in the other buffers.
+    EXPECT_TRUE(feed.getKlineBuffer("BTC_USDT").snapshot(1).empty());
+}
+
 // ---------------------------------------------------------------------------
 // Null sink
 // ---------------------------------------------------------------------------

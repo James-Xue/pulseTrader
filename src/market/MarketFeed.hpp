@@ -123,7 +123,8 @@ class MarketFeed
     ///
     /// Test/diagnostic seam: kept public so sink dispatch can be unit-tested
     /// without a live WebSocket connection.
-    void onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
+    void onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame,
+                       const std::string &fallback_symbol = "");
 
     /// Parse a TradFi ticker object into a Ticker (pure, unit-testable).
     ///

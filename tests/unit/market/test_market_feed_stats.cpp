@@ -149,26 +149,29 @@ TEST(MarketFeedStats, SpotKlineFrameHasCurrencyPairInOuterFrame)
     EXPECT_EQ("1m", result["n"].get<std::string>());
 }
 
-TEST(MarketFeedStats, FuturesKlineFrameHasContractInResult)
+TEST(MarketFeedStats, FuturesKlineFrameCarriesSymbolInIntervalField)
 {
-    // Futures kline frame: symbol is INSIDE result as "n".
-    // The outer frame does NOT have "contract" or "currency_pair".
+    // Futures kline frame (probed 08-21): NEITHER the outer frame NOR a
+    // "contract" field carries the symbol — the contract rides in "n" as
+    // "<interval>_<contract>" (e.g. "1m_ETH_USDT"). The 08-21 bug: the
+    // parser never looked there, so every futures kline fell into the first
+    // subscribed symbol's buffer.
     const nlohmann::json frame = nlohmann::json::parse(R"({
         "time": 1542162490,
         "channel": "futures.candlesticks",
         "event": "update",
-        "result": { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": 120, "n": "BTC_USDT" }
+        "result": [ { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": 120, "n": "1m_ETH_USDT", "w": false } ]
     })");
 
     const auto &result = frame["result"];
 
-    // Futures: outer frame has NO contract field.
+    // Futures: outer frame has NO symbol fields, element has NO "contract".
     EXPECT_FALSE(frame.contains("currency_pair"));
     EXPECT_FALSE(frame.contains("contract"));
+    EXPECT_FALSE(result[0].contains("contract"));
 
-    // Symbol is in result["n"].
-    EXPECT_TRUE(result.contains("n"));
-    EXPECT_EQ("BTC_USDT", result["n"].get<std::string>());
+    // "n" = "<interval>_<contract>" — the parser strips the "1m_" prefix.
+    EXPECT_EQ("1m_ETH_USDT", result[0]["n"].get<std::string>());
 }
 
 TEST(MarketFeedStats, FuturesKlineSubscriptionPerSymbol)

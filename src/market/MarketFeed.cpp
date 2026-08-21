@@ -106,10 +106,13 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     for (const auto &symbol : symbols)
     {
         std::vector<std::string> kline_payload = { "1m", symbol };
+        // Futures candlestick pushes carry NO contract in the frame (unlike
+        // tickers) — capture the subscribed symbol here, or every futures
+        // kline would fall back into the first subscribed symbol's buffer.
         m_wsClient->subscribe(candlesticks_ch,
             kline_payload,
-            [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-            { onKlineUpdate(result, full_frame); });
+            [this, symbol](const nlohmann::json &result, const nlohmann::json &full_frame)
+            { onKlineUpdate(result, full_frame, symbol); });
     }
 
     PULSE_LOG_INFO("market", "{} MarketFeed started — subscribed to {} symbols",
@@ -400,7 +403,9 @@ void MarketFeed::onOrderbookUpdate(const nlohmann::json &result, const nlohmann:
     m_orderbookCount.fetch_add(1, std::memory_order_relaxed);
 }
 
-void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
+void MarketFeed::onKlineUpdate(const nlohmann::json &result,
+                               const nlohmann::json &full_frame,
+                               const std::string &fallback_symbol)
 {
     // Gate.io K-line format:
     //
@@ -409,21 +414,24 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
     //             "v": "123.45", "n": "1m", "a": "6172800" }
     //   Symbol: full_frame["currency_pair"] = "BTC_USDT"
     //
-    // Futures — result is a JSON ARRAY with one element:
+    // Futures — result is a JSON ARRAY with one element (probed 08-21):
     //   result: [{ "t": 123, "o": "50000", "c": "50001", "h": "50100", "l": "49900",
-    //              "v": 120, "n": "1m", "contract": "BTC_USDT" }]
-    //   Symbol: element["contract"] = "BTC_USDT"
-    //   Note: "n" is the interval ("1m"), NOT the contract name.
+    //              "v": 120, "n": "1m_ETH_USDT", "w": false }]
+    //   Symbol: NO "contract" field — the contract rides in "n" as
+    //   "<interval>_<contract>". parseKlineSymbol strips the prefix.
     //
     // Processing:
     //   1. Normalize result to an iterable list of candle objects
-    //   2. Extract symbol per candle (spot: outer frame, futures: element field)
+    //   2. Extract symbol per candle — spot carries it in the outer frame;
+    //      futures pushes carry NO symbol at all (unlike tickers), so the
+    //      per-subscription captured symbol is the authority.
     //   3. Parse OHLCV and push to the appropriate KlineBuffer
 
     // 1. Normalize: build a list of candle references to process uniformly.
     //    For spot (object), wrap in a single-element span.
     //    For futures (array), iterate directly.
-    const auto process_candle = [this, &full_frame](const nlohmann::json &candle)
+    const auto process_candle = [this, &full_frame, fallback_symbol](
+                                    const nlohmann::json &candle)
     {
         if (!candle.is_object() || !candle.contains("t"))
         {
@@ -439,13 +447,27 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         }
         else if (candle.contains("contract"))
         {
-            // Futures: symbol in each candle element.
+            // Futures: symbol in each candle element (some endpoints do).
             symbol = candle["contract"].get<std::string>();
         }
-        else if (!m_subscribedSymbols.empty())
+        else if (candle.contains("n") && candle["n"].is_string())
         {
-            // Fallback: use the first subscribed symbol (single-symbol subscription).
-            symbol = m_subscribedSymbols[0];
+            // Futures candlestick pushes carry no "contract" — the contract
+            // rides in "n" as "<interval>_<contract>" (e.g. "1m_ETH_USDT",
+            // probed 08-21). Spot never reaches here (currency_pair wins).
+            const std::string n = candle["n"].get<std::string>();
+            const auto pos = n.find('_');
+            symbol = pos == std::string::npos ? n : n.substr(pos + 1);
+        }
+        else
+        {
+            // Last resort: the per-subscription captured symbol (safe for
+            // endpoints whose pushes carry no symbol at all).
+            symbol = fallback_symbol;
+            if (symbol.empty() && !m_subscribedSymbols.empty())
+            {
+                symbol = m_subscribedSymbols[0];
+            }
         }
 
         if (symbol.empty())
