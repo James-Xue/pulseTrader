@@ -505,6 +505,33 @@ TEST_F(EngineServicesTest, SyncPositionsHandlesUnconfiguredRest)
     EXPECT_EQ(0, summary["pruned"].get<int>());
 }
 
+TEST_F(EngineServicesTest, FuturesGhostPruneNeverRunsOnFailedListing)
+{
+    // M26: futures ghost pruning (fill-tracked positions on contracts the
+    // exchange no longer holds) must ONLY run against a SUCCESSFUL exchange
+    // listing. The fixture has no API credentials, so the futures sync fails
+    // fast at the REST layer — seed a stale-looking fill-tracked ETH grid
+    // position and verify it survives the sync untouched. A prune that ran
+    // on failure would drop real positions.
+    const auto opened = m_positionMgr->openPosition(
+        "ETH_USDT", Side::Sell, 2.0, 2050.0, "eth-grid-2050",
+        MarketType::Futures, 10.0, MarginMode::Cross, 0.01, 0.0);
+    ASSERT_TRUE(ok(opened));
+
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_restClient.get(), nullptr,
+        nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
+
+    const auto summary = svc.syncPositions();
+    EXPECT_EQ(0, summary["futures_synced"].get<int>());
+    const auto j = svc.positions();
+    ASSERT_EQ(1, j["positions"].size());
+    EXPECT_EQ("eth-grid-2050",
+              j["positions"][0]["strategy_id"].get<std::string>());
+}
+
 TEST_F(EngineServicesTest, OpenOrderCfdWithSlRejectedWhenFreeMarginFloorUnmet)
 {
     // M22 minimum-free-margin-after-stop gate: with a floor configured, a CFD

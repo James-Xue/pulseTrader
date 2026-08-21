@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,24 @@ class EngineServices
     /// Returns the number of positions pruned.
     [[nodiscard]] int pruneGhostPositions(
         MarketType mt, const std::vector<std::string> &live_exchange_ids);
+
+    /// Close a position that vanished from the exchange with no local close
+    /// record (manual app close, exchange-side stop/liquidation) and
+    /// synthesize the external-close report so the audit trail (recent
+    /// reports / trades.db / drawdown guard) stays complete. The exit price
+    /// is a best-effort estimate from the last known mark. Returns 1 when
+    /// the ghost was pruned.
+    [[nodiscard]] int traceExternalGhostClose(const risk::Position &pos);
+
+    /// Prune futures positions on contracts the exchange no longer holds.
+    /// Futures carry no exchange_position_id (positions merge per contract),
+    /// so the live contract set is the only handle — a contract with zero
+    /// exchange size means every engine fill on it was closed externally
+    /// (2026-08-20 ETH grid: user's app market order flattened the contract
+    /// while 15 fill-tracked entries lingered with fake unrealized PnL).
+    /// Same grace window as pruneGhostPositions.
+    [[nodiscard]] int pruneGhostFuturesByContract(
+        const std::set<std::string> &live_contracts);
 };
 
 } // namespace pulse::control

@@ -47,6 +47,8 @@ std::optional<EntryContext> EthScalper::evaluateEntry(
     // 2. Coin-specific parameters (static, from the TOML custom_params table).
     const double atr_step = customParam("eth_atr_step", 0.05);
     const double spike_filter_usd = customParam("eth_spike_filter_usd", 120.0);
+    const double spike_filter_pct = customParam("eth_spike_filter_pct", 1.5);
+    const double spike_filter_atr = customParam("eth_spike_filter_atr", 3.0);
     const double conf_scale = customParam("eth_min_confidence_scale", 1.0);
 
     // 3. Extract close prices and compute fast/slow EMA.
@@ -60,58 +62,96 @@ std::optional<EntryContext> EthScalper::evaluateEntry(
     const double ema_fast = computeEma(closes, static_cast<double>(fast_period), m_prevEmaFast);
     const double ema_slow = computeEma(closes, static_cast<double>(slow_period), m_prevEmaSlow);
 
-    // 4. Short-only entry: detect the BEARISH crossover. Bullish crossovers
-    //    are ignored (chase-short regime).
-    std::optional<EntryContext> entry;
-    if (m_hasPrev)
+    // 4. Trend state (v2): published on EVERY candle (Flat, confidence 0)
+    //    so the signal board always carries the current trend gate for the
+    //    grid sub-agent — a persistent state, not just the cross event.
+    std::string trend_state = "neutral";
+    if (ema_fast < ema_slow)
     {
-        const bool bearish_cross = (m_prevEmaFast >= m_prevEmaSlow) && (ema_fast < ema_slow);
+        trend_state = "bearish";
+    }
+    else if (ema_fast > ema_slow)
+    {
+        trend_state = "bullish";
+    }
 
-        if (bearish_cross)
+    // 5. ATR — needed for both the confidence normalization and the
+    //    ATR-relative spike filter.
+    const double atr = computeAtr(candles, 14);
+
+    // 6. Spike filter (v2): ANY of the three thresholds tripping = spike
+    //    (暴拉/插针, do NOT chase it short). The USD-only filter missed the
+    //    04:50 1m +4.4% pump in the grid review — a percent or ATR-relative
+    //    threshold catches fast pumps on any price scale. Set one to 0 to
+    //    disable it (a threshold of 0 means "no filter", not "any range").
+    const auto &latest = candles.back();
+    const double range_usd = latest.high - latest.low;
+    const double range_pct = latest.close > 0.0
+                                 ? range_usd / latest.close * 100.0 : 0.0;
+    const bool spike = (spike_filter_usd > 0.0 && range_usd > spike_filter_usd)
+                       || (spike_filter_pct > 0.0 && range_pct > spike_filter_pct)
+                       || (atr > 0.0 && spike_filter_atr > 0.0
+                           && range_usd > atr * spike_filter_atr);
+
+    // 7. Short-only entry: the bearish crossover fires the real Sell signal;
+    //    bullish crossovers are ignored (chase-short regime).
+    const bool bearish_cross = m_hasPrev
+        && (m_prevEmaFast >= m_prevEmaSlow) && (ema_fast < ema_slow);
+
+    EntryContext e;
+    e.price = latest.close;
+    e.atr = atr;
+    e.indicators = {
+        { "ema_fast", ema_fast },
+        { "ema_slow", ema_slow },
+        { "trend_state", trend_state },
+        { "atr", atr },
+        { "atr_step", atr_step },
+        { "suggested_tp", latest.close - atr_step * atr },
+        { "spike", spike ? 1 : 0 },
+        { "spike_range_usd", range_usd },
+        { "spike_range_pct", range_pct },
+        { "spike_filter_usd", spike_filter_usd },
+        { "spike_filter_pct", spike_filter_pct },
+        { "spike_filter_atr", spike_filter_atr },
+    };
+
+    if (bearish_cross && !spike && atr > 0.0)
+    {
+        // 8. Confidence: ATR-normalized EMA separation, scaled by the
+        //    coin-specific factor, clamped to [0, 1].
+        double confidence = std::clamp(
+            std::abs(ema_fast - ema_slow) / atr, 0.0, 1.0);
+        confidence = std::clamp(confidence * conf_scale, 0.0, 1.0);
+
+        e.type = SignalType::Sell;
+        e.confidence = confidence;
+        e.reason = "ETH short setup: EMA bearish crossover (fast < slow)";
+    }
+    else
+    {
+        // State-only publish: no trade signal, but the board keeps the
+        // current trend gate / spike flag fresh for consumers.
+        e.type = SignalType::Flat;
+        e.confidence = 0.0;
+        if (bearish_cross && spike)
         {
-            const auto &latest = candles.back();
-
-            // 5. Spike filter: a candle whose high-low range exceeds the
-            //    threshold is a 暴拉/插针 — do NOT chase it short.
-            const double range_usd = latest.high - latest.low;
-            if (range_usd <= spike_filter_usd)
-            {
-                // 6. Confidence: ATR-normalized EMA separation, scaled by
-                //    the coin-specific factor, clamped to [0, 1].
-                const double atr = computeAtr(candles, 14);
-                if (atr > 0.0)
-                {
-                    double confidence = std::clamp(
-                        std::abs(ema_fast - ema_slow) / atr, 0.0, 1.0);
-                    confidence = std::clamp(confidence * conf_scale, 0.0, 1.0);
-
-                    EntryContext e;
-                    e.type = SignalType::Sell;
-                    e.price = latest.close;
-                    e.confidence = confidence;
-                    e.atr = atr;
-                    e.reason = "ETH short setup: EMA bearish crossover (fast < slow)";
-                    e.indicators = {
-                        { "ema_fast", ema_fast },
-                        { "ema_slow", ema_slow },
-                        { "atr", atr },
-                        { "atr_step", atr_step },
-                        { "suggested_tp", latest.close - atr_step * atr },
-                        { "spike_range_usd", range_usd },
-                        { "spike_filter_usd", spike_filter_usd },
-                    };
-                    entry = std::move(e);
-                }
-            }
+            e.reason = "ETH state: bearish crossover but spike filter tripped "
+                       "(range > usd/pct/atr threshold) — no chase";
+        }
+        else
+        {
+            e.reason = "ETH state: EMA trend " + trend_state
+                       + (spike ? " with spike" : "") + " — no signal";
         }
     }
 
-    // 7. Store current EMAs for next crossover detection (committed even
+    // 9. Store current EMAs for next crossover detection (committed even
     //    when no signal fired — the trend has moved on regardless).
     m_prevEmaFast = ema_fast;
     m_prevEmaSlow = ema_slow;
     m_hasPrev = true;
-    return entry;
+    return e;
 }
 
 } // namespace pulse::strategy

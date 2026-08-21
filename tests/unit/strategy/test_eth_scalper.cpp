@@ -155,11 +155,15 @@ TEST(EthScalper, NoSignalWithoutFeed)
 
 TEST(EthScalper, BearishCrossEmitsShortSignal)
 {
+    // Percent spike filter disabled (test candle range is 20% of close);
+    // cooldown disabled (the two onKline calls run ms apart).
     FeedHarness harness{ MarketType::Futures };
-    auto scalper = std::make_unique<EthScalper>(make_ctx(harness));
+    auto scalper = std::make_unique<EthScalper>(
+        make_ctx(harness, { { "eth_spike_filter_pct", 0.0 } }));
     scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
     scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
     scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> received;
     scalper->setSignalCallback([&](const TradingSignal &s)
@@ -170,8 +174,9 @@ TEST(EthScalper, BearishCrossEmitsShortSignal)
     drive_two_calls(harness, *scalper,
         make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
 
-    ASSERT_EQ(1u, received.size());
-    const auto &sig = received.front();
+    // Call A publishes a state-only (Flat) entry; call B fires the Sell.
+    ASSERT_EQ(2u, received.size());
+    const auto &sig = received.back();
     EXPECT_EQ(SignalType::Sell, sig.type);
     EXPECT_EQ("ETH_USDT", sig.symbol);
     EXPECT_EQ("eth_scalper_ETH_USDT", sig.strategy_id);
@@ -197,16 +202,23 @@ TEST(EthScalper, BearishCrossEmitsShortSignal)
     EXPECT_NEAR(5.0 - 0.05 * atr, ind.value("suggested_tp", 0.0), 1e-9);
     EXPECT_NEAR(1.0, ind.value("spike_range_usd", 0.0), 1e-9); // Normal range passes filter.
     EXPECT_DOUBLE_EQ(120.0, ind.value("spike_filter_usd", 0.0));
+    // v2 trend gate + spike flag ride along on the real signal too.
+    EXPECT_EQ("bearish", ind.value("trend_state", ""));
+    EXPECT_EQ(0, ind.value("spike", -1));
 }
 
-TEST(EthScalper, BullishCrossNoSignal)
+TEST(EthScalper, BullishCrossPublishesStateOnly)
 {
-    // Rising market (fast crosses ABOVE slow) → short-only strategy stays silent.
+    // Rising market (fast crosses ABOVE slow): short-only strategy must NOT
+    // sell — but the v2 trend gate publishes a state-only (Flat, conf 0)
+    // entry so the board carries the current bullish regime.
     FeedHarness harness{ MarketType::Futures };
-    auto scalper = std::make_unique<EthScalper>(make_ctx(harness));
+    auto scalper = std::make_unique<EthScalper>(
+        make_ctx(harness, { { "eth_spike_filter_pct", 0.0 } }));
     scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
     scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
     scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> received;
     scalper->setSignalCallback([&](const TradingSignal &s)
@@ -217,17 +229,29 @@ TEST(EthScalper, BullishCrossNoSignal)
     drive_two_calls(harness, *scalper,
         make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 15.0));
 
-    EXPECT_TRUE(received.empty());
+    ASSERT_EQ(2u, received.size());
+    for (const auto &sig : received)
+    {
+        EXPECT_NE(SignalType::Sell, sig.type);
+        EXPECT_EQ(0.0, sig.confidence);
+    }
+    const auto &state = received.back();
+    EXPECT_EQ("bullish", state.indicators.value("trend_state", ""));
+    EXPECT_EQ(0, state.indicators.value("spike", -1));
+    EXPECT_NE(std::string::npos, state.reason.find("bullish"));
 }
 
 TEST(EthScalper, SpikeFilterBlocksEntry)
 {
-    // Last candle high=130 → range 126 > default filter 120 → 暴拉, no chase.
+    // Last candle high=130 → range 126 > default filter 120 (and 2520% of
+    // close) → 暴拉: no Sell, but the state entry carries spike=1 so the
+    // grid gate can freeze new levels.
     FeedHarness harness{ MarketType::Futures };
     auto scalper = std::make_unique<EthScalper>(make_ctx(harness));
     scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
     scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
     scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> received;
     scalper->setSignalCallback([&](const TradingSignal &s)
@@ -238,18 +262,27 @@ TEST(EthScalper, SpikeFilterBlocksEntry)
     drive_two_calls(harness, *scalper,
         make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0, /*drop_high=*/130.0));
 
-    EXPECT_TRUE(received.empty());
+    ASSERT_EQ(2u, received.size());
+    const auto &state = received.back();
+    EXPECT_NE(SignalType::Sell, state.type);
+    EXPECT_EQ(0.0, state.confidence);
+    EXPECT_EQ(1, state.indicators.value("spike", -1));
+    EXPECT_NE(std::string::npos, state.reason.find("spike"));
 }
 
-TEST(EthScalper, AtrAdaptiveStep)
+TEST(EthScalper, SpikeFilterAtrRelative)
 {
-    // eth_atr_step = 0.1 → suggested_tp = close - 0.1 × atr.
+    // v2 ATR-relative threshold: with the USD and pct filters disabled, an
+    // ATR multiplier of 0.5 trips on range 1.0 > 0.5 × ATR14 → spike.
     FeedHarness harness{ MarketType::Futures };
     auto scalper = std::make_unique<EthScalper>(
-        make_ctx(harness, { { "eth_atr_step", 0.1 } }));
+        make_ctx(harness, { { "eth_spike_filter_usd", 0.0 },
+                            { "eth_spike_filter_pct", 0.0 },
+                            { "eth_spike_filter_atr", 0.5 } }));
     scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
     scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
     scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> received;
     scalper->setSignalCallback([&](const TradingSignal &s)
@@ -260,8 +293,36 @@ TEST(EthScalper, AtrAdaptiveStep)
     drive_two_calls(harness, *scalper,
         make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
 
-    ASSERT_EQ(1u, received.size());
-    const auto &ind = received.front().indicators;
+    ASSERT_EQ(2u, received.size());
+    const auto &state = received.back();
+    EXPECT_NE(SignalType::Sell, state.type);
+    EXPECT_EQ(1, state.indicators.value("spike", -1));
+    EXPECT_DOUBLE_EQ(0.5, state.indicators.value("spike_filter_atr", 0.0));
+}
+
+TEST(EthScalper, AtrAdaptiveStep)
+{
+    // eth_atr_step = 0.1 → suggested_tp = close - 0.1 × atr.
+    FeedHarness harness{ MarketType::Futures };
+    auto scalper = std::make_unique<EthScalper>(
+        make_ctx(harness, { { "eth_atr_step", 0.1 },
+                            { "eth_spike_filter_pct", 0.0 } }));
+    scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
+    scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
+    scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
+
+    std::vector<TradingSignal> received;
+    scalper->setSignalCallback([&](const TradingSignal &s)
+        {
+            received.push_back(s);
+        });
+
+    drive_two_calls(harness, *scalper,
+        make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
+
+    ASSERT_EQ(2u, received.size());
+    const auto &ind = received.back().indicators;
     const double atr = ind.value("atr", 0.0);
     EXPECT_DOUBLE_EQ(0.1, ind.value("atr_step", 0.0));
     EXPECT_NEAR(5.0 - 0.1 * atr, ind.value("suggested_tp", 0.0), 1e-9);
@@ -269,16 +330,19 @@ TEST(EthScalper, AtrAdaptiveStep)
 
 TEST(EthScalper, CustomParamsControlBehavior)
 {
-    // Same data, different spike filter: 0.5 blocks the range-1.0 candle,
-    // while the default 120.0 lets it through.
+    // Same data, different USD spike filter: 0.5 blocks the range-1.0
+    // candle (no Sell), while 120.0 lets the Sell through. The pct filter
+    // is disabled so only the USD threshold decides.
     auto run = [](double filter) -> std::size_t
     {
         FeedHarness harness{ MarketType::Futures };
         auto scalper = std::make_unique<EthScalper>(
-            make_ctx(harness, { { "eth_spike_filter_usd", filter } }));
+            make_ctx(harness, { { "eth_spike_filter_usd", filter },
+                                { "eth_spike_filter_pct", 0.0 } }));
         scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
         scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
         scalper->params().min_confidence.store(0.0, std::memory_order_release);
+        scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
         std::vector<TradingSignal> received;
         scalper->setSignalCallback([&](const TradingSignal &s)
@@ -288,21 +352,26 @@ TEST(EthScalper, CustomParamsControlBehavior)
 
         drive_two_calls(harness, *scalper,
             make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
-        return received.size();
+        // Count real Sell signals (state-only entries always publish).
+        return std::count_if(received.begin(), received.end(),
+            [](const TradingSignal &s) { return s.type == SignalType::Sell; });
     };
 
-    EXPECT_EQ(0u, run(0.5));  // Range 1.0 > 0.5 → blocked.
+    EXPECT_EQ(0u, run(0.5));   // Range 1.0 > 0.5 → blocked.
     EXPECT_EQ(1u, run(120.0)); // Range 1.0 <= 120.0 → allowed.
 }
 
 TEST(EthScalper, CustomParamDefaults)
 {
     // No custom_params configured → default values surface in indicators.
+    // The test candle range (1.0/5.0 = 20%) trips the default pct filter, so
+    // the last entry is a state-only publish carrying the defaults.
     FeedHarness harness{ MarketType::Futures };
     auto scalper = std::make_unique<EthScalper>(make_ctx(harness));
     scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
     scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
     scalper->params().min_confidence.store(0.0, std::memory_order_release);
+    scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
     std::vector<TradingSignal> received;
     scalper->setSignalCallback([&](const TradingSignal &s)
@@ -313,10 +382,12 @@ TEST(EthScalper, CustomParamDefaults)
     drive_two_calls(harness, *scalper,
         make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
 
-    ASSERT_EQ(1u, received.size());
-    const auto &ind = received.front().indicators;
+    ASSERT_EQ(2u, received.size());
+    const auto &ind = received.back().indicators;
     EXPECT_DOUBLE_EQ(0.05, ind.value("atr_step", 0.0));
     EXPECT_DOUBLE_EQ(120.0, ind.value("spike_filter_usd", 0.0));
+    EXPECT_DOUBLE_EQ(1.5, ind.value("spike_filter_pct", 0.0));
+    EXPECT_DOUBLE_EQ(3.0, ind.value("spike_filter_atr", 0.0));
 }
 
 TEST(EthScalper, ConfidenceScaleApplied)
@@ -326,10 +397,12 @@ TEST(EthScalper, ConfidenceScaleApplied)
     {
         FeedHarness harness{ MarketType::Futures };
         auto scalper = std::make_unique<EthScalper>(
-            make_ctx(harness, { { "eth_min_confidence_scale", scale } }));
+            make_ctx(harness, { { "eth_min_confidence_scale", scale },
+                                { "eth_spike_filter_pct", 0.0 } }));
         scalper->params().ema_fast_period.store(2.0, std::memory_order_release);
         scalper->params().ema_slow_period.store(3.0, std::memory_order_release);
         scalper->params().min_confidence.store(0.0, std::memory_order_release);
+        scalper->params().cooldown_seconds.store(0.0, std::memory_order_release);
 
         std::vector<TradingSignal> received;
         scalper->setSignalCallback([&](const TradingSignal &s)
@@ -339,7 +412,7 @@ TEST(EthScalper, ConfidenceScaleApplied)
 
         drive_two_calls(harness, *scalper,
             make_candles(15, 10.0, 0, 0.0), make_candles(0, 0.0, 1, 5.0));
-        return received.empty() ? 0.0 : received.front().confidence;
+        return received.empty() ? 0.0 : received.back().confidence;
     };
 
     const double full = run(1.0);

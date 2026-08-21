@@ -1058,6 +1058,7 @@ int EngineServices::syncFuturesPositionsFromExchange()
     }
 
     int synced = 0;
+    std::set<std::string> live_contracts; // contracts the exchange still holds
     for (const auto &p : positions)
     {
         const std::string contract = p.value("contract", "");
@@ -1070,6 +1071,7 @@ int EngineServices::syncFuturesPositionsFromExchange()
         {
             continue;
         }
+        live_contracts.insert(contract);
 
         const double entry = syncJsonNumber(p, "entry_price");
         const double mark = syncJsonNumber(p, "mark_price");
@@ -1117,6 +1119,9 @@ int EngineServices::syncFuturesPositionsFromExchange()
     PULSE_LOG_INFO("app",
         "Position sync (futures): {} position(s) imported from exchange",
         synced);
+    // Prune fill-tracked ghosts on contracts the exchange no longer holds
+    // (external app close / liquidation) — the count is logged inside.
+    (void)pruneGhostFuturesByContract(live_contracts);
     return synced;
 }
 
@@ -1258,49 +1263,7 @@ int EngineServices::pruneGhostPositions(
         }
         if (pos.quantity > 0.0)
         {
-            // The position vanished from the exchange with no local close
-            // record — the user closed it manually in the app, or an
-            // exchange-side stop-loss/take-profit filled (native SL/TP on CFD
-            // positions fire without the engine ever seeing the order). Trace
-            // the close side through the shared record pipeline (recentReports
-            // / trades.db / drawdown guard / execution.log) so the audit trail
-            // is complete. The exit price is a best-effort estimate from the
-            // last known mark — order_id carries the "ext_" marker and the
-            // log flags the estimate so consumers can reconcile via API.
-            const double exit_price = pos.current_price > 0.0
-                                          ? pos.current_price : pos.entry_price;
-            const auto pnl = m_positionMgr.closePosition(
-                pos.position_id, pos.quantity, exit_price);
-            const double realized = pnl.has_value() ? pnl.value() : 0.0;
-
-            execution::ExecutionReport report;
-            const std::string ref = pos.exchange_position_id.empty()
-                                        ? pos.position_id
-                                        : pos.exchange_position_id;
-            report.order_id          = "ext_close_" + ref;
-            report.client_order_id   = report.order_id;
-            report.symbol            = pos.symbol;
-            report.side              = opposite(pos.side);
-            report.type              = OrderType::Market;
-            report.requested_qty     = pos.quantity;
-            report.filled_qty        = pos.quantity;
-            report.avg_fill_price    = exit_price;
-            report.submit_mid_price  = exit_price;
-            report.slippage_bps      = 0.0;
-            report.fees              = 0.0;
-            report.latency           = std::chrono::milliseconds{ 0 };
-            report.submit_time       = now();
-            report.fill_time         = now();
-            report.final_status      = OrderStatus::Filled;
-            report.exchange_position_id = pos.exchange_position_id;
-            m_orderFlow.recordExternalClose(report, realized, pos.market_type,
-                                            pos.leverage);
-
-            PULSE_LOG_INFO("app",
-                "Position sync: pruned ghost {} (absent from exchange; "
-                "external close traced, exit ~{:.2f}, pnl {:.4f})",
-                pos.position_id, exit_price, realized);
-            ++pruned;
+            pruned += traceExternalGhostClose(pos);
         }
         else if (m_positionMgr.removePosition(pos.position_id))
         {
@@ -1313,6 +1276,91 @@ int EngineServices::pruneGhostPositions(
     if (pruned > 0)
     {
         PULSE_LOG_INFO("app", "Position sync: pruned {} ghost position(s)", pruned);
+    }
+    return pruned;
+}
+
+int EngineServices::traceExternalGhostClose(const risk::Position &pos)
+{
+    // The position vanished from the exchange with no local close record —
+    // the user closed it manually in the app, or an exchange-side stop /
+    // liquidation fired without the engine ever seeing the order. Trace the
+    // close side through the shared record pipeline (recentReports /
+    // trades.db / drawdown guard / execution.log) so the audit trail is
+    // complete. The exit price is a best-effort estimate from the last known
+    // mark (falling back to entry → realized 0, keeping the ledger clean) —
+    // order_id carries the "ext_" marker and the log flags the estimate so
+    // consumers can reconcile via API.
+    const double exit_price = pos.current_price > 0.0
+                                  ? pos.current_price : pos.entry_price;
+    const auto pnl = m_positionMgr.closePosition(
+        pos.position_id, pos.quantity, exit_price);
+    const double realized = pnl.has_value() ? pnl.value() : 0.0;
+
+    execution::ExecutionReport report;
+    const std::string ref = pos.exchange_position_id.empty()
+                                ? pos.position_id
+                                : pos.exchange_position_id;
+    report.order_id          = "ext_close_" + ref;
+    report.client_order_id   = report.order_id;
+    report.symbol            = pos.symbol;
+    report.side              = opposite(pos.side);
+    report.type              = OrderType::Market;
+    report.requested_qty     = pos.quantity;
+    report.filled_qty        = pos.quantity;
+    report.avg_fill_price    = exit_price;
+    report.submit_mid_price  = exit_price;
+    report.slippage_bps      = 0.0;
+    report.fees              = 0.0;
+    report.latency           = std::chrono::milliseconds{ 0 };
+    report.submit_time       = now();
+    report.fill_time         = now();
+    report.final_status      = OrderStatus::Filled;
+    report.exchange_position_id = pos.exchange_position_id;
+    m_orderFlow.recordExternalClose(report, realized, pos.market_type,
+                                    pos.leverage);
+
+    PULSE_LOG_INFO("app",
+        "Position sync: pruned ghost {} (absent from exchange; "
+        "external close traced, exit ~{:.2f}, pnl {:.4f})",
+        pos.position_id, exit_price, realized);
+    return 1;
+}
+
+int EngineServices::pruneGhostFuturesByContract(
+    const std::set<std::string> &live_contracts)
+{
+    // Grace window: a freshly-opened engine fill may not have appeared in
+    // the exchange positions list yet — only prune fills older than the
+    // grace period so we never drop a real position.
+    constexpr auto kGrace = std::chrono::seconds{ 60 };
+    const auto cutoff = now() - kGrace;
+
+    int pruned = 0;
+    for (const auto &pos : m_positionMgr.getAllPositions())
+    {
+        if (MarketType::Futures != pos.market_type)
+        {
+            continue;
+        }
+        if (pos.quantity <= 0.0)
+        {
+            continue;
+        }
+        if (live_contracts.contains(pos.symbol))
+        {
+            continue; // contract still held on the exchange
+        }
+        if (pos.open_time > cutoff)
+        {
+            continue; // too fresh — likely a fill that has not appeared yet.
+        }
+        pruned += traceExternalGhostClose(pos);
+    }
+    if (pruned > 0)
+    {
+        PULSE_LOG_INFO("app",
+            "Position sync: pruned {} ghost futures position(s)", pruned);
     }
     return pruned;
 }

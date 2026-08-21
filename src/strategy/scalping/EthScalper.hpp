@@ -3,19 +3,31 @@
 //
 // First coin-specialized strategy, built on the UnifiedScalper template.
 // Demonstrates the three coin-extension mechanisms:
-//   1. Custom entry logic — short-only: emits ONLY on a bearish EMA
-//      crossover (fast crosses below slow). Bullish crossovers are ignored
-//      (ETH chase-short regime).
-//   2. Custom parameters (TOML instance `custom_params = { ... }`, read via
+//   1. Custom entry logic — short-only: emits a REAL Sell signal ONLY on a
+//      bearish EMA crossover (fast crosses below slow). Bullish crossovers
+//      never buy (ETH chase-short regime).
+//   2. Trend-gate state (v2, 2026-08-21): every candle publishes a
+//      state-only entry (SignalType::Flat, confidence 0) carrying the
+//      current EMA trend_state and spike flag, so consumers (grid sub-agent)
+//      can gate on persistent trend without re-computing EMAs — the grid
+//      review showed a short grid needs a trend GATE, not just cross events.
+//   3. Custom parameters (TOML instance `custom_params = { ... }`, read via
 //      UnifiedScalper::customParam):
 //        eth_atr_step            (default 0.05) — ATR-adaptive suggested TP:
 //                                suggested_tp = close - eth_atr_step * atr
 //                                (big ATR → wider TP, small ATR → tighter TP)
 //        eth_spike_filter_usd    (default 120.0) — a candle whose high-low
-//                                range exceeds this is a 暴拉/插针 spike:
+//                                range exceeds this USD amount is a spike:
 //                                do NOT chase it short
+//        eth_spike_filter_pct    (default 1.5) — same, as % of close
+//                                (v2: the fixed-USD filter misses fast pumps
+//                                on low-priced candles — e.g. the 04:50 1m
+//                                +4.4% pump in the grid review)
+//        eth_spike_filter_atr    (default 3.0) — same, as ×ATR (v2)
+//                                (any of the three thresholds tripping =
+//                                spike; set a filter to 0 to disable it)
 //        eth_min_confidence_scale (default 1.0) — confidence scale factor
-//   3. Custom confidence — ATR-normalized EMA separation, then scaled by
+//   4. Custom confidence — ATR-normalized EMA separation, then scaled by
 //      eth_min_confidence_scale and clamped to [0, 1].
 //
 // Note: this is intentionally NOT a full grid implementation — it validates
