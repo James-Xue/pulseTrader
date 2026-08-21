@@ -15,6 +15,8 @@
 
 #include "logging/Logger.hpp"
 
+#include <chrono>
+
 namespace pulse::ai
 {
 
@@ -24,12 +26,14 @@ namespace pulse::ai
 AiPipeline::AiPipeline(const AiConfig &ai_config,
                        const TwitterConfig &twitter_config,
                        const NewsConfig &news_config,
-                       AIClient::HttpTransport transport)
+                       AIClient::HttpTransport transport,
+                       core::ParamChangeLog *change_log)
     : m_twitterFeed{ twitter_config }
     , m_newsFeed{ news_config }
     , m_promptBuilder{}
     , m_aiClient{ ai_config, std::move(transport) }
     , m_paramAdvisor{}
+    , m_changeLog{ change_log }
 {
     PULSE_LOG_INFO("ai", "AiPipeline initialized (backend={}, model={})",
                    ai_config.backend, ai_config.model);
@@ -44,11 +48,18 @@ AiPipeline::AiPipeline(const AiConfig &ai_config,
 //   - JSON parse: return PulseError, old params preserved
 //   - Param apply: always succeeds (clamps out-of-range values)
 // ---------------------------------------------------------------------------
-Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
-                                       std::vector<strategy::StrategyParams *> &allParams)
+Result<AnalysisResult> AiPipeline::run(
+    const PipelineContext &ctx,
+    std::vector<strategy::StrategyHandle> &handles)
 {
-    PULSE_LOG_INFO("ai", "AI pipeline cycle started for symbol={} ({} strategy params)",
-                   snapshot.ticker.symbol, allParams.size());
+    if (handles.empty())
+    {
+        return PulseError{ ErrorCode::InternalError,
+                           "AI pipeline: no strategy handles to tune" };
+    }
+
+    PULSE_LOG_INFO("ai", "AI pipeline cycle started for symbol={} ({} strategy handles)",
+                   ctx.market.ticker.symbol, handles.size());
 
     // 1. Poll Twitter feed (failure is non-fatal)
     std::string tweet_text;
@@ -80,11 +91,10 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
                        e.what());
     }
 
-    // 3. Build system + user prompt from available data.
-    //    Use the first strategy's params for the prompt (current values shown to LLM).
-    //    Precondition: allParams is non-empty (guaranteed by HeartbeatScheduler).
+    // 3. Build system + user prompt from the cycle context.
+    //    The first strategy's params are shown to the LLM as the baseline.
     auto [systemPrompt, userPrompt] = m_promptBuilder.build(
-        snapshot, tweet_text, news_text, *allParams[0]);
+        ctx, tweet_text, news_text, *handles[0].params);
 
     PULSE_LOG_INFO("ai", "Prompt built: system={} chars, user={} chars",
                    systemPrompt.size(), userPrompt.size());
@@ -101,12 +111,25 @@ Result<AnalysisResult> AiPipeline::run(const MarketSnapshot &snapshot,
         return err;
     }
 
-    // 5. Apply validated parameter deltas to ALL strategy params.
+    // 5. Apply validated parameter deltas to ALL strategy params. Every
+    //    applied delta is audited (source="ai") so operators can trace what
+    //    the LLM changed and when.
     const auto &analysis = value(result);
     std::vector<heartbeat::OnParamUpdate> updates;
-    for (auto *params_ptr : allParams)
+    for (const auto &handle : handles)
     {
-        auto batch = m_paramAdvisor.apply(analysis, *params_ptr);
+        auto batch = m_paramAdvisor.apply(analysis, *handle.params);
+        // Audit BEFORE moving the batch away (apply returns by value).
+        if (m_changeLog != nullptr && !batch.empty())
+        {
+            const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            for (const auto &update : batch)
+            {
+                m_changeLog->record({ now_ns, handle.id, update.param_name,
+                                      update.old_value, update.new_value, "ai" });
+            }
+        }
         // Collect updates from the first strategy only (all get the same deltas).
         if (updates.empty())
         {
@@ -156,6 +179,11 @@ NewsFeed &AiPipeline::newsFeed()
 ParamAdvisor &AiPipeline::paramAdvisor()
 {
     return m_paramAdvisor;
+}
+
+core::ParamChangeLog *AiPipeline::changeLog() const noexcept
+{
+    return m_changeLog;
 }
 
 std::shared_ptr<const AnalysisResult> AiPipeline::lastResult() const noexcept

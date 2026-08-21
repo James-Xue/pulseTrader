@@ -21,11 +21,11 @@ using namespace pulse::strategy;
 TEST(PromptBuilder, SystemPromptContainsSchema)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
 
-    auto [system, user] = builder.build(snapshot, "", "", params);
+    auto [system, user] = builder.build(ctx, "", "", params);
 
     // System prompt must contain key schema elements
     EXPECT_NE(system.find("sentiment"), std::string::npos);
@@ -42,16 +42,16 @@ TEST(PromptBuilder, SystemPromptContainsSchema)
 TEST(PromptBuilder, UserPromptIncludesMarketData)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
-    snapshot.ticker.last = 65000.0;
-    snapshot.ticker.bid = 64999.0;
-    snapshot.ticker.ask = 65001.0;
-    snapshot.ticker.change_pct = 2.5;
-    snapshot.ticker.volume_24h = 15000.0;
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    ctx.market.ticker.last = 65000.0;
+    ctx.market.ticker.bid = 64999.0;
+    ctx.market.ticker.ask = 65001.0;
+    ctx.market.ticker.change_pct = 2.5;
+    ctx.market.ticker.volume_24h = 15000.0;
     StrategyParams params;
 
-    auto [system, user] = builder.build(snapshot, "", "", params);
+    auto [system, user] = builder.build(ctx, "", "", params);
 
     EXPECT_NE(user.find("BTC_USDT"), std::string::npos);
     EXPECT_NE(user.find("65000"), std::string::npos);
@@ -63,14 +63,14 @@ TEST(PromptBuilder, UserPromptIncludesMarketData)
 TEST(PromptBuilder, UserPromptIncludesSocialData)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
 
     std::string tweets = "BTC breaking out! Bullish momentum building.";
     std::string news = "Bitcoin ETF approved by SEC.";
 
-    auto [system, user] = builder.build(snapshot, tweets, news, params);
+    auto [system, user] = builder.build(ctx, tweets, news, params);
 
     EXPECT_NE(user.find("BTC breaking out"), std::string::npos);
     EXPECT_NE(user.find("Bitcoin ETF"), std::string::npos);
@@ -82,11 +82,11 @@ TEST(PromptBuilder, UserPromptIncludesSocialData)
 TEST(PromptBuilder, EmptySocialDataHandled)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "ETH_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "ETH_USDT";
     StrategyParams params;
 
-    auto [system, user] = builder.build(snapshot, "", "", params);
+    auto [system, user] = builder.build(ctx, "", "", params);
 
     // Should still produce a valid prompt without social data
     EXPECT_FALSE(user.empty());
@@ -99,13 +99,13 @@ TEST(PromptBuilder, EmptySocialDataHandled)
 TEST(PromptBuilder, UserPromptIncludesParams)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
     params.order_quantity.store(0.005, std::memory_order_release);
     params.ema_fast_period.store(12.0, std::memory_order_release);
 
-    auto [system, user] = builder.build(snapshot, "", "", params);
+    auto [system, user] = builder.build(ctx, "", "", params);
 
     // Params should be present in the user prompt
     EXPECT_NE(user.find("order_quantity"), std::string::npos);
@@ -118,8 +118,8 @@ TEST(PromptBuilder, UserPromptIncludesParams)
 TEST(PromptBuilder, KlinesIncluded)
 {
     PromptBuilder builder;
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
 
     Kline k;
     k.open = 64000.0;
@@ -128,10 +128,10 @@ TEST(PromptBuilder, KlinesIncluded)
     k.close = 65000.0;
     k.volume = 100.0;
     k.closed = true;
-    snapshot.klines.push_back(k);
+    ctx.market.klines.push_back(k);
 
     StrategyParams params;
-    auto [system, user] = builder.build(snapshot, "", "", params);
+    auto [system, user] = builder.build(ctx, "", "", params);
 
     // Kline data should appear in the prompt
     EXPECT_NE(user.find("65000"), std::string::npos);

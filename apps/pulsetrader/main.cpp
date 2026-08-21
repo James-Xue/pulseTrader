@@ -38,6 +38,7 @@
 #include "strategy/signal/SignalAggregator.hpp"
 #include "strategy/signal/SignalBoard.hpp"
 #include "ai/AiPipeline.hpp"
+#include "ai/EngineSnapshotCollector.hpp"
 #include "heartbeat/HeartbeatScheduler.hpp"
 #include "control/CommandParser.hpp"
 #include "control/ControlClient.hpp"
@@ -917,11 +918,20 @@ static int runTrade(int argc, char* argv[])
     std::unique_ptr<pulse::heartbeat::HeartbeatScheduler> heartbeat;
     if (cfg.ai.heartbeatIntervalSec > 0 && !cfg.ai.apiKey.empty())
     {
-        // Wire AI to each strategy's actual params (not a disconnected copy).
-        auto allParams = strategy_mgr.allParams();
+        // Wire AI to each strategy's actual handles (identity + params) and
+        // a live snapshot collector (real feeds + per-strategy performance).
+        auto handles = strategy_mgr.allHandles();
+        pulse::ai::EngineSnapshotCollector collector(
+            spot_feed.get(), futures_feed.get(), cfd_feed.get(), handles,
+            nullptr, // recorder wired in SQLite builds (C4)
+            24LL * 3600 * 1000'000'000);
+        pulse::ai::SnapshotProvider provider = [&collector]()
+        {
+            return collector.collect();
+        };
         heartbeat = std::make_unique<pulse::heartbeat::HeartbeatScheduler>(
-            cfg.ai, ai_pipeline, std::move(allParams));
-        log->info("[L5] Heartbeat scheduler created (interval: {}s, {} strategy params)",
+            cfg.ai, ai_pipeline, std::move(handles), std::move(provider));
+        log->info("[L5] Heartbeat scheduler created (interval: {}s, {} strategy handles)",
                   cfg.ai.heartbeatIntervalSec,
                   strategy_mgr.strategyCount());
     }

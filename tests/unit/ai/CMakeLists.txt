@@ -4,6 +4,7 @@ add_executable(test_ai_unit
     test_ai_client.cpp
     test_param_advisor.cpp
     test_ai_pipeline.cpp
+    test_pipeline_context.cpp
 )
 
 target_link_libraries(test_ai_unit

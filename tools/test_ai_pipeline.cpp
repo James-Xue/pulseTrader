@@ -131,13 +131,13 @@ int main(int argc, char *argv[])
     AiPipeline pipeline(ai_config, tw_config, news_config, std::move(transport));
 
     // 4. Create synthetic market snapshot
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
-    snapshot.ticker.last = 65000.0;
-    snapshot.ticker.bid = 64999.0;
-    snapshot.ticker.ask = 65001.0;
-    snapshot.ticker.volume_24h = 15000.0;
-    snapshot.ticker.change_pct = 2.5;
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    ctx.market.ticker.last = 65000.0;
+    ctx.market.ticker.bid = 64999.0;
+    ctx.market.ticker.ask = 65001.0;
+    ctx.market.ticker.volume_24h = 15000.0;
+    ctx.market.ticker.change_pct = 2.5;
 
     // Add some synthetic K-lines
     for (int i = 0; i < 10; ++i)
@@ -149,15 +149,15 @@ int main(int argc, char *argv[])
         k.close = k.open + 50.0;
         k.volume = 500.0;
         k.closed = true;
-        snapshot.klines.push_back(k);
+        ctx.market.klines.push_back(k);
     }
 
     std::cout << "\n--- Market Snapshot ---\n";
-    std::cout << "Symbol:     " << snapshot.ticker.symbol << "\n";
-    std::cout << "Price:      " << snapshot.ticker.last << "\n";
-    std::cout << "Bid/Ask:    " << snapshot.ticker.bid << " / " << snapshot.ticker.ask << "\n";
-    std::cout << "24h Change: " << snapshot.ticker.change_pct << "%\n";
-    std::cout << "K-lines:    " << snapshot.klines.size() << "\n";
+    std::cout << "Symbol:     " << ctx.market.ticker.symbol << "\n";
+    std::cout << "Price:      " << ctx.market.ticker.last << "\n";
+    std::cout << "Bid/Ask:    " << ctx.market.ticker.bid << " / " << ctx.market.ticker.ask << "\n";
+    std::cout << "24h Change: " << ctx.market.ticker.change_pct << "%\n";
+    std::cout << "K-lines:    " << ctx.market.klines.size() << "\n";
 
     // 5. Print current params
     StrategyParams params;
@@ -175,8 +175,9 @@ int main(int argc, char *argv[])
 
     // 6. Run the pipeline
     std::cout << "\n--- Running AI Pipeline ---\n";
-    std::vector<pulse::strategy::StrategyParams *> params_vec{ &params };
-    auto result = pipeline.run(snapshot, params_vec);
+    std::vector<pulse::strategy::StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
+    auto result = pipeline.run(ctx, handles);
 
     if (ok(result))
     {

@@ -11,6 +11,8 @@
 
 #include "ai/AiPipeline.hpp"
 
+#include "core/ParamChangeLog.hpp"
+
 #include <gtest/gtest.h>
 
 using namespace pulse;
@@ -82,20 +84,40 @@ static AiPipeline make_test_pipeline(AIClient::HttpTransport transport)
     return AiPipeline(ai_config, tw_config, news_config, std::move(transport));
 }
 
+// Helper: pipeline with an injected audit log.
+static AiPipeline make_test_pipeline_with_log(AIClient::HttpTransport transport,
+                                              core::ParamChangeLog *log)
+{
+    AiConfig ai_config;
+    ai_config.backend = "claude";
+    ai_config.model = "claude-sonnet-4-6";
+    ai_config.maxRetries = 0;
+
+    TwitterConfig tw_config;
+    tw_config.enabled = false;
+
+    NewsConfig news_config;
+    news_config.enabled = false;
+
+    return AiPipeline(ai_config, tw_config, news_config, std::move(transport),
+                      log);
+}
+
 // ---------------------------------------------------------------------------
 // 1. Successful cycle — params updated
 // ---------------------------------------------------------------------------
 TEST(AiPipeline, SuccessfulCycle)
 {
     auto pipeline = make_test_pipeline(make_success_transport(0.0002));
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
-    snapshot.ticker.last = 65000.0;
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    ctx.market.ticker.last = 65000.0;
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params_vec);
+    auto result = pipeline.run(ctx, handles);
 
     ASSERT_TRUE(ok(result));
     EXPECT_EQ(value(result).sentiment, Sentiment::Bullish);
@@ -112,13 +134,14 @@ TEST(AiPipeline, SuccessfulCycle)
 TEST(AiPipeline, LLMFailurePreservesParams)
 {
     auto pipeline = make_test_pipeline(make_error_transport());
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params_vec);
+    auto result = pipeline.run(ctx, handles);
 
     EXPECT_FALSE(ok(result));
     EXPECT_EQ(error(result).code, ErrorCode::HttpError);
@@ -133,13 +156,14 @@ TEST(AiPipeline, LLMFailurePreservesParams)
 TEST(AiPipeline, SchemaMismatchPreservesParams)
 {
     auto pipeline = make_test_pipeline(make_invalid_json_transport());
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
     double original_qty = params.order_quantity.load();
-    auto result = pipeline.run(snapshot, params_vec);
+    auto result = pipeline.run(ctx, handles);
 
     EXPECT_FALSE(ok(result));
 
@@ -153,12 +177,13 @@ TEST(AiPipeline, SchemaMismatchPreservesParams)
 TEST(AiPipeline, ZeroDeltasNoChange)
 {
     auto pipeline = make_test_pipeline(make_success_transport(0.0));
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
-    auto result = pipeline.run(snapshot, params_vec);
+    auto result = pipeline.run(ctx, handles);
     ASSERT_TRUE(ok(result));
 
     // order_quantity_delta was 0, so no change
@@ -195,13 +220,14 @@ TEST(AiPipeline, LastResultPopulatedAfterSuccessfulRun)
     // After a successful run(), lastResult() must return a non-null pointer
     // with the correct analysis data.
     auto pipeline = make_test_pipeline(make_success_transport(0.0005));
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
-    snapshot.ticker.last = 65000.0;
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    ctx.market.ticker.last = 65000.0;
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
-    auto run_result = pipeline.run(snapshot, params_vec);
+    auto run_result = pipeline.run(ctx, handles);
     ASSERT_TRUE(ok(run_result));
 
     // lastResult() should now be populated.
@@ -216,15 +242,72 @@ TEST(AiPipeline, LastResultRemainsNullAfterFailedRun)
 {
     // After a failed run(), lastResult() must remain nullptr.
     auto pipeline = make_test_pipeline(make_error_transport());
-    MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
     StrategyParams params;
-    std::vector<StrategyParams *> params_vec{ &params };
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT", "futures", &params } };
 
-    auto run_result = pipeline.run(snapshot, params_vec);
+    auto run_result = pipeline.run(ctx, handles);
     ASSERT_FALSE(ok(run_result));
 
     // lastResult() should still be nullptr.
     const auto last = pipeline.lastResult();
     EXPECT_EQ(nullptr, last);
+}
+
+// ---------------------------------------------------------------------------
+// Param change audit
+// ---------------------------------------------------------------------------
+
+TEST(AiPipeline, RecordsAiParamChangeToLog)
+{
+    core::ParamChangeLog change_log;
+    auto pipeline = make_test_pipeline_with_log(make_success_transport(0.0002),
+                                                &change_log);
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    StrategyParams params;
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT",
+          "futures", &params } };
+
+    const auto result = pipeline.run(ctx, handles);
+    ASSERT_TRUE(ok(result));
+
+    const auto snap = change_log.snapshot();
+    ASSERT_EQ(1u, snap.size());
+    EXPECT_EQ("ai", snap[0].source);
+    EXPECT_EQ("momentum_scalper_BTC_USDT", snap[0].strategy_id);
+    EXPECT_EQ("order_quantity", snap[0].param_name);
+    EXPECT_DOUBLE_EQ(0.001, snap[0].old_value);
+    EXPECT_NEAR(0.0012, snap[0].new_value, 1e-9);
+}
+
+TEST(AiPipeline, NoAuditWhenZeroDeltas)
+{
+    core::ParamChangeLog change_log;
+    auto pipeline = make_test_pipeline_with_log(make_success_transport(0.0),
+                                                &change_log);
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    StrategyParams params;
+    std::vector<StrategyHandle> handles{
+        { "momentum_scalper_BTC_USDT", "MomentumScalper", "BTC_USDT",
+          "futures", &params } };
+
+    const auto result = pipeline.run(ctx, handles);
+    ASSERT_TRUE(ok(result));
+    EXPECT_TRUE(change_log.snapshot().empty());
+}
+
+TEST(AiPipeline, EmptyHandlesReturnsError)
+{
+    auto pipeline = make_test_pipeline(make_success_transport());
+    PipelineContext ctx;
+    ctx.market.ticker.symbol = "BTC_USDT";
+    std::vector<StrategyHandle> handles;
+
+    const auto result = pipeline.run(ctx, handles);
+    ASSERT_FALSE(ok(result));
 }

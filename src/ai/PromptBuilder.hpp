@@ -15,8 +15,7 @@
 //   - PromptBuilder is stateless and can be shared across threads safely
 //   - All methods are const or static — no mutable state
 
-#include "market/KlineBuffer.hpp"
-#include "market/TickerCache.hpp"
+#include "ai/PipelineContext.hpp"
 #include "strategy/StrategyParams.hpp"
 
 #include <string>
@@ -25,19 +24,7 @@
 
 namespace pulse::ai
 {
-
-// ---------------------------------------------------------------------------
-// MarketSnapshot — lightweight aggregate of market data for prompt assembly
-//
-// Bundles the ticker (latest price, bid/ask, volume) with recent K-line candles
-// so the prompt builder has a single object to work with. The heartbeat pipeline
-// populates this from TickerCache and KlineBuffer before calling build().
-// ---------------------------------------------------------------------------
-struct MarketSnapshot
-{
-    market::Ticker ticker;                    ///< Latest ticker for the symbol.
-    std::vector<market::Kline> klines;        ///< Last N closed candles (chronological order).
-};
+// (MarketSnapshot lives in PipelineContext.hpp — shared cycle input.)
 
 // ---------------------------------------------------------------------------
 // PromptBuilder — constructs the LLM prompt for one analysis cycle
@@ -53,14 +40,15 @@ class PromptBuilder
     /// Build the system + user prompts for an AI analysis cycle.
     ///
     /// Parameters:
-    ///   1. snapshot   — current market data (ticker + recent klines)
+    ///   1. ctx        — aggregated cycle input (market + symbol tickers +
+    ///                    per-strategy recent performance)
     ///   2. tweet_text — concatenated recent tweets (empty = no social data)
     ///   3. news_text  — concatenated recent news (empty = no news data)
-    ///   4. params     — current strategy parameter values
+    ///   4. params     — primary strategy's current parameter values
     ///
     /// Returns: {systemPrompt, userPrompt} ready for AIClient::analyze().
     [[nodiscard]] std::pair<std::string, std::string> build(
-            const MarketSnapshot &snapshot,
+            const PipelineContext &ctx,
             const std::string &tweet_text,
             const std::string &news_text,
             const strategy::StrategyParams &params) const;
@@ -76,12 +64,14 @@ class PromptBuilder
     ///
     /// Includes:
     ///   1. Current ticker data (symbol, price, bid/ask, 24h change, volume)
-    ///   2. Recent K-line candles in tabular format (up to 10)
-    ///   3. Recent tweets (if available)
-    ///   4. Recent news headlines (if available)
-    ///   5. Current strategy parameter values
+    ///   2. One-line tickers for every other traded symbol
+    ///   3. Recent K-line candles in tabular format (up to 10)
+    ///   4. Recent tweets (if available)
+    ///   5. Recent news headlines (if available)
+    ///   6. Current strategy parameter values
+    ///   7. Per-strategy recent performance table (if available)
     [[nodiscard]] std::string userPrompt(
-            const MarketSnapshot &snapshot,
+            const PipelineContext &ctx,
             const std::string &tweet_text,
             const std::string &news_text,
             const strategy::StrategyParams &params) const;
