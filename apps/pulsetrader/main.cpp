@@ -42,6 +42,8 @@
 #include "control/CommandParser.hpp"
 #include "control/ControlClient.hpp"
 #include "control/EngineServices.hpp"
+#include "grid/GridGateway.hpp"
+#include "grid/GridManager.hpp"
 #include "control/JsonRpcServer.hpp"
 #include "control/McpServer.hpp"
 #include "control/OrderFlowExecutor.hpp"
@@ -1038,6 +1040,21 @@ static int runTrade(int argc, char* argv[])
     // 11b. Control plane: EngineServices + JSON-RPC control socket
     // ------------------------------------------------------------------
     const auto engine_start_ref = std::chrono::steady_clock::now();
+    // M27 engine-native grid service: exchange-facing gateway + state machine.
+    // Starts disabled; `grid_start` (REPL/MCP) activates it. The gateway
+    // forwards to placeManualOrder (full risk gate) and the futures REST
+    // client (exchange-order truth view).
+    pulse::grid::GridGateway grid_gateway{
+        order_flow, futures_rest.get(), position_mgr, rest_mutex };
+    pulse::grid::GridManager grid_mgr{
+        cfg.grid, grid_gateway, *board, futures_feed.get(), rest_mutex,
+        cfg.log.logDir.empty() ? std::filesystem::path{ "data" }
+                               : std::filesystem::path{ cfg.log.logDir } };
+    if (cfg.grid.enabled)
+    {
+        grid_mgr.loadState();
+    }
+
     pulse::control::EngineServices services(
         "0.1.0",
         engine_start_ref,
@@ -1057,7 +1074,8 @@ static int runTrade(int argc, char* argv[])
         order_flow,
         *board,
         rest_mutex,
-        symbol_registry);
+        symbol_registry,
+        &grid_mgr);
 
     // Reconcile positions that already exist on the exchange (previous
     // engine run, manual trading) so risk limits and displays reflect the
@@ -1283,6 +1301,7 @@ static int runTrade(int argc, char* argv[])
         // loop body holds no locks at this point (logSystemHeartbeat locks
         // internally).
         order_flow.sweepMakerAttempts();
+        grid_mgr.tick(now_ms);
 
         // Periodic position sync (every ~10s): imports exchange-side
         // positions and prunes local ghosts. Takes rest_mutex internally.

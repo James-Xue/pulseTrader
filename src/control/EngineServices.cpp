@@ -843,6 +843,14 @@ nlohmann::json EngineServices::switchDirection(const std::string &direction)
     s["strategies_paused"] = paused;
     s["strategies_resumed"] = resumed;
     s["cancelled_orders"] = cancelled;
+
+    // M27: the switch may have swept the grid's futures orders — let the
+    // grid mark them as externally cancelled (not fills) and re-hang per
+    // the trend gate on its next reconcile.
+    if (nullptr != m_grid)
+    {
+        m_grid->onDirectionSwitched();
+    }
     return s;
 }
 
