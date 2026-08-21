@@ -7,6 +7,8 @@
 
 add_library(pulse_strategy STATIC
     StrategyManager.cpp
+    StrategyRegistry.cpp
+    scalping/UnifiedScalper.cpp
     scalping/MomentumScalper.cpp
     scalping/OrderBookScalper.cpp
     scalping/MeanReversionScalper.cpp

@@ -5,6 +5,7 @@
 // All fields have sensible defaults so the system can start with a minimal config.
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -282,6 +283,12 @@ struct StrategyInstanceConfig
     OrderType order_type = OrderType::Market;  ///< Market, PostOnly (resting maker), or
                                                ///< MakerFirst (post-only + taker fallback).
     std::uint32_t maker_timeout_ms = 0;        ///< Maker fill wait before taker fallback (ms).
+
+    /// Coin-specific parameter channel: TOML instance-level inline table
+    /// `custom_params = { key = value }`. Static (no hot reload); consumed by
+    /// coin strategies via UnifiedScalper::customParam(key, fallback). Absent
+    /// in legacy configs → empty map.
+    std::map<std::string, double> custom_params;
 };
 
 // ---------------------------------------------------------------------------

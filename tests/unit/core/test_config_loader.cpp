@@ -981,5 +981,73 @@ record_market = true
     EXPECT_TRUE(sql.recordMarketData);
 }
 
+// ---------------------------------------------------------------------------
+// custom_params — coin-specific instance parameter channel (M26)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsInlineTable)
+{
+    // Both float and integer values are accepted (int → double).
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = { eth_atr_step = 0.05, eth_spike_filter_usd = 120, eth_scale = 1.0 }
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+
+    const auto &inst = value(result).strategy.strategies[0];
+    ASSERT_EQ(3u, inst.custom_params.size());
+    EXPECT_DOUBLE_EQ(0.05, inst.custom_params.at("eth_atr_step"));
+    EXPECT_DOUBLE_EQ(120.0, inst.custom_params.at("eth_spike_filter_usd"));
+    EXPECT_DOUBLE_EQ(1.0, inst.custom_params.at("eth_scale"));
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsAbsent)
+{
+    // Legacy instances without custom_params → empty map (backward compatible).
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "momentum_scalper"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+    EXPECT_TRUE(value(result).strategy.strategies[0].custom_params.empty());
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsNonNumberRejected)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = { eth_atr_step = "abc" }
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsNonTableRejected)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = 5
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+}
+
 } // namespace
 } // namespace pulse

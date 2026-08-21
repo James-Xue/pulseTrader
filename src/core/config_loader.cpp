@@ -663,6 +663,43 @@ PulseError parseStrategyInstance(const toml::value &tbl,
             toml::find_or(tbl, "maker_timeout_ms",
                           static_cast<int>(out.maker_timeout_ms)));
 
+    // Coin-specific parameter channel: `custom_params = { key = value }`
+    // inline table (the only sub-table form legal inside an array-of-tables
+    // element). Parsed strictly — unlike the top-level "unknown keys are
+    // silently ignored" policy, a malformed custom_params is a hard error so
+    // a typo'd key type can't silently change strategy behavior.
+    if (tbl.contains("custom_params"))
+    {
+        const toml::value &cp = tbl.at("custom_params"); // Real element ref (no temporary).
+        if (!cp.is_table())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "strategy instance \"custom_params\" must be an "
+                              "inline table (e.g. custom_params = { key = 0.05 })"};
+        }
+
+        const auto &cp_table = cp.as_table(); // Keep a named reference (GCC -Wdangling-reference).
+        for (const auto &[key, value] : cp_table)
+        {
+            double parsed = 0.0;
+            if (value.is_floating())
+            {
+                parsed = value.as_floating();
+            }
+            else if (value.is_integer())
+            {
+                parsed = static_cast<double>(value.as_integer());
+            }
+            else
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance custom_params key \"" + key
+                                      + "\" must be a number (int or float)"};
+            }
+            out.custom_params[key] = parsed;
+        }
+    }
+
     return {};
 }
 

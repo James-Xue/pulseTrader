@@ -21,11 +21,13 @@
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
-//   - m_lastSignalTimeMs is only written from the strategy thread
+//   - Stateless between candles (cooldown timestamp lives in UnifiedScalper)
 
-#include "strategy/StrategyBase.hpp"
+#include "strategy/scalping/UnifiedScalper.hpp"
 
-#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace pulse::strategy
 {
@@ -33,29 +35,11 @@ namespace pulse::strategy
 // ---------------------------------------------------------------------------
 // MeanReversionScalper — Bollinger Band mean-reversion strategy
 // ---------------------------------------------------------------------------
-class MeanReversionScalper : public StrategyBase
+class MeanReversionScalper : public UnifiedScalper
 {
   public:
-    /// Construct with injected context.
-    explicit MeanReversionScalper(const StrategyContext &context);
-
-    // --- StrategyBase overrides ---
-
-    [[nodiscard]] std::string name() const override;
-    [[nodiscard]] std::string id() const override;
-    [[nodiscard]] StrategyParams &params() override;
-
-    /// Called on each closed K-line candle.
-    ///
-    /// Computes Bollinger Bands from the last N candles and emits Buy/Sell
-    /// signals when price touches or breaches the bands.
-    void onKline(const market::Kline &kline) override;
-
-    /// Called on ticker updates — not used by this strategy.
-    void onTick(const market::Ticker &ticker) override;
-
-    /// Called on orderbook updates — not used by this strategy.
-    void onOrderbook(const market::OrderBook &book) override;
+    // Inherit the UnifiedScalper(context) constructor (public API unchanged).
+    using UnifiedScalper::UnifiedScalper;
 
     /// Compute signal confidence from band penetration normalized by ATR.
     ///
@@ -70,19 +54,15 @@ class MeanReversionScalper : public StrategyBase
         double atr,
         double band_width);
 
-  private:
-    StrategyParams m_params;
+  protected:
+    // --- UnifiedScalper hooks ---
 
-    std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last signal timestamp (ms) for cooldown.
-    std::int64_t m_lastWarmupLogMs{ 0 };  ///< Throttle warmup log to every 30 s.
-    std::int64_t m_lastNoDataLogMs{ 0 }; ///< Throttle "no data" log to every 30 s.
-
-    /// Compute ATR (average true range) over the last `period` candles.
-    ///
-    /// TR = max(high - low, |high - prev_close|, |low - prev_close|).
-    /// Returns 0.0 when fewer than `period + 1` candles are available.
-    [[nodiscard]] double computeAtr(const std::vector<market::Kline> &candles,
-        std::size_t period) const;
+    [[nodiscard]] std::string className() const override;
+    [[nodiscard]] std::string idPrefix() const override;
+    [[nodiscard]] std::size_t klineNeeded() const override;
+    std::optional<EntryContext> evaluateEntry(
+        const std::vector<market::Kline> &candles) override;
+    void logSignal(const TradingSignal &sig) const override;
 };
 
 } // namespace pulse::strategy

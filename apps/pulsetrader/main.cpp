@@ -34,12 +34,9 @@
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
 #include "strategy/StrategyManager.hpp"
+#include "strategy/StrategyRegistry.hpp"
 #include "strategy/signal/SignalAggregator.hpp"
 #include "strategy/signal/SignalBoard.hpp"
-#include "strategy/scalping/MomentumScalper.hpp"
-#include "strategy/scalping/OrderBookScalper.hpp"
-#include "strategy/scalping/MeanReversionScalper.hpp"
-#include "strategy/scalping/SuperTrendScalper.hpp"
 #include "ai/AiPipeline.hpp"
 #include "heartbeat/HeartbeatScheduler.hpp"
 #include "control/CommandParser.hpp"
@@ -212,33 +209,6 @@ static pulse::PulseConfig buildDefaultConfig()
     return cfg;
 }
 
-// ---------------------------------------------------------------------------
-// Create a strategy instance from config
-// ---------------------------------------------------------------------------
-static std::unique_ptr<pulse::strategy::StrategyBase>
-createStrategy(const std::string& name,
-                const pulse::strategy::StrategyContext& ctx)
-{
-    using namespace pulse::strategy;
-
-    if ("momentum_scalper" == name)
-    {
-        return std::make_unique<MomentumScalper>(ctx);
-    }
-    if ("orderbook_scalper" == name)
-    {
-        return std::make_unique<OrderBookScalper>(ctx);
-    }
-    if ("mean_reversion_scalper" == name)
-    {
-        return std::make_unique<MeanReversionScalper>(ctx);
-    }
-    if ("supertrend_scalper" == name)
-    {
-        return std::make_unique<SuperTrendScalper>(ctx);
-    }
-    return nullptr;
-}
 
 // ---------------------------------------------------------------------------
 // logSystemHeartbeat — periodic system health summary
@@ -844,6 +814,10 @@ static int runTrade(int argc, char* argv[])
     pulse::strategy::StrategyManager strategy_mgr;
     pulse::strategy::SignalAggregator aggregator(cfg.strategy);
 
+    // Name-keyed registry with fallback: unknown names become a passive
+    // UnifiedScalper (never emits) instead of being skipped.
+    auto strategy_registry = pulse::strategy::makeBuiltinStrategyRegistry();
+
     // Register strategy instances from config.
     for (const auto& inst_cfg : cfg.strategy.strategies)
     {
@@ -883,12 +857,9 @@ static int runTrade(int argc, char* argv[])
         pulse::strategy::StrategyContext ctx(*feed_ptr, risk_mgr,
                                              *exec_ptr, inst_cfg);
 
-        auto strat = createStrategy(inst_cfg.name, ctx);
-        if (!strat)
-        {
-            log->warn("Unknown strategy '{}', skipping", inst_cfg.name);
-            continue;
-        }
+        // Registry fallback: never returns nullptr (unknown names become a
+        // passive UnifiedScalper — see StrategyRegistry::create).
+        auto strat = strategy_registry.create(inst_cfg.name, ctx);
 
         // Seed the per-instance min_confidence from config into the live
         // params. Previously the config value was loaded but never applied,

@@ -7,6 +7,8 @@ add_executable(test_strategy_unit
     test_orderbook_scalper.cpp
     test_mean_reversion_scalper.cpp
     test_supertrend_scalper.cpp
+    test_unified_scalper.cpp
+    test_strategy_registry.cpp
     test_signal_aggregator.cpp
     test_signal_board.cpp
 )
