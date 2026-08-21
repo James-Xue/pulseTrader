@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-20 (home machine)
-> File size: 11620 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-20 (synced 08-20 events: SNDK v2.1 上扩 + ETH 网格部署 + 黄金代理停摆修复)
+> File size: 12535 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,7 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M23 Done, 2026-08-18)
+## Current State (M24/M25, 2026-08-19/20)
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -56,6 +56,7 @@
 - **M22** (08-18) 方向闸门放宽:手动单 futures/CFD 任意方向可执行(placeManualOrder,spot 仍闸门)+ minAvailableAfterStopUsd 风控,759 绿(用户 7e0cace + 我 bb21832)
 - **M23** (08-18) 期货触发单 price_orders 三接口(place/list/cancel_trigger_order)+ list_futures_orders 交易所侧挂单查询,770 绿(09087ae)
 - **M24** (08-19) futures sync 外部余量去重:引擎自营成交与 synced 仓同品种同向合并后不再重复计数(UNITREE 实证:交易所 20 张,引擎视图 30);_sync 只存外部余量,零余量删条目;783 绿(c84cd2a)
+- **M25** (08-19 定稿) 黄金代理收官:gate_ledger.py 沉淀 + 接力重建(cron */3 + flock);Gate 权威对账净 +3.69(原 +5.88 虚高,转账 3 笔实锤)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
@@ -155,12 +156,29 @@ PulseConfig
 - Sub-account recommended for risk isolation (max 10 for VIP0-4, inherit main VIP)
 - Futures: USDT-settled only, leverage up to 125x, simultaneous spot+futures via config
 
-## SNDK 网格(2026-08-18 部署,用户定制)
+## SNDK 网格 v2.1(2026-08-18 部署,08-19/20 上扩)
 
-- **规格**:36 格限价空 1730~1800 步进 2,每格 2 张(quanto 0.01,~35 USD/格,网格 ~1,260 USD);只做空;分格止盈 = 成交价-10 的 price_orders 触发单(rule=2,size=2);不挂止损;TP 兑现后同格循环重挂
-- **实盘状态**:45 单 = 36 网格 + 8 App 用户单(1738/1758/1788 与网格重叠,用户决定**双重加空**)+ 20@2000 引擎单;持仓空 40 张;App 全平触发单 @1692(auto_size=close,价格 ≤1692 平整个空头)
+- **规格 v2.1**:20 格限价空 1615~1710 步进 5(演进:v1 36 格 1730~1800 → v2 12 格 1600~1665),每格 2 张(quanto 0.01,~35 USD/格);只做空;分格 TP = 成交价-10 的 reduce-only 限价买单(price_orders 不支持部分平仓 → 协议 v2);不挂止损;TP 兑现后同格循环重挂;保护线 A = 1730
+- **实盘状态(08-19/20)**:旧网格 12/12 全成交(末 1670@20:38,TP 已挂),新 8 格 20:43 挂出(1675/1680 挂出即成交);sync 行 40 张 = 用户 App 加空(均价 1669.11)与网格单 disjoint,**非双计**(Gate 单向持仓模式,App 单与网格单合并);通宵值守 14h/1736 轮(FOMC 1093 轮满分),59 兑现 **+11.8 USD**,铁律 0 违规
 - **代理文档**:`~/1_Code/commit_my_life/0_note/gate交易/闪迪/joey-Z170I-PRO-GAMING/`(策略/任务书/思考板/状态);黄金代理同构目录在 `gate交易/黄金/joey-Z170I-PRO-GAMING/`;并行各管各市场
 - **经验**:批量挂单 CLI 输出不可靠(报错走 stderr)、maxOpenPositions=4 拦网格(→40)、引擎重启后 tracker 视图丢旧单(用 list_futures_orders 交易所侧视图)、触发单必须 size=2 不能用 auto_size=close
+
+## ETH 网格(2026-08-20 部署,开局暴拉)
+
+- 以闪迪 v2.1 为模板克隆的追空网格,文档在 `~/1_Code/commit_my_life/0_note/gate交易/以太坊/joey-Z170I-PRO-GAMING/`(策略/任务书/思考板/状态)
+- **规格(已部署)**:20 格限价空 step 5,每格 2 张(0.01 ETH ≈ 20 USD @2011,~40 USD/格,总名义 ~805);分格 TP = 成交价-10 的 reduce-only 限价买单;无单格止损;保护线 A 顶+20 · B -30 USD;日亏 -10;重锚冷却 30 分钟;ETH maker 费率 -0.01%(挂单返佣)
+- trading.toml 已加 ETH 3 策略 signal_only,**maxOpenPositions 40→80**,引擎重启 17 实例
+- **首锚 2020**(mid 2012.55),部署即暴拉 +8.9%(2010→2118):**20 格全部成交**,11+ 次 TP 兑现(按成交价精算 **+5.0 USD**),10 格在持 10 格已兑现并循环重挂(2080 格二次成交)
+- ⚠️ **9103 名义闸击穿**:2085 格 TP 兑现后重挂空单被拒 → 裸奔无保护;协议"每批探闸 1 笔",用户平仓后闸开
+- 固化对账脚本 `gate交易/以太坊/joey-Z170I-PRO-GAMING/工具/gate_eth_state.py`(签名直查 Gate,绕过引擎分页/缓存 bug)
+- 通宵值守 51 轮,04:51 清仓 -39.2 停手(三机通宵托管收官)
+- ⚠️ 用户 App 活跃:持仓 ~210 + 新挂 -100@2128;用户已有 ETH 手动空仓,**代理铁律不触碰**
+
+## 黄金代理 08-20 停摆与修复
+
+- **事故**:`xauusd-agent-state.json` 第 43 行 2 处裸 ASCII 引号写进 JSON 字符串值 → `json.load` 失败 → relay MODE 为空 → 08-19 22:18Z 起连续 **73 次静默 `skip: mode=`**(stderr 被 `2>/dev/null` 吞)
+- **修复**(commit_my_life `3095b7f`):状态机扫描只转义字符串值内部裸引号(2 处),结构引号不动;relay(`~/bin/xauusd-relay.sh`)json.load 失败改 **WARNING 告警** + 错误内容入日志,不再静默跳过
+- **当前状态**:接力按用户令稳定停止(mode=stopped,每 3 分钟 tick 仅留 `skip: mode=stopped`);**恢复接力 = 状态文件 `mode` → `running`,下个 tick 自动拉起**
 
 ## 笔记目录 (2026-08-19 重组)
 
@@ -171,10 +189,11 @@ PulseConfig
 
 ## Next Steps (2026-08-20)
 
-- ⏳ 启动期 REST 爬行修复:方案 A+C(启动期短超时 + 符号表磁盘缓存)评估完成未实施;08-20 直连后样本 1 未复现
-- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;trailing 升级待做;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
-- ⏳ **SNDK 网格首轮实盘验证**:首格成交 → 分格 TP 触发单触发(只平 2 张)→ 同格循环重挂
-- ⏳ **双代理并行**:SNDK 网格代理 + 黄金代理同时跑,验证互不干扰(各自独立会话/文档,共享全局熔断)
+- ✅ SNDK 网格首轮实盘验证(通宵 59 兑现 +11.8 USD)✅ 双代理/三市场并行(三机通宵托管收官)
+- ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
+- ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
+- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
+- ⏳ 黄金对账遗留:引擎 position_id 漂移 + 外部裸单沟通 + 当日 realized 权威复核
 - ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
 - ⏳ maker-first 实盘验证(先 testnet 后小资金)
 - ✅ 显示 bug 已修:futures PnL 乘杠杆(36ee6f9)、open_time_str +8h 偏移(f94a74f)
