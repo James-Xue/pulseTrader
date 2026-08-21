@@ -10,6 +10,7 @@ add_subdirectory(risk)
 add_subdirectory(execution)
 add_subdirectory(logging)
 add_subdirectory(control)
+add_subdirectory(grid)
 
 if(PULSE_ENABLE_SQLITE)
     add_subdirectory(trade_recorder)
