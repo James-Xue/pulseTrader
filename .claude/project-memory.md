@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-21 (M27: 引擎内网格服务 GridManager 落地,848 绿)
-> File size: 15372 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 17705 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,7 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24–M26, 2026-08-21)
+## Current State (M24–M27, 2026-08-21)
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -40,8 +40,8 @@
 - **子代理**:08-18 夜用户令停(引擎+代理+2cron);08-20 引擎已重启(直连),子代理循环未跑
 
 ### Test Summary
-- **817 tests green** (本机 8-21 实测,M22–M26 全量)
-- M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
+- **848 tests green** (本机 8-21 实测,M22–M27 全量)
+- M27: 风险 reduce-only 5 + 配置 9 + tracker 2 + GridManager 10 + parser 3 + MCP 更新;M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
 - **M1–M5** 九层核心 → **M6** TOML 配置 → **M7** SQLite 落库 → **M8** 合约配置 → **M9** EndpointRouter/WS ping-pong → **M10** 合约行情 → **M11** 合约风控/PnL → **M12** 合约执行+双市场 → **M13** testnet
@@ -58,6 +58,8 @@
 - **M24** (08-19) futures sync 外部余量去重:引擎自营成交与 synced 仓同品种同向合并后不再重复计数(UNITREE 实证:交易所 20 张,引擎视图 30);_sync 只存外部余量,零余量删条目;783 绿(c84cd2a)
 - **M25** (08-19 定稿) 黄金代理收官:gate_ledger.py 沉淀 + 接力重建(cron */3 + flock);Gate 权威对账净 +3.69(原 +5.88 虚高,转账 3 笔实锤)
 - **M26** (08-21) 策略架构:UnifiedScalper 基类 + StrategyRegistry 兜底 + custom_params 通道 + EthScalper 币种策略示范,817 绿(ff616b6/8fb4021)
+- **M26.1** (08-21) ETH 网格复盘升级:EthScalper v2 趋势闸门状态(trend_state/spike)+ 三口径暴拉过滤;futures 幽灵仓剪枝;9103 预算 12000/6500(341e0bf)
+- **M27** (08-21) 引擎内网格服务 GridManager:ETH 网格 v2 规则 C++ 化(挂格/TP 循环/重锚/保护线 A+B/趋势闸门/暴拉冻结/日亏北京日);reduce-only 名义语义(9103 根因);[grid] TOML 段;控制面 grid_start/status/pause/stop;IGridGateway 抽象,848 绿(fd8505c..f724fbb)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
@@ -84,7 +86,7 @@
 - 编译:`build_headless`(Debug + SQLITE ON),745 绿 11.7s;旧 `build/` 已废弃
 - 配置:trading.toml 主网 CFD 黄金(XAUUSD 3 策略 + signal_only + 风控 6000/5500/4);`.env` 不入库
 - MCP 注册:`claude mcp add pulsetrader -- <repo>/run.sh mcp`;MCP 模式 stdout 必须纯 JSON-RPC(曾移除 echo 污染)
-- 引擎 systemd 管理(single instance 独占 8081);08-20 已重启(家庭机 nohup 直连,见上节)
+- 引擎 systemd 管理(single instance 独占 8081);8-21 状态 **running**(uptime 36h+,CFD 方向,17 策略,新二进制含 M26.1/M27 待重启生效)
 
 ### M26 策略架构:UnifiedScalper + Registry 兜底 + 币种策略 (2026-08-21, ff616b6/8fb4021)
 
@@ -96,6 +98,19 @@
 - **futures 幽灵仓剪枝**(08-21,M26.1):syncFuturesPositionsFromExchange 收集 live_contracts,`pruneGhostFuturesByContract` 剪掉交易所已无持仓合约上的 fill-tracked 仓(60s 宽限;同步失败绝不剪)。背景:08-19 ETH 网格 15 个 eth-grid-* 仓被用户 App 04:51 全平后,因 exchange_position_id 为空永久残留 + 假 upnl +623;**重启后 15 个幽灵仓自动清理(get_positions 验收)**
 - **加新币种策略套路**:继承 UnifiedScalper 覆写钩子(className/idPrefix/klineNeeded/warmupThreshold/cooldownEnabled/evaluateEntry/buildSignal/logSignal)→ StrategyRegistry.cpp 注册一行 → src/strategy + tests/unit/strategy 两个 CMakeLists 各一行 → FeedHarness kline 全链路测试(模式见 tests/unit/market/test_market_feed_sink.cpp:55-71,MarketFeed 构造无 I/O,getKlineBuffer(symbol).push 注入蜡烛)
 - 已知:clangd 对 PULSE_LOG_INFO 格式串报 invalid_consteval_call 是 LSP 误报(新文件未入编译数据库),真实编译零警告
+
+### M27 引擎内网格服务 GridManager (2026-08-21, fd8505c..f724fbb, 848 绿)
+
+- **动机**:ETH 网格 v2 规则(Python 工具链 + LLM 子代理)不可单测、绕开引擎风控、状态易漂移;复盘 eth-review-20260821-grid-v1.md 后 C++ 化
+- **架构**:`src/grid/`(pulse_grid 库,无 pulse_control 依赖,IGridGateway 抽象防链接环):
+  - `IGridGateway`(place/cancel/openFuturesOrders/positionsBySymbol 纯虚);生产实现 `GridGateway`(main.cpp 编译进可执行文件):place → **placeManualOrder 全风控**(M22 宽松闸),cancel → 直撤交易所优先(tracker 看不到重启前订单),openFuturesOrders → getFuturesOrders(交易所真相视图)
+  - `GridManager`:无独立线程,主循环 200ms tick 驱动,内部 fast(每拍 spike/日界)/mid(~1s 趋势/冻结到期)/slow(~50s 对账主流程)分层;m_mutex 守卫(锁序 m_mutex→rest_mutex)
+  - 规则:挂格(锚=round(mid+1×step),ATR 自适应 step=clamp(0.5×ATR15m,3,8))→ 成交整格记账(filled+=qty_per_level)→ TP reduce-only 限价买(fill-2×step,严禁 place_trigger_order)→ TP 兑现记账+循环重挂 → 重锚(下移跟随,冷却 30min+趋势 bearish)→ 保护线 A(1m 收>顶+2×step)/B(浮亏≤-30)→ reduce-only 市价平**恰好网格份额**+重锚 → 趋势闸门(读 SignalBoard eth_scalper trend_state,wall-clock 新鲜度,stale=禁新格)→ 暴拉冻结(1m 涨幅>max(1%,3×ATR15m),冻结期不续刷)→ 日亏停手(realized≤-10,北京 08:00==UTC 00:00 重置)→ 方向切换撤单判"取消"不判成交(externalCancelPending 标志)
+  - 持久化:JSON tmp+rename 原子写(data/grid_state.json),重启后交易所视图为真相
+- **风险层 reduce-only 语义**(PR-1,9103 根因):`reserveNotional(..., reduce_only, side)`——平仓单跳过 maxOpenPositions 名额;名义只计同 symbol 反向仓之外的 excess;excess≤0 直接 Approved 绝不 Modified(缩减 TP 会半仓裸奔)
+- **控制面**:`grid_start [--levels N] [--qty Q] [--step S] [--anchor P]` / `grid_status` / `grid_pause` / `grid_stop`(REPL/MCP/JSON-RPC);错误码 GridNotStarted=9200/GridAlreadyRunning=9201;start 预检用户仓(非 eth-grid-* 存在则拒绝,除非 force)
+- **踩坑实录**:① start/pause/stop 持锁调 status() 自死锁→拆 statusLocked();② SignalBoard JSON 键是 "source" 非 "strategy_id";③ 订单类型判断不能用 order_id 前缀(成交后 client_order_id 丢失)→ map 存 TrackedOrder{idx,is_tp};④ TP 消失分支必须优先于 resting==0 的 sell 分支;⑤ 趋势新鲜度用 wall-clock(测试推进 now_ms 会误过期)
+- **待办**:引擎重启生效 + testnet 演练(挂格→成交→TP→循环;保护线演练;重启演练;方向切换演练)→ 演练通过后启 mainnet 网格,eth_watch.py 退役(eth_ledger.py 保留应急)
 
 ## 关键决策与事故 (M14–M16 时代,细节见 archive)
 
