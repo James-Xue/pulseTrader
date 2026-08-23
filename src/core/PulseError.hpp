@@ -109,6 +109,14 @@ enum class ErrorCode : std::uint32_t
     GridAlreadyRunning = 9201,     ///< grid_start while already running.
     GridNotPaused = 9202,          ///< grid_resume when the grid is not paused.
 
+    // Backtest (93xx) — historical replay engine (single-strategy MVP).
+    BacktestRangeInvalid = 9300,      ///< Requested time range is invalid (from > to).
+    BacktestDataUnavailable = 9301,   ///< No candle data for the requested range.
+    BacktestSqliteUnavailable = 9302, ///< SQLite kline_bars read failed.
+    BacktestApiFetchFailed = 9303,    ///< Gate REST kline fetch failed.
+    BacktestNoCandles = 9304,         ///< Kline load produced zero candles.
+    BacktestConfigInvalid = 9305,     ///< Backtest options/strategy config invalid.
+
     // Internal (9xxx)
     InternalError = 9000,
     NotImplemented = 9001,

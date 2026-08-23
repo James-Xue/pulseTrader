@@ -184,6 +184,30 @@ class GateRestClient
     /// open trigger orders for a contract (status=open filter hard-coded).
     [[nodiscard]] Result<nlohmann::json> getFuturesPriceOrders(const std::string &contract);
 
+    // -----------------------------------------------------------------------
+    // Historical candlestick endpoints (public) — backtest data source (M29).
+    // The live feed only receives candles from the moment of subscription, so
+    // historical windows must be fetched via REST. Both endpoints return an
+    // array of candle arrays, see parseCandles() in src/backtest for the
+    // layout (which differs between spot and futures).
+    // -----------------------------------------------------------------------
+
+    /// GET /api/v4/spot/candlesticks — historical spot klines.
+    ///
+    /// Query: currency_pair=X&interval=1m&from=SEC&to=SEC&limit=N.
+    /// Timestamps are Unix seconds. Public endpoint — no credentials needed.
+    [[nodiscard]] Result<nlohmann::json> getSpotKlines(const std::string &currency_pair,
+        const std::string &interval, std::int64_t from_sec, std::int64_t to_sec,
+        int limit = 1000);
+
+    /// GET /api/v4/futures/usdt/candlesticks — historical futures klines.
+    ///
+    /// Query: contract=X&interval=1m&from=SEC&to=SEC&limit=N.
+    /// Timestamps are Unix seconds. Public endpoint — no credentials needed.
+    [[nodiscard]] Result<nlohmann::json> getFuturesKlines(const std::string &contract,
+        const std::string &interval, std::int64_t from_sec, std::int64_t to_sec,
+        int limit = 1000);
+
     /// DELETE /api/v4/futures/usdt/price_orders/{order_id} — cancel a trigger
     /// order. Returns the cancelled trigger order object on success.
     [[nodiscard]] Result<nlohmann::json> cancelFuturesPriceOrder(const std::string &order_id);

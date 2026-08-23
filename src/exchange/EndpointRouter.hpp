@@ -96,6 +96,19 @@ class EndpointRouter
     /// Futures: "/api/v4/futures/usdt/tickers"
     [[nodiscard]] static std::string tickersPath(MarketType mt);
 
+    /// Path to historical candlesticks.
+    ///
+    /// Spot:    "/api/v4/spot/candlesticks"     (query: currency_pair, interval,
+    ///                                            from, to, limit)
+    /// Futures: "/api/v4/futures/usdt/candlesticks" (query: contract, interval,
+    ///                                            from, to, limit)
+    /// Cfd:     returns empty string (CFD klines live on the TradFi path —
+    ///            see cfdKlinesPath(), which has no time-range support).
+    ///
+    /// Used by the backtest engine (M29) to fetch historical candles that
+    /// were not captured locally in kline_bars.
+    [[nodiscard]] static std::string klinesPath(MarketType mt);
+
     /// Path to fetch account balances.
     ///
     /// Spot:    "/api/v4/spot/accounts"

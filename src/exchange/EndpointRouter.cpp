@@ -120,6 +120,23 @@ std::string EndpointRouter::tickersPath(MarketType mt)
     return restPrefix(mt) + "/tickers";
 }
 
+// ---------------------------------------------------------------------------
+// klinesPath — historical candlesticks (backtest data source)
+//
+// Spot:    /api/v4/spot/candlesticks
+// Futures: /api/v4/futures/usdt/candlesticks
+// Cfd:     empty — CFD klines use the TradFi endpoint (cfdKlinesPath) which
+//          only supports limit-based backfill, no from/to.
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::klinesPath(MarketType mt)
+{
+    if (MarketType::Cfd == mt)
+    {
+        return ""; // TradFi klines are a different API shape (see cfdKlinesPath).
+    }
+    return restPrefix(mt) + "/candlesticks";
+}
+
 std::string EndpointRouter::accountsPath(MarketType mt)
 {
     if (MarketType::Cfd == mt)

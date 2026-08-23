@@ -233,4 +233,15 @@ TEST(EndpointRouterTest, CfdPositionsPaths)
               EndpointRouter::cfdPositionClosePath("pos_1"));
 }
 
+TEST(EndpointRouterTest, KlinesPath_HistoricalCandlesticks)
+{
+    EXPECT_EQ("/api/v4/spot/candlesticks",
+              EndpointRouter::klinesPath(MarketType::Spot));
+    EXPECT_EQ("/api/v4/futures/usdt/candlesticks",
+              EndpointRouter::klinesPath(MarketType::Futures));
+    // CFD klines live on the TradFi path (no time-range support) — the
+    // generic klinesPath returns empty for it.
+    EXPECT_EQ("", EndpointRouter::klinesPath(MarketType::Cfd));
+}
+
 } // namespace pulse::exchange::test

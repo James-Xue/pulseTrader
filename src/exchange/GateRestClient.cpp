@@ -363,6 +363,40 @@ Result<nlohmann::json> GateRestClient::getCfdKlines(const std::string &symbol, i
     return request("GET", EndpointRouter::cfdKlinesPath(symbol), query);
 }
 
+// ---------------------------------------------------------------------------
+// Historical candlesticks (public, backtest data source)
+// ---------------------------------------------------------------------------
+
+Result<nlohmann::json> GateRestClient::getSpotKlines(const std::string &currency_pair,
+    const std::string &interval, std::int64_t from_sec, std::int64_t to_sec, int limit)
+{
+    // Gate rejects `limit` when `from`/`to` are present (probed 2026-08-23:
+    // "limit and from and to cannot be present at the same time").
+    std::string query = "currency_pair=" + currency_pair
+        + "&interval=" + interval
+        + "&from=" + std::to_string(from_sec)
+        + "&to=" + std::to_string(to_sec);
+    if (0 < limit)
+    {
+        query += "&limit=" + std::to_string(limit);
+    }
+    return request("GET", EndpointRouter::klinesPath(MarketType::Spot), query);
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesKlines(const std::string &contract,
+    const std::string &interval, std::int64_t from_sec, std::int64_t to_sec, int limit)
+{
+    std::string query = "contract=" + contract
+        + "&interval=" + interval
+        + "&from=" + std::to_string(from_sec)
+        + "&to=" + std::to_string(to_sec);
+    if (0 < limit)
+    {
+        query += "&limit=" + std::to_string(limit);
+    }
+    return request("GET", EndpointRouter::klinesPath(MarketType::Futures), query);
+}
+
 Result<nlohmann::json> GateRestClient::getCfdSymbolsDetail(const std::vector<std::string> &symbols)
 {
     if (!hasCredentials())
