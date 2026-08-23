@@ -3,6 +3,7 @@ add_executable(test_backtest
     test_gate_kline_fetcher.cpp
     test_kline_loader.cpp
     test_replay_driver.cpp
+    test_backtest_report.cpp
     test_sqlite_kline_reader.cpp
 )
 
