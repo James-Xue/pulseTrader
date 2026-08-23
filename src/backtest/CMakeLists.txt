@@ -2,6 +2,7 @@
 
 add_library(pulse_backtest STATIC
     BacktestAccount.cpp
+    BacktestEngine.cpp
     BacktestReport.cpp
     GateKlineFetcher.cpp
     KlineLoader.cpp
@@ -27,8 +28,10 @@ target_link_libraries(pulse_backtest
 
 # SqliteKlineReader is optional (SQLite is a build-time option). Without it
 # the loader degrades to a pure Gate API fetch — the header is safe either way.
+# The define reaches BacktestEngine (sqlite-source wiring) and the reader TU.
 if(PULSE_ENABLE_SQLITE)
     target_sources(pulse_backtest PRIVATE SqliteKlineReader.cpp)
+    target_compile_definitions(pulse_backtest PRIVATE PULSE_ENABLE_SQLITE)
     target_link_libraries(pulse_backtest PRIVATE SQLiteCpp)
 endif()
 

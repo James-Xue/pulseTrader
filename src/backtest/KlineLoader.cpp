@@ -5,6 +5,8 @@
 #include "logging/Logger.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
 
 namespace pulse::backtest
 {
@@ -52,6 +54,68 @@ std::vector<std::pair<std::int64_t, std::int64_t>> findKlineGaps(
     }
 
     return gaps;
+}
+
+// ---------------------------------------------------------------------------
+// sanitizeCandles — data-quality guard for recorder glitches
+//
+// The live recorder has captured implausible bars (e.g. an ETH 1m candle
+// with close 76403.9 next to 2371 neighbours on 2026-08-21). Such rows
+// corrupt ATR/EMA state for the whole warmup, so drop them before replay:
+//   - non-positive OHLCV or inconsistent high/low
+//   - a relative jump > 25% from the previous close (1m bars never move
+//     that far even in flash moves; the 08-21 glitch produced a 32x jump
+//     and a follow-up -32% bar that must also be caught)
+// Dropped bars are counted and surfaced in the load warnings.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr double kMaxRelativeJump = 0.25; ///< |c[i]-c[i-1]| / c[i-1] beyond this → drop.
+
+bool looksPlausible(const market::Kline &k)
+{
+    return k.open > 0.0 && k.high > 0.0 && k.low > 0.0 && k.close > 0.0
+        && k.volume >= 0.0
+        && k.high >= std::max(k.open, k.close)
+        && k.low <= std::min(k.open, k.close);
+}
+
+} // anonymous namespace
+
+std::vector<market::Kline> sanitizeCandles(std::vector<market::Kline> candles,
+                                           KlineLoadStats &stats)
+{
+    std::vector<market::Kline> clean;
+    clean.reserve(candles.size());
+    std::optional<double> prev_close;
+
+    for (auto &k : candles)
+    {
+        bool drop = !looksPlausible(k);
+        if (!drop && prev_close.has_value() && *prev_close > 0.0)
+        {
+            const double jump = std::abs(k.close - *prev_close) / *prev_close;
+            drop = jump > kMaxRelativeJump;
+        }
+
+        if (drop)
+        {
+            stats.warnings.push_back("dropped implausible candle at "
+                + std::to_string(k.open_time) + " (close " + std::to_string(k.close) + ")");
+            continue;
+        }
+        prev_close = k.close;
+        clean.push_back(std::move(k));
+    }
+
+    if (clean.size() != candles.size())
+    {
+        stats.warnings.push_back("data sanitizer dropped "
+            + std::to_string(candles.size() - clean.size()) + " implausible candle(s)");
+    }
+    return clean;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +226,15 @@ Result<std::vector<market::Kline>> KlineLoader::load(
             + std::to_string(req.from_ms) + ", " + std::to_string(req.to_ms) + "]" };
     }
 
+    // 5. Data-quality sanitizing (recorder glitches corrupt strategy state).
+    merged = sanitizeCandles(std::move(merged), stats);
+    if (merged.empty())
+    {
+        return PulseError{ ErrorCode::BacktestNoCandles,
+            "All candles for " + req.symbol + " were dropped as implausible" };
+    }
+
+    stats.rows_total = merged.size();
     return merged;
 }
 

@@ -286,4 +286,54 @@ TEST(KlineLoaderTest, Load_ApiBackfillDisabled_NoApiCalls)
     EXPECT_TRUE(api.requested_ranges.empty());
 }
 
+// ---------------------------------------------------------------------------
+// sanitizeCandles — data-quality guard
+// ---------------------------------------------------------------------------
+
+TEST(KlineLoaderTest, Sanitize_DropsJumpCandleAndInconsistentCandle)
+{
+    // 100, 101, 76403 (3x jump — recorder glitch), 102, then an
+    // inconsistent candle (high < close).
+    std::vector<market::Kline> candles = { makeCandle(1'000'000, 100.0),
+                                            makeCandle(1'060'000, 101.0),
+                                            makeCandle(1'120'000, 76'403.9),
+                                            makeCandle(1'180'000, 102.0) };
+    market::Kline bad = makeCandle(1'240'000, 103.0);
+    bad.high = 100.0; // high < close → inconsistent.
+    candles.push_back(bad);
+
+    KlineLoadStats stats;
+    const auto clean = sanitizeCandles(candles, stats);
+
+    ASSERT_EQ(3u, clean.size()); // 76k jump + inconsistent dropped.
+    EXPECT_EQ(1'000'000LL, clean[0].open_time);
+    EXPECT_EQ(1'060'000LL, clean[1].open_time);
+    EXPECT_EQ(1'180'000LL, clean[2].open_time);
+    // Warning surfaces both drops.
+    ASSERT_GE(stats.warnings.size(), 1u);
+    EXPECT_NE(std::string::npos, stats.warnings.back().find("2"));
+}
+
+TEST(KlineLoaderTest, Sanitize_KeepsNormalVolatility)
+{
+    std::vector<market::Kline> candles;
+    for (std::int64_t i = 0; i < 5; ++i)
+    {
+        candles.push_back(makeCandle(1'000'000 + i * 60'000, 2000.0 + i * 10.0));
+    }
+    KlineLoadStats stats;
+    const auto clean = sanitizeCandles(candles, stats);
+    EXPECT_EQ(5u, clean.size());
+    EXPECT_TRUE(stats.warnings.empty());
+}
+
+TEST(KlineLoaderTest, Sanitize_DropsNonPositivePrice)
+{
+    market::Kline k = makeCandle(1'000'000, 0.0);
+    KlineLoadStats stats;
+    const auto clean = sanitizeCandles({ k }, stats);
+    EXPECT_TRUE(clean.empty());
+    EXPECT_FALSE(stats.warnings.empty());
+}
+
 } // namespace pulse::backtest::test

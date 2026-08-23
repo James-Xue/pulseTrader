@@ -89,6 +89,9 @@ Result<ReplayResult> ReplayDriver::run(
         m_currentCandleIndex = static_cast<std::int64_t>(i);
         m_currentCandleOpenMs = candle.open_time;
         m_strategy->onKline(candle);
+
+        // Sample the equity curve at every candle boundary (mark = close).
+        m_account->sampleEquity(candle.open_time, candle.close);
     }
 
     // Warmup: candles fed before the first signal. When the first evaluated

@@ -47,7 +47,8 @@ struct BacktestOptions
     double min_confidence = 0.6;        ///< Signal confidence gate (seed, like live).
     double leverage = 1.0;              ///< Display only — does not affect PnL.
     double quanto_multiplier = 1.0;     ///< Futures contract size (ETH_USDT = 0.01).
-    double taker_fee_rate = 0.0;        ///< 0 = default per market (futures 0.0005, spot 0.001).
+    double taker_fee_rate = 0.0;        ///< <0 = no fees, 0 = market default
+                                        ///< (futures 0.0005, spot 0.001), >0 = explicit.
     double cooldown_seconds = 0.0;      ///< 0 = replay disables wall-clock cooldown.
     CloseMode close_mode = CloseMode::Flip;
     bool api_backfill = true;           ///< Fetch missing ranges from Gate REST.

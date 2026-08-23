@@ -73,4 +73,15 @@ class IKlineSource
     const std::vector<market::Kline> &rows,
     std::int64_t from_ms, std::int64_t to_ms, std::int64_t interval_ms);
 
+// ---------------------------------------------------------------------------
+// sanitizeCandles — drop implausible candles before replay
+//
+// Guards against recorder glitches (an ETH 1m bar with close 76403.9 next
+// to 2371 neighbours was captured live on 2026-08-21). Drops candles with
+// non-positive OHLCV, inconsistent high/low, or a >50% relative close jump
+// from the previous bar. Drops are recorded in stats.warnings.
+// ---------------------------------------------------------------------------
+[[nodiscard]] std::vector<market::Kline> sanitizeCandles(
+    std::vector<market::Kline> candles, KlineLoadStats &stats);
+
 } // namespace pulse::backtest

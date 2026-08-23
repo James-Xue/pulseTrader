@@ -16,7 +16,11 @@
 //   pulsetrader --config trading.toml    Start with TOML config file
 //   pulsetrader --help                   Print usage
 //   pulsetrader --version                Print version
+//   pulsetrader backtest ...             Offline strategy replay (M29)
+//   pulsetrader cli                      Remote control REPL
+//   pulsetrader mcp                      stdio MCP server
 
+#include "backtest_cli.hpp"
 #include "core/SingleInstanceGuard.hpp"
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
@@ -1667,7 +1671,8 @@ int main(int argc, char *argv[])
     if (argc > 1)
     {
         const std::string first(argv[1]);
-        if ("trade" == first || "cli" == first || "mcp" == first)
+        if ("trade" == first || "cli" == first || "mcp" == first
+            || "backtest" == first)
         {
             subcommand = first;
             argv += 2;
@@ -1692,6 +1697,10 @@ int main(int argc, char *argv[])
     if ("mcp" == subcommand)
     {
         return runMcp(argc, argv);
+    }
+    if ("backtest" == subcommand)
+    {
+        return pulse::runBacktest(argc, argv);
     }
     return runTrade(argc, argv);
 }

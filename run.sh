@@ -28,11 +28,12 @@ BUILD_DIR="build_headless"
 [ -d "$BUILD_DIR" ] || BUILD_DIR="build"
 
 usage() {
-    echo "Usage: $0 {trade|cli|mcp|rest|ws|market|strategy|ai|test} [args...]"
+    echo "Usage: $0 {trade|cli|mcp|backtest|rest|ws|market|strategy|ai|test} [args...]"
     echo ""
     echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
     echo "  cli [--config <path>]   Attach REPL to running engine"
     echo "  mcp [--config <path>]   Run stdio MCP server (bridges to engine)"
+    echo "  backtest ...            Offline strategy replay (M29), see --help"
     echo "  rest      Test Gate.io REST API"
     echo "  ws        Test Gate.io WebSocket"
     echo "  market    Test market data pipeline"
@@ -73,6 +74,10 @@ case "$1" in
     cli)
         echo "=== Control CLI (attach to running engine) ==="
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" cli --config trading.toml
+        ;;
+    backtest)
+        shift
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" backtest "$@"
         ;;
     mcp)
         # MCP 走 stdio 协议: stdout 必须是纯 JSON-RPC, 禁止 echo 污染
