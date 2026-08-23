@@ -1049,6 +1049,36 @@ enabled = true
     EXPECT_TRUE(value(result).sqlite.skipKlineMarkets.empty());
 }
 
+TEST(ConfigLoader, ParseSqlite_DailyKlineSyncParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+daily_kline_sync = true
+daily_sync_hour = 6
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.dailyKlineSync);
+    EXPECT_EQ(6, sql.dailySyncHour);
+}
+
+TEST(ConfigLoader, ParseSqlite_DailyKlineSyncDefaults)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_FALSE(sql.dailyKlineSync);
+    EXPECT_EQ(8, sql.dailySyncHour); // Beijing 08:00 == UTC 00:00.
+}
+
 TEST(ConfigLoader, ParseStrategy_PreloadKlinesDefaultTrue)
 {
     TempToml tmp(R"(

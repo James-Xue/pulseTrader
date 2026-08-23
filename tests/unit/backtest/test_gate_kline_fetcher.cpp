@@ -119,18 +119,21 @@ TEST(GateKlineFetcherTest, ParseCandles_NumericTimestamps)
 
 TEST(GateKlineFetcherTest, SplitRange_ExactMultiples)
 {
+    // Gate counts data points INCLUSIVE of both ends, so each closed chunk
+    // holds exactly max_rows points: step = interval × (max_rows - 1).
     const auto chunks = GateKlineFetcher::splitRange(0, 1'000'000, 60'000, 4);
-    ASSERT_EQ(5u, chunks.size());
-    EXPECT_EQ(std::make_pair(0LL, 239'999LL), chunks[0]);
-    EXPECT_EQ(std::make_pair(240'000LL, 479'999LL), chunks[1]);
-    EXPECT_EQ(std::make_pair(960'000LL, 1'000'000LL), chunks[4]);
+    ASSERT_EQ(6u, chunks.size());
+    EXPECT_EQ(std::make_pair(0LL, 180'000LL), chunks[0]);      // 0..180s = 4 points.
+    EXPECT_EQ(std::make_pair(180'000LL, 360'000LL), chunks[1]);
+    EXPECT_EQ(std::make_pair(900'000LL, 1'000'000LL), chunks[5]); // Tail.
 }
 
 TEST(GateKlineFetcherTest, SplitRange_Remainder)
 {
     const auto chunks = GateKlineFetcher::splitRange(0, 100'000, 60'000, 2);
-    ASSERT_EQ(1u, chunks.size());
-    EXPECT_EQ(std::make_pair(0LL, 100'000LL), chunks[0]);
+    ASSERT_EQ(2u, chunks.size());
+    EXPECT_EQ(std::make_pair(0LL, 60'000LL), chunks[0]);  // 2 points.
+    EXPECT_EQ(std::make_pair(60'000LL, 100'000LL), chunks[1]);
 }
 
 TEST(GateKlineFetcherTest, SplitRange_InvalidInput_Empty)

@@ -4,6 +4,7 @@ add_library(pulse_backtest STATIC
     BacktestAccount.cpp
     BacktestEngine.cpp
     BacktestReport.cpp
+    DailyKlineSync.cpp
     GateKlineFetcher.cpp
     KlineLoader.cpp
     ReplayDriver.cpp

@@ -798,6 +798,12 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
     out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
     out.recordMarketData = toml::find_or(sec, "record_market", out.recordMarketData);
 
+    // M31: daily kline archival sync (opt-in, defaults false).
+    out.dailyKlineSync = toml::find_or(sec, "daily_kline_sync", out.dailyKlineSync);
+    out.dailySyncHour =
+        static_cast<int>(toml::find_or(sec, "daily_sync_hour",
+                                       static_cast<int>(out.dailySyncHour)));
+
     // M30: skip_kline_markets = ["futures"] — markets whose kline_bars
     // persistence is disabled (ticker_ticks unaffected).
     if (sec.contains("skip_kline_markets"))

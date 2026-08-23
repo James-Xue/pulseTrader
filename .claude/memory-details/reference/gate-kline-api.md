@@ -20,6 +20,14 @@
 3. **futures 解析器不设 `closed` 标志**(默认 false)→ 回测/预载数据需自行强制 `closed=true`,否则 strategyLoop 的 closed 门永不通过(M30 WarmupSeeder 已处理)。
 4. 深历史(黄金 >8.3h)只能换 `kline_type=5m/15m/1d` 或持续收集。
 
+## 数据深度:最近 10000 点(M31 实测)
+
+- **合约 1m:最近 10000 根(≈6.9 天)**,更早报 `Candlestick too long ago. Maximum 10000 points recently are allowed`;1d 可到上市日(2020-01-01 有数据)
+- **现货 1m:更少 — from=now-9999min 即拒**(比合约少 1 分钟),且纯合约符号(SNDK/UNITREE)报 `INVALID_CURRENCY_PAIR`
+- **⚠️ 动态边界**:上限按服务端时钟在请求时刻重算,窗口起点正好踩在 now-10000min 会随排队的 1~2 秒失效 → M31 用 9995(futures)/9990(spot)根窗口 + 失败前移 10min 重试一次
+- **点数按闭区间含两端**:窗口 [from, from+999×60s] = 1000 点刚好,GateKlineFetcher::splitRange 曾按 1000 间隔切出 1001 点被拒(HTTP 400 "range too broad"),已修 step = interval×(max_rows-1)
+- M31 每日同步:spot/futures 各拉最近窗口写回 kline_bars(INSERT OR IGNORE 幂等);**PK (symbol, open_time) 不含 market_type → spot 与 futures 同 symbol 同 open_time 互相 IGNORE,spot 数据被 futures 挤掉(既有 schema 语义,改 PK 需迁移,待办)**
+
 ## 数据质量对比(2026-08-23 交叉验证)
 
 - sqlite `kline_bars`(引擎 WS 自录)vs REST 直拉 CSV(2881 根重叠):

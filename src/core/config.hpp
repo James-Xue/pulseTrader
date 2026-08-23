@@ -339,6 +339,16 @@ struct SqliteConfig
     /// live futures candles (~30s fresh), so futures self-recording is
     /// redundant. Empty = record all markets.
     std::vector<MarketType> skipKlineMarkets;
+
+    /// Daily kline archival sync (M31): once per day pull ~10000 1m candles
+    /// (Gate REST depth limit) for spot/futures + 500 gold candles (CFD) and
+    /// merge into kline_bars (INSERT OR IGNORE). Backfills local history
+    /// that M30 stopped self-recording. Default false (opt-in).
+    bool dailyKlineSync = false;
+
+    /// UTC day-boundary hour in Beijing time (UTC+8) for the daily sync.
+    /// Default 8 → boundary at UTC 00:00 == Beijing 08:00.
+    int dailySyncHour = 8;
 };
 
 // ---------------------------------------------------------------------------

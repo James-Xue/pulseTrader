@@ -21,6 +21,7 @@
 //   pulsetrader mcp                      stdio MCP server
 
 #include "backtest_cli.hpp"
+#include "backtest/DailyKlineSync.hpp"
 #include "backtest/GateKlineFetcher.hpp"
 #include "backtest/SqliteKlineReader.hpp"
 #include "backtest/WarmupSeeder.hpp"
@@ -1211,6 +1212,20 @@ static int runTrade(int argc, char* argv[])
         log->info("[L1] Futures WebSocket connecting...");
     }
 
+    // Shared kline DB reader (M30 warmup preload + M31 daily sync share one
+    // SqliteKlineReader instance — no extra connection). SqliteKlineReader
+    // opens lazily; a missing DB degrades to pure API.
+    pulse::backtest::SqliteKlineReader *kline_db = nullptr;
+#ifdef PULSE_ENABLE_SQLITE
+    std::unique_ptr<pulse::backtest::SqliteKlineReader> kline_db_owner;
+    if (cfg.sqlite.enabled)
+    {
+        kline_db_owner =
+            std::make_unique<pulse::backtest::SqliteKlineReader>(cfg.sqlite.dbPath);
+        kline_db = kline_db_owner.get();
+    }
+#endif
+
     // L1.5: Startup kline preload (M30) — seed recent history into each
     // feed's KlineBuffer BEFORE feed->start(): the KlineBuffer assumes a
     // single writer, and the WS I/O thread begins writing once the feed
@@ -1222,18 +1237,6 @@ static int runTrade(int argc, char* argv[])
     // candles on first poll (MarketFeed::pollLoop).
     if (cfg.strategy.preloadKlines)
     {
-        pulse::backtest::SqliteKlineReader *kline_db = nullptr;
-#ifdef PULSE_ENABLE_SQLITE
-        // SqliteKlineReader opens lazily; a missing DB degrades to pure API.
-        std::unique_ptr<pulse::backtest::SqliteKlineReader> kline_db_owner;
-        if (cfg.sqlite.enabled)
-        {
-            kline_db_owner =
-                std::make_unique<pulse::backtest::SqliteKlineReader>(cfg.sqlite.dbPath);
-            kline_db = kline_db_owner.get();
-        }
-#endif
-
         std::size_t seeded_total = 0;
         if (spot_feed && spot_rest)
         {
@@ -1248,6 +1251,54 @@ static int runTrade(int argc, char* argv[])
             seeded_total += seeder.seed(*futures_feed, futures_symbols, pulse::MarketType::Futures);
         }
         log->info("[L1.5] warmup preload done — {} candles seeded", seeded_total);
+    }
+
+    // M31: daily kline archival sync. Pulls ~10000 1m candles (Gate REST
+    // depth limit) per spot/futures symbol + 500 gold candles (CFD) once per
+    // UTC day (Beijing 08:00), merged into kline_bars. Runs on its own
+    // worker thread; tick() only does a day-key check. The fetchers below
+    // must outlive kline_sync (they are held by reference).
+    std::unique_ptr<pulse::backtest::GateKlineFetcher> spot_kline_api;
+    std::unique_ptr<pulse::backtest::GateKlineFetcher> futures_kline_api;
+    std::unique_ptr<pulse::backtest::CfdKlineSource> cfd_kline_api;
+    std::unique_ptr<pulse::backtest::DailyKlineSync> kline_sync;
+    if (cfg.sqlite.enabled && cfg.sqlite.dailyKlineSync && spot_rest && futures_rest)
+    {
+        // The spot/futures REST endpoints reject CFD-only symbols
+        // (XAUUSD/XAGUSD → INVALID_CURRENCY_PAIR). symbols_for() falls back
+        // to the mixed cfg.symbols list when a market has no enabled
+        // strategies, so strip any symbol the CFD market owns.
+        auto strip_cfd_symbols = [&cfd_symbols](std::vector<std::string> syms)
+        {
+            syms.erase(std::remove_if(syms.begin(), syms.end(),
+                          [&cfd_symbols](const std::string &s)
+                          {
+                              return std::find(cfd_symbols.begin(),
+                                               cfd_symbols.end(), s)
+                                  != cfd_symbols.end();
+                          }),
+                       syms.end());
+            return syms;
+        };
+        const auto sync_spot_symbols = strip_cfd_symbols(spot_symbols);
+        const auto sync_futures_symbols = strip_cfd_symbols(futures_symbols);
+
+        spot_kline_api =
+            std::make_unique<pulse::backtest::GateKlineFetcher>(*spot_rest);
+        futures_kline_api =
+            std::make_unique<pulse::backtest::GateKlineFetcher>(*futures_rest);
+        if (cfd_rest)
+        {
+            cfd_kline_api =
+                std::make_unique<pulse::backtest::CfdKlineSource>(*cfd_rest);
+        }
+        kline_sync = std::make_unique<pulse::backtest::DailyKlineSync>(
+            kline_db, *spot_kline_api, *futures_kline_api, cfd_kline_api.get(),
+            rest_mutex, sync_spot_symbols, sync_futures_symbols, cfd_symbols,
+            cfg.sqlite.dailySyncHour);
+        log->info("[M31] daily kline sync armed (hour {}+08, spot={} futures={} cfd={})",
+                  cfg.sqlite.dailySyncHour, sync_spot_symbols.size(),
+                  sync_futures_symbols.size(), cfd_symbols.size());
     }
 
     // L3: Subscribe to market data channels.
@@ -1419,6 +1470,14 @@ static int runTrade(int argc, char* argv[])
         grid_mgr.tick(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 
+        // M31: daily kline sync day-boundary check (µs — fetch runs on the
+        // worker thread, never blocks the main loop).
+        if (kline_sync)
+        {
+            kline_sync->tick(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+
         // Periodic position sync (every ~10s): imports exchange-side
         // positions and prunes local ghosts. Takes rest_mutex internally.
         if (++position_sync_counter >= kPositionSyncIntervalTicks)
@@ -1493,6 +1552,13 @@ static int runTrade(int argc, char* argv[])
     log->info("[L1] WebSocket(s) disconnected");
 
     // Summary
+    // M31: stop the daily kline sync worker (join) before the DB writers go
+    // away — it may be mid-fetch with the sqlite reader open.
+    if (kline_sync)
+    {
+        kline_sync.reset();
+    }
+
     auto portfolio = position_mgr.portfolioSummary();
     log->info("Final portfolio: {} open position(s), notional {:.2f} USDT",
               position_mgr.openPositionCount(), portfolio.total_notional);

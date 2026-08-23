@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-23 (M30 futures K 线停录 + 启动免热机,967 绿;M29 回测;M28 验证)
-> File size: 20368 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 21644 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > 细节文件索引(memory-details/,按主题拆分,主文件只留摘要+指针):
 >   reference/gate-kline-api.md — Gate k线 REST 三端点铁律(limit/from-to/格式/新鲜度/黄金 kline_type 坑)
 >   reference/backtest-engine.md — M29 回测引擎全量(组件/实测/端到端基准)
@@ -36,7 +36,16 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24–M30, 2026-08-23)
+## Current State (M24–M31, 2026-08-23)
+
+### 2026-08-23 M31 每日 k 线归档同步 DailyKlineSync (976 绿, 已部署)
+
+- **动机**:Gate REST 1m 深度上限 10000 根(≈6.9 天,实测);M30 停 futures 自录后本地历史不再增长,回测 >7 天窗口缺数据 → 引擎每天拉一次合并入库
+- **实现**:`src/backtest/DailyKlineSync.{hpp,cpp}`(pulse_backtest 库):主循环 200ms tick 做日界检测(照抄 GridManager day_key 算法,北京 08:00 默认)→ 触发内部 worker 线程(不阻塞主循环);spot/futures 走 KlineLoader 同款 GateKlineFetcher 分页(9990/9995 根窗口+失败前移 10min 重试一次,规避动态边界),CFD 走 `CfdKlineSource`(getCfdKlines 500 根);写回统一 SqliteKlineReader::writeBack(INSERT OR IGNORE 幂等);rest_mutex 每符号粒度加锁
+- **配置**:`[sqlite] daily_kline_sync = true` + `daily_sync_hour = 8`(北京时刻;trading.toml 已启用)
+- **实测**:首启即同步,futures 4 合约 × ~10000 根入库(10166→40015,含 08-17 起的完整历史);重启幂等(+3 边界新行);SNDK/UNITREE spot 报 INVALID_CURRENCY_PAIR 是预期(无现货市场,每日 1 条 WARN)
+- **已知限制**:kline_bars PK (symbol, open_time) 不含 market_type → spot 与 futures 同 symbol 同 open_time 互 IGNORE,spot 数据被 futures 挤掉(既有 schema 语义;改 PK 需迁移,待办)
+- **新 API 知识**(10000 点上限/动态边界/现货更少/闭区间计数)→ `memory-details/reference/gate-kline-api.md`
 
 ### 2026-08-23 M30 futures K 线停录 + 引擎启动免热机 (967 绿, 已部署)
 

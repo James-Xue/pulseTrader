@@ -85,10 +85,16 @@ std::vector<std::pair<std::int64_t, std::int64_t>> GateKlineFetcher::splitRange(
         return chunks;
     }
 
-    const std::int64_t step_ms = interval_ms * max_rows_per_request;
+    // Gate counts data points INCLUSIVE of both ends: a [start, start+step]
+    // closed range with step = interval × max_rows holds max_rows+1 points
+    // and gets rejected with "Candlestick range too broad. Maximum 1000
+    // data points are allowed per request" (HTTP 400, probed 2026-08-23
+    // on the M31 10000-candle daily sync). Step by (max_rows - 1) intervals
+    // so every chunk contains exactly max_rows points.
+    const std::int64_t step_ms = interval_ms * (max_rows_per_request - 1);
     for (std::int64_t start = from_ms; start <= to_ms; start += step_ms)
     {
-        const std::int64_t end = std::min(start + step_ms - 1, to_ms);
+        const std::int64_t end = std::min(start + step_ms, to_ms);
         chunks.emplace_back(start, end);
     }
     return chunks;
