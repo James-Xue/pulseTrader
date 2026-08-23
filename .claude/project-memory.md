@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-23 (M28 验证完成 + autotrade 暂缓,903 绿)
-> File size: 22101 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M28 验证+修复+隐私扫描+文档补齐,903 绿)
+> File size: 22484 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -43,6 +43,8 @@
 - **903 绿**(新增 EmitSignalFlatBypassesConfidenceGate);提交 4aacbe0(代码)+ 9620c61(文档/示例)
 - **板上覆盖式设计**:每 strategy_id 只保留最新条目,eth_scalper 真信号最多 60s 后被下一根 Flat 覆盖(设计如此,消费方按状态读取;共振策略无 Flat,条目保留到下次迁移)
 - **引擎当前状态**:running(新二进制含全部修复),futures 方向,ema_resonance/eth_scalper 均 warmup 完成出信号中;auto_trade 全部 0(仅信号)
+- **隐私扫描(08-23)**:run.ps1(WebUI 时代 Windows 遗留,引用已删 build/Release 与 WebUI)硬编码 Gate **测试网** key/secret,公开仓库历史可见(c9efae9 起)——已移除改环境读取(aaac867);mainnet 密钥确认从未入库(内容+历史);AI key 仅 env 引用;sk- 命中均为 CSS 类名误报;**待办:Gate 后台轮换测试网密钥**(历史仍可检索,虚拟资金风险低,不值得 filter-repo 重写)
+- **文档补齐(08-23)**:新增 docs/strategies/eth-scalper.md(4af38de)——6 个注册策略文档 6/6 全覆盖;README 索引同步;文档含 v2 状态通道/三口径暴拉过滤/scale 20 语义/2026-08-23 实盘经验
 
 ### 2026-08-18~20 更新(家庭机)
 
