@@ -398,6 +398,7 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 | `cancel <order_id>` | Cancel an open order |
 | `halt` / `resume` | Halt / resume all trading |
 | `pause <id>` / `resume-strategy <id>` | Pause / resume a single strategy |
+| `autotrade <id> on\|off` | One-click per-strategy auto-trade switch: `off` = signals-only (board visible, never orders), `on` = signals may place orders (needs the active direction to match; restart resets to config) |
 | `risk` | Risk snapshot (drawdown, rate limiter) |
 | `market <sym> [--levels N] [--klines N] [--market spot\|futures]` | Market snapshot |
 | `signals` | Signal board: latest per-strategy signals + indicators + aggregator consensus |
@@ -405,13 +406,13 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 | `sync` | Reconcile the engine position view with the exchange (imports missing positions, prunes ghosts from manual app-side closes) |
 | `help` / `quit` / `exit` | Help / leave the REPL |
 
-**Control-plane methods (= MCP tool names, 20 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`. REPL commands map 1:1 to these methods over the control socket.
+**Control-plane methods (= MCP tool names, 32 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`. REPL commands map 1:1 to these methods over the control socket.
 
-**Signal-only mode** — `[strategy] signal_only = true` makes strategies compute + publish signals to the signal board (`get_signals` / REPL `signals`) without ever placing orders; manual `open_order`/`close_position` remain live (the XAUUSD sub-agent's execution path). Board entries carry `ts_ms` + indicator snapshots — treat entries older than ~120 s as stale.
+**Per-strategy auto-trade switch (2026-08-23)** — every strategy instance carries a runtime `auto_trade` gate: `off` = signals publish to the signal board (`get_signals` / REPL `signals`) but never place orders; `on` = signals participate in aggregation and may place orders through the normal risk gate. One-click via MCP `set_strategy_trading` / REPL `autotrade <id> on|off` / `set <id> auto_trade 0|1`. `[strategy] signal_only = true` (current default) seeds every strategy to `off` at startup — a restart returns to signals-only (fail-safe). The gate is independent of the active-market direction gate (a futures strategy also needs `switch futures` to actually trade) and of manual orders (`open_order`/`close_position` — the sub-agent's path — stay live). Each toggle is recorded in `get_param_history`. Board entries carry `ts_ms` + indicator snapshots — treat entries older than ~120 s as stale.
 
 **Hot position sync (M21)** — the engine reconciles positions against the exchange at startup, every ~10 s, and on demand (`sync_positions` / REPL `sync`): exchange-side positions are imported and local ghosts (positions closed manually in the Gate app — the user's normal habit) are pruned without a restart. **Dynamic SL/TP (M21)** — `modify_sl_tp` (REPL `modify <id> --sl P --tp P`) adjusts an open CFD position's exchange-native `price_sl`/`price_tp` over `PUT /tradfi/positions/{id}`; the stops live on the exchange, so they fire even if the engine or sub-agent dies. `get_positions` now reports each position's attached `sl_price`/`tp_price`.
 
-**MCP usage** — the `mcp` subcommand exposes the 18 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+**MCP usage** — the `mcp` subcommand exposes the 32 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
 
 ```bash
 claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml

@@ -1,7 +1,7 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-669%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
@@ -43,7 +43,7 @@ For the full architecture document including module responsibilities, key files,
 
 - **5-minute AI heartbeat** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread.
 - **Real-time social signal ingestion** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed directly into each AI prompt.
-- **Four built-in scalping strategies** — `MomentumScalper` (EMA crossover), `OrderBookScalper` (bid/ask imbalance), `MeanReversionScalper` (Bollinger Band reversion), and `SuperTrendScalper` (ATR trend reversal), each running on its own `std::jthread`.
+- **Six built-in scalping strategies** — the four base scalpers (`MomentumScalper` EMA crossover, `OrderBookScalper` bid/ask imbalance, `MeanReversionScalper` Bollinger Band reversion, `SuperTrendScalper` ATR trend reversal) plus two coin-specific ones (`EthScalper` EMA chase-short with spike filter; `EmaResonanceScalper` five-period EMA 7/14/30/60/200 full-alignment resonance), each running on its own `std::jthread`. Rules for every strategy are documented in `docs/strategies/`.
 - **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights updated after each AI cycle.
 - **Gate.io spot + futures integration** — Native REST (HMAC-SHA512 signed) and WebSocket channels for both spot and USDT perpetual futures, with EndpointRouter for market-type-aware routing, incremental order book updates, proxy tunnel support, and dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker).
 - **Testnet support** — `PULSE_NETWORK=testnet` env switch routes REST API to Gate.io testnet (`api-testnet.gateapi.io`) for virtual fund trading while using mainnet WebSocket for identical real-time market data. TOML `testnet = true` in `[exchange]` section for file-driven config. Validator rejects spot strategies in testnet mode (futures-only).
@@ -52,8 +52,8 @@ For the full architecture document including module responsibilities, key files,
 - **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 17 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`.
-- **Runtime control** — Per-strategy pause/resume (`pause_strategy` / `resume_strategy`, atomic `setPaused`), manual trading halt (`halt_trading` / `resume_trading`), and live atomic strategy param get/set (`get_strategy_params` / `set_strategy_param`). Manual orders share the same `OrderFlowExecutor` as the signal aggregator.
+- **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 32 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`.
+- **Runtime control** — Per-strategy pause/resume (`pause_strategy` / `resume_strategy`, atomic `setPaused`), per-strategy one-click auto-trade switch (`set_strategy_trading` / REPL `autotrade <id> on|off`: off = signals-only, on = signals may place orders), manual trading halt (`halt_trading` / `resume_trading`), and live atomic strategy param get/set (`get_strategy_params` / `set_strategy_param`). Manual orders share the same `OrderFlowExecutor` as the signal aggregator.
 - **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
 - **Single-instance enforcement** — The engine takes an exclusive `flock` on `data/engine.lock` at startup; any second engine process (manual launch, another Claude session, a stale nohup) is refused immediately and exits. This prevents double trading — two engines placing orders independently caused the exchange position to drift from the engine view on 2026-08-16. The lock is kernel-managed, so crashes/SIGKILL leave no stale lock. Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
 - **Startup position reconciliation** — On startup the engine fetches real open positions from the exchange (`GET /futures/usdt/positions`, synced into the risk engine with entry/mark/liquidation prices, leverage and contract multiplier). Positions opened by a previous engine run or manually (e.g. SKHY shorts) are visible from the first second — displays, PnL and risk limits reflect true exposure, and a restart no longer forgets open positions. Synced ids use the `<symbol>_<Buy|Sell>_sync` form so they never collide with engine-opened ids. Note: the position-notional cap is enforced **per market type** (`maxPositionNotionalFutures/Cfd/Spot` with `maxPositionNotional` as fallback), so a large futures position blocks futures orders but not CFD orders; `maxOpenPositions` and `maxSymbolNotional` stay global.
@@ -142,7 +142,7 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (669 tests)
+# 4. Run tests (902 tests)
 ctest --test-dir build --output-on-failure
 ```
 
@@ -248,12 +248,12 @@ The service sources `.env` and execs the same binary (`build_headless/.../pulset
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 669 unit tests
+./run.sh test        # Run all 902 unit tests
 ```
 
 ### MCP Client Configuration
 
-The `mcp` subcommand serves the control plane's 17 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
+The `mcp` subcommand serves the control plane's 32 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
 
 ```bash
 # Claude Code
@@ -343,6 +343,12 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 | M15 | Dual-direction trading (CFD gold + crypto futures, runtime-switchable) — `MarketType::Cfd`, TradFi REST paths, MT5 order schema verified live | 🚧 in progress |
 
 ---
+
+## Recent Changes (2026-08-23)
+
+- **Per-strategy one-click auto-trade switch** — runtime `auto_trade` gate per strategy instance: OFF (default) = signals publish to the signal board but never place orders; ON = signals participate in aggregation and may place orders through the risk gate. One-click via MCP `set_strategy_trading` / REPL `autotrade <id> on|off` / `set_strategy_param auto_trade 0|1` (bounded + audited). The gate lives in the strategy→aggregator wiring (the aggregator output loses the strategy id); `[strategy] signal_only` now only seeds the startup default (fail-safe: restart returns to signals-only). Independent of the active-market direction gate and of manual orders. 902 tests green (898 + 4).
+- **Five-period EMA resonance strategy (`ema_resonance_scalper`)** — EMA 7/14/30/60/200 strict full-alignment resonance (all five ascending = Buy, all descending = Sell), transition-triggered entries, confidence = `clamp(|ema7−ema200|/ATR, 0, 1)`, fresh full-series EMA recompute per candle. Registered for `ETH_USDT` futures; signal-only under the current engine config. Rules doc: `docs/strategies/ema-resonance-scalper.md`. 898 tests green (891 + 7).
+- **Verification** — 902 tests green.
 
 ## Recent Changes (2026-08-15)
 
