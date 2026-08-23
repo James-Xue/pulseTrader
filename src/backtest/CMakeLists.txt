@@ -1,8 +1,10 @@
 # src/backtest/CMakeLists.txt — backtest engine (M29, single-strategy MVP)
 
 add_library(pulse_backtest STATIC
+    BacktestAccount.cpp
     GateKlineFetcher.cpp
     KlineLoader.cpp
+    ReplayDriver.cpp
 )
 
 add_library(pulse::backtest ALIAS pulse_backtest)
