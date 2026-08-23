@@ -53,7 +53,9 @@ confidence = clamp( |EMA7 − EMA200| / ATR14 × res_conf_scale, 0, 1 )
 
 - 分子 = 共振堆的**总跨度**(最快线到最慢线),堆越宽趋势共识越强
 - 分母 = ATR14 波动率归一化:同样的跨度在平静市场得高分,在剧烈震荡市得低分
-- `res_conf_scale` 默认 1.0,可整体缩放
+- `res_conf_scale` 默认 1.0,可整体缩放。主网实例已用 2.0:首条真信号实测
+  |ema7-ema200|/ATR=0.5459,乘 1.0 不过 min_confidence=0.6 闸被 emitSignal
+  静默丢弃(2026-08-23 实盘验证发现,与 eth_scalper scale 20 同族)
 
 ---
 
@@ -125,7 +127,7 @@ order_quantity  = 20
 min_confidence  = 0.6
 enabled         = true
 poll_interval_ms = 500
-custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 1.0 }
+custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 ```
 
 ### 下单模式(先信号后激活)

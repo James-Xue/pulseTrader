@@ -151,7 +151,9 @@ poll_interval_ms = 500
 #   res_ema_p3      (默认 30)
 #   res_ema_p4      (默认 60)
 #   res_ema_p5      (默认 200)  — 最慢 EMA 周期
-#   res_conf_scale  (默认 1.0)  — 置信度缩放系数
+#   res_conf_scale  (默认 1.0)  — 置信度缩放系数。实测 |ema7-ema200|/ATR ≈ 0.55
+#                                 不过 min_confidence=0.6 闸被静默丢弃;主网已用
+#                                 2.0 (典型对齐 ~1.0 过闸, 仍守 0.6 语义)
 # 规则文档: docs/strategies/ema-resonance-scalper.md
 #
 # [[strategy.instances]]
@@ -164,7 +166,7 @@ poll_interval_ms = 500
 # min_confidence  = 0.6
 # enabled         = true
 # poll_interval_ms = 500
-# custom_params  = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 1.0 }
+# custom_params  = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]
