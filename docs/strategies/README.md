@@ -141,4 +141,5 @@
 - [OrderBookScalper — 订单簿失衡](orderbook-scalper.md)
 - [MeanReversionScalper — 布林带均值回归](mean-reversion-scalper.md)
 - [SuperTrendScalper — ATR 趋势翻转](supertrend-scalper.md)
+- [EthScalper — ETH 追空 EMA 交叉(币种专属)](eth-scalper.md)
 - [EmaResonanceScalper — 五周期 EMA 共振](ema-resonance-scalper.md)
