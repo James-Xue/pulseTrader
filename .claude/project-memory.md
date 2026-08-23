@@ -1,8 +1,13 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-23 (M30 futures K 线停录 + 启动免热机,967 绿;M29 回测;M28 验证)
-> File size: 25274 chars / 25000 chars. Must recalculate and sync this line after updating this file.
-> 细节文件索引:memory-details/reference/gate-kline-api.md — Gate k线 REST 三端点铁律(limit/from-to/格式/新鲜度/黄金 kline_type 坑)
+> File size: 20368 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> 细节文件索引(memory-details/,按主题拆分,主文件只留摘要+指针):
+>   reference/gate-kline-api.md — Gate k线 REST 三端点铁律(limit/from-to/格式/新鲜度/黄金 kline_type 坑)
+>   reference/backtest-engine.md — M29 回测引擎全量(组件/实测/端到端基准)
+>   reference/strategy-architecture.md — M26 策略架构全量(UnifiedScalper/Registry/custom_params/EthScalper v2)
+>   reference/grid-manager.md — M27 GridManager 全量(规则链/reduce-only 语义/踩坑实录)
+>   sessions/grids-sndk-eth.md — SNDK v2.1 + ETH 网格实盘实录
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -65,12 +70,9 @@
 
 ### 2026-08-23 M29 回测引擎(单策略 MVP,5 提交,954 绿)
 
-- **提交链(均已推送)**:dcadc60 交易所 K 线端点+93xx 错误码 / 5c4744e 数据源层 / e2fcdca 回放+虚拟账户 / 3b14c44 报告 / bb1a480 子命令+数据净化
-- **src/backtest/ 新库**:IKlineSource 抽象(SqliteKlineReader 本地优先 + GateKlineFetcher API 补缺口,KlineLoader 合并去重+回写缓存);ReplayDriver(FeedHarness 无 I/O 驱动真实策略,同一 onKline 模板路径,cooldown 播种 0);BacktestAccount(close 价即时成交,Flip/Independent 模式,PnL 公式同 PositionManager,quanto 缩放,费率三态 <0 免/0 默认/>0 显式);BacktestReport(表格+JSON 导出);BacktestEngine(trading.toml 实例播种 + 注册名校验)
-- **用法**:`./run.sh backtest --strategy ema_resonance_scalper --symbol ETH_USDT --from 2026-08-21 --to 2026-08-23 --quantity 20 --quanto 0.01 [--json x.json]`;窗口缺省自动解析(coverage 或 7 天);quanto 内置表 ETH 0.01 / BTC 0.0001
-- **实测经验**:① Gate limit 与 from/to **互斥**(HTTP 400)→ 有条件省略;② futures candlesticks 是**对象数组** `{t,o,h,l,c,v}`,spot 是数组 `[ts,quote_vol,c,h,l,o,base_vol,closed]`(与 fetch_klines 实测一致);③ **脏数据净化**:kline_bars 有 ETH 坏蜡烛(close 76403.9/1613.43 邻 2371,08-21 记录缺陷)→ sanitizeCandles 剔非正 OHLC/高低不一致/>25% 跳变,报告带警告;④ EmaResonance **迁移触发**:单调趋势永不发信号,回测序列需构造状态迁移;warmup=首信号前蜡烛数
-- **端到端**:ETH 08-21~23 2879 根(sqlite 优先+API 补齐+缓存回写)、72 信号 16 笔净 -5.72;错误路径非零退出(缺参 2/未知策略 1/坏时间 2)
-- **后续**:多策略聚合、控制面 MCP backtest 方法、orderbook_scalper、参数优化、intra-bar SL/TP、资金费率
+- **用法**:`./run.sh backtest --strategy ema_resonance_scalper --symbol ETH_USDT --from 2026-08-21 --to 2026-08-23 --quantity 20 --quanto 0.01 [--json x.json]`;窗口缺省自动解析;quanto 内置 ETH 0.01 / BTC 0.0001;错误路径非零退出(缺参 2/未知策略 1/坏时间 2)
+- **架构/组件/实测经验/端到端基准**(IKlineSource/SqliteKlineReader/GateKlineFetcher/KlineLoader/ReplayDriver/BacktestAccount/Report;limit 与 from-to 互斥;脏数据净化;迁移触发)→ 详见 `memory-details/reference/backtest-engine.md`
+- **后续**:多策略聚合、MCP backtest 方法、orderbook_scalper、参数优化、intra-bar SL/TP、资金费率
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -131,27 +133,12 @@
 
 ### M26 策略架构:UnifiedScalper + Registry 兜底 + 币种策略 (2026-08-21, ff616b6/8fb4021)
 
-- **UnifiedScalper**(`src/strategy/scalping/`):kline 驱动策略的模板方法基类——onKline/onTick final,computeAtr/warmup/cooldown/no-data 日志从 3 处逐字重复收敛为一处;momentum/mean_reversion/supertrend 已迁移继承,**行为逐字节等价**(strategy_id/日志文案/cooldown 语义——Momentum 显式禁用/ATR 归一化置信度均不变);orderbook_scalper 保持独立(数据源不同)
-- **StrategyRegistry**(`src/strategy/StrategyRegistry.{hpp,cpp}`):TOML `name` = 注册键,`makeBuiltinStrategyRegistry()` 集中注册;**未注册名 → 被动 UnifiedScalper(默认 evaluateEntry→nullopt,永不发信号)+ WARN 列已注册名**(不再 warn+skip,引擎不会因拼错配置退出);重名注册拒绝;替代 main.cpp 硬编码 if-chain 工厂
-- **custom_params**:实例级 TOML 内联表 `custom_params = { key = value }`(array-of-tables 下唯一合法子表形式)→ `StrategyInstanceConfig.custom_params` map;严格类型校验(非 table/非数字报 ConfigInvalidValue,缺键空 map 向后兼容);`UnifiedScalper::customParam(key, fallback)` 静态读取,无热更新
-- **EthScalper**(注册键 `"eth_scalper"`):首个币种策略示范——追空 EMA bearish cross(只做空)+ 暴拉过滤 + ATR 自适应止盈(`eth_atr_step` 默认 0.05,suggested_tp = close - step×atr)+ 置信度缩放(`eth_min_confidence_scale`);**主网 trading.toml 未启用**(启用 = 参考 trading.toml.example 注释块)
-- **EthScalper v2**(08-21,M26.1,ETH 网格复盘后升级,819 绿):① 每 candle 发布 Flat+conf=0 **状态信号**,indicators 恒带 `trend_state`(bullish/bearish/neutral)+ `spike`(0/1)——信号板永远有最新趋势状态,网格子代理读 get_signals 即得挂格闸门(不需自算 EMA);② 暴拉过滤**三口径**:`eth_spike_filter_usd`(120)+ `eth_spike_filter_pct`(1.5%)+ `eth_spike_filter_atr`(3×ATR),任一触发即过滤,设 0 禁用(复盘教训:USD 单口径挡不住 04:50 1m +4.4% 暴拉);③ 真信号语义不变(bearish cross 且非 spike 才 Sell);④ trading.toml 已配实例(custom_params 齐全,5 参数),**待引擎重启生效**
-- **futures 幽灵仓剪枝**(08-21,M26.1):syncFuturesPositionsFromExchange 收集 live_contracts,`pruneGhostFuturesByContract` 剪掉交易所已无持仓合约上的 fill-tracked 仓(60s 宽限;同步失败绝不剪)。背景:08-19 ETH 网格 15 个 eth-grid-* 仓被用户 App 04:51 全平后,因 exchange_position_id 为空永久残留 + 假 upnl +623;**重启后 15 个幽灵仓自动清理(get_positions 验收)**
-- **加新币种策略套路**:继承 UnifiedScalper 覆写钩子(className/idPrefix/klineNeeded/warmupThreshold/cooldownEnabled/evaluateEntry/buildSignal/logSignal)→ StrategyRegistry.cpp 注册一行 → src/strategy + tests/unit/strategy 两个 CMakeLists 各一行 → FeedHarness kline 全链路测试(模式见 tests/unit/market/test_market_feed_sink.cpp:55-71,MarketFeed 构造无 I/O,getKlineBuffer(symbol).push 注入蜡烛)
-- 已知:clangd 对 PULSE_LOG_INFO 格式串报 invalid_consteval_call 是 LSP 误报(新文件未入编译数据库),真实编译零警告
+- **UnifiedScalper** 模板方法基类(onKline/onTick final;momentum/mean_reversion/supertrend 已迁移,**行为逐字节等价**;orderbook_scalper 独立);**StrategyRegistry**(未注册名→被动 UnifiedScalper 永不发信号+WARN);**custom_params**(TOML 内联表,严格校验);**EthScalper v2**(每 candle 状态信号 trend_state/spike + 三口径暴拉过滤);幽灵仓剪枝;加新策略套路 → 详见 `memory-details/reference/strategy-architecture.md`
 
 ### M27 引擎内网格服务 GridManager (2026-08-21, fd8505c..f724fbb, 848 绿)
 
-- **动机**:ETH 网格 v2 规则(Python 工具链 + LLM 子代理)不可单测、绕开引擎风控、状态易漂移;复盘 eth-review-20260821-grid-v1.md 后 C++ 化
-- **架构**:`src/grid/`(pulse_grid 库,无 pulse_control 依赖,IGridGateway 抽象防链接环):
-  - `IGridGateway`(place/cancel/openFuturesOrders/positionsBySymbol 纯虚);生产实现 `GridGateway`(main.cpp 编译进可执行文件):place → **placeManualOrder 全风控**(M22 宽松闸),cancel → 直撤交易所优先(tracker 看不到重启前订单),openFuturesOrders → getFuturesOrders(交易所真相视图)
-  - `GridManager`:无独立线程,主循环 200ms tick 驱动,内部 fast(每拍 spike/日界)/mid(~1s 趋势/冻结到期)/slow(~50s 对账主流程)分层;m_mutex 守卫(锁序 m_mutex→rest_mutex)
-  - 规则:挂格(锚=round(mid+1×step),ATR 自适应 step=clamp(0.5×ATR15m,3,8))→ 成交整格记账(filled+=qty_per_level)→ TP reduce-only 限价买(fill-2×step,严禁 place_trigger_order)→ TP 兑现记账+循环重挂 → 重锚(下移跟随,冷却 30min+趋势 bearish)→ 保护线 A(1m 收>顶+2×step)/B(浮亏≤-30)→ reduce-only 市价平**恰好网格份额**+重锚 → 趋势闸门(读 SignalBoard eth_scalper trend_state,wall-clock 新鲜度,stale=禁新格)→ 暴拉冻结(1m 涨幅>max(1%,3×ATR15m),冻结期不续刷)→ 日亏停手(realized≤-10,北京 08:00==UTC 00:00 重置)→ 方向切换撤单判"取消"不判成交(externalCancelPending 标志)
-  - 持久化:JSON tmp+rename 原子写(data/grid_state.json),重启后交易所视图为真相
-- **风险层 reduce-only 语义**(PR-1,9103 根因):`reserveNotional(..., reduce_only, side)`——平仓单跳过 maxOpenPositions 名额;名义只计同 symbol 反向仓之外的 excess;excess≤0 直接 Approved 绝不 Modified(缩减 TP 会半仓裸奔)
-- **控制面**:`grid_start [--levels N] [--qty Q] [--step S] [--anchor P]` / `grid_status` / `grid_pause` / `grid_stop`(REPL/MCP/JSON-RPC);错误码 GridNotStarted=9200/GridAlreadyRunning=9201;start 预检用户仓(非 eth-grid-* 存在则拒绝,除非 force)
-- **踩坑实录**:① start/pause/stop 持锁调 status() 自死锁→拆 statusLocked();② SignalBoard JSON 键是 "source" 非 "strategy_id";③ 订单类型判断不能用 order_id 前缀(成交后 client_order_id 丢失)→ map 存 TrackedOrder{idx,is_tp};④ TP 消失分支必须优先于 resting==0 的 sell 分支;⑤ 趋势新鲜度用 wall-clock(测试推进 now_ms 会误过期)
-- **待办**:引擎重启生效 + testnet 演练(挂格→成交→TP→循环;保护线演练;重启演练;方向切换演练)→ 演练通过后启 mainnet 网格,eth_watch.py 退役(eth_ledger.py 保留应急)
+- **GridManager**:主循环 200ms tick 驱动(fast/mid/slow 三层),规则链=挂格→TP reduce-only 限价买循环→重锚→保护线 A/B→趋势闸门→暴拉冻结→日亏停手;IGridGateway 抽象(GridGateway 走 placeManualOrder 全风控);reduce-only 名义语义(9103 根因);控制面 grid_start/status/pause/stop(9200/9201);5 条踩坑实录 → 详见 `memory-details/reference/grid-manager.md`
+- **状态**:已随 M30 部署重启生效(08-23);待办 testnet 演练后启 mainnet 网格,eth_watch.py 退役
 
 ## 关键决策与事故 (M14–M16 时代,细节见 archive)
 
@@ -224,23 +211,11 @@ PulseConfig
 - Sub-account recommended for risk isolation (max 10 for VIP0-4, inherit main VIP)
 - Futures: USDT-settled only, leverage up to 125x, simultaneous spot+futures via config
 
-## SNDK 网格 v2.1(2026-08-18 部署,08-19/20 上扩)
+## 网格实盘实录(SNDK v2.1 + ETH,2026-08-18~20)
 
-- **规格 v2.1**:20 格限价空 1615~1710 步进 5(演进:v1 36 格 1730~1800 → v2 12 格 1600~1665),每格 2 张(quanto 0.01,~35 USD/格);只做空;分格 TP = 成交价-10 的 reduce-only 限价买单(price_orders 不支持部分平仓 → 协议 v2);不挂止损;TP 兑现后同格循环重挂;保护线 A = 1730
-- **实盘状态(08-19/20)**:旧网格 12/12 全成交(末 1670@20:38,TP 已挂),新 8 格 20:43 挂出(1675/1680 挂出即成交);sync 行 40 张 = 用户 App 加空(均价 1669.11)与网格单 disjoint,**非双计**(Gate 单向持仓模式,App 单与网格单合并);通宵值守 14h/1736 轮(FOMC 1093 轮满分),59 兑现 **+11.8 USD**,铁律 0 违规
-- **代理文档**:`~/1_Code/commit_my_life/0_note/gate交易/闪迪/joey-Z170I-PRO-GAMING/`(策略/任务书/思考板/状态);黄金代理同构目录在 `gate交易/黄金/joey-Z170I-PRO-GAMING/`;并行各管各市场
-- **经验**:批量挂单 CLI 输出不可靠(报错走 stderr)、maxOpenPositions=4 拦网格(→40)、引擎重启后 tracker 视图丢旧单(用 list_futures_orders 交易所侧视图)、触发单必须 size=2 不能用 auto_size=close
-
-## ETH 网格(2026-08-20 部署,开局暴拉)
-
-- 以闪迪 v2.1 为模板克隆的追空网格,文档在 `~/1_Code/commit_my_life/0_note/gate交易/以太坊/joey-Z170I-PRO-GAMING/`(策略/任务书/思考板/状态)
-- **规格(已部署)**:20 格限价空 step 5,每格 2 张(0.01 ETH ≈ 20 USD @2011,~40 USD/格,总名义 ~805);分格 TP = 成交价-10 的 reduce-only 限价买单;无单格止损;保护线 A 顶+20 · B -30 USD;日亏 -10;重锚冷却 30 分钟;ETH maker 费率 -0.01%(挂单返佣)
-- trading.toml 已加 ETH 3 策略 signal_only,**maxOpenPositions 40→80**,引擎重启 17 实例
-- **首锚 2020**(mid 2012.55),部署即暴拉 +8.9%(2010→2118):**20 格全部成交**,11+ 次 TP 兑现(按成交价精算 **+5.0 USD**),10 格在持 10 格已兑现并循环重挂(2080 格二次成交)
-- ⚠️ **9103 名义闸击穿**:2085 格 TP 兑现后重挂空单被拒 → 裸奔无保护;协议"每批探闸 1 笔",用户平仓后闸开
-- 固化对账脚本 `gate交易/以太坊/joey-Z170I-PRO-GAMING/工具/gate_eth_state.py`(签名直查 Gate,绕过引擎分页/缓存 bug)
-- 通宵值守 51 轮,04:51 清仓 -39.2 停手(三机通宵托管收官)
-- ⚠️ 用户 App 活跃:持仓 ~210 + 新挂 -100@2128;用户已有 ETH 手动空仓,**代理铁律不触碰**
+- **SNDK v2.1**:20 格空 1615~1710 步进 5,每格 2 张,分格 TP=成交价-10 reduce-only 买(price_orders 不支持部分平仓→协议 v2);14h/1736 轮 59 兑现 **+11.8 USD** 铁律 0 违规;sync 40 张=用户 App 加空与网格 disjoint 非双计;经验:批量挂单 CLI 输出不可靠、maxOpenPositions=4 拦网格(→40)、重启后 tracker 丢旧单用 list_futures_orders、触发单必须 size=2
+- **ETH 网格**:SNDK v2.1 模板克隆,20 格空 step 5 每格 2 张,保护线 A 顶+20/B -30,日亏 -10,ETH maker -0.01% 返佣;首锚 2020 部署即暴拉 +8.9% **20 格全成交** +5.0 USD;⚠️ 9103 名义闸击穿(2085 格重挂被拒裸奔)→ M27 reduce-only 语义修复;通宵 51 轮 04:51 清仓 -39.2 停手
+- 全文(规格/演进/对账脚本 gate_eth_state.py/代理文档路径)→ 详见 `memory-details/sessions/grids-sndk-eth.md`
 
 ## 黄金代理 08-20 停摆与修复
 
