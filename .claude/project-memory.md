@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-23 (M28 验证+修复+隐私扫描+文档补齐,903 绿)
-> File size: 22484 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M29 回测引擎完成,5 提交 954 绿;M28 验证+修复;fetch_klines 工具)
+> File size: 23892 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,7 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24–M28, 2026-08-23)
+## Current State (M24–M29, 2026-08-23)
 
 ### 2026-08-23 M28 部署验证 + 4 修复 (4aacbe0/9620c61, 903 绿)
 
@@ -46,7 +46,24 @@
 - **隐私扫描(08-23)**:run.ps1(WebUI 时代 Windows 遗留,引用已删 build/Release 与 WebUI)硬编码 Gate **测试网** key/secret,公开仓库历史可见(c9efae9 起)——已移除改环境读取(aaac867);mainnet 密钥确认从未入库(内容+历史);AI key 仅 env 引用;sk- 命中均为 CSS 类名误报;**待办:Gate 后台轮换测试网密钥**(历史仍可检索,虚拟资金风险低,不值得 filter-repo 重写)
 - **文档补齐(08-23)**:新增 docs/strategies/eth-scalper.md(4af38de)——6 个注册策略文档 6/6 全覆盖;README 索引同步;文档含 v2 状态通道/三口径暴拉过滤/scale 20 语义/2026-08-23 实盘经验
 
-### 2026-08-18~20 更新(家庭机)
+### 2026-08-23 工具:批量 k线下载 fetch_klines (b2683c6,已推送)
+
+- **tools/fetch_klines.py**(公开 REST,无需 key):BTC/ETH 合约+现货 + XAUUSD CFD 的 1m k线 → `data/klines/*_1m.csv`(ts,open,high,low,close,volume);用法 `python3 tools/fetch_klines.py [hours]`(默认 48h)
+- **实测接口铁律**(2026-08-23 验证):
+  - 合约 `/api/v4/futures/usdt/candlesticks`:limit≤2000;`from/to` 分页可用但**与 limit 互斥**,窗口内全量返回
+  - 现货 `/api/v4/spot/candlesticks`:limit≤1000,超窗报 `INVALID_PARAM_VALUE "Candlestick range too broad"`;字段序 `[ts,成交额,close,high,low,open,成交量,closed]`
+  - 黄金 `/api/v4/tradfi/symbols/XAUUSD/klines`:limit≤500(≈8.3h 的 1m),**from/to 被忽略**,无成交量字段,响应包在 `data.list`(字段 {o,c,h,l,t});周末休市最新一根滞后 ~33h;深历史只能换 `kline_type=5m/15m/1d` 或持续收集
+- `data/` 在 .gitignore → 提交 CSV 需 `git add -f data/klines/`
+- M29 回测引擎已落地(见下节),fetch_klines 数据可与 kline_bars 互补
+
+### 2026-08-23 M29 回测引擎(单策略 MVP,5 提交,954 绿)
+
+- **提交链(均已推送)**:dcadc60 交易所 K 线端点+93xx 错误码 / 5c4744e 数据源层 / e2fcdca 回放+虚拟账户 / 3b14c44 报告 / bb1a480 子命令+数据净化
+- **src/backtest/ 新库**:IKlineSource 抽象(SqliteKlineReader 本地优先 + GateKlineFetcher API 补缺口,KlineLoader 合并去重+回写缓存);ReplayDriver(FeedHarness 无 I/O 驱动真实策略,同一 onKline 模板路径,cooldown 播种 0);BacktestAccount(close 价即时成交,Flip/Independent 模式,PnL 公式同 PositionManager,quanto 缩放,费率三态 <0 免/0 默认/>0 显式);BacktestReport(表格+JSON 导出);BacktestEngine(trading.toml 实例播种 + 注册名校验)
+- **用法**:`./run.sh backtest --strategy ema_resonance_scalper --symbol ETH_USDT --from 2026-08-21 --to 2026-08-23 --quantity 20 --quanto 0.01 [--json x.json]`;窗口缺省自动解析(coverage 或 7 天);quanto 内置表 ETH 0.01 / BTC 0.0001
+- **实测经验**:① Gate limit 与 from/to **互斥**(HTTP 400)→ 有条件省略;② futures candlesticks 是**对象数组** `{t,o,h,l,c,v}`,spot 是数组 `[ts,quote_vol,c,h,l,o,base_vol,closed]`(与 fetch_klines 实测一致);③ **脏数据净化**:kline_bars 有 ETH 坏蜡烛(close 76403.9/1613.43 邻 2371,08-21 记录缺陷)→ sanitizeCandles 剔非正 OHLC/高低不一致/>25% 跳变,报告带警告;④ EmaResonance **迁移触发**:单调趋势永不发信号,回测序列需构造状态迁移;warmup=首信号前蜡烛数
+- **端到端**:ETH 08-21~23 2879 根(sqlite 优先+API 补齐+缓存回写)、72 信号 16 笔净 -5.72;错误路径非零退出(缺参 2/未知策略 1/坏时间 2)
+- **后续**:多策略聚合、控制面 MCP backtest 方法、orderbook_scalper、参数优化、intra-bar SL/TP、资金费率
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -56,7 +73,7 @@
 - **子代理**:08-18 夜用户令停(引擎+代理+2cron);08-20 引擎已重启(直连),子代理循环未跑
 
 ### Test Summary
-- **902 tests green** (本机 8-23 实测,M22–M28 全量)
+- **954 tests green** (本机 8-23 实测,M22–M29 全量)
 - M28: EmaResonance 6 + registry 1 + engine services 3 + command parser 1;M27: 风险 reduce-only 5 + 配置 9 + tracker 2 + GridManager 10 + parser 3 + MCP 更新;M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
@@ -236,14 +253,6 @@ PulseConfig
 - ✅ M28 两个功能已提交并推送(eea0651 共振策略 / 190e84c 一键开关 / e7a0bb5+fe6a38f 文档与规则)
 - ✅ **M28 部署验证完成**(08-23):① 引擎启动 auto_trade=0 种子 ✅ ② get_signals 板上共振信号 + indicators(ema7/14/30/60/200 严格递增 + resonance=bull_aligned)✅ ③ 验证过程发现并修复 4 处同族缺陷(见 Current State 08-23 节,4aacbe0/9620c61)
 - ⏳ **autotrade 开关(用户 08-23 决定:暂缓开启)**:验证已完成且信号持续正常,但 08-23 下午为震荡市、共振信号 ~2-5 分钟频繁翻转,用户决定暂不开,保持仅信号;开启时 `autotrade ema_resonance_scalper_ETH_USDT on`(当前 futures 方向已就绪),重启回仅信号(fail-safe)
-- ⏳ **M27 引擎内网格待重启+testnet 演练**(grid_start/status/pause/stop 控制面、GridManager 状态机、reduce-only 名义);演练通过后启 mainnet 网格,eth_watch.py 退役
-- ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
-- ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
-- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
-- ⏳ 黄金对账遗留:引擎 position_id 漂移 + 外部裸单沟通 + 当日 realized 权威复核
-- ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
-- ⏳ maker-first 实盘验证(先 testnet 后小资金)
-- ⏳ 规则调优候选(夜盘纸面 3W/1L +15.7):RSI<30 破位禁追空(4/4 被买回教训)、双收盘+ticker 确认纪律、ATR 动态止损
 - ⏳ **M27 引擎内网格服务已落地(5 PR,848 绿),待重启+testnet 演练**:grid_start/status/pause/stop 控制面命令;GridManager 状态机(挂格/TP 循环/重锚/保护线 A+B/趋势闸门/暴拉冻结/日亏北京日);IGridGateway 抽象(GridGateway 生产实现走 placeManualOrder 全风控);reduce-only 名义语义修复(9103 根因);[grid] TOML 段;重启后 get_signals 可见 eth_scalper_ETH_USDT(含 trend_state/spike)+ 15 个 ETH 幽灵仓清理 + 预算 12000/6500 一并验收;ETH 网格 v2 文档与 watchdog 已升级(commit_my_life 以太坊目录),引擎内网格启用后 eth_watch.py 退役
 - ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
 - ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
@@ -253,4 +262,4 @@ PulseConfig
 - ⏳ maker-first 实盘验证(先 testnet 后小资金)
 - ✅ 显示 bug 已修:futures PnL 乘杠杆(36ee6f9)、open_time_str +8h 偏移(f94a74f)
 - ⏳ loopback awselb 响应(疑 Clash TUN 劫持;用户已关 TUN,可能已无关)
-- ⏳ 规则调优候选(夜盘纸面 3W/1L +15.7):RSI<30 破位禁追空(4/4 被买回教训)、双收盘+ticker 确认纪律、ATR 动态止损
+- ✅ **M29 回测引擎完成**(08-23,5 提交已推送,954 绿):用法 `./run.sh backtest --strategy X --symbol Y [--from/--to/--quantity/--quanto/--json]`,详见 Current State M29 节;待办:多策略聚合、控制面 MCP backtest 方法、orderbook_scalper、参数优化
