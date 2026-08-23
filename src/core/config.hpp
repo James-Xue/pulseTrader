@@ -312,6 +312,13 @@ struct StrategyConfig
     /// they are the sub-agent's execution path. Default false = current
     /// auto-trading behavior.
     bool signal_only = false;
+
+    /// Startup kline preload (M30): fetch the last ~500 historical 1m candles
+    /// into each feed's KlineBuffer before the strategy threads start, so
+    /// warmup completes on the first poll instead of waiting for live WS
+    /// pushes to accumulate (e.g. EmaResonance needs 201 candles ≈ 3.4h).
+    /// Failure degrades gracefully to the traditional live warmup.
+    bool preloadKlines = true;
 };
 
 // ---------------------------------------------------------------------------
@@ -326,6 +333,12 @@ struct SqliteConfig
     bool enabled = false;                ///< Disabled by default.
     std::string dbPath = "trades.db";    ///< SQLite database file path.
     bool recordMarketData = false;       ///< Persist ticker/kline to SQLite (M18).
+
+    /// Markets whose KLINE data is NOT persisted to kline_bars (M30).
+    /// Ticker recording (ticker_ticks) is never affected. Gate REST serves
+    /// live futures candles (~30s fresh), so futures self-recording is
+    /// redundant. Empty = record all markets.
+    std::vector<MarketType> skipKlineMarkets;
 };
 
 // ---------------------------------------------------------------------------

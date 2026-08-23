@@ -982,6 +982,97 @@ record_market = true
 }
 
 // ---------------------------------------------------------------------------
+// M30: skip_kline_markets + preload_klines
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+skip_kline_markets = ["futures"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    ASSERT_EQ(1u, sql.skipKlineMarkets.size());
+    EXPECT_EQ(MarketType::Futures, sql.skipKlineMarkets[0]);
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsMultiple)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = ["spot", "cfd"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    ASSERT_EQ(2u, sql.skipKlineMarkets.size());
+    EXPECT_EQ(MarketType::Spot, sql.skipKlineMarkets[0]);
+    EXPECT_EQ(MarketType::Cfd, sql.skipKlineMarkets[1]);
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsInvalidRejected)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = ["nope"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsNotArrayRejected)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = "futures"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsDefaultEmpty)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).sqlite.skipKlineMarkets.empty());
+}
+
+TEST(ConfigLoader, ParseStrategy_PreloadKlinesDefaultTrue)
+{
+    TempToml tmp(R"(
+[strategy]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).strategy.preloadKlines);
+}
+
+TEST(ConfigLoader, ParseStrategy_PreloadKlinesParsed)
+{
+    TempToml tmp(R"(
+[strategy]
+preload_klines = false
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_FALSE(value(result).strategy.preloadKlines);
+}
+
+// ---------------------------------------------------------------------------
 // custom_params — coin-specific instance parameter channel (M26)
 // ---------------------------------------------------------------------------
 

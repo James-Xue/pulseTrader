@@ -237,6 +237,7 @@ maxClients  = 4                    # 最大 WebSocket 连接数
 enabled = true
 dbPath  = "data/trades.db"         # SQLite 数据库文件路径
 record_market = false             # M18: 行情(ticker/kline)落库,同文件第二连接
+# skip_kline_markets = ["futures"]  # M30: 不写这些市场的 kline_bars(如合约,改由 REST 实时拉);ticker_ticks 不受影响
 
 # ── 引擎内网格服务 (M27) ─────────────────────────────────────────────
 # ETH 网格 v2 规则(commit_my_life gate交易/以太坊 策略文档 v2)的引擎原生实现。

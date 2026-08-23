@@ -88,7 +88,8 @@ Result<std::unique_ptr<MarketRecorder>> MarketRecorder::open(
     const std::string &db_path,
     std::size_t queue_capacity,
     std::size_t batch_size,
-    std::chrono::milliseconds flush_interval)
+    std::chrono::milliseconds flush_interval,
+    std::vector<MarketType> skip_kline_markets)
 {
     try
     {
@@ -106,7 +107,8 @@ Result<std::unique_ptr<MarketRecorder>> MarketRecorder::open(
         // Direct new-expression (member context): std::make_unique cannot
         // access the private constructor.
         return std::unique_ptr<MarketRecorder>(new MarketRecorder(
-            std::move(db), queue_capacity, batch_size, flush_interval));
+            std::move(db), queue_capacity, batch_size, flush_interval,
+            std::move(skip_kline_markets)));
     }
     catch (const SQLite::Exception &e)
     {
@@ -117,12 +119,19 @@ Result<std::unique_ptr<MarketRecorder>> MarketRecorder::open(
 MarketRecorder::MarketRecorder(std::unique_ptr<SQLite::Database> db,
                                std::size_t queue_capacity,
                                std::size_t batch_size,
-                               std::chrono::milliseconds flush_interval)
+                               std::chrono::milliseconds flush_interval,
+                               std::vector<MarketType> skip_kline_markets)
     : m_db{ std::move(db) }
     , m_queue{ queue_capacity }
     , m_batchSize{ std::max<std::size_t>(batch_size, 1) }
     , m_flushInterval{ flush_interval }
 {
+    // Build the kline skip mask once at construction; onKline only pays one
+    // bit test per event on the hot path.
+    for (const auto mt : skip_kline_markets)
+    {
+        m_klineSkipMask |= (1u << static_cast<unsigned>(mt));
+    }
     m_writer = std::jthread([this](std::stop_token st) { writerLoop(std::move(st)); });
 }
 
@@ -159,6 +168,13 @@ void MarketRecorder::onTicker(const Symbol &symbol, MarketType market_type,
 void MarketRecorder::onKline(const Symbol &symbol, MarketType market_type,
                              const market::Kline &kline)
 {
+    // M30: skip whole markets' kline recording before touching the ring
+    // buffer (ticker recording unaffected). Gate REST serves live futures
+    // candles (~30s fresh), so self-recorded futures kline_bars are redundant.
+    if (m_klineSkipMask & (1u << static_cast<unsigned>(market_type)))
+    {
+        return;
+    }
     MarketDataEntry entry{};
     entry.kind = EntryKind::Kline;
     entry.market_type = market_type;

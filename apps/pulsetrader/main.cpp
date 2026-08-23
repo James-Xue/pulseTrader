@@ -21,6 +21,9 @@
 //   pulsetrader mcp                      stdio MCP server
 
 #include "backtest_cli.hpp"
+#include "backtest/GateKlineFetcher.hpp"
+#include "backtest/SqliteKlineReader.hpp"
+#include "backtest/WarmupSeeder.hpp"
 #include "core/SingleInstanceGuard.hpp"
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
@@ -794,7 +797,8 @@ static int runTrade(int argc, char* argv[])
     if (cfg.sqlite.recordMarketData)
     {
         auto mr_result = pulse::trade_recorder::MarketRecorder::open(
-            cfg.sqlite.dbPath);
+            cfg.sqlite.dbPath, 8192, 128, std::chrono::milliseconds(1000),
+            cfg.sqlite.skipKlineMarkets);
 
         if (pulse::ok(mr_result))
         {
@@ -1205,6 +1209,45 @@ static int runTrade(int argc, char* argv[])
     {
         futures_ws->start();
         log->info("[L1] Futures WebSocket connecting...");
+    }
+
+    // L1.5: Startup kline preload (M30) — seed recent history into each
+    // feed's KlineBuffer BEFORE feed->start(): the KlineBuffer assumes a
+    // single writer, and the WS I/O thread begins writing once the feed
+    // starts. With history in the buffer, each strategy thread's first poll
+    // completes warmup instantly (EmaResonance needs 201 candles ≈ 3.4h)
+    // instead of accumulating live pushes. The seeder never throws and never
+    // writes back to kline_bars; a failed symbol just falls back to live
+    // warmup. CFD is skipped — its REST poll loop already backfills 500
+    // candles on first poll (MarketFeed::pollLoop).
+    if (cfg.strategy.preloadKlines)
+    {
+        pulse::backtest::SqliteKlineReader *kline_db = nullptr;
+#ifdef PULSE_ENABLE_SQLITE
+        // SqliteKlineReader opens lazily; a missing DB degrades to pure API.
+        std::unique_ptr<pulse::backtest::SqliteKlineReader> kline_db_owner;
+        if (cfg.sqlite.enabled)
+        {
+            kline_db_owner =
+                std::make_unique<pulse::backtest::SqliteKlineReader>(cfg.sqlite.dbPath);
+            kline_db = kline_db_owner.get();
+        }
+#endif
+
+        std::size_t seeded_total = 0;
+        if (spot_feed && spot_rest)
+        {
+            pulse::backtest::GateKlineFetcher api_fetcher(*spot_rest);
+            pulse::backtest::WarmupSeeder seeder(kline_db, api_fetcher);
+            seeded_total += seeder.seed(*spot_feed, spot_symbols, pulse::MarketType::Spot);
+        }
+        if (futures_feed && futures_rest)
+        {
+            pulse::backtest::GateKlineFetcher api_fetcher(*futures_rest);
+            pulse::backtest::WarmupSeeder seeder(kline_db, api_fetcher);
+            seeded_total += seeder.seed(*futures_feed, futures_symbols, pulse::MarketType::Futures);
+        }
+        log->info("[L1.5] warmup preload done — {} candles seeded", seeded_total);
     }
 
     // L3: Subscribe to market data channels.

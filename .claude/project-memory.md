@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-23 (M29 回测引擎完成,5 提交 954 绿;M28 验证+修复;fetch_klines 工具)
-> File size: 23892 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M30 futures K 线停录 + 启动免热机,967 绿;M29 回测;M28 验证)
+> File size: 25607 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,17 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24–M29, 2026-08-23)
+## Current State (M24–M30, 2026-08-23)
+
+### 2026-08-23 M30 futures K 线停录 + 引擎启动免热机 (967 绿, 已部署)
+
+- **动机**:Gate REST 合约 k 线实测几乎实时(最新一根滞后 ~33s),而自录 futures kline 质量差(08-21 脏蜡烛 76381.8 + 12% 成交量失真,交叉验证 sqlite vs REST 直拉 2881 根:价格 2533 根完全一致但 347 根成交量差 >10 倍);用户决定不再自录合约 K 线
+- **① 停录**:`MarketRecorder::open()` 第 5 参 `skip_kline_markets`(vector<MarketType>,缺省空=全录),构造时建 bitmask,`onKline` 入口短路(**onTicker 不动** — 用户确认只停 kline 保留 ticker);配置 `[sqlite] skip_kline_markets = ["futures"]`(config_loader 数组解析,非法值报错,缺省兼容旧配置);trading.toml 已启用
+- **② 免热机**:新 `src/backtest/WarmupSeeder.{hpp,cpp}`(pulse_backtest 库,引擎二进制已链接):`seed(feed, symbols, market_type, count=500)` 每 symbol 用 **KlineLoader(SQLite-first+API 补缺+sanitize)** 拉尾 500 根 1m → 剔 forming(open_time+60s>now)→ **强制 closed=true**(GateKlineFetcher futures 解析不设 closed,不强制则 strategyLoop 的 closed 门永不通过)→ 升序 push 进 `feed.getKlineBuffer(symbol)`;**cache_writeback 写死 false**(否则每次启动又写回 futures,违背停录);失败 WARN 降级传统 warmup,绝不阻塞启动
+- **装配**(main.cpp L1.5 块,在 feed->start() 之前保证 KlineBuffer 单写者):spot+futures 各建 GateKlineFetcher;CFD 跳过(已有 pollLoop 500 根回填);`[strategy] preload_klines = true` 开关(缺省 true)
+- **时序原理**:strategyLoop 首轮 poll 见 latest closed && open_time != 0 → onKline → snapshot(201) 满 → 过 warmup 门 → 首个信号;cooldown 不拦(m_lastSignalTimeMs=0)
+- **端到端实测**(重启部署):`[L1.5] warmup preload done — 1996 candles seeded`(BTC/SNDK/UNITREE/ETH 各 499,sqlite 272+api 228);重启后零 "Warming up" 日志,3 分钟内 eth_scalper 出真实信号(对比旧引擎等 201 根实时 ≈ 3.4h);kline_bars futures 2.5 分钟冻结 10166 行、ticker_ticks 持续增长;967 绿(+13:recorder 2/config 7/warmup 4;test_warmup_seeder 注意 stub 类改名避免与 test_kline_loader ODR 冲突)
+- **遗留**:回测 CLI 的 cache_writeback 仍会写回 futures kline_bars(显式工具,保留);KlineBuffer push 不去重,注入与 WS 首帧边界至多 1 根重复(接受,last_kline_time 防重复信号)
 
 ### 2026-08-23 M28 部署验证 + 4 修复 (4aacbe0/9620c61, 903 绿)
 

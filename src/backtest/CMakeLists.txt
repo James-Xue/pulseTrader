@@ -7,6 +7,7 @@ add_library(pulse_backtest STATIC
     GateKlineFetcher.cpp
     KlineLoader.cpp
     ReplayDriver.cpp
+    WarmupSeeder.cpp
 )
 
 add_library(pulse::backtest ALIAS pulse_backtest)

@@ -5,6 +5,7 @@ add_executable(test_backtest
     test_replay_driver.cpp
     test_backtest_report.cpp
     test_sqlite_kline_reader.cpp
+    test_warmup_seeder.cpp
 )
 
 target_link_libraries(test_backtest

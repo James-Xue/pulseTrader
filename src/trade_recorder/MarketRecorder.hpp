@@ -105,11 +105,17 @@ class MarketRecorder : public market::MarketDataSink
     /// The recorder uses a SECOND connection to the same file as
     /// TradeRecorder (WAL supports concurrent connections; busy_timeout=5000
     /// arbitrates contention). Returns an error on SQLite failure.
+    ///
+    /// skip_kline_markets (M30): markets whose KLINE events are dropped before
+    /// enqueue (ticker events always recorded). Default empty = record all
+    /// markets. Used to stop persisting futures kline_bars — Gate REST serves
+    /// live futures candles (~30s fresh), making self-recording redundant.
     [[nodiscard]] static Result<std::unique_ptr<MarketRecorder>> open(
         const std::string &db_path,
         std::size_t queue_capacity = 8192,
         std::size_t batch_size = 128,
-        std::chrono::milliseconds flush_interval = std::chrono::milliseconds(1000));
+        std::chrono::milliseconds flush_interval = std::chrono::milliseconds(1000),
+        std::vector<MarketType> skip_kline_markets = {});
 
     ~MarketRecorder() override;
 
@@ -145,7 +151,8 @@ class MarketRecorder : public market::MarketDataSink
     MarketRecorder(std::unique_ptr<SQLite::Database> db,
                    std::size_t queue_capacity,
                    std::size_t batch_size,
-                   std::chrono::milliseconds flush_interval);
+                   std::chrono::milliseconds flush_interval,
+                   std::vector<MarketType> skip_kline_markets);
 
     /// Writer thread: flush batches (batch_size rows or flush_interval),
     /// then on shutdown drain everything and checkpoint the WAL.
@@ -170,6 +177,8 @@ class MarketRecorder : public market::MarketDataSink
 
     std::size_t m_batchSize;
     std::chrono::milliseconds m_flushInterval;
+    /// Bitmask of MarketType values whose KLINE events are dropped (M30).
+    std::uint8_t m_klineSkipMask{ 0 };
     std::jthread m_writer;
 };
 

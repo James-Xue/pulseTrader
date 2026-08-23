@@ -723,6 +723,8 @@ PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
                           static_cast<int>(out.signal_cooldown_sec)));
     out.signal_only =
         toml::find_or(sec, "signal_only", out.signal_only);
+    out.preloadKlines =
+        toml::find_or(sec, "preload_klines", out.preloadKlines);
 
     if (sec.contains("instances"))
     {
@@ -795,6 +797,40 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
     out.recordMarketData = toml::find_or(sec, "record_market", out.recordMarketData);
+
+    // M30: skip_kline_markets = ["futures"] — markets whose kline_bars
+    // persistence is disabled (ticker_ticks unaffected).
+    if (sec.contains("skip_kline_markets"))
+    {
+        const auto &arr = sec.at("skip_kline_markets");
+        if (!arr.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "sqlite.skip_kline_markets must be an array of strings"};
+        }
+
+        out.skipKlineMarkets.clear();
+        std::size_t idx = 0;
+        for (const auto &elem : arr.as_array())
+        {
+            if (!elem.is_string())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "sqlite.skip_kline_markets[" + std::to_string(idx)
+                                      + "] must be a string"};
+            }
+            MarketType mt{};
+            auto err = parseMarketType(elem.as_string(), mt);
+            if (ErrorCode::Ok != err.code)
+            {
+                return PulseError{err.code,
+                                  "sqlite.skip_kline_markets[" + std::to_string(idx)
+                                      + "]: " + err.message};
+            }
+            out.skipKlineMarkets.push_back(mt);
+            ++idx;
+        }
+    }
 
     return {};
 }

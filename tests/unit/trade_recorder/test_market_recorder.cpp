@@ -197,3 +197,51 @@ TEST(MarketRecorder, ZeroFlushNoCallbackAfterClose)
     EXPECT_EQ(0u, rec->queueSize());
     EXPECT_EQ(0, count_rows(path, "ticker_ticks"));
 }
+
+// ---------------------------------------------------------------------------
+// M30: skip_kline_markets — markets whose KLINE events are dropped (ticker
+// recording unaffected)
+// ---------------------------------------------------------------------------
+
+TEST(MarketRecorder, SkipKlineMarketsFiltersFuturesKlinesOnly)
+{
+    const std::string path = temp_db_path("skip_futures_kline");
+    auto result = MarketRecorder::open(
+        path, 8192, 64, std::chrono::seconds(10), { MarketType::Futures });
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    auto &rec = value(result);
+
+    // Futures kline must be dropped before enqueue...
+    rec->onKline("ETH_USDT", MarketType::Futures,
+                 make_kline("ETH_USDT", 1000, 2400.0));
+    // ...spot kline still recorded...
+    rec->onKline("BTC_USDT", MarketType::Spot,
+                 make_kline("BTC_USDT", 2000, 60000.0));
+    // ...and tickers are never filtered, futures included.
+    rec->onTicker("ETH_USDT", MarketType::Futures,
+                  make_ticker("ETH_USDT", 2400.0, 3000));
+    rec->onTicker("BTC_USDT", MarketType::Spot,
+                  make_ticker("BTC_USDT", 60000.0, 4000));
+    rec->stop();
+
+    EXPECT_EQ(1, count_rows(path, "kline_bars"));   // spot only.
+    EXPECT_EQ(2, count_rows(path, "ticker_ticks")); // both markets.
+}
+
+TEST(MarketRecorder, SkipKlineMarketsEmptyRecordsAll)
+{
+    const std::string path = temp_db_path("skip_none");
+    // Default (empty) skip list = record everything — pins the legacy
+    // behaviour so existing tests stay green.
+    auto result = MarketRecorder::open(path, 8192, 64, std::chrono::seconds(10));
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    auto &rec = value(result);
+
+    rec->onKline("ETH_USDT", MarketType::Futures,
+                 make_kline("ETH_USDT", 1000, 2400.0));
+    rec->onKline("XAUUSD", MarketType::Cfd,
+                 make_kline("XAUUSD", 2000, 4300.0));
+    rec->stop();
+
+    EXPECT_EQ(2, count_rows(path, "kline_bars"));
+}
