@@ -1,0 +1,32 @@
+# src/backtest/CMakeLists.txt — backtest engine (M29, single-strategy MVP)
+
+add_library(pulse_backtest STATIC
+    GateKlineFetcher.cpp
+    KlineLoader.cpp
+)
+
+add_library(pulse::backtest ALIAS pulse_backtest)
+
+target_include_directories(pulse_backtest
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/src
+)
+
+target_link_libraries(pulse_backtest
+    PUBLIC
+        pulse::core
+        pulse::exchange
+        pulse::market
+        pulse::strategy
+    PRIVATE
+        spdlog::spdlog
+)
+
+# SqliteKlineReader is optional (SQLite is a build-time option). Without it
+# the loader degrades to a pure Gate API fetch — the header is safe either way.
+if(PULSE_ENABLE_SQLITE)
+    target_sources(pulse_backtest PRIVATE SqliteKlineReader.cpp)
+    target_link_libraries(pulse_backtest PRIVATE SQLiteCpp)
+endif()
+
+target_compile_features(pulse_backtest PUBLIC cxx_std_20)

@@ -93,3 +93,21 @@ target_link_libraries(test_control_smoke
         pulse::core
         pulse::logging
 )
+
+add_executable(backtest_data_check
+    backtest_data_check.cpp
+)
+
+target_link_libraries(backtest_data_check
+    PRIVATE
+        pulse::backtest
+        pulse::core
+        pulse::exchange
+        pulse::market
+        pulse::logging
+)
+
+if(PULSE_ENABLE_SQLITE)
+    target_link_libraries(backtest_data_check PRIVATE SQLiteCpp)
+    target_compile_definitions(backtest_data_check PRIVATE PULSE_ENABLE_SQLITE)
+endif()

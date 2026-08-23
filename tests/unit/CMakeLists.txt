@@ -11,6 +11,7 @@ add_subdirectory(ai)
 add_subdirectory(heartbeat)
 add_subdirectory(control)
 add_subdirectory(grid)
+add_subdirectory(backtest)
 
 if(PULSE_ENABLE_SQLITE)
     add_subdirectory(trade_recorder)
