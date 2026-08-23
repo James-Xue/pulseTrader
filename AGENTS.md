@@ -160,6 +160,7 @@ When making architectural changes, update `architecture.md` to keep it as the so
 - Commit messages: conventional style (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
 - Keep commits atomic — one logical change per commit.
 - Don't commit API keys, secrets, or `.env` files. The `.gitignore` already covers `.claude/` and build artifacts.
+- **Every commit must be pushed to origin immediately** (user rule, 2026-08-23). Never leave local commits unpushed — after any commit, run `git push` (branch `headless`; on SSH failure, clear the ControlMaster first and retry).
 
 ---
 
