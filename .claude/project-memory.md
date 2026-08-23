@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-23 (M30 futures K 线停录 + 启动免热机,967 绿;M29 回测;M28 验证)
-> File size: 21644 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M31 每日 k 线归档同步,976 绿;M30 停录+免热机;记忆架构=摘要+memory-details)
+> File size: 21692 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > 细节文件索引(memory-details/,按主题拆分,主文件只留摘要+指针):
 >   reference/gate-kline-api.md — Gate k线 REST 三端点铁律(limit/from-to/格式/新鲜度/黄金 kline_type 坑)
 >   reference/backtest-engine.md — M29 回测引擎全量(组件/实测/端到端基准)
