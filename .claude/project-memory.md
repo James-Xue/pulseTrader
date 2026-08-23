@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-21 (M27: 引擎内网格服务 GridManager 落地,848 绿)
-> File size: 17705 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M28 部署验证完成:4 修复 4aacbe0/9620c61,903 绿)
+> File size: 22058 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -30,7 +30,21 @@
 - Vendored: websocketpp in `third_party/` (uWebSockets/uSockets removed with the WebUI)
 - SQLiteCpp GCC 15 fix: build with `-DCMAKE_CXX_FLAGS="-include cstdint"`
 
-## Current State (M24–M27, 2026-08-21)
+## Current State (M24–M28, 2026-08-23)
+
+### 2026-08-23 M28 部署验证 + 4 修复 (4aacbe0/9620c61, 903 绿)
+
+- **验证流程**:systemd user 服务启动(非系统级,unit 在 ~/.config/systemd/user/)→ `switch futures`(方向闸门,15 恢复 4 CFD 暂停)→ get_signals 全链路核验。注意:引擎重启后回 cfd 方向,ETH 策略 paused,必须再 switch futures
+- **同族缺陷 4 处**(验证中发现,已修):
+  ① **emitSignal 置信度闸丢弃 Flat 状态信号**(conf=0<0.6):eth_scalper v2"每 candle 发布 trend_state/spike"契约从未生效——日志在闸前打印(logSignal 先于 emitSignal),板上永远无条目 → M27 GridManager 趋势闸门数据源失效。聚合器已忽略 Flat,放行零风险。修:StrategyManager.cpp Flat 例外
+  ② **eth_scalper 真信号过不了 0.6 闸**:|EMA9-EMA21|/ATR 实测 ~0.03,scale 1.0 恒被丢(11:15 交叉 conf=0.0326 实证)。修:trading.toml eth_min_confidence_scale 1.0→20.0(实测 conf 1.0 上板,type=sell)
+  ③ **order_quantity 未播种**:get_strategy_params 恒显默认 0.001(自动路径实际用配置 20 合约,热调无效)——与 8ad1884 min_confidence 同款。修:main.cpp 注册块补播种(现显示 20.0)
+  ④ **ema_resonance 同族**:首信号 |ema7-ema200|/ATR=0.5459 不过 0.6 闸被丢。修:trading.toml res_conf_scale 1.0→2.0(验证:conf 1.0 上板,indicators ema7/14/30/60/200 严格递增 + resonance=bull_aligned)
+- **903 绿**(新增 EmitSignalFlatBypassesConfidenceGate);提交 4aacbe0(代码)+ 9620c61(文档/示例)
+- **板上覆盖式设计**:每 strategy_id 只保留最新条目,eth_scalper 真信号最多 60s 后被下一根 Flat 覆盖(设计如此,消费方按状态读取;共振策略无 Flat,条目保留到下次迁移)
+- **引擎当前状态**:running(新二进制含全部修复),futures 方向,ema_resonance/eth_scalper 均 warmup 完成出信号中;auto_trade 全部 0(仅信号)
+
+### 2026-08-18~20 更新(家庭机)
 
 ### 2026-08-18~20 更新(家庭机)
 
@@ -40,8 +54,8 @@
 - **子代理**:08-18 夜用户令停(引擎+代理+2cron);08-20 引擎已重启(直连),子代理循环未跑
 
 ### Test Summary
-- **848 tests green** (本机 8-21 实测,M22–M27 全量)
-- M27: 风险 reduce-only 5 + 配置 9 + tracker 2 + GridManager 10 + parser 3 + MCP 更新;M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
+- **902 tests green** (本机 8-23 实测,M22–M28 全量)
+- M28: EmaResonance 6 + registry 1 + engine services 3 + command parser 1;M27: 风险 reduce-only 5 + 配置 9 + tracker 2 + GridManager 10 + parser 3 + MCP 更新;M23: 触发单 3 + 订单查询 + parser/mcp 更新;M21: sync/modify-sl-tp;M20: SignalBoard 6 + OrderFlow 2 + EngineServices 3;M17: 预算 18;M16: maker-first 22;M15: direction-gate 17
 
 ### Milestones (M1–M21 全 ✅,历史细节见 project-memory-archive.md)
 - **M1–M5** 九层核心 → **M6** TOML 配置 → **M7** SQLite 落库 → **M8** 合约配置 → **M9** EndpointRouter/WS ping-pong → **M10** 合约行情 → **M11** 合约风控/PnL → **M12** 合约执行+双市场 → **M13** testnet
@@ -60,6 +74,7 @@
 - **M26** (08-21) 策略架构:UnifiedScalper 基类 + StrategyRegistry 兜底 + custom_params 通道 + EthScalper 币种策略示范,817 绿(ff616b6/8fb4021)
 - **M26.1** (08-21) ETH 网格复盘升级:EthScalper v2 趋势闸门状态(trend_state/spike)+ 三口径暴拉过滤;futures 幽灵仓剪枝;9103 预算 12000/6500(341e0bf)
 - **M27** (08-21) 引擎内网格服务 GridManager:ETH 网格 v2 规则 C++ 化(挂格/TP 循环/重锚/保护线 A+B/趋势闸门/暴拉冻结/日亏北京日);reduce-only 名义语义(9103 根因);[grid] TOML 段;控制面 grid_start/status/pause/stop;IGridGateway 抽象,848 绿(fd8505c..f724fbb)
+- **M28** (08-23) ① EmaResonanceScalper:五周期 EMA 7/14/30/60/200 严格全排列对齐共振(递增=Bull Buy/递减=Bear Sell/mixed 无信号),共振状态迁移触发(不重发、direct flip 也触发),置信度 = clamp(|ema7-ema200|/ATR,0,1)×res_conf_scale;每根 K 线全量重算(prev=0.0 SMA 播种,确定性无滚动状态);klineNeeded=warmup=201;custom_params 静态(res_ema_p1..p5/res_conf_scale);注册键 ema_resonance_scalper,仅 ETH_USDT futures;规则文档 docs/strategies/ema-resonance-scalper.md(用户要求:每策略必须有文本规则+对应 C++ 实现,已入全局记忆);898 绿(e ea0651)② **按策略一键自动交易开关**:StrategyParams 加 atomic auto_trade(0=仅发信号到信号板永不下单,1=参与聚合走风控下单);闸门在 main.cpp strategy→aggregator wiring(聚合输出丢策略身份,onSignal 无法区分);`[strategy] signal_only` 语义迁移为启动默认种子(重启回仅信号, fail-safe);onSignal 全局拦截删除;接口:MCP set_strategy_trading / REPL `autotrade <id> on|off` / set auto_trade 0|1(带 bounds+审计);list_strategies 带 auto_trade;902 绿(190e84c);③ AGENTS.md 规则:每次 commit 后必须立即 push(e7a0bb5);README/AGENTS/OPERATIONAL_GUIDE 同步(方法数统一 32、6 策略、902 测试)(fe6a38f)
 
 ### M21 持仓热同步 + 动态 SL/TP (2026-08-17, 6e15245/a0d31e5)
 - 背景:用户习惯在 Gate App 手动平仓,引擎视图滞后产生幽灵仓(XAUUSD_Buy_1),重启才清
@@ -125,8 +140,8 @@
 - **单二进制** `apps/pulsetrader/pulsetrader`,子命令:`trade`(引擎+控制 socket+内嵌 REPL)/`cli`(远程 REPL)/`mcp`(stdio MCP 桥,自动加载 trading.toml)
 - **控制 socket**:TCP 127.0.0.1:8081,换行分隔 JSON-RPC 2.0;`[control]` toml,env `PULSE_CONTROL_PORT`
 - **安全**:仅 localhost 无认证 — 永不暴露;MCP 模式强制文件日志(stdout=协议);REST 经共享 mutex 串行
-- **20 方法** = MCP 工具名:get_status · get_account · get_positions · get_orders · list_strategies · get_strategy_params · set_strategy_param · open_order · close_position · cancel_order · halt_trading · resume_trading · get_risk · get_market · pause_strategy · resume_strategy · switch_direction · get_signals · sync_positions · modify_sl_tp
-- **REPL**:status · account · positions · orders · strategies · params · set · open(含 --type/--price/--market/--leverage/--reduce-only/--client-id/--sl/--tp) · close · cancel · halt · resume · pause · resume-strategy · risk · market · signals · sync · modify · help · quit
+- **32 方法** = MCP 工具名:get_status · get_account · get_positions · get_orders · list_strategies · get_strategy_params · set_strategy_param · **set_strategy_trading** · open_order · close_position · cancel_order · halt_trading · resume_trading · get_risk · get_market · pause_strategy · resume_strategy · switch_direction · get_signals · sync_positions · modify_sl_tp · get_param_history · get_strategy_performance · grid_start/status/pause/resume/stop · place/list/cancel_trigger_order · list_futures_orders
+- **REPL**:status · account · positions · orders · strategies · params · set · **autotrade <id> on|off** · open(含 --type/--price/--market/--leverage/--reduce-only/--client-id/--sl/--tp) · close · cancel · halt · resume · pause · resume-strategy · risk · market · signals · sync · modify · trigger * · grid * · help · quit
 - **src/control/**:JsonRpcServer · CommandParser · McpServer · ControlClient(自动重连)· EngineServices · OrderFlowExecutor(统一订单流)
 
 ## Config Structure
@@ -137,7 +152,7 @@ Key files: `src/core/config.hpp` (all structs), `config_loader.cpp` (TOML→stru
 PulseConfig
 ├── ExchangeConfig   (apiKey, apiSecret, restBaseUrl, wsUrl, futuresWsUrl, proxyUrl, testnet)
 ├── LogConfig        (level, logDir, toConsole, toFile)
-├── StrategyConfig   (aggregator_threshold, cooldown_sec, signal_only, instances[])
+├── StrategyConfig   (aggregator_threshold, cooldown_sec, signal_only=启动时所有实例 auto_trade 的默认种子, instances[])
 │   └── StrategyInstanceConfig (name, symbol, market_type, leverage, margin_mode, order_type, maker_timeout_ms, ...)
 ├── RiskConfig       (maxPositionNotional, maxOpenPositions, maxDailyDrawdown, max_leverage, maxPositionNotionalFutures/Cfd/Spot, ...)
 │   ├── StopLossConfig  (mode, fixed_pct, trailing_pct, max_hold_seconds)
@@ -214,9 +229,19 @@ PulseConfig
 - Gate 通用 API 备忘(期货触发单)在 gate交易/ 根目录
 - 文档内路径引用已同步更新;续接子代理会话时按新路径读取
 
-## Next Steps (2026-08-21)
+## Next Steps (2026-08-23)
 
-- ✅ SNDK 网格首轮实盘验证(通宵 59 兑现 +11.8 USD)✅ 双代理/三市场并行(三机通宵托管收官)✅ M26 策略架构落地(817 绿)
+- ✅ M28 两个功能已提交并推送(eea0651 共振策略 / 190e84c 一键开关 / e7a0bb5+fe6a38f 文档与规则)
+- ✅ **M28 部署验证完成**(08-23):① 引擎启动 auto_trade=0 种子 ✅ ② get_signals 板上共振信号 + indicators(ema7/14/30/60/200 严格递增 + resonance=bull_aligned)✅ ③ 验证过程发现并修复 4 处同族缺陷(见 Current State 08-23 节,4aacbe0/9620c61)
+- ⏳ **autotrade 开关启用(用户决策)**:验证已完成,是否 `autotrade ema_resonance_scalper_ETH_USDT on` 进入自动交易由用户拍板;注意先 `switch futures`(当前已是),重启回仅信号(fail-safe)
+- ⏳ **M27 引擎内网格待重启+testnet 演练**(grid_start/status/pause/stop 控制面、GridManager 状态机、reduce-only 名义);演练通过后启 mainnet 网格,eth_watch.py 退役
+- ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
+- ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
+- ⏳ **黄金自动交易子代理 v2**(规则已确认,因子决策见 gate交易/黄金/joey-Z170I-PRO-GAMING/策略/xauusd-signal-board-design.md §4):get_signals 读因子 + get_market 自算,新鲜度 ≤120s;单笔 0.01 手、硬止损 -5 USD、止盈 +8~10、日亏 -8 停手;状态落盘 xauusd-agent-state.json;18:00 窗口 XAU 深空 = SHORT 候选
+- ⏳ 黄金对账遗留:引擎 position_id 漂移 + 外部裸单沟通 + 当日 realized 权威复核
+- ⏳ CFD 成本模型:0.06 USDT/0.01 手佣金 + 黄金库存/swap 利差,未入 PnL/风控
+- ⏳ maker-first 实盘验证(先 testnet 后小资金)
+- ⏳ 规则调优候选(夜盘纸面 3W/1L +15.7):RSI<30 破位禁追空(4/4 被买回教训)、双收盘+ticker 确认纪律、ATR 动态止损
 - ⏳ **M27 引擎内网格服务已落地(5 PR,848 绿),待重启+testnet 演练**:grid_start/status/pause/stop 控制面命令;GridManager 状态机(挂格/TP 循环/重锚/保护线 A+B/趋势闸门/暴拉冻结/日亏北京日);IGridGateway 抽象(GridGateway 生产实现走 placeManualOrder 全风控);reduce-only 名义语义修复(9103 根因);[grid] TOML 段;重启后 get_signals 可见 eth_scalper_ETH_USDT(含 trend_state/spike)+ 15 个 ETH 幽灵仓清理 + 预算 12000/6500 一并验收;ETH 网格 v2 文档与 watchdog 已升级(commit_my_life 以太坊目录),引擎内网格启用后 eth_watch.py 退役
 - ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
 - ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
