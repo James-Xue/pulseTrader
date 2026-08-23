@@ -1,7 +1,7 @@
 # pulseTrader — Project Memory
 
-> Last updated: 2026-08-23 (M28 部署验证完成:4 修复 4aacbe0/9620c61,903 绿)
-> File size: 22058 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> Last updated: 2026-08-23 (M28 验证完成 + autotrade 暂缓,903 绿)
+> File size: 22101 chars / 25000 chars. Must recalculate and sync this line after updating this file.
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -233,7 +233,7 @@ PulseConfig
 
 - ✅ M28 两个功能已提交并推送(eea0651 共振策略 / 190e84c 一键开关 / e7a0bb5+fe6a38f 文档与规则)
 - ✅ **M28 部署验证完成**(08-23):① 引擎启动 auto_trade=0 种子 ✅ ② get_signals 板上共振信号 + indicators(ema7/14/30/60/200 严格递增 + resonance=bull_aligned)✅ ③ 验证过程发现并修复 4 处同族缺陷(见 Current State 08-23 节,4aacbe0/9620c61)
-- ⏳ **autotrade 开关启用(用户决策)**:验证已完成,是否 `autotrade ema_resonance_scalper_ETH_USDT on` 进入自动交易由用户拍板;注意先 `switch futures`(当前已是),重启回仅信号(fail-safe)
+- ⏳ **autotrade 开关(用户 08-23 决定:暂缓开启)**:验证已完成且信号持续正常,但 08-23 下午为震荡市、共振信号 ~2-5 分钟频繁翻转,用户决定暂不开,保持仅信号;开启时 `autotrade ema_resonance_scalper_ETH_USDT on`(当前 futures 方向已就绪),重启回仅信号(fail-safe)
 - ⏳ **M27 引擎内网格待重启+testnet 演练**(grid_start/status/pause/stop 控制面、GridManager 状态机、reduce-only 名义);演练通过后启 mainnet 网格,eth_watch.py 退役
 - ⏳ **9103 名义闸 2 处待处置**:ETH 2085 格重挂被拒(裸奔无保护)+ SNDK 9103 闸击穿待拍板;协议"每批探闸 1 笔";modify 锁在列
 - ⏳ **黄金代理接力恢复**:状态文件 `mode` → `running` 即可(下个 tick 自动拉起);任务书加"写状态 JSON 转义引号"纪律防复发
