@@ -4,9 +4,9 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
-# Gate.io 测试网凭证
-$env:GATE_TESTNET_API_KEY    = 'cff28506ce22b26a932864daa9fe98eb'
-$env:GATE_TESTNET_API_SECRET = 'cbc25a2b7e55d3026390920afa7c3c2e731995f5218a4bc6c8db021b93125a51'
+# Gate.io 测试网凭证:从环境读取(勿硬编码)
+# ⚠️ 2026-08-23 隐私扫描:此文件历史版本硬编码过测试网 key/secret 并已推送
+# 公开仓库(历史仍可见)—— 请在 Gate 后台轮换测试网密钥;主网密钥从未入库
 $env:PULSE_WEBUI_TOKEN       = 'demo'
 $env:HTTPS_PROXY             = 'http://127.0.0.1:7897'
 $env:HTTP_PROXY              = 'http://127.0.0.1:7897'
