@@ -888,6 +888,15 @@ static int runTrade(int argc, char* argv[])
         strat->params().min_confidence.store(inst_cfg.min_confidence,
                                              std::memory_order_release);
 
+        // Seed the per-instance order_quantity from config into the live
+        // params. Previously only min_confidence was seeded, so
+        // get_strategy_params showed the hard-coded default (0.001) while
+        // automatic orders actually used the config value — a display
+        // mismatch that also made live tuning of order_quantity appear
+        // ineffective. Same bug class as the min_confidence seeding above.
+        strat->params().order_quantity.store(inst_cfg.order_quantity,
+                                             std::memory_order_release);
+
         // Seed the per-strategy auto-trade gate from the global signal_only
         // config: signal_only=true → every strategy starts in signals-only
         // mode (auto_trade=0); false → auto-trading on. The runtime one-click

@@ -48,8 +48,12 @@ void StrategyBase::emitSignal(const TradingSignal &signal)
     }
 
     // 2. Drop if confidence is below the strategy's minimum threshold.
+    //    Flat state signals (confidence 0) bypass the gate: they are a
+    //    state channel (trend/spike publish, e.g. EthScalper v2), not
+    //    trade entries — the aggregator already ignores Flat, so they can
+    //    never trigger execution downstream.
     const double min_conf = params().min_confidence.load(std::memory_order_acquire);
-    if (signal.confidence < min_conf)
+    if (SignalType::Flat != signal.type && signal.confidence < min_conf)
     {
         return;
     }

@@ -122,7 +122,10 @@ poll_interval_ms = 500
 # custom_params 为币种专属参数表(静态, 无热更新), 缺省走策略默认值:
 #   eth_atr_step             (默认 0.05) — ATR 自适应止盈距离 suggested_tp = close - step×atr
 #   eth_spike_filter_usd     (默认 120.0) — 单根 kline 振幅超过此值视为暴拉/插针, 不追空
-#   eth_min_confidence_scale (默认 1.0)   — 置信度缩放系数
+#   eth_min_confidence_scale (默认 1.0)   — 置信度缩放系数。实测 |EMA9-EMA21|/ATR
+#                                           仅 ~0.03,乘 1.0 永远过不了 min_confidence=0.6
+#                                           闸,真信号被 emitSignal 静默丢弃;主网已用 20.0
+#                                           (典型交叉 ~0.65 过闸,仍守 0.6 语义)
 #
 # [[strategy.instances]]
 # name            = "eth_scalper"
