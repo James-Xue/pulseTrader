@@ -1,7 +1,8 @@
 # pulseTrader — Project Memory
 
 > Last updated: 2026-08-23 (M30 futures K 线停录 + 启动免热机,967 绿;M29 回测;M28 验证)
-> File size: 25607 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> File size: 25274 chars / 25000 chars. Must recalculate and sync this line after updating this file.
+> 细节文件索引:memory-details/reference/gate-kline-api.md — Gate k线 REST 三端点铁律(limit/from-to/格式/新鲜度/黄金 kline_type 坑)
 > Historical details migrated to `project-memory-archive.md`
 
 ## Overview
@@ -58,12 +59,8 @@
 
 ### 2026-08-23 工具:批量 k线下载 fetch_klines (b2683c6,已推送)
 
-- **tools/fetch_klines.py**(公开 REST,无需 key):BTC/ETH 合约+现货 + XAUUSD CFD 的 1m k线 → `data/klines/*_1m.csv`(ts,open,high,low,close,volume);用法 `python3 tools/fetch_klines.py [hours]`(默认 48h)
-- **实测接口铁律**(2026-08-23 验证):
-  - 合约 `/api/v4/futures/usdt/candlesticks`:limit≤2000;`from/to` 分页可用但**与 limit 互斥**,窗口内全量返回
-  - 现货 `/api/v4/spot/candlesticks`:limit≤1000,超窗报 `INVALID_PARAM_VALUE "Candlestick range too broad"`;字段序 `[ts,成交额,close,high,low,open,成交量,closed]`
-  - 黄金 `/api/v4/tradfi/symbols/XAUUSD/klines`:limit≤500(≈8.3h 的 1m),**from/to 被忽略**,无成交量字段,响应包在 `data.list`(字段 {o,c,h,l,t});周末休市最新一根滞后 ~33h;深历史只能换 `kline_type=5m/15m/1d` 或持续收集
-- `data/` 在 .gitignore → 提交 CSV 需 `git add -f data/klines/`
+- **tools/fetch_klines.py**(公开 REST,无需 key):BTC/ETH 合约+现货 + XAUUSD 1m k线 → `data/klines/*_1m.csv`;`python3 tools/fetch_klines.py [hours]`(默认 48h);`data/` gitignore,提交需 `git add -f`
+- **Gate k线 REST 三端点铁律**(limit 上限/from-to 互斥/响应格式/新鲜度/黄金 kline_type 坑)→ 详见 `memory-details/reference/gate-kline-api.md`(2026-08-23 新增黄金必须显式 `kline_type=1m`,否则 INVALID_ARGUMENT)
 - M29 回测引擎已落地(见下节),fetch_klines 数据可与 kline_bars 互补
 
 ### 2026-08-23 M29 回测引擎(单策略 MVP,5 提交,954 绿)
