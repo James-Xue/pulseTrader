@@ -7,6 +7,7 @@
 //   - Duplicate registration is rejected (first registration wins).
 
 #include "strategy/StrategyRegistry.hpp"
+#include "strategy/scalping/EmaResonanceScalper.hpp"
 #include "strategy/scalping/EthScalper.hpp"
 #include "strategy/scalping/MeanReversionScalper.hpp"
 #include "strategy/scalping/MomentumScalper.hpp"
@@ -175,14 +176,25 @@ TEST(StrategyRegistry, CreatesEthScalper)
     EXPECT_EQ("eth_scalper_ETH_USDT", strat->id());
 }
 
+TEST(StrategyRegistry, CreatesEmaResonanceScalper)
+{
+    const auto registry = makeBuiltinStrategyRegistry();
+    auto strat = registry.create("ema_resonance_scalper", make_ctx("ema_resonance_scalper", "ETH_USDT"));
+    ASSERT_NE(nullptr, strat);
+    EXPECT_NE(nullptr, dynamic_cast<EmaResonanceScalper *>(strat.get()));
+    EXPECT_EQ("EmaResonanceScalper", strat->name());
+    EXPECT_EQ("ema_resonance_scalper_ETH_USDT", strat->id());
+}
+
 TEST(StrategyRegistry, RegisteredNamesListed)
 {
     const auto registry = makeBuiltinStrategyRegistry();
     const auto names = registry.registeredNames();
-    EXPECT_EQ(5u, names.size());
+    EXPECT_EQ(6u, names.size());
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "momentum_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "orderbook_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "mean_reversion_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "supertrend_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "eth_scalper"));
+    EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "ema_resonance_scalper"));
 }

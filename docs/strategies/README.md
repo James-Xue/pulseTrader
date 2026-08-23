@@ -1,6 +1,6 @@
 # pulseTrader 策略对比总览
 
-> 4 个内置剥头皮策略的风格、优缺点与适用场景对比。
+> 内置剥头皮策略的风格、优缺点与适用场景对比。
 
 ## 策略速查表
 
@@ -10,6 +10,7 @@
 | **OrderBookScalper** | 微观结构 | 订单簿深度 | 高 | 即时 | 震荡/高流动性 |
 | **MeanReversionScalper** | 均值回归 | K线收盘价 | 中 | ~20 根 K 线 | 震荡区间 |
 | **SuperTrendScalper** | 趋势跟踪 | K线 H/L/C | 中 | ~11 根 K 线 | 趋势/波动率上升 |
+| **EmaResonanceScalper** | 五周期共振 | K线收盘价 | 极低 | ~201 根 K 线 | 单边大趋势 |
 
 ---
 
@@ -140,3 +141,4 @@
 - [OrderBookScalper — 订单簿失衡](orderbook-scalper.md)
 - [MeanReversionScalper — 布林带均值回归](mean-reversion-scalper.md)
 - [SuperTrendScalper — ATR 趋势翻转](supertrend-scalper.md)
+- [EmaResonanceScalper — 五周期 EMA 共振](ema-resonance-scalper.md)

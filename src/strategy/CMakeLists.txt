@@ -14,6 +14,7 @@ add_library(pulse_strategy STATIC
     scalping/MeanReversionScalper.cpp
     scalping/SuperTrendScalper.cpp
     scalping/EthScalper.cpp
+    scalping/EmaResonanceScalper.cpp
     signal/SignalAggregator.cpp
     signal/SignalBoard.cpp
 )

@@ -135,6 +135,31 @@ poll_interval_ms = 500
 # order_type      = "maker_first"   # "market"（默认）| "post_only" | "maker_first"
 # maker_timeout_ms = 500            # 挂单超时毫秒，超时撤单改市价（仅 maker_first）
 
+# ── 五周期 EMA 共振策略示例: ema_resonance_scalper（2026-08-23）────────
+# EMA 7/14/30/60/200 全排列对齐才出信号: 严格递增 = 多头共振 Buy,
+# 严格递减 = 空头共振 Sell, 其余 mixed 无信号。入场为共振状态迁移触发
+# (非每根 K 线重发); 置信度 = clamp(|ema7-ema200|/ATR,0,1)×res_conf_scale。
+# custom_params 语义 (静态, 无热更新, 缺省走默认值):
+#   res_ema_p1      (默认 7)    — 最快 EMA 周期
+#   res_ema_p2      (默认 14)
+#   res_ema_p3      (默认 30)
+#   res_ema_p4      (默认 60)
+#   res_ema_p5      (默认 200)  — 最慢 EMA 周期
+#   res_conf_scale  (默认 1.0)  — 置信度缩放系数
+# 规则文档: docs/strategies/ema-resonance-scalper.md
+#
+# [[strategy.instances]]
+# name            = "ema_resonance_scalper"
+# symbol          = "ETH_USDT"
+# market_type     = "futures"
+# leverage        = 10
+# margin_mode     = "cross"
+# order_quantity  = 20
+# min_confidence  = 0.6
+# enabled         = true
+# poll_interval_ms = 500
+# custom_params  = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 1.0 }
+
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]
 maxPositionNotional = 500          # 最大总持仓（USDT）

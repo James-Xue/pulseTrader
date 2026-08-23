@@ -3,6 +3,7 @@
 #include "strategy/StrategyRegistry.hpp"
 
 #include "logging/Logger.hpp"
+#include "strategy/scalping/EmaResonanceScalper.hpp"
 #include "strategy/scalping/EthScalper.hpp"
 #include "strategy/scalping/MeanReversionScalper.hpp"
 #include "strategy/scalping/MomentumScalper.hpp"
@@ -77,6 +78,7 @@ StrategyRegistry makeBuiltinStrategyRegistry()
     registry.registerStrategy<SuperTrendScalper>("supertrend_scalper");
     registry.registerStrategy<OrderBookScalper>("orderbook_scalper");
     registry.registerStrategy<EthScalper>("eth_scalper");
+    registry.registerStrategy<EmaResonanceScalper>("ema_resonance_scalper");
     return registry;
 }
 
