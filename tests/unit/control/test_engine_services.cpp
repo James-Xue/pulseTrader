@@ -922,3 +922,81 @@ TEST_F(EngineServicesTest, ParamHistoryReturnsRecentFirst)
     EXPECT_DOUBLE_EQ(0.61, history[1]["new_value"].get<double>());
     EXPECT_EQ("manual", history[0]["source"].get<std::string>());
 }
+
+TEST_F(EngineServicesTest, SetStrategyTradingTogglesSnapshot)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    // Default: auto_trade = 1.0 → snapshot shows trading on.
+    auto snap = m_services->strategies();
+    ASSERT_TRUE(snap.is_array());
+    ASSERT_EQ(1u, snap.size());
+    EXPECT_TRUE(snap[0]["auto_trade"].get<bool>());
+
+    // One-click OFF → signals-only (board visible, no orders).
+    EXPECT_TRUE(m_services->setStrategyTrading("mock_scalper_BTC_USDT", false));
+    snap = m_services->strategies();
+    ASSERT_EQ(1u, snap.size());
+    EXPECT_FALSE(snap[0]["auto_trade"].get<bool>());
+
+    // One-click ON → auto-trade restored.
+    EXPECT_TRUE(m_services->setStrategyTrading("mock_scalper_BTC_USDT", true));
+    snap = m_services->strategies();
+    EXPECT_TRUE(snap[0]["auto_trade"].get<bool>());
+
+    // Unknown strategy → false.
+    EXPECT_FALSE(m_services->setStrategyTrading("no_such", true));
+}
+
+TEST_F(EngineServicesTest, SetStrategyTradingRecordsManualAudit)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    core::ParamChangeLog change_log;
+    EngineServices svc("test", m_start, m_cfg, m_strategyMgr, *m_riskMgr,
+                       *m_positionMgr, nullptr, nullptr, nullptr,
+                       m_restClient.get(), nullptr, nullptr,
+                       nullptr, nullptr, nullptr, *m_flow, *m_board,
+                       m_restMutex, nullptr, nullptr, &change_log);
+
+    EXPECT_TRUE(svc.setStrategyTrading("mock_scalper_BTC_USDT", false));
+    const auto snap = change_log.snapshot();
+    ASSERT_EQ(1u, snap.size());
+    EXPECT_EQ("manual", snap[0].source);
+    EXPECT_EQ("mock_scalper_BTC_USDT", snap[0].strategy_id);
+    EXPECT_EQ("auto_trade", snap[0].param_name);
+    EXPECT_DOUBLE_EQ(1.0, snap[0].old_value); // default auto_trade
+    EXPECT_DOUBLE_EQ(0.0, snap[0].new_value);
+}
+
+TEST_F(EngineServicesTest, SetStrategyTradingRegisteredInMethodRegistry)
+{
+    strategy::StrategyContext ctx;
+    ctx.config.symbol = "BTC_USDT";
+    ctx.config.market_type = MarketType::Futures;
+    m_strategyMgr.registerStrategy(std::make_unique<MockScalper>(ctx));
+
+    const auto reg = makeMethodRegistry(*m_services);
+    const auto it = reg.find("set_strategy_trading");
+    ASSERT_NE(reg.end(), it);
+
+    const auto result = it->second(nlohmann::json{
+        { "strategy_id", "mock_scalper_BTC_USDT" },
+        { "enabled", false } });
+    const auto payload = std::get<nlohmann::json>(result);
+    ASSERT_TRUE(payload.is_array());
+    ASSERT_EQ(1u, payload.size());
+    EXPECT_FALSE(payload[0]["auto_trade"].get<bool>());
+
+    // Non-boolean enabled → invalid request.
+    const auto bad = it->second(nlohmann::json{
+        { "strategy_id", "mock_scalper_BTC_USDT" },
+        { "enabled", "yes" } });
+    EXPECT_TRUE(std::holds_alternative<PulseError>(bad));
+}

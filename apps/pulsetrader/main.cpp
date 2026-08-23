@@ -888,6 +888,14 @@ static int runTrade(int argc, char* argv[])
         strat->params().min_confidence.store(inst_cfg.min_confidence,
                                              std::memory_order_release);
 
+        // Seed the per-strategy auto-trade gate from the global signal_only
+        // config: signal_only=true → every strategy starts in signals-only
+        // mode (auto_trade=0); false → auto-trading on. The runtime one-click
+        // switch (set_strategy_trading / `autotrade <id> on|off`) overrides
+        // this per strategy; a restart returns to this fail-safe default.
+        strat->params().auto_trade.store(cfg.strategy.signal_only ? 0.0 : 1.0,
+                                         std::memory_order_release);
+
         log->info("[L6] Registered strategy: {} on {} (qty={}, conf={:.2f}, market={})",
                   inst_cfg.name, inst_cfg.symbol,
                   inst_cfg.order_quantity, inst_cfg.min_confidence,
@@ -910,12 +918,22 @@ static int runTrade(int argc, char* argv[])
     auto board = std::make_shared<pulse::strategy::SignalBoard>(
         cfg.strategy.signal_aggregator_threshold);
 
-    // Wire: strategy signals → signal board + aggregator
+    // Wire: strategy signals → signal board + aggregator.
+    //
+    // Per-strategy auto-trade gate lives HERE (not in OrderFlowExecutor):
+    // the aggregator output loses the originating strategy id, so a strategy
+    // with auto_trade=0 (signals-only) must be stopped before aggregation.
+    // It still publishes to the board (get_signals stays live for testing).
     strategy_mgr.setSignalCallback(
-        [&aggregator, board](const pulse::strategy::TradingSignal& sig)
+        [&aggregator, board, &strategy_mgr](const pulse::strategy::TradingSignal& sig)
         {
             board->publish(sig);
-            aggregator.addSignal(sig);
+            const auto *params = strategy_mgr.paramsByName(sig.strategy_id);
+            if (nullptr == params
+                || params->auto_trade.load(std::memory_order_acquire) != 0.0)
+            {
+                aggregator.addSignal(sig);
+            }
         });
 
     log->info("[L6] Strategy engine ready ({} instances, threshold={:.2f}, "

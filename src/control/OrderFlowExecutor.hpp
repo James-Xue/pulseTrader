@@ -283,7 +283,9 @@ class OrderFlowExecutor
                               double leverage, double quanto_multiplier);
 
     StrategyConfig m_strategyCfg;
-    const bool m_signalOnly; ///< Signal-only mode: onSignal never places orders.
+    const bool m_signalOnly; ///< Startup default observability flag (config [strategy]
+                             ///< signal_only); the runtime per-strategy gate lives
+                             ///< upstream in the strategy→aggregator wiring.
     risk::RiskManager &m_riskMgr;
     risk::PositionManager &m_positionMgr;
     risk::DrawdownGuard &m_drawdownGuard;

@@ -48,6 +48,7 @@ const std::unordered_map<std::string, ParamGetter> &paramGetters()
         { "cooldown_seconds",    [](const auto &p) { return p.cooldown_seconds.load(); } },
         { "stop_loss_pct",       [](const auto &p) { return p.stop_loss_pct.load(); } },
         { "take_profit_pct",     [](const auto &p) { return p.take_profit_pct.load(); } },
+        { "auto_trade",          [](const auto &p) { return p.auto_trade.load(); } },
     };
     return table;
 }
@@ -68,6 +69,7 @@ const std::unordered_map<std::string, ParamSetter> &paramSetters()
         { "cooldown_seconds",    [](auto &p, double v) { p.cooldown_seconds.store(v); } },
         { "stop_loss_pct",       [](auto &p, double v) { p.stop_loss_pct.store(v); } },
         { "take_profit_pct",     [](auto &p, double v) { p.take_profit_pct.store(v); } },
+        { "auto_trade",          [](auto &p, double v) { p.auto_trade.store(v); } },
     };
     return table;
 }
@@ -1173,6 +1175,14 @@ bool EngineServices::pauseStrategy(const std::string &id)
 bool EngineServices::resumeStrategy(const std::string &id)
 {
     return m_strategyMgr.setPaused(id, false);
+}
+
+bool EngineServices::setStrategyTrading(const std::string &id, bool enabled)
+{
+    // The execution gate is a StrategyParams field, so the regular param
+    // path gives us bounds clamping + audit logging for free. Unknown
+    // strategy → false (setStrategyParam already returns false).
+    return setStrategyParam(id, "auto_trade", enabled ? 1.0 : 0.0);
 }
 
 std::mutex &EngineServices::restMutex()

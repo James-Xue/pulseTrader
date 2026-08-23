@@ -218,12 +218,15 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
         return;
     }
 
-    // Signal-only mode: signals are published to the board by the wiring
-    // in main.cpp, but nothing may be placed from the aggregator path.
-    if (m_signalOnly)
-    {
-        return;
-    }
+    // NOTE (2026-08-23): the global signal-only gate no longer lives here.
+    // It moved UPSTREAM into the strategy→aggregator wiring (main.cpp): each
+    // strategy carries a runtime auto_trade flag, and signals from disabled
+    // strategies never enter the aggregator (so this method only ever sees
+    // signals whose strategy has auto-trading on). The config [strategy]
+    // signal_only flag now seeds that per-strategy flag at startup; a
+    // strategy toggled on at runtime (set_strategy_trading) therefore works
+    // even while the config default was signals-only. m_signalOnly remains
+    // only as an observability query.
 
     // Direction gate: only the active market's signals may trade.
     // Skipped BEFORE risk evaluation so gated signals burn no rate-limiter

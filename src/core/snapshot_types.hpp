@@ -226,6 +226,7 @@ inline void to_json(nlohmann::json &j, const StrategySnapshot &s)
         {"enabled",          s.enabled},
         {"running",          s.running},
         {"paused",           s.paused},
+        {"auto_trade",       s.auto_trade},
         {"poll_interval_ms", s.poll_interval_ms},
     };
 }

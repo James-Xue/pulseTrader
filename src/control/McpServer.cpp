@@ -367,6 +367,25 @@ nlohmann::json McpServer::toolDefinitions()
         },
         { "strategy_id" });
 
+    add("set_strategy_trading",
+        "One-click per-strategy auto-trade switch. enabled=false: the "
+        "strategy's signals still publish to the signal board (get_signals) "
+        "but never place orders (signals-only). enabled=true: signals "
+        "participate in aggregation and may place orders through the risk "
+        "gate. Independent of the active direction (a futures strategy still "
+        "needs switch_direction futures to actually trade while cfd is "
+        "active). Startup default comes from [strategy] signal_only; a "
+        "restart resets the switch. Manual orders (open_order) are "
+        "unaffected. Returns the strategy list snapshot.",
+        nlohmann::json{
+            { "strategy_id", stringParam("strategy_id",
+                                         "Strategy instance ID") },
+            { "enabled", nlohmann::json{
+                  { "type", "boolean" },
+                  { "description", "true = auto-trade on; false = signals-only" } } },
+        },
+        { "strategy_id", "enabled" });
+
     return defs;
 }
 

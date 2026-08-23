@@ -200,7 +200,7 @@ TEST(AiPipeline, ComponentAccessors)
     // Should be able to access components
     EXPECT_EQ(pipeline.twitterFeed().size(), 0u);
     EXPECT_EQ(pipeline.newsFeed().size(), 0u);
-    EXPECT_EQ(pipeline.paramAdvisor().bounds().size(), 10u);
+    EXPECT_EQ(pipeline.paramAdvisor().bounds().size(), 11u); // +auto_trade gate
 }
 
 // ---------------------------------------------------------------------------

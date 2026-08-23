@@ -161,6 +161,19 @@ std::optional<ParsedCommand> parseCommandLine(const std::string &line)
         return ParsedCommand{ "resume_strategy",
                               nlohmann::json{ { "strategy_id", tokens[1] } } };
     }
+    // autotrade <id> on|off — per-strategy one-click auto-trade switch
+    // (signals-only ⇄ auto-trade). Independent of the active direction.
+    if ("autotrade" == cmd && tokens.size() >= 3)
+    {
+        const auto &state = tokens[2];
+        if ("on" != state && "off" != state)
+        {
+            return {};
+        }
+        return ParsedCommand{ "set_strategy_trading",
+                              nlohmann::json{ { "strategy_id", tokens[1] },
+                                              { "enabled", ("on" == state) } } };
+    }
     if ("cancel" == cmd && tokens.size() >= 2)
     {
         return ParsedCommand{ "cancel_order",
@@ -558,9 +571,11 @@ std::string formatStrategies(const nlohmann::json &result)
             s.value("enabled", false) ? "on" : "off",
             s.value("running", false) ? "run" : "stop",
             s.value("paused", false) ? "PAUSED" : "-",
+            s.value("auto_trade", false) ? "trade" : "signal",
         });
     }
-    return renderTable(rows, { "STRATEGY", "SYMBOL", "ENABLED", "STATE", "PAUSE" });
+    return renderTable(rows, { "STRATEGY", "SYMBOL", "ENABLED", "STATE",
+                               "PAUSE", "EXEC" });
 }
 
 std::string formatSignals(const nlohmann::json &result)
@@ -635,6 +650,10 @@ std::string replHelp()
         "  switch <spot|futures|cfd>  activate one trading direction (pauses the\n"
         "                          other's strategies, cancels its open orders)\n"
         "  halt / resume          halt or resume all trading\n"
+        "  autotrade <id> on|off  one-click auto-trade switch per strategy:\n"
+        "                          off = signals-only (board visible, no orders),\n"
+        "                          on = signals may place orders (needs the active\n"
+        "                          direction to match; restart resets to config)\n"
         "  pause <id> / resume-strategy <id>\n"
         "  risk                   risk snapshot (drawdown, rate limiter)\n"
         "  modify <id> [--sl P] [--tp P]   adjust CFD position SL/TP live (0 clears)\n"

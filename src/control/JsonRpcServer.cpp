@@ -360,7 +360,7 @@ void JsonRpcServer::handleSession(std::shared_ptr<asio::ip::tcp::socket> sock)
 }
 
 // ---------------------------------------------------------------------------
-// makeMethodRegistry — the 17 control-plane methods bound to EngineServices
+// makeMethodRegistry — the 18 control-plane methods bound to EngineServices
 // (method names double as MCP tool names)
 // ---------------------------------------------------------------------------
 MethodRegistry makeMethodRegistry(EngineServices &services)
@@ -563,6 +563,23 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
             return RpcResult{ PulseError{
                 ErrorCode::ControlInvalidRequest,
                 "resume_strategy: strategy not found: " + id } };
+        }
+        return RpcResult{ services.strategies() };
+    };
+    reg["set_strategy_trading"] = [&services](const nlohmann::json &params)
+    {
+        const auto id = params.value("strategy_id", "");
+        if (!params.contains("enabled") || !params["enabled"].is_boolean())
+        {
+            return RpcResult{ PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "set_strategy_trading: enabled (boolean) is required" } };
+        }
+        if (!services.setStrategyTrading(id, params["enabled"].get<bool>()))
+        {
+            return RpcResult{ PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "set_strategy_trading: strategy not found: " + id } };
         }
         return RpcResult{ services.strategies() };
     };

@@ -36,6 +36,12 @@ namespace pulse::strategy
 //   11. take_profit_pct         — first take-profit target as fraction of entry
 //   12. supertrend_period       — ATR period for SuperTrend bands
 //   13. supertrend_multiplier   — ATR multiplier for SuperTrend bands
+//   14. auto_trade              — execution gate: 1.0 = signals feed the
+//                                 aggregator and may place orders; 0.0 =
+//                                 signals-only (publish to the signal board,
+//                                 never order). Runtime one-click toggle via
+//                                 set_strategy_trading; seeded at startup from
+//                                 [strategy] signal_only (fail-safe default).
 // ---------------------------------------------------------------------------
 struct StrategyParams
 {
@@ -65,6 +71,9 @@ struct StrategyParams
     // --- Risk (AI-tunable, mirrors StopLossConfig / TakeProfitConfig) ---
     std::atomic<double> stop_loss_pct{ 0.01 };         ///< Stop-loss distance fraction.
     std::atomic<double> take_profit_pct{ 0.005 };       ///< First take-profit target fraction.
+
+    // --- Execution gate (runtime one-click switch) ---
+    std::atomic<double> auto_trade{ 1.0 };             ///< 1.0 = auto-trade on; 0.0 = signals-only.
 };
 
 } // namespace pulse::strategy

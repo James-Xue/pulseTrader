@@ -31,8 +31,9 @@ TEST(ParamAdvisor, DefaultBounds)
     ParamAdvisor advisor;
     const auto &b = advisor.bounds();
 
-    // All 10 parameter bounds should be present
-    EXPECT_EQ(b.size(), 10u);
+    // All 11 parameter bounds should be present (auto_trade is the manual
+    // execution gate — bounds registered for the manual channel only).
+    EXPECT_EQ(b.size(), 11u);
     EXPECT_TRUE(b.contains("order_quantity"));
     EXPECT_TRUE(b.contains("min_confidence"));
     EXPECT_TRUE(b.contains("ema_fast_period"));
@@ -43,6 +44,7 @@ TEST(ParamAdvisor, DefaultBounds)
     EXPECT_TRUE(b.contains("cooldown_seconds"));
     EXPECT_TRUE(b.contains("stop_loss_pct"));
     EXPECT_TRUE(b.contains("take_profit_pct"));
+    EXPECT_TRUE(b.contains("auto_trade"));
 }
 
 // ---------------------------------------------------------------------------

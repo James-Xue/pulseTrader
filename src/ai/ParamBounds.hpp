@@ -61,6 +61,10 @@ defaultParamBounds()
 
         // Risk — take-profit target as fraction of entry price.
         { "take_profit_pct", { 0.001, 0.002, 0.03 } },
+
+        // Execution gate — binary 0/1 (one-click auto-trade switch, manual
+        // channel only; the AI pipeline does not tune it).
+        { "auto_trade", { 1.0, 0.0, 1.0 } },
     };
     return kBounds;
 }

@@ -84,7 +84,7 @@ class JsonRpcServer
     std::vector<std::shared_ptr<asio::ip::tcp::socket>> m_sessionSockets;
 };
 
-/// Build the full 16-method registry from an EngineServices instance.
+/// Build the full 18-method registry from an EngineServices instance.
 [[nodiscard]] MethodRegistry makeMethodRegistry(EngineServices &services);
 
 } // namespace pulse::control

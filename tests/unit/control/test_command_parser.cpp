@@ -136,6 +136,25 @@ TEST(CommandParser, HaltResumePause)
               parseCommandLine("resume-strategy momentum_scalper_BTC_USDT")->method);
 }
 
+TEST(CommandParser, AutoTradeParsesOnOff)
+{
+    const auto on = parseCommandLine("autotrade ema_resonance_scalper_ETH_USDT on");
+    ASSERT_TRUE(on.has_value());
+    EXPECT_EQ("set_strategy_trading", on->method);
+    EXPECT_EQ("ema_resonance_scalper_ETH_USDT", on->params["strategy_id"]);
+    EXPECT_TRUE(on->params["enabled"].get<bool>());
+
+    const auto off = parseCommandLine("autotrade ema_resonance_scalper_ETH_USDT off");
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ("set_strategy_trading", off->method);
+    EXPECT_FALSE(off->params["enabled"].get<bool>());
+
+    // Bad state → not parsed.
+    EXPECT_FALSE(parseCommandLine("autotrade ema_resonance_scalper_ETH_USDT maybe").has_value());
+    // Missing state → not parsed.
+    EXPECT_FALSE(parseCommandLine("autotrade ema_resonance_scalper_ETH_USDT").has_value());
+}
+
 TEST(CommandParser, MarketParsesFlags)
 {
     const auto cmd = parseCommandLine(

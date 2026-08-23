@@ -45,6 +45,8 @@ struct StrategySnapshot
     bool enabled;                 ///< Whether the strategy is configured as enabled.
     bool running;                 ///< Whether the strategy thread is currently active.
     bool paused;                  ///< Whether the strategy is manually paused (ticks skipped).
+    bool auto_trade;              ///< Whether the strategy's signals may place orders
+                                  ///< (false = signals-only, board visible only).
     std::uint32_t poll_interval_ms; ///< Poll interval.
 
     StrategySnapshot()
@@ -54,6 +56,7 @@ struct StrategySnapshot
         , enabled{ false }
         , running{ false }
         , paused{ false }
+        , auto_trade{ false }
         , poll_interval_ms{ 0 }
     {
     }

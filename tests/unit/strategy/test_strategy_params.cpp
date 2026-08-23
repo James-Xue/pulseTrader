@@ -26,6 +26,7 @@ TEST(StrategyParams, DefaultValues)
     EXPECT_DOUBLE_EQ(0.3, params.ob_imbalance_threshold.load());
     EXPECT_DOUBLE_EQ(5.0, params.ob_depth.load());
     EXPECT_DOUBLE_EQ(30.0, params.cooldown_seconds.load());
+    EXPECT_DOUBLE_EQ(1.0, params.auto_trade.load()); // execution gate: on by default
 }
 
 // ---------------------------------------------------------------------------

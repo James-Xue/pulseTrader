@@ -477,8 +477,14 @@ TEST_F(OrderFlowTest, OnSignalSkipsFlat)
     EXPECT_EQ(0, m_placer->place_count);
 }
 
-TEST_F(OrderFlowTest, SignalOnlyModeSkipsSignalExecution)
+TEST_F(OrderFlowTest, SignalOnlyConfigGateMovedUpstream)
 {
+    // 2026-08-23: the global signal-only gate moved UPSTREAM into the
+    // strategy→aggregator wiring (per-strategy auto_trade). onSignal is only
+    // reached by signals that already passed that gate, so a signal_only
+    // config no longer blocks execution here — it only seeds each strategy's
+    // auto_trade default at startup (main.cpp). signalOnly() remains as an
+    // observability query.
     auto signal_only_cfg = m_strategyCfg;
     signal_only_cfg.signal_only = true;
     OrderFlowExecutor flow(signal_only_cfg, *m_riskMgr, *m_positionMgr,
@@ -496,8 +502,8 @@ TEST_F(OrderFlowTest, SignalOnlyModeSkipsSignalExecution)
     sig.price = 60000.0;
     flow.onSignal(sig);
 
-    EXPECT_EQ(0, m_placer->place_count);
-    EXPECT_EQ(0, m_positionMgr->openPositionCount());
+    // The signal executes: the executor trusts upstream per-strategy gating.
+    EXPECT_EQ(1, m_placer->place_count);
 }
 
 TEST_F(OrderFlowTest, SignalOnlyModeManualOrdersStillWork)

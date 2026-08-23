@@ -159,6 +159,7 @@ std::vector<StrategySnapshot> StrategyManager::snapshot() const
         snap.enabled = s->context().config.enabled;
         snap.running = s->active().load(std::memory_order_acquire);
         snap.paused = s->paused().load(std::memory_order_acquire);
+        snap.auto_trade = s->params().auto_trade.load(std::memory_order_acquire) != 0.0;
         snap.poll_interval_ms = s->context().config.poll_interval_ms;
         result.push_back(std::move(snap));
     }

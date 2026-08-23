@@ -179,6 +179,22 @@ class EngineServices
     bool pauseStrategy(const std::string &id);
     bool resumeStrategy(const std::string &id);
 
+    /// One-click per-strategy execution gate (`set_strategy_trading`).
+    ///
+    /// enabled = false → the strategy's signals still publish to the signal
+    /// board (get_signals) but never feed the aggregator, so no orders are
+    /// placed (signals-only mode). enabled = true → signals participate in
+    /// aggregation and may place orders through the normal risk gate.
+    ///
+    /// Independent of the active-market direction gate (a futures strategy
+    /// still needs `switch futures` to actually trade while cfd is active)
+    /// and of the manual order path (placeManualOrder is unaffected).
+    /// Startup default comes from [strategy] signal_only (fail-safe: true →
+    /// all signals-only). Recorded in the param audit log.
+    ///
+    /// Returns false when the strategy id is unknown.
+    bool setStrategyTrading(const std::string &id, bool enabled);
+
     /// Switch the single active trading direction.
     ///
     /// Sequence (under rest_mutex): close the order-flow gate for the new
