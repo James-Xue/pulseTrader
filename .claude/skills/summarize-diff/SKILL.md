@@ -30,11 +30,19 @@ Run git commands from the project root `E:\Quantification\pulseTrader`.
 
 4. **Identify the overall theme** — one sentence, e.g. "new feature", "bug fix", "refactor", "docs", "test infrastructure", or a mix (name the dominant one).
 
-5. **Suggest a commit message** in the repo's conventional style (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`), atomic (one logical change), with a short body. Per Claude Code convention, end the message body with:
+5. **Suggest a commit** following the Chinese commit-description template from AGENTS.md §11 (提交说明格式). Fill in only the `xxx` placeholders; keep field names, order, and defaults unchanged (per AGENTS.md §11, do not add fields like `Co-Authored-By`). For 代码评审人/业务评审人, use the name of the model driving this session (e.g. deepseek-v4-flash).
 
-   `Co-Authored-By: Claude <noreply@anthropic.com>`
+   ```
+   TD: 暂无（xxx）
+   问题原因：xxx。
+   解决方案：xxx。
+   影响范围：xxx。
+   代码评审人：xxx
+   业务评审人：xxx
+   代码提交版本：主干
+   ```
 
-   **Do NOT commit or push** — this skill only suggests. The user runs the commit themselves (and per repo rule pushes immediately afterwards).
+   **Do NOT commit or push** — this skill only suggests. Pushing is manual-only (user rule, 2026-08-30): never run `git push`; the user pushes manually.
 
 ## Output format
 
@@ -51,9 +59,13 @@ Run git commands from the project root `E:\Quantification\pulseTrader`.
 <one sentence>
 
 ## Suggested commit
-git commit -m "fix: ..." -m "..."
-
-Co-Authored-By: Claude <noreply@anthropic.com>
+TD: 暂无（xxx）
+问题原因：xxx。
+解决方案：xxx。
+影响范围：xxx。
+代码评审人：xxx
+业务评审人：xxx
+代码提交版本：主干
 ```
 
 If the working copy is clean (`git status` shows nothing to commit), say so and stop.

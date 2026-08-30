@@ -63,6 +63,50 @@ if(PULSE_ENABLE_SQLITE)
 endif()
 
 # ---------------------------------------------------------------------------
+# Qt launcher UI (optional) — pulsetrader_ui
+# ---------------------------------------------------------------------------
+# A separate GUI process that verifies API credentials and manages the
+# engine's lifecycle. Skipped when Qt is not installed; the engine itself
+# never links Qt. Qt is expected from a system installation (e.g. the Qt
+# online installer), NOT from vcpkg — vcpkg Qt is large and slow to build.
+#
+# Detected here (before the tests subdirectory) so PULSE_QT_MAJOR is also
+# visible to tests/unit/ui.
+option(PULSE_BUILD_UI "Build the Qt launcher UI (pulsetrader_ui)" ON)
+if(PULSE_BUILD_UI)
+    # Auto-detect the Qt online-installer layout used on this machine.
+    if(NOT DEFINED Qt6_DIR AND NOT DEFINED Qt5_DIR)
+        if(EXISTS "C:/Qt/6.5.3/msvc2019_64/lib/cmake/Qt6")
+            set(Qt6_DIR "C:/Qt/6.5.3/msvc2019_64/lib/cmake/Qt6" CACHE PATH
+                "Qt6 cmake directory (auto-detected)")
+        elseif(EXISTS "C:/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5")
+            set(Qt5_DIR "C:/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5" CACHE PATH
+                "Qt5 cmake directory (auto-detected)")
+        endif()
+    endif()
+
+    find_package(Qt6 QUIET COMPONENTS Widgets)
+    if(Qt6_FOUND)
+        set(PULSE_QT_MAJOR 6)
+    else()
+        find_package(Qt5 QUIET COMPONENTS Widgets)
+        if(Qt5_FOUND)
+            set(PULSE_QT_MAJOR 5)
+        endif()
+    endif()
+
+    if(PULSE_QT_MAJOR)
+        add_subdirectory(apps/pulsetrader_ui)
+        message(STATUS "pulsetrader_ui: Qt${PULSE_QT_MAJOR} launcher enabled")
+    else()
+        message(WARNING
+            "Qt not found — pulsetrader_ui skipped. Set Qt6_DIR / CMAKE_PREFIX_PATH "
+            "(e.g. -DQt6_DIR=C:/Qt/6.5.3/msvc2019_64/lib/cmake/Qt6) or disable "
+            "with -DPULSE_BUILD_UI=OFF.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(src)
@@ -77,3 +121,67 @@ endif()
 
 add_subdirectory(tools)
 add_subdirectory(apps)
+
+# ---------------------------------------------------------------------------
+# Solution folders (Visual Studio filters) — MVC layout
+# ---------------------------------------------------------------------------
+# Organises every project in the generated .sln into four solution filters
+# (pure presentation: physical layout and build behaviour are unchanged).
+#
+# This block MUST run after every add_subdirectory — FOLDER assignment for a
+# target requires the target to exist already.
+#
+#   model   — data & credentials layer: core types/config, exchange & market
+#             data, klines (backtest/SQLite), logging, credential store (the
+#             login key/secret) — where future log exports and kline output
+#             live
+#   view    — display layer: Qt launcher GUI (a future WebUI lands here too)
+#   control — strategy & control plane: strategies, grid, AI tuning, risk,
+#             execution, heartbeat, JSON-RPC/MCP control plane
+#   main    — program entry points: engine executable + CLI/smoke tools
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+# model
+foreach(t pulse_core pulse_exchange pulse_market pulse_backtest pulse_logging
+         pulse_ui pulse_trade_recorder
+         test_core test_config_loader test_config_validator test_param_change_log
+         test_exchange test_market test_logging test_backtest test_ui)
+    if(TARGET ${t})
+        set_property(TARGET ${t} PROPERTY FOLDER model)
+    endif()
+endforeach()
+
+# view
+foreach(t pulsetrader_ui)
+    set_property(TARGET ${t} PROPERTY FOLDER view)
+endforeach()
+
+# control
+foreach(t pulse_strategy pulse_grid pulse_ai pulse_heartbeat pulse_risk
+         pulse_execution pulse_control
+         test_strategy_unit test_grid test_risk
+         test_control_client test_control_command_parser test_control_engine_services
+         test_control_json_rpc test_control_mcp test_control_order_flow
+         test_execution_unit test_heartbeat_unit test_ai_unit)
+    if(TARGET ${t})
+        set_property(TARGET ${t} PROPERTY FOLDER control)
+    endif()
+endforeach()
+
+# main — engine entry point plus the standalone CLI/smoke tools (tools/)
+foreach(t pulsetrader backtest_data_check test_ai_pipeline test_balance_diag
+         test_control_smoke test_execution test_gate_rest test_gate_ws
+         test_market_feed test_strategy)
+    if(TARGET ${t})
+        set_property(TARGET ${t} PROPERTY FOLDER main)
+    endif()
+endforeach()
+
+# Startup project for Visual Studio: the engine in the main solution (the UI
+# is a view module, not an entry point); the build-all target in the test
+# solution (no single test project is a sensible default).
+if(PULSE_BUILD_TESTS)
+    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ALL_BUILD)
+else()
+    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT pulsetrader)
+endif()

@@ -16,3 +16,9 @@ add_subdirectory(backtest)
 if(PULSE_ENABLE_SQLITE)
     add_subdirectory(trade_recorder)
 endif()
+
+# Qt launcher tests — only when the launcher is enabled (PULSE_QT_MAJOR is
+# set by the top-level CMakeLists before tests are added).
+if(PULSE_BUILD_UI AND PULSE_QT_MAJOR)
+    add_subdirectory(ui)
+endif()

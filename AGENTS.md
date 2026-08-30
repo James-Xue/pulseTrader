@@ -36,6 +36,20 @@ cmake --build build -j$(nproc)
 # Run tests (902 tests)
 ctest --test-dir build --output-on-failure
 
+# Split solutions (Windows/Visual Studio): unit tests are configured into a
+# SEPARATE build tree so the main pulseTrader.sln contains only the program
+# (engine + UI + tools), never test projects. Same flags as the main build.
+cmake -B build -S . -DPULSE_BUILD_TESTS=OFF      # main program solution
+cmake -B build_test -S . -DPULSE_BUILD_TESTS=ON  # unit-test solution (21 projects)
+ctest --test-dir build_test --output-on-failure  # run the test tree
+
+# The test solution is named pulseTrader_test.sln (CMake names every solution
+# after project(pulseTrader) with no override option — the file is renamed
+# after generation). Windows: use ./configure_test.cmd to configure
+# build_test and rename the solution in one step. Re-running cmake on the
+# test tree (e.g. VS "Reconfigure") recreates pulseTrader.sln; run
+# configure_test.cmd again to rename it.
+
 # Optional features
 cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON
 ```

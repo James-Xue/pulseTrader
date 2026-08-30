@@ -1,6 +1,8 @@
 #Compile Dir
 build
 build_headless/
+# Test-only build tree (split solution: tests live in build_test/, see CMakeLists PULSE_BUILD_TESTS)
+build_test/
 
 # Prerequisites
 *.d
