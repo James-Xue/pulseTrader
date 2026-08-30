@@ -56,6 +56,10 @@ logs/
 # Environment variables (API keys)
 .env
 
+# Claude Code: track skills (sync via git), keep local config + session archives private
+.claude/*
+!.claude/skills/
+
 # vcpkg installed packages (build artifacts, platform-specific)
 vcpkg_installed/
 
