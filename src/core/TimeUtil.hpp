@@ -155,26 +155,43 @@ parseDisplayTimezone(std::string_view sv) noexcept
     switch (tz.mode)
     {
     case DisplayTimezone::Mode::Utc:
+#ifdef _WIN32
+        gmtime_s(&tm, &seconds);
+#else
         gmtime_r(&seconds, &tm);
+#endif
         break;
     case DisplayTimezone::Mode::Fixed:
     {
         const std::time_t shifted = seconds + static_cast<std::time_t>(tz.offsetMinutes) * 60;
+#ifdef _WIN32
+        gmtime_s(&tm, &shifted);
+#else
         gmtime_r(&shifted, &tm);
+#endif
         offset_seconds = tz.offsetMinutes * 60;
         break;
     }
     case DisplayTimezone::Mode::Local:
     default:
     {
+#ifdef _WIN32
+        localtime_s(&tm, &seconds);
+        // _mkgmtime is MSVC's name for the inverse-of-gmtime conversion
+        // (timegm on POSIX).
+        offset_seconds = static_cast<int>(_mkgmtime(&tm) - seconds);
+#else
         localtime_r(&seconds, &tm);
+#endif
         // Local UTC offset for the instant being rendered: how far the wall
         // clock is ahead of UTC. Interpret the wall clock AS IF it were UTC
         // (timegm) and subtract the true instant. Using mktime(&tm) instead
         // would convert the wall clock back to the SAME instant (mktime
         // treats tm as local time), yielding offset 0 and labelling a
         // Beijing wall clock as "+00:00" — the old +8h display bug.
+#ifndef _WIN32
         offset_seconds = static_cast<int>(timegm(&tm) - seconds);
+#endif
         break;
     }
     }

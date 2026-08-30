@@ -55,11 +55,19 @@ bool seedFromConfig(BacktestOptions &opts, const PulseConfig &cfg)
 Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
     const BacktestOptions &opts, SqliteKlineReader *sqlite)
 {
+#ifndef PULSE_ENABLE_SQLITE
+    // Without the SQLite build the reader is never constructed and the
+    // coverage lookups below are compiled out — the parameter stays unused.
+    (void)sqlite;
+#endif
     std::int64_t from = opts.from_ms;
     std::int64_t to = opts.to_ms;
 
     if (0 == to)
     {
+#ifdef PULSE_ENABLE_SQLITE
+        // sqlite is always null without the SQLite build (see run()) — the
+        // reader TU is not compiled then, so the calls must not be either.
         if (sqlite)
         {
             auto cov = sqlite->coverage(opts.symbol, opts.market_type);
@@ -68,6 +76,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
                 to = value(cov)->second;
             }
         }
+#endif
         if (0 == to)
         {
             const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -77,6 +86,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
     }
     if (0 == from)
     {
+#ifdef PULSE_ENABLE_SQLITE
         if (sqlite)
         {
             auto cov = sqlite->coverage(opts.symbol, opts.market_type);
@@ -85,6 +95,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
                 from = value(cov)->first;
             }
         }
+#endif
         if (0 == from)
         {
             from = to - kDefaultWindowMs;

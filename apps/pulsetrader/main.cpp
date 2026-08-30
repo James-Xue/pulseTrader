@@ -85,8 +85,13 @@ class TradeRecorder;
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h> // GetStdHandle / WaitForSingleObject for the REPL poll
+#include <io.h>      // _isatty / _fileno
+#else
 #include <poll.h>
 #include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Global stop flag — set by SIGINT / SIGTERM handler
@@ -1364,7 +1369,11 @@ static int runTrade(int argc, char* argv[])
 
     // Embedded REPL: enabled when stdin is a TTY. Commands dispatch
     // directly to EngineServices in-process (no socket round-trip).
+#ifdef _WIN32
+    bool repl_enabled = _isatty(_fileno(stdin));
+#else
     bool repl_enabled = isatty(STDIN_FILENO);
+#endif
     std::string repl_buffer;
     if (repl_enabled)
     {
@@ -1377,6 +1386,19 @@ static int runTrade(int argc, char* argv[])
         if (repl_enabled)
         {
             // Poll stdin with a 200ms timeout (EINTR-safe).
+#ifdef _WIN32
+            // WaitForSingleObject on the console input handle is the Windows
+            // counterpart of poll() on stdin: it returns once console input
+            // is available or the 200ms timeout expires.
+            const HANDLE h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+            if (WAIT_OBJECT_0 == WaitForSingleObject(h_stdin, 200))
+            {
+                char buf[512];
+                DWORD n = 0;
+                if (ReadFile(h_stdin, buf, sizeof(buf), &n, nullptr) && n > 0)
+                {
+                    repl_buffer.append(buf, static_cast<std::size_t>(n));
+#else
             struct pollfd pfd{ STDIN_FILENO, POLLIN, 0 };
             int rc = ::poll(&pfd, 1, 200);
             if (rc > 0 && (pfd.revents & POLLIN))
@@ -1386,6 +1408,7 @@ static int runTrade(int argc, char* argv[])
                 if (n > 0)
                 {
                     repl_buffer.append(buf, static_cast<std::size_t>(n));
+#endif
                     std::size_t newline;
                     while ((newline = repl_buffer.find('\n'))
                            != std::string::npos)
@@ -1441,6 +1464,15 @@ static int runTrade(int argc, char* argv[])
                         std::cout << "pulse> " << std::flush;
                     }
                 }
+#ifdef _WIN32
+                else
+                {
+                    // ReadFile error/EOF on the console handle — nothing to
+                    // process this tick; wait for the next poll interval.
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                }
+            }
+#else
                 else if (0 == n)
                 {
                     // EOF (Ctrl+D) — exit the REPL only.
@@ -1454,6 +1486,7 @@ static int runTrade(int argc, char* argv[])
                 // poll error — fall back to sleeping.
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
+#endif
         }
         else
         {

@@ -42,6 +42,10 @@ nlohmann::json textContent(const std::string &text, bool is_error)
 nlohmann::json stringParam(const std::string &name,
                            const std::string &description)
 {
+    // The property name lives in the schema's property map; the parameter is
+    // accepted for call-site symmetry but not embedded in the schema entry.
+    (void)name;
+
     return nlohmann::json{
         { "type", "string" },
         { "description", description },

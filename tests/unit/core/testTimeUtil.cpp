@@ -16,6 +16,10 @@
 
 using namespace pulse;
 
+// setenv/tzset are POSIX-only. The only test using them
+// (LocalOffsetMatchesMachineTimezone) is compiled out on Windows — the CRT
+// does not understand IANA timezone names — so no emulation is needed here.
+
 // ---------------------------------------------------------------------------
 // parseDisplayTimezone
 // ---------------------------------------------------------------------------
@@ -104,6 +108,13 @@ TEST(FormatEpochMs, NegativeClamped)
 
 TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
 {
+#ifdef _WIN32
+    // The Windows CRT parses TZ as a POSIX rule (e.g. "EST5EDT"); it does not
+    // understand IANA zone names like Asia/Shanghai, so the offset assertions
+    // cannot be satisfied deterministically. Skip on Windows. (The #ifdef
+    // also avoids MSVC C4702 unreachable-code after the skip's return.)
+    GTEST_SKIP() << "IANA timezone names are unsupported by the Windows CRT";
+#else
     // Force a known timezone so the assertions are deterministic no matter
     // which machine runs the suite. Regression: the old offset computation
     // (mktime-based) always produced 0, labelling e.g. a Beijing wall clock
@@ -130,6 +141,7 @@ TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
     // Restore a neutral TZ so later tests in the same process are unaffected.
     setenv("TZ", "UTC", 1);
     tzset();
+#endif
 }
 
 TEST(FormatIsoTimestamp, NanosecondAlias)

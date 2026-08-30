@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime> // _mkgmtime / timegm
 #include <iostream>
 #include <string>
 
@@ -91,7 +92,13 @@ std::int64_t parseTimeArg(const std::string &text, bool *ok_flag)
     tm.tm_sec = second;
     tm.tm_isdst = 0;
 
+#ifdef _WIN32
+    // _mkgmtime is MSVC's name for the inverse-of-gmtime conversion
+    // (timegm on POSIX).
+    const std::time_t secs = _mkgmtime(&tm);
+#else
     const std::time_t secs = timegm(&tm);
+#endif
     if (-1 == secs)
     {
         *ok_flag = false;

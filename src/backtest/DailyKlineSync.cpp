@@ -98,10 +98,14 @@ DailyKlineSync::~DailyKlineSync()
         std::lock_guard lock(m_mutex);
         m_pending = false; // Let the worker exit without another fetch.
     }
+    // request_stop BEFORE notify_all: the worker's cv predicate re-checks
+    // stop_requested only when notified, so notifying first and stopping
+    // second would leave the worker asleep forever and join() would block
+    // (reproduced on Windows: DailyKlineSync.CfdSkippedWhenNull hung).
+    m_worker.request_stop();
     m_cv.notify_all();
     if (m_worker.joinable())
     {
-        m_worker.request_stop();
         m_worker.join();
     }
 }

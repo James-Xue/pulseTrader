@@ -39,11 +39,21 @@ class SingleInstanceGuard
     /// True if this process holds the exclusive lock.
     [[nodiscard]] bool acquired() const noexcept
     {
+#ifdef _WIN32
+        return m_handle != nullptr;
+#else
         return m_fd >= 0;
+#endif
     }
 
   private:
-    int m_fd = -1;
+#ifdef _WIN32
+    /// Windows HANDLE to the lock file; nullptr when not held.
+    /// Stored as void* to avoid pulling <windows.h> into this header.
+    void *m_handle = nullptr;
+#else
+    int m_fd = -1; ///< POSIX file descriptor; -1 when not held.
+#endif
 };
 
 } // namespace pulse

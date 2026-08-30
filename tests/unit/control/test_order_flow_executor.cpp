@@ -118,6 +118,11 @@ class OrderFlowTest : public ::testing::Test
                        double qty, double price,
                        const std::string &client_id = "")
     {
+        // side/client_id are part of the call-site vocabulary but the
+        // simulated fill event does not use them.
+        (void)side;
+        (void)client_id;
+
         // Simulate the WS fill event through the tracker, which fires the
         // completion callback (same path as live fills).
         m_tracker->testSimulateWsUpdate(nlohmann::json{

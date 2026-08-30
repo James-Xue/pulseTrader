@@ -45,6 +45,10 @@ void PositionManager::syncPositionFromExchange(
     // exchange (previous engine run, manual trading). No limit validation —
     // the exposure is real and must be visible to the risk engine.
     //
+    // maintenance_rate is reserved for margin/collateral checks; the current
+    // sync path does not use it.
+    (void)maintenance_rate;
+    //
     // Dedup first by exchange_position_id: a fill-tracked CFD position
     // (e.g. "XAUUSD_Buy_1" opened via open_order) and its exchange twin
     // share the same exchange id — importing a second "_sync" entry would

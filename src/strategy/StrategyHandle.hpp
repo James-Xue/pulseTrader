@@ -11,7 +11,7 @@
 namespace pulse::strategy
 {
 
-class StrategyParams;
+struct StrategyParams;
 
 struct StrategyHandle
 {

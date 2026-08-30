@@ -113,6 +113,7 @@ void wait_for_idle(DailyKlineSync &sync, std::size_t spin_ms = 500)
 {
     // Best-effort: the sync runs on a worker thread; the day-boundary tests
     // use empty symbol lists so syncOnce returns in microseconds.
+    (void)sync;
     std::this_thread::sleep_for(std::chrono::milliseconds(spin_ms));
 }
 

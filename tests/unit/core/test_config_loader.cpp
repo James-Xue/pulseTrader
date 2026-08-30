@@ -13,8 +13,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <unistd.h>
 #include <string>
+
+#ifndef _WIN32
+#include <unistd.h> // getpid
+#else
+#include <process.h>   // _getpid (MSVC; getpid is deprecated)
+#define getpid _getpid
+#endif
 
 // Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
 // Windows uses _putenv_s / _dupenv_s).

@@ -45,6 +45,32 @@ using WsClient = websocketpp::client<websocketpp::config::asio_tls_client>;
 using WsConnectionPtr = websocketpp::connection_hdl;
 using WsMessagePtr = WsClient::message_ptr;
 
+namespace
+{
+
+// ---------------------------------------------------------------------------
+// wsIoContext — cross-version accessor for the client's asio event loop.
+// Newer websocketpp releases expose get_io_context(); the vendored 0.8.x copy
+// (used on Windows) only exposes get_io_service(), which in standalone asio
+// is the same type — asio::io_context is io_service's typedef.
+// ---------------------------------------------------------------------------
+template <typename Client>
+    requires requires(Client &c) { c.get_io_context(); }
+asio::io_context &wsIoContext(Client &c)
+{
+    return c.get_io_context();
+}
+
+template <typename Client>
+    requires(!requires(Client &c) { c.get_io_context(); })
+    && requires(Client &c) { c.get_io_service(); }
+asio::io_context &wsIoContext(Client &c)
+{
+    return c.get_io_service();
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // detail — Pure functions for testing
 // ---------------------------------------------------------------------------
@@ -421,7 +447,7 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
 
             // 3. Initialise the asio transport
             client.init_asio();
-            m_internal->io_ctx_ptr = &client.get_io_context();
+            m_internal->io_ctx_ptr = &wsIoContext(client);
 
             // 4. Set TLS handler for wss:// connections
             //    When using a proxy tunnel, we connect via wss:// to 127.0.0.1
@@ -667,7 +693,7 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
             }
 
             // Brief pause to let close handshake complete
-            client.get_io_context().run_for(std::chrono::milliseconds(500));
+            wsIoContext(client).run_for(std::chrono::milliseconds(500));
 
             if (stop_token.stop_requested())
             {

@@ -311,8 +311,12 @@ TEST_F(EngineServicesTest, SwitchDirectionToUnconfiguredCfdFails)
     // instead of leaving the engine in a half-switched state.
     const auto j = m_services->switchDirection("cfd");
     EXPECT_TRUE(j.contains("error"));
-    EXPECT_EQ("futures", m_flow->activeMarket() == MarketType::Futures
-                             ? "futures" : "other");
+    // EXPECT_STREQ (not EXPECT_EQ): comparing const char* with == compares
+    // pointers, which only agrees with the value comparison when the compiler
+    // merges identical string literals (GCC/Clang do; MSVC without /GF does
+    // not).
+    EXPECT_STREQ("futures", m_flow->activeMarket() == MarketType::Futures
+                                ? "futures" : "other");
 }
 
 TEST_F(EngineServicesTest, SwitchDirectionRejectsUnknownDirection)

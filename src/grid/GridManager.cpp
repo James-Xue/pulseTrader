@@ -767,6 +767,10 @@ void GridManager::hangLevels()
 
 void GridManager::manageTp(std::int64_t now_ms)
 {
+    // now_ms is part of the periodic-tick signature shared by the other
+    // management passes; this pass does not need the timestamp.
+    (void)now_ms;
+
     const double mid = computeMid();
     for (auto &lv : m_levels)
     {

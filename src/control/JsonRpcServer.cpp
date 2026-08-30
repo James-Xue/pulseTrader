@@ -13,7 +13,11 @@
 #include <asio/streambuf.hpp>
 #include <asio/write.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h> // WSAPoll — the Winsock counterpart of poll(2)
+#else
 #include <poll.h>
+#endif
 
 #include <iostream>
 
@@ -276,8 +280,14 @@ void JsonRpcServer::acceptLoop()
                 if (asio::error::would_block == ec)
                 {
                     // No pending connection — poll briefly, then re-check.
+#ifdef _WIN32
+                    WSAPOLLFD pfd{ static_cast<SOCKET>(m_acceptor.native_handle()),
+                                   POLLIN, 0 };
+                    ::WSAPoll(&pfd, 1, 200);
+#else
                     struct pollfd pfd{ m_acceptor.native_handle(), POLLIN, 0 };
                     ::poll(&pfd, 1, 200);
+#endif
                     continue;
                 }
                 // Acceptor closed during stop() — exit the loop.

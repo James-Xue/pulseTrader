@@ -184,7 +184,7 @@ int main(int argc, char **argv)
         std::cerr << "  built without PULSE_ENABLE_SQLITE\n";
         return 1;
 #endif
-
+#if defined(PULSE_ENABLE_SQLITE)
         pulse::backtest::BacktestOptions opts;
         opts.strategy_name = replay_strategy;
         opts.symbol = symbol;
@@ -222,6 +222,7 @@ int main(int argc, char **argv)
             std::cout << "  trades = " << account.trades().size()
                       << ", net_pnl = " << account.realizedCash() << "\n";
         }
+#endif
     }
 
     return 0;
