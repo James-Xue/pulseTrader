@@ -82,6 +82,37 @@ TEST_F(SimTradeEngineTest, OpenRejectedWithoutAccount)
     EXPECT_TRUE(open.error.contains(QStringLiteral("未设置模拟账户")));
 }
 
+TEST_F(SimTradeEngineTest, OpenRejectedWithoutTpSl)
+{
+    // Real CFD rule: an entry order MUST carry both TP and SL at open —
+    // there is no "open first, set stops later" in the real workflow.
+    const auto noTp = SimTradeEngine::openLong(
+        QStringLiteral("keyA"), 0.01, 4000.0, 0.0, 3950.0, 100.0, kNow);
+    EXPECT_FALSE(noTp.ok);
+    EXPECT_TRUE(noTp.error.contains(QStringLiteral("止盈止损")));
+
+    const auto noSl = SimTradeEngine::openLong(
+        QStringLiteral("keyA"), 0.01, 4000.0, 4100.0, 0.0, 100.0, kNow);
+    EXPECT_FALSE(noSl.ok);
+    EXPECT_TRUE(noSl.error.contains(QStringLiteral("止盈止损")));
+    EXPECT_TRUE(SimTradeEngine::positions(QStringLiteral("keyA")).empty());
+}
+
+TEST_F(SimTradeEngineTest, OpenRejectsWrongSidedStops)
+{
+    // A long needs TP > entry > SL — wrong-sided stops are rejected.
+    const auto badTp = SimTradeEngine::openLong(
+        QStringLiteral("keyA"), 0.01, 4000.0, 3900.0, 3950.0, 100.0, kNow);
+    EXPECT_FALSE(badTp.ok);
+    EXPECT_TRUE(badTp.error.contains(QStringLiteral("止盈必须高于开仓价")));
+
+    const auto badSl = SimTradeEngine::openLong(
+        QStringLiteral("keyA"), 0.01, 4000.0, 4100.0, 4050.0, 100.0, kNow);
+    EXPECT_FALSE(badSl.ok);
+    EXPECT_TRUE(badSl.error.contains(QStringLiteral("止损必须低于开仓价")));
+    EXPECT_TRUE(SimTradeEngine::positions(QStringLiteral("keyA")).empty());
+}
+
 TEST_F(SimTradeEngineTest, OpenRejectedOnInsufficientBalance)
 {
     EXPECT_TRUE(SimAccountStore::save(QStringLiteral("keyA"), 1.0));  // tiny balance
@@ -150,4 +181,58 @@ TEST_F(SimTradeEngineTest, PositionsPersistAcrossLoad)
     ASSERT_EQ(1, reloaded->positions.size());
     EXPECT_DOUBLE_EQ(4000.0, reloaded->positions[0].entryPrice);
     EXPECT_DOUBLE_EQ(40.0, reloaded->positions[0].marginUsdt);
+}
+
+// ---------------------------------------------------------------------------
+// updateStops — trailing stops move only in the favourable direction
+// ---------------------------------------------------------------------------
+
+TEST_F(SimTradeEngineTest, UpdateStopsMovesUpOnRisingMarket)
+{
+    ASSERT_TRUE(openOne().ok);  // TP 4100, SL 3950.
+    // Market moved up: suggestion TP 4150 / SL 3980 → both move up.
+    const auto update =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4150.0, 3980.0);
+    ASSERT_TRUE(update.ok);
+    EXPECT_EQ(1, update.updatedCount);
+    const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    ASSERT_EQ(1, positions.size());
+    EXPECT_DOUBLE_EQ(4150.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(3980.0, positions[0].stopLoss);
+}
+
+TEST_F(SimTradeEngineTest, UpdateStopsNeverLowersStops)
+{
+    ASSERT_TRUE(openOne().ok);  // TP 4100, SL 3950.
+    // Suggestion below the current stops → nothing moves (profit is
+    // protected, mirroring a real trailing stop).
+    const auto update =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4080.0, 3930.0);
+    ASSERT_TRUE(update.ok);
+    EXPECT_EQ(0, update.updatedCount);
+    const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    ASSERT_EQ(1, positions.size());
+    EXPECT_DOUBLE_EQ(4100.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(3950.0, positions[0].stopLoss);
+}
+
+TEST_F(SimTradeEngineTest, UpdateStopsSkipsInvalidSuggestions)
+{
+    ASSERT_TRUE(openOne().ok);
+    const auto update =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 3900.0, 4100.0);  // TP < SL
+    EXPECT_FALSE(update.ok);
+    // Position untouched.
+    const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    ASSERT_EQ(1, positions.size());
+    EXPECT_DOUBLE_EQ(4100.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(3950.0, positions[0].stopLoss);
+}
+
+TEST_F(SimTradeEngineTest, UpdateStopsIsNoOpWithoutPositions)
+{
+    const auto update =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4150.0, 3980.0);
+    ASSERT_TRUE(update.ok);
+    EXPECT_EQ(0, update.updatedCount);
 }

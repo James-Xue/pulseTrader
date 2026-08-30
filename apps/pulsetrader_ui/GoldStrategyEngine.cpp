@@ -26,6 +26,19 @@ GoldStrategyEngine::GoldStrategyEngine(std::shared_ptr<const Params> params)
 // EMA over the stored history (fresh full-series computation, seeded SMA —
 // deterministic, no drifting rolling state).
 // ---------------------------------------------------------------------------
+double GoldStrategyEngine::volatility() const
+{
+    const int window = m_params->volWindow.load();
+    if (window <= 0 || static_cast<std::size_t>(window) > m_prices.size())
+    {
+        return 0.0;
+    }
+    const std::size_t start = m_prices.size() - static_cast<std::size_t>(window);
+    const auto [lo, hi] = std::minmax_element(
+        m_prices.begin() + static_cast<std::ptrdiff_t>(start), m_prices.end());
+    return *hi - *lo;
+}
+
 double GoldStrategyEngine::ema(int period) const
 {
     if (period <= 0 || static_cast<std::size_t>(period) > m_prices.size())
@@ -74,10 +87,7 @@ GoldDecision GoldStrategyEngine::onPrice(double price, std::int64_t nowMs)
     }
 
     // 3. Volatility envelope (peak-to-trough of the last volWindow ticks).
-    const std::size_t start = m_prices.size() - static_cast<std::size_t>(m_params->volWindow.load());
-    const auto [lo, hi] = std::minmax_element(
-        m_prices.begin() + static_cast<std::ptrdiff_t>(start), m_prices.end());
-    const double vol = *hi - *lo;
+    const double vol = volatility();
     if (vol < m_params->minVolUsd.load())
     {
         decision.reason = QStringLiteral("波幅过低（%1 USD < 下限 %2），市场停滞")
@@ -123,6 +133,27 @@ GoldDecision GoldStrategyEngine::onPrice(double price, std::int64_t nowMs)
     decision.reason = QStringLiteral("EMA 上行共振，波幅 %1 USD → 开多")
                           .arg(vol, 0, 'f', 2);
     return decision;
+}
+
+std::optional<GoldStrategyEngine::GoldStops> GoldStrategyEngine::suggestStops(double price) const
+{
+    // Warm-up and volatility bounds mirror the open-decision gates: without
+    // a valid envelope there is nothing sensible to suggest.
+    const std::size_t needed =
+        static_cast<std::size_t>(m_params->emaSlow.load() + m_params->volWindow.load());
+    if (m_prices.size() < needed)
+    {
+        return std::nullopt;
+    }
+    const double vol = volatility();
+    if (vol < m_params->minVolUsd.load() || vol > m_params->maxVolUsd.load())
+    {
+        return std::nullopt;
+    }
+    GoldStops stops;
+    stops.takeProfit = price + m_params->tpVolMult.load() * vol;
+    stops.stopLoss = price - m_params->slVolMult.load() * vol;
+    return stops;
 }
 
 void GoldStrategyEngine::reset()

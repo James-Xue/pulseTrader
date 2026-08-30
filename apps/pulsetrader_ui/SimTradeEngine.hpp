@@ -70,6 +70,23 @@ class SimTradeEngine
 
     /// Snapshot of the open positions (read-only).
     static std::vector<SimPosition> positions(const QString &apiKey);
+
+    struct StopsUpdateResult
+    {
+        bool ok = false;
+        int updatedCount = 0;   ///< Positions whose stops actually moved.
+        QString error;
+    };
+
+    /// Apply trailing-stop suggestions to every open long position.
+    ///
+    /// Real-CFD behaviour: stops move only in the favourable direction — a
+    /// long's TP and SL only ever move UP (locking in profit on a trending
+    /// market); a suggestion below the current stops is ignored for that
+    /// position. Invalid suggestions (tp ≤ sl) are skipped entirely.
+    static StopsUpdateResult updateStops(const QString &apiKey,
+                                         double suggestedTp,
+                                         double suggestedSl);
 };
 
 } // namespace pulse::ui

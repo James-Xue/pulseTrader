@@ -23,6 +23,7 @@
 #include <memory>
 #include <thread>
 
+#include "EngineStrategyAdapter.hpp"
 #include "GoldStrategyEngine.hpp"
 #include "VerifyWorker.hpp"
 
@@ -65,9 +66,11 @@ class SimGateSystem : public QWidget
     void applyParamsFromUi();
     /// Show the strategy decision; on an open signal, open a simulated CFD
     /// position (margin = notional/leverage, real fee model).
-    void handleDecision(const pulse::ui::GoldDecision &decision);
+    void handleDecision(const pulse::ui::AdapterDecision &decision);
     /// Close TP/SL-hit positions (paper settlement) and refresh the panes.
     void settleSimPositions(double price);
+    /// Apply the trailing-stop suggestion to open positions (upward-only).
+    void applyTrailingStops(const std::optional<pulse::ui::EngineStrategyAdapter::Stops> &stops);
     /// Re-render the 持仓 row from the persisted positions.
     void refreshSimPositions();
     /// Refresh label_simBalance from the persisted store.
@@ -78,7 +81,11 @@ class SimGateSystem : public QWidget
     void stopEnginePolling();
     void updateEngineButtons(bool running);
     /// UI-thread handler for one poll round (queued from the poll thread).
-    void onPollResult(double price, const pulse::ui::GoldDecision &decision);
+    /// `stops` carries the trailing-stop suggestion computed on the poll
+    /// thread (nullopt while warming up).
+    void onPollResult(double price,
+                      const std::optional<pulse::ui::AdapterDecision> &decision,
+                      const std::optional<pulse::ui::EngineStrategyAdapter::Stops> &stops);
     void onPollingStopped();
     void appendLog(const QString &text);
     void appendTrade(const QString &text);

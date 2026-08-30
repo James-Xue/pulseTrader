@@ -4,6 +4,8 @@
 
 #include <QDateTime>
 
+#include <algorithm>
+
 namespace pulse::ui
 {
 
@@ -40,7 +42,31 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
         return result;
     }
 
-    // 1. Real CFD margin & fee model.
+    // 1. Real CFD rule: an opening order MUST carry both a take-profit and a
+    //    stop-loss (the exchange attaches them to the entry order). A long
+    //    needs TP above and SL below the entry — reject anything else,
+    //    mirroring the real rejection.
+    if (takeProfit <= 0.0 || stopLoss <= 0.0)
+    {
+        result.error = QStringLiteral("真实 CFD 开仓必须同时带止盈止损（TP/SL 缺失）");
+        return result;
+    }
+    if (takeProfit <= entryPrice)
+    {
+        result.error = QStringLiteral("止盈必须高于开仓价（多头 TP %1 ≤ 开仓 %2）")
+                           .arg(takeProfit, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+    if (stopLoss >= entryPrice)
+    {
+        result.error = QStringLiteral("止损必须低于开仓价（多头 SL %1 ≥ 开仓 %2）")
+                           .arg(stopLoss, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+
+    // 2. Real CFD margin & fee model.
     const double notional = volumeLots * kOzPerLot * entryPrice;
     result.marginUsdt = notional / leverage;
     result.feeUsdt = volumeLots * kFeeUsdtPerLot;  // BUY side, once.
@@ -153,6 +179,59 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
         SimAccountStore::saveAccount(apiKey, updated);
     }
     return results;
+}
+
+SimTradeEngine::StopsUpdateResult SimTradeEngine::updateStops(const QString &apiKey,
+                                                               double suggestedTp,
+                                                               double suggestedSl)
+{
+    StopsUpdateResult result;
+    if (suggestedTp <= suggestedSl)
+    {
+        result.error = QStringLiteral("止盈止损建议无效（TP %1 ≤ SL %2）")
+                           .arg(suggestedTp, 0, 'f', 2)
+                           .arg(suggestedSl, 0, 'f', 2);
+        return result;
+    }
+
+    const auto account = SimAccountStore::load(apiKey);
+    if (false == account.has_value() || account->positions.empty())
+    {
+        result.ok = true;  // Nothing to update — not an error.
+        return result;
+    }
+
+    SimAccount updated = *account;
+    for (auto &p : updated.positions)
+    {
+        // Long positions: stops move only UP (favourable direction).
+        const double newTp = std::max(p.takeProfit, suggestedTp);
+        const double newSl = std::max(p.stopLoss, suggestedSl);
+        if (newTp <= newSl)
+        {
+            continue;  // Keep the existing (valid) pair.
+        }
+        if (newTp != p.takeProfit || newSl != p.stopLoss)
+        {
+            p.takeProfit = newTp;
+            p.stopLoss = newSl;
+            ++result.updatedCount;
+        }
+    }
+
+    if (result.updatedCount > 0)
+    {
+        updated.updatedAt = nowStamp();
+        if (false == SimAccountStore::saveAccount(apiKey, updated))
+        {
+            result.error = QStringLiteral("模拟账户保存失败：%1")
+                               .arg(SimAccountStore::filePath());
+            result.updatedCount = 0;
+            return result;
+        }
+    }
+    result.ok = true;
+    return result;
 }
 
 std::vector<SimPosition> SimTradeEngine::positions(const QString &apiKey)

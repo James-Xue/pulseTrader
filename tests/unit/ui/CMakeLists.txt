@@ -9,6 +9,7 @@ add_executable(test_ui
     test_sim_account_store.cpp
     test_sim_trade_engine.cpp
     test_gold_strategy.cpp
+    test_engine_strategy_adapter.cpp
 )
 
 target_link_libraries(test_ui

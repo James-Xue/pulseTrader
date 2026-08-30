@@ -17,6 +17,7 @@ add_library(pulse_ui STATIC
     SimAccountStore.cpp
     SimTradeEngine.cpp
     GoldStrategyEngine.cpp
+    EngineStrategyAdapter.cpp
 )
 
 target_include_directories(pulse_ui
@@ -27,6 +28,7 @@ target_include_directories(pulse_ui
 target_link_libraries(pulse_ui
     PUBLIC
         pulse::exchange
+        pulse::strategy
         Qt${PULSE_QT_MAJOR}::Core
 )
 

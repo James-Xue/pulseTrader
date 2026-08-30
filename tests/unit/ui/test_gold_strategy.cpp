@@ -128,3 +128,28 @@ TEST(GoldStrategyTest, ResetClearsHistory)
     EXPECT_EQ(0, engine.priceCount());
     EXPECT_FALSE(engine.onPrice(4430.0, now).shouldOpen);  // back to warm-up
 }
+
+// ---------------------------------------------------------------------------
+// suggestStops — trailing-stop envelope for open positions
+// ---------------------------------------------------------------------------
+
+TEST(GoldStrategyTest, SuggestStopsMirrorsOpenEnvelope)
+{
+    GoldStrategyEngine engine;
+    std::int64_t now = 1'700'000'000'000LL;
+    feedRising(engine, 4400.0, 0.5, 60, now);
+    const auto stops = engine.suggestStops(4430.0);
+    ASSERT_TRUE(stops.has_value());
+    // Same envelope as the open decision: TP above, SL below the price.
+    EXPECT_GT(stops->takeProfit, 4430.0);
+    EXPECT_LT(stops->stopLoss, 4430.0);
+    EXPECT_GT(stops->takeProfit, stops->stopLoss);
+}
+
+TEST(GoldStrategyTest, SuggestStopsRequiresWarmup)
+{
+    GoldStrategyEngine engine;
+    std::int64_t now = 1'700'000'000'000LL;
+    engine.onPrice(4400.0, now);  // single tick — far below the warm-up.
+    EXPECT_FALSE(engine.suggestStops(4400.0).has_value());
+}

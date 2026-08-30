@@ -5,6 +5,7 @@
 
 #include "MainWindow.hpp"
 
+#include "EngineStrategyAdapter.hpp"
 #include "SimAccountStore.hpp"
 #include "SimTradeEngine.hpp"
 
@@ -79,33 +80,23 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
 void SimGateSystem::on_pushBtn_applyParams_clicked()
 {
     applyParamsFromUi();
-    appendLog(QStringLiteral("[参数] 已应用：EMA%1/%2 波幅窗%3 TP×%4 SL×%5 手数%6 "
-                             "波幅[%7,%8] 冷却%9s")
-                  .arg(ui->spin_emaFast->value())
-                  .arg(ui->spin_emaSlow->value())
-                  .arg(ui->spin_volWindow->value())
+    appendLog(QStringLiteral("[参数] 已应用：TP×%1 SL×%2 手数%3 杠杆%4x 冷却%5s")
                   .arg(ui->spin_tpMult->value(), 0, 'f', 1)
                   .arg(ui->spin_slMult->value(), 0, 'f', 1)
                   .arg(ui->spin_openVolume->value(), 0, 'f', 2)
-                  .arg(ui->spin_minVol->value(), 0, 'f', 2)
-                  .arg(ui->spin_maxVol->value(), 0, 'f', 2)
-                  .arg(ui->spin_cooldown->value())
-                  .arg(QStringLiteral(" 杠杆%1x").arg(ui->spin_leverage->value())));
+                  .arg(ui->spin_leverage->value())
+                  .arg(ui->spin_cooldown->value()));
 }
 
 void SimGateSystem::applyParamsFromUi()
 {
     // Atomic stores — visible to the polling thread on its next read.
-    m_strategyParams->emaFast.store(ui->spin_emaFast->value());
-    m_strategyParams->emaSlow.store(ui->spin_emaSlow->value());
-    m_strategyParams->volWindow.store(ui->spin_volWindow->value());
     m_strategyParams->tpVolMult.store(ui->spin_tpMult->value());
     m_strategyParams->slVolMult.store(ui->spin_slMult->value());
     m_strategyParams->openVolumeLots.store(ui->spin_openVolume->value());
-    m_strategyParams->minVolUsd.store(ui->spin_minVol->value());
-    m_strategyParams->maxVolUsd.store(ui->spin_maxVol->value());
-    m_strategyParams->cooldownMs.store(static_cast<std::int64_t>(ui->spin_cooldown->value()) * 1000);
     m_strategyParams->openLeverage.store(static_cast<double>(ui->spin_leverage->value()));
+    m_strategyParams->cooldownMs.store(static_cast<std::int64_t>(ui->spin_cooldown->value()) * 1000);
+    m_strategyParams->openProtectMin.store(ui->spin_protectMin->value());
 }
 
 SimGateSystem::~SimGateSystem()
@@ -207,9 +198,37 @@ void SimGateSystem::startEnginePolling()
     QPointer<SimGateSystem> self(this);
     m_pollThread = std::thread([self, cfg, params]() {
         pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
-        pulse::ui::GoldStrategyEngine engine(params);
+        // The engine's real strategy (EmaResonanceScalper) drives the paper
+        // trades; the adapter aggregates ticks into 1m candles and calls the
+        // strategy's pure evaluateEntry() on every poll.
+        pulse::ui::EngineStrategyAdapter adapter;
+        const int warmupCandles = adapter.warmup(cfd);
+        QMetaObject::invokeMethod(
+            self,
+            [self, warmupCandles]() {
+                if (self)
+                {
+                    self->appendLog(warmupCandles > 0
+                                        ? QStringLiteral("[策略] K线历史回填 %1 根，策略预热完成。")
+                                              .arg(warmupCandles)
+                                        : QStringLiteral("[策略] K线回填失败，将依赖实时轮询累积预热。"));
+                }
+            },
+            Qt::QueuedConnection);
+
         std::chrono::steady_clock::time_point lastErrorReport{};
         bool firstErrorLogged = false;
+        // Market-open tracking: the TradFi ticker carries a "status" field
+        // ("open"/"closed"). While closed, evaluation is paused (no new
+        // ticks reach the strategy — a closed market can never produce a
+        // valid entry) and the poll slows to one request per minute.
+        bool marketOpen = true;
+        bool lastReportedOpen = true;
+        // Market-open protection: entries stay blocked for the first
+        // `openProtectMin` minutes after a closed→open transition — opening
+        // prices/spreads are unreliable right after the open (gaps, spikes,
+        // thin liquidity). Re-arm the timer on every transition.
+        std::int64_t marketOpenSinceMs = -1;  // -1 = not armed (already open at start).
 
         while (true)
         {
@@ -227,19 +246,85 @@ void SimGateSystem::startEnginePolling()
                 {
                     const double price = pulse::ui::VerifyWorker::jsonToDouble(
                         (*obj)["last_price"]);
-                    if (price > 0.0)
+                    // The status field is authoritative; absent → assume open.
+                    marketOpen =
+                        (false == obj->contains("status") || "open" == obj->value("status", "open"));
+
+                    if (marketOpen != lastReportedOpen)
+                    {
+                        // Report the market-state transition exactly once and
+                        // (re)arm the open-protection window.
+                        lastReportedOpen = marketOpen;
+                        if (marketOpen)
+                        {
+                            marketOpenSinceMs =
+                                std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch())
+                                    .count();
+                        }
+                        else
+                        {
+                            marketOpenSinceMs = -1;  // Re-arm on the next open.
+                        }
+                        const QString stateText =
+                            marketOpen
+                                ? QStringLiteral("[行情] XAUUSD 开市，恢复 1 秒轮询与策略评估"
+                                                 "（开市保护 %1 分钟，期间不开仓）。")
+                                      .arg(params->openProtectMin.load())
+                                : QStringLiteral("[行情] XAUUSD 休市（最后价格 %1 USD），"
+                                                 "暂停策略评估，轮询降至 60 秒。")
+                                      .arg(price, 0, 'f', 2);
+                        QMetaObject::invokeMethod(
+                            self,
+                            [self, stateText]() {
+                                if (self)
+                                {
+                                    self->appendLog(stateText);
+                                }
+                            },
+                            Qt::QueuedConnection);
+                    }
+
+                    if (marketOpen && price > 0.0)
                     {
                         const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                               std::chrono::system_clock::now().time_since_epoch())
                                               .count();
-                        const pulse::ui::GoldDecision decision =
-                            engine.onPrice(price, nowMs);
+                        // Hot-read the tunable envelope parameters each round
+                        // (atomic — the parameter UI writes them).
+                        const double tpMult = params->tpVolMult.load();
+                        const double slMult = params->slVolMult.load();
+                        std::optional<pulse::ui::AdapterDecision> decision =
+                            adapter.onTick(price, nowMs, tpMult, slMult,
+                                           params->cooldownMs.load());
+                        // Open-protection gate: evaluation keeps running (the
+                        // kline stream stays continuous) but any entry signal
+                        // inside the window is downgraded to "no open" — the
+                        // first minutes of a fresh market carry unreliable
+                        // prices (gaps/spikes), exactly the data the user
+                        // does not want to trade on.
+                        const std::int64_t protectMs =
+                            static_cast<std::int64_t>(params->openProtectMin.load()) * 60'000;
+                        if (decision.has_value() && decision->shouldOpen
+                            && marketOpenSinceMs > 0
+                            && nowMs - marketOpenSinceMs < protectMs)
+                        {
+                            decision->shouldOpen = false;
+                            decision->reason =
+                                QStringLiteral("开市保护期（剩余 %1 秒，开市初期数据不可靠）")
+                                    .arg((protectMs - (nowMs - marketOpenSinceMs)) / 1000);
+                        }
+                        // Trailing stops: the envelope is recomputed every
+                        // round regardless of the open decision (TP/SL =
+                        // price ± mult × ATR from the buffered candles).
+                        const std::optional<pulse::ui::EngineStrategyAdapter::Stops> stops =
+                            adapter.suggestStops(price, tpMult, slMult);
                         QMetaObject::invokeMethod(
                             self,
-                            [self, price, decision]() {
+                            [self, price, decision, stops]() {
                                 if (self)
                                 {
-                                    self->onPollResult(price, decision);
+                                    self->onPollResult(price, decision, stops);
                                 }
                             },
                             Qt::QueuedConnection);
@@ -274,8 +359,11 @@ void SimGateSystem::startEnginePolling()
             }
 
             // Interruptible sleep: check the stop flag every 100 ms. A null
-            // self (window already destroyed) also exits the loop.
-            for (int i = 0; i < 10; ++i)
+            // self (window already destroyed) also exits the loop. While the
+            // market is closed the poll slows to 60 s (1 s when open) — the
+            // close state is re-checked on every wake-up.
+            const int sleepChunks = marketOpen ? 10 : 600;
+            for (int i = 0; i < sleepChunks; ++i)
             {
                 if (nullptr == self
                     || self->m_stopRequested.load(std::memory_order_acquire))
@@ -313,18 +401,45 @@ void SimGateSystem::stopEnginePolling()
     appendLog(QStringLiteral("[引擎] 轮询已停止。"));
 }
 
-void SimGateSystem::onPollResult(double price, const pulse::ui::GoldDecision &decision)
+void SimGateSystem::onPollResult(
+    double price, const std::optional<pulse::ui::AdapterDecision> &decision,
+    const std::optional<pulse::ui::EngineStrategyAdapter::Stops> &stops)
 {
     if (false == m_polling)
     {
         return;
     }
     appendLog(QStringLiteral("[行情] XAUUSD：%1 USD").arg(price, 0, 'f', 2));
-    handleDecision(decision);
+    if (decision.has_value())
+    {
+        handleDecision(*decision);
+    }
     settleSimPositions(price);
+    // Trailing stops run AFTER settlement: a TP/SL hit closes first, then
+    // the surviving positions get their stops moved up.
+    applyTrailingStops(stops);
 }
 
-void SimGateSystem::handleDecision(const pulse::ui::GoldDecision &decision)
+void SimGateSystem::applyTrailingStops(
+    const std::optional<pulse::ui::EngineStrategyAdapter::Stops> &stops)
+{
+    if (false == stops.has_value())
+    {
+        return;  // Still warming up / no valid envelope — keep current stops.
+    }
+    const SimTradeEngine::StopsUpdateResult update =
+        SimTradeEngine::updateStops(m_apiKey, stops->takeProfit, stops->stopLoss);
+    if (update.updatedCount > 0)
+    {
+        refreshSimPositions();
+        appendLog(QStringLiteral("[策略] 移动止盈止损：%1 个持仓更新为 TP %2 / SL %3")
+                      .arg(update.updatedCount)
+                      .arg(stops->takeProfit, 0, 'f', 2)
+                      .arg(stops->stopLoss, 0, 'f', 2));
+    }
+}
+
+void SimGateSystem::handleDecision(const pulse::ui::AdapterDecision &decision)
 {
     if (false == decision.shouldOpen)
     {
@@ -332,8 +447,11 @@ void SimGateSystem::handleDecision(const pulse::ui::GoldDecision &decision)
         return;
     }
 
+    // Volume and leverage come from the hot-tunable parameters (atomic).
+    const double volumeLots = m_strategyParams->openVolumeLots.load();
+    const double leverage = m_strategyParams->openLeverage.load();
     appendTrade(QStringLiteral("[策略] 开仓买多 %1 手 @%2 | 止盈 %3 | 止损 %4 | %5")
-                    .arg(decision.volumeLots, 0, 'f', 2)
+                    .arg(volumeLots, 0, 'f', 2)
                     .arg(decision.entryPrice, 0, 'f', 2)
                     .arg(decision.takeProfit, 0, 'f', 2)
                     .arg(decision.stopLoss, 0, 'f', 2)
@@ -345,20 +463,20 @@ void SimGateSystem::handleDecision(const pulse::ui::GoldDecision &decision)
                            std::chrono::system_clock::now().time_since_epoch())
                            .count();
     const SimTradeEngine::OpenResult open = SimTradeEngine::openLong(
-        m_apiKey, decision.volumeLots, decision.entryPrice, decision.takeProfit,
-        decision.stopLoss, m_strategyParams->openLeverage.load(), nowMs);
+        m_apiKey, volumeLots, decision.entryPrice, decision.takeProfit,
+        decision.stopLoss, leverage, nowMs);
     if (open.ok)
     {
         refreshSimBalance();
         refreshSimPositions();
         appendLog(QStringLiteral("[模拟] 开仓 %1 手 @%2：保证金 %3 USDT + 手续费 %4 USDT，"
                                  "可用余额 %5 USDT（杠杆 %6x）")
-                      .arg(decision.volumeLots, 0, 'f', 2)
+                      .arg(volumeLots, 0, 'f', 2)
                       .arg(decision.entryPrice, 0, 'f', 2)
                       .arg(open.marginUsdt, 0, 'f', 2)
                       .arg(open.feeUsdt, 0, 'f', 2)
                       .arg(SimAccountStore::load(m_apiKey)->balanceUsdt, 0, 'f', 2)
-                      .arg(m_strategyParams->openLeverage.load(), 0, 'f', 0));
+                      .arg(leverage, 0, 'f', 0));
     }
     else
     {

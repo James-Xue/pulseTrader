@@ -24,6 +24,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace pulse::ui
@@ -59,6 +60,7 @@ class GoldStrategyEngine
         std::atomic<std::int64_t> cooldownMs{ 60'000 };  ///< Min gap between open signals.
         std::atomic<double> openVolumeLots{ 0.01 };      ///< Open size (lots) per signal.
         std::atomic<double> openLeverage{ 1.0 };         ///< Simulated margin leverage (real-CFD model).
+        std::atomic<int> openProtectMin{ 10 };           ///< Minutes after market open with entries blocked.
     };
 
     explicit GoldStrategyEngine(
@@ -77,7 +79,24 @@ class GoldStrategyEngine
     /// Number of prices fed so far (diagnostics/tests).
     int priceCount() const;
 
+    /// Suggested stop prices for the current market state (trailing stops).
+    ///
+    /// Recomputes the volatility envelope against `price` the same way the
+    /// open decision does: tp = price + tpVolMult×vol, sl = price −
+    /// slVolMult×vol. Returns nullopt while still warming up or when the
+    /// volatility is out of bounds. The caller (SimTradeEngine::updateStops)
+    /// applies the suggestion with a move-only-favourable constraint.
+    struct GoldStops
+    {
+        double takeProfit = 0.0;
+        double stopLoss = 0.0;
+    };
+    std::optional<GoldStops> suggestStops(double price) const;
+
   private:
+    /// Peak-to-trough volatility of the last volWindow ticks; 0.0 when the
+    /// window has not filled yet.
+    double volatility() const;
     double ema(int period) const;
 
     std::shared_ptr<const Params> m_params;
