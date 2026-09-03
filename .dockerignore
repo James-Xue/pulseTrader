@@ -1,0 +1,9 @@
+.git
+build
+build_headless
+build_no_sqlite
+logs
+data
+.env
+*.db
+deploy/cloud-out
