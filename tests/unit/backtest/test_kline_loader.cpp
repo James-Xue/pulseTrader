@@ -107,7 +107,7 @@ TEST(KlineLoaderTest, FindGaps_EmptyRows_WholeWindowIsGap)
 {
     const auto gaps = findKlineGaps({}, 1'000'000, 5'000'000, 60'000);
     ASSERT_EQ(1u, gaps.size());
-    EXPECT_EQ(std::make_pair(1'000'000LL, 5'000'000LL), gaps[0]);
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(1'000'000, 5'000'000)), gaps[0]);
 }
 
 TEST(KlineLoaderTest, FindGaps_HeadMiddleTail)
@@ -121,9 +121,9 @@ TEST(KlineLoaderTest, FindGaps_HeadMiddleTail)
     // Window [1500, 5000]: head gap, middle gap, tail gap.
     const auto gaps = findKlineGaps(rows, 1'500'000, 5'000'000, 60'000);
     ASSERT_EQ(3u, gaps.size());
-    EXPECT_EQ(std::make_pair(1'500'000LL, 1'940'000LL), gaps[0]); // head
-    EXPECT_EQ(std::make_pair(2'120'000LL, 2'240'000LL), gaps[1]); // middle
-    EXPECT_EQ(std::make_pair(2'360'000LL, 5'000'000LL), gaps[2]); // tail
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(1'500'000, 1'940'000)), gaps[0]); // head
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(2'120'000, 2'240'000)), gaps[1]); // middle
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(2'360'000, 5'000'000)), gaps[2]); // tail
 }
 
 TEST(KlineLoaderTest, FindGaps_NoGaps_Empty)
@@ -200,7 +200,7 @@ TEST(KlineLoaderTest, Load_GapsTriggerApiCalls_AndMergeDedup)
     EXPECT_EQ(2u, stats.rows_sqlite);
     EXPECT_EQ(1, stats.missing_range_count);
     EXPECT_EQ(1u, api.requested_ranges.size());
-    EXPECT_EQ(std::make_pair(1'060'000LL, 1'060'000LL), api.requested_ranges[0]);
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(1'060'000, 1'060'000)), api.requested_ranges[0]);
 }
 
 TEST(KlineLoaderTest, Load_ApiFailure_DegradesWithWarning)

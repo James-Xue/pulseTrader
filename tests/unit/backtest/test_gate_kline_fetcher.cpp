@@ -123,17 +123,17 @@ TEST(GateKlineFetcherTest, SplitRange_ExactMultiples)
     // holds exactly max_rows points: step = interval × (max_rows - 1).
     const auto chunks = GateKlineFetcher::splitRange(0, 1'000'000, 60'000, 4);
     ASSERT_EQ(6u, chunks.size());
-    EXPECT_EQ(std::make_pair(0LL, 180'000LL), chunks[0]);      // 0..180s = 4 points.
-    EXPECT_EQ(std::make_pair(180'000LL, 360'000LL), chunks[1]);
-    EXPECT_EQ(std::make_pair(900'000LL, 1'000'000LL), chunks[5]); // Tail.
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(0, 180'000)), chunks[0]);      // 0..180s = 4 points.
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(180'000, 360'000)), chunks[1]);
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(900'000, 1'000'000)), chunks[5]); // Tail.
 }
 
 TEST(GateKlineFetcherTest, SplitRange_Remainder)
 {
     const auto chunks = GateKlineFetcher::splitRange(0, 100'000, 60'000, 2);
     ASSERT_EQ(2u, chunks.size());
-    EXPECT_EQ(std::make_pair(0LL, 60'000LL), chunks[0]);  // 2 points.
-    EXPECT_EQ(std::make_pair(60'000LL, 100'000LL), chunks[1]);
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(0, 60'000)), chunks[0]);  // 2 points.
+    EXPECT_EQ((std::make_pair<int64_t, int64_t>(60'000, 100'000)), chunks[1]);
 }
 
 TEST(GateKlineFetcherTest, SplitRange_InvalidInput_Empty)
