@@ -149,6 +149,27 @@ poll_interval_ms = 500
 custom_params = { eth_spike_filter_usd = 120, eth_spike_filter_pct = 1.5, eth_spike_filter_atr = 3.0, eth_atr_step = 0.05, eth_min_confidence_scale = 20.0 }
 ```
 
+> **BTC_USDT 同名实例(2026-09-04)**:类为 symbol-agnostic(无 ETH 硬编码,实例
+> id 自动为 `eth_scalper_BTC_USDT`),加实例即可。**USD 口径必须按价量级重标**:
+> `eth_spike_filter_usd=120` 在 ETH(~$2500)≈ 4.8% 的极端单根;照搬到 $81k 的
+> BTC 等于 0.15%,正常波动全会误判 spike → BTC 版放宽为 **2000(≈2.5%)**;
+> pct/atr/conf_scale 为无量纲口径沿用。初值上线后按信号板 confidence/spike
+> 实测再调(与 ETH 08-23 标定流程相同)。示例:
+
+```toml
+[[strategy.instances]]
+name            = "eth_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1              # 1 张 = 0.0001 BTC(信息性,signal_only)
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+custom_params = { eth_spike_filter_usd = 2000, eth_spike_filter_pct = 1.5, eth_spike_filter_atr = 3.0, eth_atr_step = 0.05, eth_min_confidence_scale = 20.0 }
+```
+
 ### 下单模式(先信号后激活)
 
 引擎全局 `signal_only = true` → 本策略只发信号到信号板,不下单。激活自动交易:

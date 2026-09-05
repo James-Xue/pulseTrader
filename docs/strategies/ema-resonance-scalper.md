@@ -130,6 +130,24 @@ poll_interval_ms = 500
 custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 ```
 
+> **BTC_USDT 同名实例(2026-09-04)**:类为 symbol-agnostic(实例 id 自动为
+> `ema_resonance_scalper_BTC_USDT`),参数全部无量纲(EMA 周期 + 置信度缩放),
+> 无需按币种重标,直接照抄即可:
+
+```toml
+[[strategy.instances]]
+name            = "ema_resonance_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1              # 1 张 = 0.0001 BTC(信息性,signal_only)
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
+```
+
 ### 下单模式(先信号后激活)
 
 策略代码具备完整直接下单能力(Buy/Sell 信号经正常聚合器路径 → 风控闸门)。但引擎全局开关决定是否真的下单:
