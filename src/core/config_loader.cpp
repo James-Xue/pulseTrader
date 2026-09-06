@@ -842,6 +842,45 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
     return {};
 }
 
+// [backtest] — kline-store / backtest tooling (M33). Optional section.
+PulseError parseBacktest(const toml::value &root, BacktestConfig &out)
+{
+    if (!root.contains("backtest"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("backtest");
+
+    out.store_db = toml::find_or(sec, "store_db", out.store_db);
+    out.contract_cache_path =
+        toml::find_or(sec, "contract_cache_path", out.contract_cache_path);
+
+    if (sec.contains("store_symbols"))
+    {
+        const auto &arr = sec.at("store_symbols");
+        if (!arr.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "backtest.store_symbols must be an array of strings"};
+        }
+        out.store_symbols.clear();
+        std::size_t idx = 0;
+        for (const auto &elem : arr.as_array())
+        {
+            if (!elem.is_string())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "backtest.store_symbols[" + std::to_string(idx)
+                                      + "] must be a string"};
+            }
+            out.store_symbols.push_back(elem.as_string());
+            ++idx;
+        }
+    }
+    return {};
+}
+
 PulseError parseGrid(const toml::value &root, GridConfig &out)
 {
     if (!root.contains("grid"))
@@ -1006,6 +1045,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseGrid(root, cfg.grid);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseBacktest(root, cfg.backtest);
 
     if (ErrorCode::Ok != err.code)
     {

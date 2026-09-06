@@ -5,6 +5,7 @@
 add_executable(pulsetrader
     main.cpp
     backtest_cli.cpp
+    kline_store_cli.cpp
 )
 
 target_link_libraries(pulsetrader

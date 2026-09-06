@@ -74,6 +74,10 @@ namespace
 
 constexpr double kMaxRelativeJump = 0.25; ///< |c[i]-c[i-1]| / c[i-1] beyond this → drop.
 
+/// Gate REST serves at most ~10000 recent 1m points per symbol (~6.9 days);
+/// API gaps wider than this can never be backfilled.
+constexpr std::int64_t kApiDepthLimitMs = 9'995 * 60'000;
+
 bool looksPlausible(const market::Kline &k)
 {
     return k.open > 0.0 && k.high > 0.0 && k.low > 0.0 && k.close > 0.0
@@ -171,6 +175,22 @@ Result<std::vector<market::Kline>> KlineLoader::load(
             if (gap_to < gap_from)
             {
                 continue; // Degenerate edge gap (e.g. first candle at from_ms).
+            }
+            // Gate REST retains only ~10000 recent 1m points per symbol; a
+            // gap deeper than that can never be API-filled (every paginated
+            // request would 400) — one clean warning instead of N failures.
+            if (gap_to - gap_from > kApiDepthLimitMs)
+            {
+                stats.warnings.push_back(
+                    "API gap [" + std::to_string(gap_from) + ", "
+                    + std::to_string(gap_to) + "] is older than the REST "
+                    "retention depth (~6.9 days of 1m) — skipped; store "
+                    "history daily with kline-store to fill it over time");
+                PULSE_LOG_WARN("backtest", "API gap [{}, {}] beyond REST "
+                               "retention depth — skipped (use kline-store to "
+                               "accumulate deep history)",
+                               gap_from, gap_to);
+                continue;
             }
             auto remote = m_api.fetch(req.symbol, req.market_type, gap_from, gap_to);
             if (!ok(remote))

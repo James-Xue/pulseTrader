@@ -21,6 +21,7 @@
 //   pulsetrader mcp                      stdio MCP server
 
 #include "backtest_cli.hpp"
+#include "kline_store_cli.hpp"
 #include "backtest/DailyKlineSync.hpp"
 #include "backtest/GateKlineFetcher.hpp"
 #include "backtest/SqliteKlineReader.hpp"
@@ -1889,7 +1890,7 @@ int main(int argc, char *argv[])
     {
         const std::string first(argv[1]);
         if ("trade" == first || "cli" == first || "mcp" == first
-            || "backtest" == first)
+            || "backtest" == first || "kline-store" == first)
         {
             subcommand = first;
             argv += 2;
@@ -1918,6 +1919,10 @@ int main(int argc, char *argv[])
     if ("backtest" == subcommand)
     {
         return pulse::runBacktest(argc, argv);
+    }
+    if ("kline-store" == subcommand)
+    {
+        return pulse::runKlineStore(argc, argv);
     }
     return runTrade(argc, argv);
 }

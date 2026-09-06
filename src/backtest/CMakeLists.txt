@@ -29,11 +29,15 @@ target_link_libraries(pulse_backtest
         spdlog::spdlog
 )
 
-# SqliteKlineReader is optional (SQLite is a build-time option). Without it
-# the loader degrades to a pure Gate API fetch — the header is safe either way.
-# The define reaches BacktestEngine (sqlite-source wiring) and the reader TU.
+# SqliteKlineReader/KlineStore are optional (SQLite is a build-time option).
+# Without it the loader degrades to a pure Gate API fetch — the headers are
+# safe either way. The define reaches BacktestEngine (sqlite-source wiring),
+# the reader TU and the store TU (importFromDb reads raw SQLite).
 if(PULSE_ENABLE_SQLITE)
-    target_sources(pulse_backtest PRIVATE SqliteKlineReader.cpp)
+    target_sources(pulse_backtest PRIVATE
+        SqliteKlineReader.cpp
+        KlineStore.cpp
+    )
     target_compile_definitions(pulse_backtest PRIVATE PULSE_ENABLE_SQLITE)
     target_link_libraries(pulse_backtest PRIVATE SQLiteCpp)
 endif()

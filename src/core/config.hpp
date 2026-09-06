@@ -398,6 +398,25 @@ struct GridConfig
 };
 
 // ---------------------------------------------------------------------------
+// BacktestConfig — [backtest] backtest / kline-store tooling (M33)
+//
+// Optional section; absent values keep the tool defaults. Used by the
+// `kline-store` subcommand (trailing kline accumulation) and by the
+// `backtest` CLI as the contract-cache location default.
+// ---------------------------------------------------------------------------
+struct BacktestConfig
+{
+    /// kline-store target database (kline_bars table, same schema as the
+    /// engine's data/trades.db). Default data/trades.db.
+    std::string store_db = "data/trades.db";
+    /// Futures symbols kline-store accumulates daily. Empty (default) =
+    /// enabled futures strategy instances' symbols, mirroring symbols_for().
+    std::vector<std::string> store_symbols;
+    /// Contract-list cache shared with the backtest CLI (QuantoResolver).
+    std::string contract_cache_path = "data/contracts_cache.json";
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
@@ -412,6 +431,7 @@ struct PulseConfig
     ControlConfig control;              ///< JSON-RPC control socket.
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     GridConfig grid;                    ///< [grid] engine-native grid service (M27).
+    BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
     MarketType active_market = MarketType::Futures; ///< Single active trading direction at startup; runtime switch is ephemeral (restart returns here).

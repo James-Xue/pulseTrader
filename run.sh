@@ -79,6 +79,10 @@ case "$1" in
         shift
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" backtest "$@"
         ;;
+    kline-store)
+        shift
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" kline-store "$@"
+        ;;
     mcp)
         # MCP 走 stdio 协议: stdout 必须是纯 JSON-RPC, 禁止 echo 污染
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
