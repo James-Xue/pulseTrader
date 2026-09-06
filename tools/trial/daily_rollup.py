@@ -8,12 +8,12 @@
      缺失则等同 equal 并标注)
   3. 写 data/trial/<day>/report.md + 追加 trial.log
 
-用法(VPS crontab 00:35 Asia/Shanghai):
+用法(VPS crontab;UTC 16:35 = 北京 00:35):
   cd ~/pulseTrader && python3 tools/trial/daily_rollup.py \
       --db data/trades.db --symbol BTC_USDT \
       --day-offset 1 2>>data/trial/trial.log >>data/trial/trial.log
---day-offset 1 = 汇总"昨天"(UTC 日界 08:00 北京,引擎日界)。缺省 0 =
-当天至今。
+日界 = UTC 日历日(== 北京 08:00,引擎日亏重置边界)。--day-offset 1 =
+汇总"昨天"(整日);缺省 0 = 今天至今(部分日,标注 partial)。
 """
 
 from __future__ import annotations
@@ -35,13 +35,11 @@ DAY_NS = 86_400 * 1_000_000_000
 
 
 def bj_day_bounds(offset_days: int):
-    """北京日界(UTC+8,即 UTC 前一日 16:00)。返回 (start_ns, end_ns) 含当天。"""
+    """UTC 日历日界(== 北京 08:00 日界,与引擎日亏重置/daily_sync 一致;
+    亦与 run_replay 的 day_of 对齐)。返回 (start_ns, end_ns) 含当天。"""
     now = datetime.now(timezone.utc)
-    # 今天北京零点 = UTC 昨天 16:00
-    today_bj = (now - timedelta(hours=8)).date()
-    day = today_bj - timedelta(days=offset_days)
-    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) \
-        + timedelta(hours=8)
+    day = now.date() - timedelta(days=offset_days)
+    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
     return int(start.timestamp() * 1e9), int(end.timestamp() * 1e9)
 
