@@ -109,6 +109,12 @@ class EndpointRouter
     /// were not captured locally in kline_bars.
     [[nodiscard]] static std::string klinesPath(MarketType mt);
 
+    /// Path to fetch USDT-M funding-rate history (public; 180-day retention).
+    ///
+    /// Futures: "/api/v4/futures/usdt/funding_rate" (query: contract, limit)
+    /// Used by the FundingWatch service to detect harvest windows.
+    [[nodiscard]] static std::string fundingRatePath();
+
     /// Path to fetch account balances.
     ///
     /// Spot:    "/api/v4/spot/accounts"

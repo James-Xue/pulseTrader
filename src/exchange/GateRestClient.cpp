@@ -397,6 +397,14 @@ Result<nlohmann::json> GateRestClient::getFuturesKlines(const std::string &contr
     return request("GET", EndpointRouter::klinesPath(MarketType::Futures), query);
 }
 
+Result<nlohmann::json> GateRestClient::getFuturesFundingRate(
+    const std::string &contract, int limit)
+{
+    std::string query = "contract=" + contract
+        + "&limit=" + std::to_string(limit);
+    return request("GET", EndpointRouter::fundingRatePath(), query);
+}
+
 Result<nlohmann::json> GateRestClient::getCfdSymbolsDetail(const std::vector<std::string> &symbols)
 {
     if (!hasCredentials())

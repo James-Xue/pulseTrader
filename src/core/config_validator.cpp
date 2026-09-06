@@ -457,6 +457,46 @@ PulseError validateConfig(const PulseConfig &cfg)
         }
     }
 
+    // [funding_watch] section (funding-window monitor). Validated when
+    // enabled — the service is pure observation, but a nonsense gate would
+    // spam the signal board.
+    if (cfg.funding_watch.enabled)
+    {
+        if (cfg.funding_watch.symbols.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.symbols must not be empty when "
+                              "funding_watch.enabled"};
+        }
+        if (cfg.funding_watch.threshold <= 0.0
+            || cfg.funding_watch.threshold > 0.01)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.threshold must be in (0, 0.01] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.threshold)
+                                  + ")"};
+        }
+        if (cfg.funding_watch.consec_events < 1
+            || cfg.funding_watch.consec_events > 24)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.consec_events must be in [1, 24] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.consec_events)
+                                  + ")"};
+        }
+        if (cfg.funding_watch.poll_sec < 60
+            || cfg.funding_watch.poll_sec > 86400)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.poll_sec must be in [60, 86400] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.poll_sec)
+                                  + ")"};
+        }
+    }
+
     return {}; // All checks passed.
 }
 

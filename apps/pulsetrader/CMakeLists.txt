@@ -23,6 +23,7 @@ target_link_libraries(pulsetrader
 
 target_link_libraries(pulsetrader PRIVATE pulse::control)
 target_link_libraries(pulsetrader PRIVATE pulse::backtest)
+target_link_libraries(pulsetrader PRIVATE pulse::funding)
 
 if(PULSE_ENABLE_SQLITE)
     target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_SQLITE=1)

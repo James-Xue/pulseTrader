@@ -208,6 +208,14 @@ class GateRestClient
         const std::string &interval, std::int64_t from_sec, std::int64_t to_sec,
         int limit = 1000);
 
+    /// GET /api/v4/futures/usdt/funding_rate — USDT-M funding-rate history.
+    ///
+    /// Query: contract=X&limit=N (no from/to — retention ~180 days, newest
+    /// first). Response is a JSON array of {"r": rate-string, "t": sec}.
+    /// Public endpoint. Used by FundingWatch (harvest-window monitor).
+    [[nodiscard]] Result<nlohmann::json> getFuturesFundingRate(
+        const std::string &contract, int limit = 12);
+
     /// DELETE /api/v4/futures/usdt/price_orders/{order_id} — cancel a trigger
     /// order. Returns the cancelled trigger order object on success.
     [[nodiscard]] Result<nlohmann::json> cancelFuturesPriceOrder(const std::string &order_id);

@@ -53,6 +53,7 @@
 #include "control/ControlClient.hpp"
 #include "control/EngineServices.hpp"
 #include "grid/GridGateway.hpp"
+#include "funding/FundingWatch.hpp"
 #include "grid/GridManager.hpp"
 #include "control/JsonRpcServer.hpp"
 #include "control/McpServer.hpp"
@@ -1227,6 +1228,21 @@ static int runTrade(int argc, char* argv[])
         grid_mgr.loadState();
     }
 
+    // Funding-window monitor: pure observation (signal board + logs), never
+    // trades. Polls the public funding endpoint on its own slow gate; only
+    // exists when a futures REST client is live.
+    std::unique_ptr<pulse::funding::FundingWatch> funding_watch;
+    if (cfg.funding_watch.enabled && futures_rest)
+    {
+        funding_watch = std::make_unique<pulse::funding::FundingWatch>(
+            cfg.funding_watch, *board, *futures_rest, rest_mutex);
+        log->info("[L8+] FundingWatch armed ({} symbols, threshold={}, "
+                  "consec={}×8h)",
+                  cfg.funding_watch.symbols.size(),
+                  cfg.funding_watch.threshold,
+                  cfg.funding_watch.consec_events);
+    }
+
     pulse::control::EngineServices services(
         "0.1.0",
         engine_start_ref,
@@ -1568,6 +1584,14 @@ static int runTrade(int argc, char* argv[])
         // windows, signal freshness all use it).
         grid_mgr.tick(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
+
+        // Funding-window monitor (slow gate inside — polls at most every
+        // poll_sec; object only exists when enabled and futures REST is up).
+        if (funding_watch)
+        {
+            funding_watch->tick(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        }
 
         // M31: daily kline sync day-boundary check (µs — fetch runs on the
         // worker thread, never blocks the main loop).

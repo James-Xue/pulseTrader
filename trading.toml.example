@@ -294,3 +294,17 @@ force = false                      # 有非网格持仓时仍允许 grid_start
 # store_db = "data/trades.db"                  # kline-store 目标库
 # store_symbols = ["DOGE_USDT", "PEPE_USDT"]   # 积累清单;缺省 = 下方启用的 futures 策略实例符号
 # contract_cache_path = "data/contracts_cache.json"  # 合约表缓存(backtest 自动解析 quanto 用)
+
+# ---------------------------------------------------------------------------
+# [funding_watch] — 资金费率窗口监视器(纯观察,永不下单)
+# 信号板亮灯(funding_watch_<SYMBOL>):连续 consec_events 次结算(8h/次)
+# 费率 > threshold → 窗口 OPEN(type=Sell = "做空收租窗口");回落即 CLOSED。
+# 7 年全史验证(2026-09-06,data/funding/):0.5bp 闸下 2020-21 牛市净收
+# +16~36%/年、平淡年 ≈0 —— 本服务 = 收割策略的"等情绪税出台"开关。
+# 开启示例:
+# [funding_watch]
+# enabled = true
+# symbols = ["BTC_USDT", "ETH_USDT"]
+# threshold = 0.0005        # 5bp/8h(牛市典型 5-10bp;当前平淡市 ~0.1-1bp)
+# consec_events = 6         # ≈ 48 小时持续
+# poll_sec = 1800           # 30 分钟轮询(费率 8h 才动一次)

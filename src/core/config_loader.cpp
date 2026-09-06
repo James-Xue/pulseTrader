@@ -1045,6 +1045,31 @@ PulseError parseGrid(const toml::value &root, GridConfig &out)
     return {};
 }
 
+PulseError parseFundingWatch(const toml::value &root, FundingWatchConfig &out)
+{
+    if (!root.contains("funding_watch"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("funding_watch");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.threshold = toml::find_or(sec, "threshold", out.threshold);
+    out.consec_events = toml::find_or(sec, "consec_events", out.consec_events);
+    out.poll_sec = toml::find_or(sec, "poll_sec", out.poll_sec);
+    if (sec.contains("symbols") && sec.at("symbols").is_array())
+    {
+        out.symbols.clear();
+        for (const auto &sym : sec.at("symbols").as_array())
+        {
+            out.symbols.push_back(sym.as_string());
+        }
+    }
+
+    return {};
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1159,6 +1184,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseGrid(root, cfg.grid);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseFundingWatch(root, cfg.funding_watch);
 
     if (ErrorCode::Ok != err.code)
     {

@@ -439,6 +439,27 @@ struct BacktestConfig
 };
 
 // ---------------------------------------------------------------------------
+// FundingWatchConfig — [funding_watch] section: funding-rate window monitor
+// ---------------------------------------------------------------------------
+// Watches USDT-M perpetual funding rates (public endpoint, 8h cadence) and
+// raises a signal-board window when the "crowd-long premium tax" is high and
+// persistent — the harvest condition for a spot-long/perp-short funding
+// carry. 7-year full-history validation (2026-09-06): with a 0.5bp gate the
+// bull years 2020-21 paid +16~36%/yr net while flat years stay ≈0 — the
+// watch's job is to sit silent most of the time and light up only when a
+// harvest window actually opens. Pure observation: publishes to the signal
+// board and logs; never places orders and never feeds the aggregator.
+struct FundingWatchConfig
+{
+    bool enabled = false;                 ///< Service active at startup.
+    std::vector<std::string> symbols;     ///< Futures contracts to watch (e.g. BTC_USDT).
+    double threshold = 0.0005;            ///< Window = all of the last `consec_events`
+                                          ///< funding applies > this (5bp/8h default).
+    int consec_events = 6;                ///< Sustained high funding ≈ 6×8h = 48h.
+    int poll_sec = 1800;                  ///< REST poll cadence (funding moves every 8h).
+};
+
+// ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
 struct PulseConfig
@@ -453,6 +474,7 @@ struct PulseConfig
     ControlConfig control;              ///< JSON-RPC control socket.
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     GridConfig grid;                    ///< [grid] engine-native grid service (M27).
+    FundingWatchConfig funding_watch;   ///< [funding_watch] funding-window monitor.
     BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.

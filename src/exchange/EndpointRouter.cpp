@@ -137,6 +137,12 @@ std::string EndpointRouter::klinesPath(MarketType mt)
     return restPrefix(mt) + "/candlesticks";
 }
 
+std::string EndpointRouter::fundingRatePath()
+{
+    // USDT-M perpetual funding history (8h cadence, newest first [{r,t}]).
+    return "/api/v4/futures/usdt/funding_rate";
+}
+
 std::string EndpointRouter::accountsPath(MarketType mt)
 {
     if (MarketType::Cfd == mt)
