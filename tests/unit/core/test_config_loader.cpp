@@ -1246,5 +1246,94 @@ level = "info"
     EXPECT_EQ(12, g.levels);
 }
 
+// ---------------------------------------------------------------------------
+// news_windows (重大消息事件闸)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindows)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "iron_trader"
+symbol = "BTC_USDT"
+order_quantity = 20.0
+custom_params = { it_sep_gate = 0.2 }
+news_windows = [
+    { time = "2026-09-16T18:00:00Z" },
+    { time = 1789000000, close_before_min = 30, resume_after_min = 45 },
+    { time = "2026-10-01", close_before_min = 0.5, resume_after_min = 0 },
+]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ("iron_trader", inst.name);
+    EXPECT_DOUBLE_EQ(0.2, inst.custom_params.at("it_sep_gate"));  // coexists
+
+    ASSERT_EQ(3u, inst.news_windows.size());
+    // ISO string; omitted X/Y → 15/15 defaults.
+    EXPECT_EQ(1'789'581'600'000LL, inst.news_windows[0].event_open_ms);
+    EXPECT_DOUBLE_EQ(15.0, inst.news_windows[0].close_before_min);
+    EXPECT_DOUBLE_EQ(15.0, inst.news_windows[0].resume_after_min);
+    // Bare epoch integer (< 1e12 → seconds); explicit X/Y overrides.
+    EXPECT_EQ(1'789'000'000'000LL, inst.news_windows[1].event_open_ms);
+    EXPECT_DOUBLE_EQ(30.0, inst.news_windows[1].close_before_min);
+    EXPECT_DOUBLE_EQ(45.0, inst.news_windows[1].resume_after_min);
+    // Date-only ISO; fractional minutes allowed; Y = 0 legal.
+    EXPECT_EQ(1'790'812'800'000LL, inst.news_windows[2].event_open_ms);
+    EXPECT_DOUBLE_EQ(0.5, inst.news_windows[2].close_before_min);
+    EXPECT_DOUBLE_EQ(0.0, inst.news_windows[2].resume_after_min);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindowsErrors)
+{
+    struct Case
+    {
+        const char *windows;
+        const char *fragment;  // expected substring in the error message
+    };
+    const Case cases[] = {
+        { "5", "news_windows" },                            // not an array
+        { "[ 5 ]", "news_windows[0]" },                     // element not a table
+        { "[ { resume_after_min = 5 } ]", "news_windows[0]" },  // missing time
+        { "[ { time = \"not-a-time\" } ]", "news_windows[0]" }, // bad time string
+        { "[ { time = 12.5 } ]", "news_windows[0]" },       // time must be str/int
+        { "[ { time = \"2026-09-16T18:00:00Z\", close_before_min = -1 } ]",
+          "news_windows[0]" },                              // negative X
+    };
+
+    for (const auto &c : cases)
+    {
+        TempToml tmp(std::string(R"(
+[[strategy.instances]]
+name = "iron_trader"
+symbol = "BTC_USDT"
+news_windows = )")
+            + c.windows + "\n");
+
+        auto result = loadConfigFile(tmp.path());
+        EXPECT_FALSE(ok(result)) << "case should fail: " << c.windows;
+        EXPECT_NE(std::string::npos, error(result).message.find(c.fragment))
+            << "case: " << c.windows << " msg: " << error(result).message;
+    }
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindowsAbsentKeepsEmpty)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "momentum_scalper"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_TRUE(inst.news_windows.empty());   // absent → gate off
+}
+
 } // namespace
 } // namespace pulse

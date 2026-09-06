@@ -12,6 +12,7 @@ add_executable(test_strategy_unit
     test_eth_scalper.cpp
     test_ema_resonance_scalper.cpp
     test_iron_trader.cpp
+    test_news_gate.cpp
     test_signal_aggregator.cpp
     test_signal_board.cpp
 )

@@ -17,6 +17,7 @@ add_library(pulse_strategy STATIC
     scalping/EthScalper.cpp
     scalping/EmaResonanceScalper.cpp
     scalping/IronTrader.cpp
+    NewsGate.cpp
     signal/SignalAggregator.cpp
     signal/SignalBoard.cpp
 )

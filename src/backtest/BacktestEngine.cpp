@@ -50,6 +50,12 @@ bool seedFromConfig(BacktestOptions &opts, const PulseConfig &cfg)
         // read them in klineNeeded() from the very first candle). CLI
         // "--param" custom keys are merged on top later and win.
         opts.custom_params = inst.custom_params;
+        // News gate windows: seed from the config instance only when the CLI
+        // left none (--news explicit values win).
+        if (opts.news_windows.empty())
+        {
+            opts.news_windows = inst.news_windows;
+        }
         // Seed confidence only when the CLI left the default — the explicit
         // "--min-confidence" flag must win over the config instance.
         if (kDefaultMinConfidence == opts.min_confidence)

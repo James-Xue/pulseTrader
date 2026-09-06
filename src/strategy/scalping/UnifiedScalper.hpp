@@ -11,9 +11,10 @@
 //       3. candles < warmupThreshold() → throttled warmup log, return
 //       4. evaluateEntry(candles) — detection + rolling-state commit
 //       5. nullopt → return (state already committed per subclass rules)
-//       6. inCooldown() → return (state already committed, timestamp untouched)
-//       7. buildSignal + base fills symbol / strategy_id / timestamp
-//       8. logSignal → emitSignal → m_lastSignalTimeMs = now
+//       6. news gate → entry dropped, Flat passes (state already committed)
+//       7. inCooldown() → return (state already committed, timestamp untouched)
+//       8. buildSignal + base fills symbol / strategy_id / timestamp
+//       9. logSignal → emitSignal → m_lastSignalTimeMs = now
 //   - computeAtr() — one copy instead of three verbatim duplicates
 //   - cooldown / warmup / no-data throttled logging — one implementation
 //
@@ -158,12 +159,22 @@ class UnifiedScalper : public StrategyBase
     /// "Waiting for kline data" log, throttled to 30 s.
     void logNoDataThrottled();
 
+    /// 重大消息事件闸: true when `open_ms` falls inside any configured news
+    /// blackout window (StrategyInstanceConfig::news_windows — empty = off).
+    /// Semantics: strategy/NewsGate.hpp; rules: docs/strategies/iron-trader.md
+    /// §4.6. Judged on candle open_time only (live == backtest).
+    [[nodiscard]] bool newsGateBlocked(std::int64_t open_ms) const;
+
+    /// Throttled "entry suppressed by news gate" log (60 s).
+    void logNewsGateSuppressedThrottled(std::int64_t open_ms);
+
     // --- Shared state ---
 
     StrategyParams m_params;              ///< Hot-reloadable parameters.
     std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last emitted signal time (cooldown).
     std::int64_t m_lastWarmupLogMs{ 0 };  ///< Throttle warmup log to every 30 s.
     std::int64_t m_lastNoDataLogMs{ 0 };  ///< Throttle "no data" log to every 30 s.
+    std::int64_t m_lastNewsGateLogMs{ 0 }; ///< Throttle news-gate log to every 60 s.
 };
 
 } // namespace pulse::strategy

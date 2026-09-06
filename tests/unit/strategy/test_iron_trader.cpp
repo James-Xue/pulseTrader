@@ -100,7 +100,8 @@ struct Trader
     std::unique_ptr<IronTrader> strategy;
     std::vector<TradingSignal> received;
 
-    explicit Trader(std::map<std::string, double> custom = {})
+    explicit Trader(std::map<std::string, double> custom = {},
+        std::vector<NewsWindow> windows = {})
     {
         auto merged = fastParams();
         for (const auto &[k, v] : custom)
@@ -113,6 +114,7 @@ struct Trader
         ctx.config.symbol = "BTC_USDT";
         ctx.config.market_type = MarketType::Futures;
         ctx.config.custom_params = std::move(merged);
+        ctx.config.news_windows = std::move(windows);
         ctx.market_feed = &harness.feed;
 
         strategy = std::make_unique<IronTrader>(ctx);
@@ -406,6 +408,147 @@ TEST(IronTrader, DailyStopAfterThreeConsecutiveLosses)
     }
     driveBullPullbackToEntry(tr, 25);
     EXPECT_GT(buyCount(tr.received), buys);
+}
+
+// ---------------------------------------------------------------------------
+// 重大消息事件闸 (§4.6)
+//
+// Fixture geometry: entry candles land at kMainOpen + 148m.. (+warmup 100 +
+// ramp 45 + dip 3). All news-gate windows below are placed relative to that
+// known band and stay inside the main session (08:00Z..20:00Z UTC).
+// ---------------------------------------------------------------------------
+
+/// True when any received signal carries the news_blackout exit reason.
+bool anyNewsFlatten(const std::vector<TradingSignal> &signals)
+{
+    return std::any_of(signals.begin(), signals.end(),
+        [](const TradingSignal &s)
+        {
+            return SignalType::Flat == s.type
+                && s.indicators.contains("exit_reason")
+                && "news_blackout"
+                    == s.indicators.value("exit_reason", std::string{});
+        });
+}
+
+TEST(IronTrader, NewsGateSuppressesEntriesDuringBlackout)
+{
+    // Blackout [kMainOpen+147m, kMainOpen+153m) covers the reclaim-bar band
+    // where the no-window fixture would enter (~kMainOpen+148m).
+    NewsWindow w;
+    w.event_open_ms = kMainOpen + 150 * 60'000;
+    w.close_before_min = 3.0;
+    w.resume_after_min = 3.0;
+    Trader tr{ {}, { w } };
+
+    tr.warmup();
+    tr.harness.ramp(*tr.strategy, 0.02, 45);      // bull trend
+    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
+    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
+    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);  // 浅拉回
+    for (std::size_t i = 0; i < 12; ++i)          // reclaim attempts, all blocked
+    {
+        tr.harness.candle(*tr.strategy, tr.harness.last_close + 0.03);
+    }
+    EXPECT_EQ(0u, buyCount(tr.received));         // window swallowed the setup
+    EXPECT_EQ(0u, flatCount(tr.received));
+
+    // Window over (open_time ≥ T+Y): the same pullback geometry re-enters.
+    driveBullPullbackToEntry(tr);
+    EXPECT_GE(buyCount(tr.received), 1u);
+    EXPECT_FALSE(anyNewsFlatten(tr.received));
+}
+
+TEST(IronTrader, NewsGateFlattensHeldPositionAtPreClose)
+{
+    // Long timeout so the gentle post-entry drift never trips time_stop.
+    Trader tr{ { { "it_timeout_bars", 200.0 } } };
+    driveBullPullbackToEntry(tr);
+    ASSERT_EQ(1u, buyCount(tr.received));
+
+    // Window 40m after entry-confirm: blackout [t+30m, t+50m), flatten from
+    // the first candle with open_time ≥ t+30m.
+    const std::int64_t confirm_t = tr.harness.t;
+    NewsWindow w;
+    w.event_open_ms = confirm_t + 40 * 60'000;
+    w.close_before_min = 10.0;
+    w.resume_after_min = 10.0;
+    Trader gated{ { { "it_timeout_bars", 200.0 } }, { w } };
+    driveBullPullbackToEntry(gated);
+    ASSERT_EQ(1u, buyCount(gated.received));
+    ASSERT_EQ(confirm_t, gated.harness.t);        // both fixtures drive identically
+
+    // Gentle drift BEFORE T−X (30m): still holding, no premature exit.
+    for (std::size_t i = 0; i < 25; ++i)
+    {
+        gated.harness.candle(*gated.strategy, gated.harness.last_close + 0.0005);
+    }
+    EXPECT_EQ(1u, buyCount(gated.received));
+    EXPECT_EQ(0u, flatCount(gated.received));
+
+    // Crossing T−X → exactly one news_blackout Flat (close-only), no Sell.
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        gated.harness.candle(*gated.strategy, gated.harness.last_close + 0.0005);
+    }
+    ASSERT_EQ(1u, flatCount(gated.received));
+    EXPECT_TRUE(anyNewsFlatten(gated.received));
+    EXPECT_EQ(0u, std::count_if(gated.received.begin(), gated.received.end(),
+        [](const TradingSignal &s) { return SignalType::Sell == s.type; }));
+
+    // Through the event and past T+Y: no second Flat, no entry inside the
+    // blackout (fresh pullback geometry only re-enters after T+Y).
+    for (std::size_t i = 0; i < 20; ++i)
+    {
+        gated.harness.candle(*gated.strategy, gated.harness.last_close + 0.0005);
+    }
+    EXPECT_EQ(1u, flatCount(gated.received));
+
+    // After T+Y a fresh pullback setup trades again — and its entry (E > T+Y)
+    // can never trip this window.
+    driveBullPullbackToEntry(gated);
+    EXPECT_GE(buyCount(gated.received), 2u);
+    EXPECT_EQ(1u, flatCount(gated.received));
+    EXPECT_TRUE(anyNewsFlatten(gated.received));
+}
+
+TEST(IronTrader, NewsGateStandsDownBreakoutMachineAcrossEvent)
+{
+    // RSI chase filter off (isolate the confirmation machine). Window
+    // [kMainOpen+149m, kMainOpen+151m) sits on the would-be confirmation bar
+    // right after the break bar (open +148m).
+    NewsWindow w;
+    w.event_open_ms = kMainOpen + 150 * 60'000;
+    w.close_before_min = 1.0;
+    w.resume_after_min = 1.0;
+    Trader tr{ { { "it_rsi_ob", 100.0 }, { "it_rsi_os", 0.0 } }, { w } };
+
+    tr.warmup();
+    tr.harness.ramp(*tr.strategy, 0.02, 40);      // trend + momentum
+    tr.harness.ramp(*tr.strategy, 0.001, 8);      // quiet box, RSI cooling
+    const double box_top = tr.harness.last_close;
+
+    tr.harness.candle(*tr.strategy, box_top + 0.15);  // break — armed (+148m)
+    EXPECT_EQ(0u, buyCount(tr.received));
+
+    // Would-be confirmation bars land inside the blackout → suppressed
+    // (entry evaluation never runs), and the armed machine is stood down.
+    tr.harness.candle(*tr.strategy, box_top + 0.09);  // +149m (blocked)
+    tr.harness.candle(*tr.strategy, box_top + 0.09);  // +150m (blocked)
+    EXPECT_EQ(0u, buyCount(tr.received));
+
+    // Post-window fresh jump above the (now elevated) box → the machine must
+    // RE-ARM (run=1, no entry). Had it NOT been stood down, these would-be
+    // closes beyond the original level would have instantly confirmed on the
+    // first bar back — an event-spike bar can never confirm a breakout.
+    tr.harness.candle(*tr.strategy, box_top + 0.25);  // +151m → re-armed
+    EXPECT_EQ(0u, buyCount(tr.received));
+
+    // ... the SECOND consecutive close beyond confirms (§4.2 确认制).
+    tr.harness.candle(*tr.strategy, box_top + 0.25);  // +152m → run=2
+    ASSERT_EQ(1u, buyCount(tr.received));
+    EXPECT_NE(std::string::npos,
+              tr.received.back().reason.find("box_breakout"));
 }
 
 // (Session-tiering / tight-gate behaviour is exercised by the real backtest

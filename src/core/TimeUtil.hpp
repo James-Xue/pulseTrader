@@ -192,6 +192,70 @@ parseDisplayTimezone(std::string_view sv) noexcept
                        sign, hours, mins);
 }
 
+// ---------------------------------------------------------------------------
+// Parsing — epoch text (bare epoch or ISO UTC)
+// ---------------------------------------------------------------------------
+
+/// Parse a time argument into UTC epoch ms: bare digits (length < 13
+/// interpreted as seconds, else ms) or ISO UTC "YYYY-MM-DD" (midnight) /
+/// "YYYY-MM-DDTHH:MM:SS" (a trailing "Z"/offset is naturally ignored).
+/// Shared by the backtest CLI (--from/--to/--news) and the config loader
+/// (news_windows "time"). Returns false and leaves out_ms untouched on any
+/// parse failure — callers must treat failure as an error, never 0.
+[[nodiscard]] inline bool parseEpochMsText(std::string_view text,
+                                           std::int64_t &out_ms) noexcept
+{
+    if (text.empty())
+    {
+        return false;
+    }
+
+    // Pure numeric → epoch (seconds if < 1e12, else ms).
+    bool all_digits = true;
+    for (const char c : text)
+    {
+        all_digits = all_digits && (c >= '0' && c <= '9');
+    }
+    if (all_digits)
+    {
+        // stoll on a string_view: hand-craft the value to stay noexcept.
+        std::int64_t v = 0;
+        for (const char c : text)
+        {
+            v = v * 10 + static_cast<std::int64_t>(c - '0');
+        }
+        out_ms = (v < 1'000'000'000'000LL) ? v * 1000 : v;
+        return true;
+    }
+
+    // ISO UTC. Accept "YYYY-MM-DD" (midnight) and "YYYY-MM-DDTHH:MM:SS".
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    const std::string tmp{ text };
+    if (6 > std::sscanf(tmp.c_str(), "%d-%d-%dT%d:%d:%d",
+                        &year, &month, &day, &hour, &minute, &second)
+        && 3 > std::sscanf(tmp.c_str(), "%d-%d-%d", &year, &month, &day))
+    {
+        return false;
+    }
+
+    std::tm tm{};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_isdst = 0;
+
+    const std::time_t secs = timegm(&tm);
+    if (-1 == secs)
+    {
+        return false;
+    }
+    out_ms = static_cast<std::int64_t>(secs) * 1000;
+    return true;
+}
+
 /// Format the project's nanosecond Timestamp as an ISO8601 string.
 [[nodiscard]] inline std::string
 formatIsoTimestamp(const Timestamp &ts, const DisplayTimezone &tz) noexcept

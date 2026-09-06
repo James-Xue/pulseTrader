@@ -10,6 +10,7 @@
 // Unknown keys are silently ignored for forward compatibility.
 
 #include "core/config_loader.hpp"
+#include "core/TimeUtil.hpp"
 
 #include <toml.hpp>
 
@@ -699,6 +700,119 @@ PulseError parseStrategyInstance(const toml::value &tbl,
                                       + "\" must be a number (int or float)"};
             }
             out.custom_params[key] = parsed;
+        }
+    }
+
+    // 重大消息事件闸 windows: `news_windows = [{ time = "...", ... }]`
+    // array of inline tables (one per scheduled event). Parsed strictly like
+    // custom_params — a typo'd event time silently disabling the gate would
+    // be dangerous. PRESET-only, no hot reload. Empty/absent = gate off.
+    if (tbl.contains("news_windows"))
+    {
+        const toml::value &nw = tbl.at("news_windows"); // Real element ref (no temporary).
+
+        if (!nw.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "strategy instance \"news_windows\" must be an "
+                              "array of tables (e.g. news_windows = [ { time = "
+                              "\"2026-09-16T18:00:00Z\" } ])"};
+        }
+
+        const auto &nw_array = nw.as_array(); // Keep a named reference (GCC -Wdangling-reference).
+        for (std::size_t i = 0; i < nw_array.size(); ++i)
+        {
+            const auto &elem = nw_array[i];
+            if (!elem.is_table())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] must be a table"};
+            }
+            const auto &win_table = elem.as_table();
+
+            NewsWindow win;
+            // time (required): ISO UTC string or bare epoch (seconds if
+            // < 1e12, else ms) — same convention as the backtest CLI.
+            if (!win_table.contains("time"))
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] missing required key \"time\""};
+            }
+            const toml::value &tv = win_table.at("time");
+            std::int64_t parsed_ms = 0;
+            if (tv.is_string())
+            {
+                if (!parseEpochMsText(tv.as_string(), parsed_ms))
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] \"time\" is not a valid ISO UTC "
+                                            "instant or epoch"};
+                }
+            }
+            else if (tv.is_integer())
+            {
+                // Route through the same digits convention (seconds/ms).
+                const std::string digits = std::to_string(tv.as_integer());
+                if (!parseEpochMsText(digits, parsed_ms))
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] \"time\" epoch out of range"};
+                }
+            }
+            else
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] \"time\" must be an ISO UTC string or "
+                                        "integer epoch"};
+            }
+            win.event_open_ms = parsed_ms;
+
+            // close_before_min / resume_after_min: optional, >= 0.0.
+            if (win_table.contains("close_before_min"))
+            {
+                const toml::value &cv = win_table.at("close_before_min");
+                if (!cv.is_floating() && !cv.is_integer())
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] close_before_min must be a number"};
+                }
+                win.close_before_min = cv.is_floating()
+                    ? cv.as_floating()
+                    : static_cast<double>(cv.as_integer());
+                if (win.close_before_min < 0.0)
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] close_before_min must be >= 0"};
+                }
+            }
+            if (win_table.contains("resume_after_min"))
+            {
+                const toml::value &rv = win_table.at("resume_after_min");
+                if (!rv.is_floating() && !rv.is_integer())
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] resume_after_min must be a number"};
+                }
+                win.resume_after_min = rv.is_floating()
+                    ? rv.as_floating()
+                    : static_cast<double>(rv.as_integer());
+                if (win.resume_after_min < 0.0)
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] resume_after_min must be >= 0"};
+                }
+            }
+
+            out.news_windows.push_back(std::move(win));
         }
     }
 

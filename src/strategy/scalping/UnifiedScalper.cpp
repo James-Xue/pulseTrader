@@ -3,6 +3,7 @@
 #include "strategy/scalping/UnifiedScalper.hpp"
 
 #include "logging/Logger.hpp"
+#include "strategy/NewsGate.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -78,6 +79,20 @@ void UnifiedScalper::onKline(const market::Kline & /*kline*/)
     auto entry = evaluateEntry(candles);
     if (!entry)
     {
+        return;
+    }
+
+    // 4.5 News gate (重大消息事件闸): entry signals inside a configured
+    //     blackout are dropped here; Flat (the close-only/exit channel)
+    //     always passes so gate flattening and exits flow. Note this drop
+    //     happens AFTER the state commit — subclasses that own a position
+    //     state machine MUST also suppress entries inside evaluateEntry
+    //     (IronTrader does; the net is the safety layer for other adopters,
+    //     mirroring the cooldown precedent at step 5).
+    if (SignalType::Flat != entry->type
+        && newsGateBlocked(candles.back().open_time))
+    {
+        logNewsGateSuppressedThrottled(candles.back().open_time);
         return;
     }
 
@@ -259,6 +274,27 @@ void UnifiedScalper::logNoDataThrottled()
         PULSE_LOG_INFO("strategy",
             "[{}] Waiting for kline data (WS may not be connected yet)", id());
         m_lastNoDataLogMs = now_ms;
+    }
+}
+
+bool UnifiedScalper::newsGateBlocked(std::int64_t open_ms) const
+{
+    if (m_context.config.news_windows.empty())
+    {
+        return false;
+    }
+    return newsGateBlackout(m_context.config.news_windows, open_ms);
+}
+
+void UnifiedScalper::logNewsGateSuppressedThrottled(std::int64_t open_ms)
+{
+    const auto now_ms = nowMs();
+    if (now_ms - m_lastNewsGateLogMs >= 60'000)
+    {
+        PULSE_LOG_INFO("strategy",
+            "[{}] entry suppressed by news gate (blackout) at open_time={}",
+            id(), open_ms);
+        m_lastNewsGateLogMs = now_ms;
     }
 }
 

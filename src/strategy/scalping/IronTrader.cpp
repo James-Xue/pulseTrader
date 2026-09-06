@@ -4,6 +4,7 @@
 #include "strategy/scalping/IronTrader.hpp"
 
 #include "logging/Logger.hpp"
+#include "strategy/NewsGate.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -480,12 +481,62 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
 }
 
 // ---------------------------------------------------------------------------
+// 重大消息事件闸 (§4.6) — pre-event forced flatten; commit block mirrors the
+// managePosition exit above with exit_reason = "news_blackout" (Flat channel)
+// ---------------------------------------------------------------------------
+
+std::optional<EntryContext> IronTrader::flattenForNews(const market::Kline &cur)
+{
+    const bool is_long = (Phase::Long == m_phase);
+    const double close = cur.close;
+    const std::string reason = "news_blackout";
+
+    settleTrade(is_long, m_entry_price, close);
+
+    EntryContext exit_ctx;
+    exit_ctx.type = SignalType::Flat;   // 只平仓、不反手 (close-only channel)
+    exit_ctx.price = close;
+    exit_ctx.confidence = 0.0;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "exit %s | held=%lld | close=%.2f",
+        reason.c_str(), static_cast<long long>(m_bars_held), close);
+    exit_ctx.reason = buf;
+    exit_ctx.indicators = {
+        { "state", is_long ? "long" : "short" },
+        { "exit_reason", reason },
+        { "close", close },
+    };
+
+    PULSE_LOG_INFO("iron_trader", "[{}] news gate flatten (pre-event window) "
+        "at open_time={} — closing {:.2f} ({})", id(), cur.open_time, close,
+        is_long ? "long" : "short");
+
+    m_phase = Phase::Flat;
+    m_flat_bars = 0;
+    m_bars_held = 0;
+    m_break_active = false;
+    m_break_run = 0;
+    return exit_ctx;
+}
+
+bool IronTrader::newsFlattenDueNow(std::int64_t open_ms) const
+{
+    if (m_context.config.news_windows.empty())
+    {
+        return false;
+    }
+    return newsGateFlattenDue(m_context.config.news_windows, m_entry_open_ms,
+        open_ms);
+}
+
+// ---------------------------------------------------------------------------
 // Entry decisions — Flat phase only
 // ---------------------------------------------------------------------------
 
 std::optional<EntryContext> IronTrader::finishEntry(double close,
     const Indicators &ind, bool bull, double sep_gate_effective,
-    const std::string &trigger, double sep_for_conf)
+    const std::string &trigger, double sep_for_conf,
+    std::int64_t entry_open_ms)
 {
     // Re-run the checklist at the decision moment (R6 may have tripped while
     // a breakout was confirming).
@@ -509,6 +560,7 @@ std::optional<EntryContext> IronTrader::finishEntry(double close,
     confidence = std::clamp(confidence, 0.0, 1.0);
 
     m_phase = bull ? Phase::Long : Phase::Short;
+    m_entry_open_ms = entry_open_ms;   // news gate pre-event flatten predicate
     m_entry_price = close;
     m_entry_atr = ind.atr14;
     m_stop_price = bull ? (close - stop_dist) : (close + stop_dist);
@@ -623,7 +675,7 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
                 return std::nullopt;
             }
             return finishEntry(close, ind, bull, sep_gate, "box_breakout",
-                m_break_sep);
+                m_break_sep, candles.back().open_time);
         }
         return std::nullopt;
     }
@@ -664,7 +716,7 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
     if (pullback)
     {
         return finishEntry(close, ind, bull, sep_gate, "pullback_resume",
-            ind.sep);
+            ind.sep, candles.back().open_time);
     }
     return std::nullopt;
 }
@@ -684,13 +736,31 @@ std::optional<EntryContext> IronTrader::evaluateEntry(
     const Indicators ind = computeIndicators(candles);
     const double close = candles.back().close;
 
+    // 重大消息事件闸 (§4.6): a position opened before a listed event must be
+    // flat from the first candle with open_time ≥ T−X — the gate reason wins
+    // over any coincident exit reason (either way the position closes and
+    // settleTrade books the same realized PnL).
+    const bool news_flatten_due = newsFlattenDueNow(candles.back().open_time);
+
     if (Phase::Flat != m_phase)
     {
         ++m_bars_held;
+        if (news_flatten_due)
+        {
+            return flattenForNews(candles.back());
+        }
         return managePosition(candles.back(), ind);   // 有仓 → 只做管理 (R2)
     }
 
     ++m_flat_bars;
+    if (newsGateBlocked(candles.back().open_time))
+    {
+        // Blackout window: no entries; the T-B machine is stood down so an
+        // event-spike bar can never serve as a confirmation bar after resume.
+        m_break_active = false;
+        m_break_run = 0;
+        return std::nullopt;
+    }
     return evaluateEntrySetup(candles, ind, structDir(ind, close), close);
 }
 

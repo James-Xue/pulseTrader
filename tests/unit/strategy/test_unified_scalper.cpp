@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -117,6 +118,41 @@ static std::vector<market::Kline> make_candles(std::size_t count, double close_s
     }
     return candles;
 }
+
+// Like make_candles but with explicit 1m open/close times starting at
+// `start_ms` (the news gate judges candle open_time — untimed candles
+// (open_time == 0) would never fall in a 2026-era window).
+static std::vector<market::Kline> make_timed_candles(std::size_t count,
+    std::int64_t start_ms, double close_step = 1.0)
+{
+    auto candles = make_candles(count, close_step);
+    for (std::size_t i = 0; i < candles.size(); ++i)
+    {
+        candles[i].open_time = start_ms + static_cast<std::int64_t>(i) * 60'000;
+        candles[i].close_time = candles[i].open_time + 60'000;
+    }
+    return candles;
+}
+
+// FlatScalper — emits a Flat (close-only) entry per evaluation; proves the
+// base net always lets the flatten/exit channel through a blackout.
+class FlatScalper : public TestScalper
+{
+  public:
+    using TestScalper::TestScalper;
+
+  protected:
+    std::optional<EntryContext> evaluateEntry(
+        const std::vector<market::Kline> & /*candles*/) override
+    {
+        ++eval_calls;
+        EntryContext e;
+        e.type = SignalType::Flat;
+        e.confidence = 0.0;
+        e.reason = "test flat";
+        return e;
+    }
+};
 
 } // anonymous namespace
 
@@ -293,6 +329,84 @@ TEST(UnifiedScalper, CooldownDisabledByZeroParam)
     scalper->onKline(trigger);
 
     EXPECT_EQ(2u, received.size());
+}
+
+TEST(UnifiedScalper, NewsGateDropsEntrySignalsWhileBlocked)
+{
+    FeedHarness harness{ MarketType::Futures };
+    const std::int64_t kEvent = 1'800'000'000'000LL;   // fixed event instant
+    NewsWindow w;
+    w.event_open_ms = kEvent;
+    w.close_before_min = 15.0;
+    w.resume_after_min = 15.0;   // blackout [kEvent−15m, kEvent+15m)
+
+    auto ctx = make_ctx(harness, "BTC_USDT");
+    ctx.config.news_windows.push_back(w);
+
+    auto scalper = std::make_unique<TestScalper>(ctx);
+    scalper->params().min_confidence.store(0.0, std::memory_order_release);
+
+    std::vector<TradingSignal> received;
+    scalper->setSignalCallback([&](const TradingSignal &s)
+        {
+            received.push_back(s);
+        });
+
+    // Two candles whose LAST open_time is inside the blackout → the entry
+    // signal is dropped here (after evaluateEntry already ran — the same
+    // "state committed, signal dropped" contract as the cooldown gate).
+    auto candles = make_timed_candles(2, kEvent - 10 * 60'000);
+    harness.feed.getKlineBuffer("BTC_USDT").push(candles[0]);
+    harness.feed.getKlineBuffer("BTC_USDT").push(candles[1]);
+
+    market::Kline trigger;
+    trigger.closed = true;
+    scalper->onKline(trigger);
+    EXPECT_EQ(1u, scalper->eval_calls);   // evaluateEntry still ran
+    EXPECT_TRUE(received.empty());        // ... but the Buy was suppressed
+
+    // Candle open_time at/after T+Y → the entry flows again.
+    auto after = make_timed_candles(1, kEvent + 15 * 60'000);
+    harness.feed.getKlineBuffer("BTC_USDT").push(after.front());
+    scalper->onKline(trigger);
+    EXPECT_EQ(2u, scalper->eval_calls);
+    ASSERT_EQ(1u, received.size());
+    EXPECT_EQ(SignalType::Buy, received.front().type);
+}
+
+TEST(UnifiedScalper, NewsGatePassesFlatSignals)
+{
+    FeedHarness harness{ MarketType::Futures };
+    const std::int64_t kEvent = 1'800'000'000'000LL;
+    NewsWindow w;
+    w.event_open_ms = kEvent;
+    w.close_before_min = 15.0;
+    w.resume_after_min = 15.0;
+
+    auto ctx = make_ctx(harness, "BTC_USDT");
+    ctx.config.news_windows.push_back(w);
+
+    auto scalper = std::make_unique<FlatScalper>(ctx);
+    scalper->params().min_confidence.store(0.0, std::memory_order_release);
+
+    std::vector<TradingSignal> received;
+    scalper->setSignalCallback([&](const TradingSignal &s)
+        {
+            received.push_back(s);
+        });
+
+    // A Flat inside the blackout MUST be delivered — the close-only exit
+    // channel stays open so gate flattening and rule exits always flow.
+    auto candles = make_timed_candles(2, kEvent - 5 * 60'000);
+    harness.feed.getKlineBuffer("BTC_USDT").push(candles[0]);
+    harness.feed.getKlineBuffer("BTC_USDT").push(candles[1]);
+
+    market::Kline trigger;
+    trigger.closed = true;
+    scalper->onKline(trigger);
+    EXPECT_EQ(1u, scalper->eval_calls);
+    ASSERT_EQ(1u, received.size());
+    EXPECT_EQ(SignalType::Flat, received.front().type);
 }
 
 TEST(UnifiedScalper, CustomParamReturnsConfiguredValue)

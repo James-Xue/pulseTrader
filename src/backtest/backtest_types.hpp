@@ -73,6 +73,10 @@ struct BacktestOptions
     /// overlaid with CLI custom keys. Applied BEFORE strategy construction
     /// (some strategies read them in klineNeeded() from candle one).
     std::map<std::string, double> custom_params;
+    /// 重大消息事件闸 windows (NewsGate): from repeatable CLI "--news" flags
+    /// or seeded from the config instance's news_windows. Empty = gate off.
+    /// CLI-explicit --news windows win over the config seed.
+    std::vector<pulse::NewsWindow> news_windows;
 };
 
 // ---------------------------------------------------------------------------

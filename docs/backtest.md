@@ -47,7 +47,8 @@ BacktestAccount 自 2026-09-06 起把 Flat 当只平通道(原语义:状态信�
 | `--quanto Q` | 合约乘数(1 张 = Q 基础币)。**缺省自动解析**:公开合约表 → 缓存 12h。改缓存路径 `--contracts-cache P`,禁用 `--no-contract-cache`(离线且无缓存时明确报错要 `--quanto`,绝不静默按错误乘数算 PnL) |
 | `--param KEY=VALUE` | **策略参数注入**(可重复,CLI 胜出 `--config`)。原子热参键:`order_quantity, min_confidence, ema_fast_period, ema_slow_period, bb_period, bb_std_dev, supertrend_period, supertrend_multiplier, cooldown_seconds, stop_loss_pct, take_profit_pct, auto_trade`;任何其它键走 custom_params 通道(`eth_atr_step`, `eth_spike_filter_*`, `res_ema_p1..p5`, ...)。JSON 报告的 `params.atomic / params.custom` 记录实际跑了什么 |
 | `--quantity Q` | 开仓量(只做 PnL 缩放)。`--param order_quantity=` 只热更策略侧原子值,不改成交尺寸 |
-| `--config PATH` | trading.toml 实例播种:quantity/min_confidence(仅当 CLI 未显式改过)+ **custom_params**(M33 起)。CLI 显式值胜出 |
+| `--config PATH` | trading.toml 实例播种:quantity/min_confidence(仅当 CLI 未显式改过)+ **custom_params**(M33 起)+ **news_windows**(M33.1 起,仅当 CLI 未显式给过 `--news`)。CLI 显式值胜出 |
+| `--news TIME[/X[/Y]]` | **重大消息事件闸窗口**(M33.1,可重复,一次一个)。T = 事件 UTC 时刻(ISO 或 epoch);X = `close_before_min`(缺省 15)、Y = `resume_after_min`(缺省 15):禁开 [T−X, T+Y)、持仓跨 T−X 强制 Flat(`exit_reason = news_blackout`)。实例级 TOML 同款键 `news_windows`;规则见 docs/strategies/iron-trader.md §4.6。例:`--news "2026-09-16T18:00:00Z/15/15"`(sweep 透传) |
 | `--from/--to TIME` | 秒/毫秒 epoch 或 ISO UTC;缺省按本地覆盖自动解析 |
 | `--no-api` / `--no-cache` | 只用本地存量 / 不写回 sqlite |
 | `--db PATH` | kline_bars 库(默认 `data/trades.db`) |

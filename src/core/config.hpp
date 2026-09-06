@@ -257,6 +257,21 @@ struct ControlConfig
 };
 
 // ---------------------------------------------------------------------------
+// NewsWindow — one preset UTC news/event window (重大消息事件闸)
+//
+// Major scheduled events (FOMC/CPI/NFP ...) close positions and block new
+// entries around the event instant. Judged ONLY on candle open_time ms UTC
+// (no wall clock) so live and backtest behave identically — see
+// strategy/NewsGate.hpp for the full gate semantics.
+// ---------------------------------------------------------------------------
+struct NewsWindow
+{
+    std::int64_t event_open_ms = 0;  ///< Event instant (UTC epoch ms).
+    double close_before_min = 15.0;  ///< X: flatten starts at T−X; entries block from T−X.
+    double resume_after_min = 15.0;  ///< Y: entries resume at first open_time ≥ T+Y.
+};
+
+// ---------------------------------------------------------------------------
 // StrategyInstanceConfig — one strategy's runtime parameters
 //
 // Fields:
@@ -290,6 +305,13 @@ struct StrategyInstanceConfig
     /// coin strategies via UnifiedScalper::customParam(key, fallback). Absent
     /// in legacy configs → empty map.
     std::map<std::string, double> custom_params;
+
+    /// 重大消息事件闸 windows: TOML instance-level
+    /// `news_windows = [{ time = "2026-09-16T18:00:00Z", ... }]` (array of
+    /// inline tables). Empty = gate off. PRESET-only (config edit + restart),
+    /// deliberately NOT a custom_params/--param key — the double map cannot
+    /// hold a time list. Times judged on candle open_time ms UTC (NewsGate).
+    std::vector<NewsWindow> news_windows;
 };
 
 // ---------------------------------------------------------------------------

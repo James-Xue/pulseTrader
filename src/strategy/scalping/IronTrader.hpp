@@ -9,11 +9,19 @@
 // Lifecycle — fully managed INSIDE the strategy (the M33 account flip model
 // alone cannot express "exit without re-entering"):
 //   Flat ──(T-A pullback | T-B confirmed breakout, all gates green)──▶ Long/Short
-//   Long/Short ──(hard stop / structure flip / momentum flip / time stop)──▶ Flat
+//   Long/Short ──(hard stop / structure flip / momentum flip / time stop /
+//                  news_blackout 事件闸强平)──▶ Flat
 // Every exit emits a *Flat* signal — a close-only channel: BacktestAccount
 // closes without opening the opposite side; the signal board / aggregator
 // treat Flat as a status event as usual. Live OrderFlowExecutor semantics for
 // this strategy are future work (strategy runs signal-only today).
+//
+// 重大消息事件闸 (§4.6, NewsGate.hpp): preset UTC news windows
+// (StrategyInstanceConfig::news_windows) — entries are suppressed from T−X
+// to T+Y around each event, and a position opened before the event is
+// force-flattened (Flat, exit_reason = news_blackout) from the first candle
+// with open_time ≥ T−X. Fully effective in backtest and at the signal level
+// today; live force-close EXECUTION stays a future milestone (see above).
 //
 // Gate stack per candle (rules doc §4):
 //   G1 structure — close vs trend EMA + 20-bar slope; no trend → stand aside
@@ -137,15 +145,26 @@ class IronTrader : public UnifiedScalper
     std::optional<EntryContext> managePosition(
         const market::Kline &cur, const Indicators &ind);
 
+    /// 事件闸强平 (§4.6): commit a Flat exit when a news window's pre-close
+    /// phase is due for the held position (exit_reason = "news_blackout").
+    std::optional<EntryContext> flattenForNews(const market::Kline &cur);
+
+    /// True when the held position (entered at m_entry_open_ms) must flatten
+    /// for a news window at this candle's open time.
+    [[nodiscard]] bool newsFlattenDueNow(std::int64_t open_ms) const;
+
     /// Entry evaluation in the Flat phase (cooldown → gates → T-A/T-B).
     std::optional<EntryContext> evaluateEntrySetup(
         const std::vector<market::Kline> &candles, const Indicators &ind,
         StructDir struct_dir, double close);
 
     /// Commit a decided entry and build its Buy/Sell EntryContext.
+    /// entry_open_ms = the entry candle's open_time (recorded for the news
+    /// gate's pre-event flatten predicate).
     std::optional<EntryContext> finishEntry(double close,
         const Indicators &ind, bool bull, double sep_gate,
-        const std::string &trigger, double sep_for_conf);
+        const std::string &trigger, double sep_for_conf,
+        std::int64_t entry_open_ms);
 
     /// R0/R1/R6 pre-trade checklist (30 秒检查表, §3). Logs the refusal.
     [[nodiscard]] bool riskChecklistPasses(const Indicators &ind);
@@ -170,6 +189,7 @@ class IronTrader : public UnifiedScalper
     // --- Rolling state (strategy thread only) ---
 
     Phase m_phase{ Phase::Flat };
+    std::int64_t m_entry_open_ms = 0; ///< Entry candle open_time (news gate flatten predicate).
     double m_entry_price = 0.0;
     double m_stop_price = 0.0;        ///< Protective stop (moves one way only).
     double m_entry_atr = 0.0;         ///< ATR14 at entry.

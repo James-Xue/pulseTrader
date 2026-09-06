@@ -41,7 +41,7 @@
 | 回测成交模型 | M33:信号在 K 线收盘触发,按**下一根收盘价**(或信号收盘价——以实际加载器为准)即时成交;`stop_loss_pct/take_profit_pct` 等 intra-bar 路径**未实现** | SL/TP 条款在回测中 = "收盘价确认止损",intra-bar 保真 → 待里程碑(§9 标记 ⚠️) |
 | 手续费 | 回测默认 futures taker 0.05%/腿(往返 0.10%) | 高频必死,E2/E1 已证;IronTrader 低频,但费率敏感时考虑 maker 变体 |
 | 资金模型 | 回测账户**无初始资金/无强平/无资金费**(增量净盈亏) | 铁律中的"强平距离/权益百分比"条款在回测语义 N/A,保留为实盘条款并标 [实盘] |
-| 时间事件 | 回测无新闻日历 feed | FOMC 等"数据前纪律"以波动率闸近似;真日历门闸 → [实盘增强] |
+| 时间事件 | 定档重大消息以**预置 UTC 事件窗**(§4.6,实例级 `news_windows`,回测 `--news` 注入,同表同行为)硬闸处理;未列入事件的冲击仍以波动率闸近似(§4.5) | **策略侧红字门闸已实现**(回测+信号侧,见 §4.6);实盘强平执行(OrderFlowExecutor 吃 Flat)仍 [实盘增强] |
 
 ---
 
@@ -87,7 +87,7 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 多方动能: sep ≥ +it_sep_gate      空方动能: sep ≤ −it_sep_gate
 ```
 - |sep| 介于 0 与 gate 之间 = **粘合期**,是 XAU 实证里假交叉的重灾区 → 不做。
-- **时段分层**(BTC 24/7 无维护窗,主/收紧只是门槛分层、不是交易开关):主时段 **06:00Z–20:00Z**(欧美活跃)用 `it_sep_gate`;收紧时段 **20:00Z–06:00Z**(亚盘+凌晨薄流动性)门槛 × `it_tight_gate_mult` 且冷却 + `it_tight_cooldown_add` 根(源:XAU 任务书 v3.1 时段感知权重)。时刻一律以 K 线 close_time 的 UTC 判定,不信本地日历跨日(日界实证教训)。
+- **时段分层**(BTC 24/7 无维护窗,主/收紧只是门槛分层、不是交易开关):主时段 **06:00Z–20:00Z**(欧美活跃)用 `it_sep_gate`;收紧时段 **20:00Z–06:00Z**(亚盘+凌晨薄流动性)门槛 × `it_tight_gate_mult` 且冷却 + `it_tight_cooldown_add` 根(源:XAU 任务书 v3.1 时段感知权重)。时刻一律以 K 线 **open_time** 的 UTC 判定(与实现一致;早期行文写 close_time,见修订记录 v1.5 口径修正),不信本地日历跨日(日界实证教训)。
 
 **G3 · 波动闸(R5)**:
 - `regime ≠ hot`:ATR14 ≤ it_regime_cap × median(TR, 20);超限 = hot → 禁开;
@@ -132,11 +132,32 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 - 反向触发刚发生过 1 根(等冷却);
 - **勿追急拉/急跌第一波**(用户原话纪律 + 复盘 #13/#15 实证:追第二腿顶 → 见顶回撤 ~6 点;高位压顶 0.75×ATR 不追 → 价格钉住横盘未续涨);
 - 任何一条 30 秒检查表不过;
-- ⚠️ **不猜**:数据/事件冲击后的第一波急拉急跌不追(无日历 feed 时以"maxTR 骤升 + sep 骤扩"近似识别,真日历 → [实盘增强])。
+- ⚠️ **不猜**:数据/事件冲击后的第一波急拉急跌不追(**列入 §4.6 事件窗的走硬闸**;未列入的临时冲击以"maxTR 骤升 + sep 骤扩"波动近似兜底)。
 
----
+### 4.6 重大消息事件闸(红字日历门闸;g7/RED_WINDOW 同构)
 
-## 5. 信号输出契约(给引擎/聚合器/信号板)
+> 源:XAU 任务书 g7(事件日历门闸)+ RED_WINDOW 17:45Z–18:05Z 不开新仓 + 事件前持仓评估先例(docs/gate交易/黄金/joey-Z170I-PRO-GAMING/任务书/xauusd-agent-taskbook.md:18,58)。引擎无新闻日历 feed —— 本闸以**预置 UTC 事件窗**把"数据前纪律"从波动率近似升级为确定性硬闸。
+
+- **配置**(实例级 TOML 键 `news_windows`,**非** `custom_params`/`--param` 键;回测用 `--news` 注入,见 docs/backtest.md):
+
+  ```toml
+  [[strategy.instances]]
+  name = "iron_trader"
+  symbol = "BTC_USDT"
+  news_windows = [
+      { time = "2026-09-16T18:00:00Z" },                              # X/Y 缺省 15/15
+      { time = "2026-10-01T12:30:00Z", close_before_min = 30, resume_after_min = 30 },
+  ]
+  # time = ISO UTC 串 或 裸 epoch(< 1e12 视为秒,否则 ms);空/缺省 = 闸关
+  ```
+
+- **语义**(事件时刻 T、提前平仓 X 分、延后恢复 Y 分;判定一律 K 线 **open_time** ms UTC,与时段分层/日界同口径):
+  - **禁开窗 = [T−X, T+Y)**:该区间内任意开仓信号不发(破位确认机 m_break_active 同步作废 —— 事件尖刺根不得充当恢复后的确认根);首根可开仓 K:`open_time ≥ T+Y`。
+  - **强平 = 持仓且 入场 K open_time < T,当前 open_time ≥ T−X**:首根到达即合成 Flat 出场(`exit_reason = news_blackout`,与其它出场同结算口径),平后保持禁开直到窗口结束。
+  - 多窗口取并集(重叠/乱序幂等);窗口过期自然失效(事件后开的仓永不触发该窗);X=0 表示事件当根收盘才平 —— 留余量请 X ≥ 1(1m 粒度动作延迟 ≤ 1 根)。
+  - **无运行期开关**:改配置 + 重启;事件清单预置(fail-safe:写错/漏配 = 闸关,解析期严格报错 5xxx)。
+- **范围 = 框架级通用**:任何 UnifiedScalper 族策略实例可配同款窗(基类 onKline 对 entry 信号统一兜底拦截、Flat 只平通道永远放行,见 NewsGate.hpp/UnifiedScalper.hpp);iron_trader 为本闸首个接线者(强平语义依赖其策略内状态机)。
+- ⚠️ 实盘强平**执行**(OrderFlowExecutor 对 Flat 的真实下单平仓)仍属 [实盘增强] future work —— 本闸在回测与信号侧完整生效,当前引擎 posture = signal_only。
 
 - 满足全部闸门 + 任一触发 → 发 `Buy`/`Sell`,置信度(实现口径,与 C++ 一致):
   ```
@@ -144,7 +165,7 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
   sep_gate_effective = it_sep_gate × (时段收紧) × (连亏 2 最强信号倍数)
   ```
   设计理由:`sep ≥ gate` 是入场最低门槛 ⇒ 任何合格入场置信 ≥ **0.6**(引擎默认 min_confidence,不再像 E3 那样把信号静默滤掉),2×gate 封顶 1.0。闸不过一律不发;退出是 **Flat**(只平仓通道,见 §9 映射),与翻转事件驱动策略的"不发 Flat"不同——本策略的 Flat 是交易动作。
-- 退出的 Flat 信号 `indicators`:`{ state, exit_reason, close }`;`exit_reason ∈ { hard_stop, structure_flip, momentum_flip, time_stop }`。
+- 退出的 Flat 信号 `indicators`:`{ state, exit_reason, close }`;`exit_reason ∈ { hard_stop, structure_flip, momentum_flip, time_stop, news_blackout(§4.6 事件闸强平) }`。
 - `indicators` 快照(进信号板/报告,每根收盘更新):`{ close, ema_trend, ema_fast, ema_slow, atr14, med_tr20, sep, regime, spike_flag, rsi14, box_high, box_low, state }`;
 - **暖机纪律**(复盘 #10:25 根短窗暖机算出假空头交叉差点带偏方向):`klineNeeded = it_trend_ema + 60`(覆盖斜率判定的 20 根余量 + ATR/RSI 稳定窗);暖机完成前不发任何信号、不发布状态——禁止用短窗"伪指标"发信号。
 - `reason` 人类可读:如 `pullback_resume_buy | sep=0.34 | regime=calm`。
@@ -157,18 +178,19 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 ```
 每根 1m K 收盘(暖机完成前直接 return,klineNeeded 见 §5):
   1. 更新指标:EMA(fast/slow/trend)、ATR14、medTR20、RSI14、箱体(high/low of last N closed);标 spike_flag(尖刺根,4.1 G3)
-  2. 更新结构方向 struct_dir = bull|bear|none(4.1 G1);判定当前时段(主 06:00Z–20:00Z / 收紧,按 close_time UTC)
+  2. 更新结构方向 struct_dir = bull|bear|none(4.1 G1);判定当前时段(主 06:00Z–20:00Z / 收紧,按 open_time UTC)
   3. 更新日计数(R6:已开笔数/连亏/当日已实现);跨 UTC 00:00Z → 全部归零
-  4. 若 持仓 != 0:
+  4. 事件闸(§4.6):命中任一窗 → 持仓且入场在事件前 → 强平 Flat(news_blackout)+结算 → return;无仓 → 破位机作废,return(禁开)
+  5. 若 持仓 != 0:
        执行 4.3 出场检查;若平仓 → 记盈亏(止损距离倍数)/理由 → 冷却 it_cooldown_bars(+收紧时段 it_tight_cooldown_add)
        若有仓且未平 → return(有仓只做管理,R2)
-  5. 若 冷却中 → return
-  6. 30 秒检查表(R2/R5/R6):不过 → return(记 reason)
-  7. 方向闸 G2:sep 同向达标(收紧时段 ×it_tight_gate_mult;连亏 2 后 ×it_streak_gate_mult)?不过 → return
-  8. 触发评估(先最后复检 4.2:近 cooldown 根内反向事件 → return):
+  6. 若 冷却中 → return
+  7. 30 秒检查表(R2/R5/R6):不过 → return(记 reason)
+  8. 方向闸 G2:sep 同向达标(收紧时段 ×it_tight_gate_mult;连亏 2 后 ×it_streak_gate_mult)?不过 → return
+  9. 触发评估(先最后复检 4.2:近 cooldown 根内反向事件 → return):
        T-A 拉回:上根收 < EMA_fast(多向)且本根收 > EMA_fast → 入场多
        T-B 突破:收盘破箱体 + 确认制(+尖刺复证) → 入场(RSI 对冲过滤拦截则 return)
-  9. 入场:R1 检查(止损成本 ≤ 2%×日初权益,超限 return)→ 记 entry、初始止损 = entry ∓ it_sl_atr×ATR14 → 发 Buy/Sell 信号(带 indicators/reason)
+  10. 入场:R1 检查(止损成本 ≤ 2%×日初权益,超限 return)→ 记 entry、初始止损 = entry ∓ it_sl_atr×ATR14 → 发 Buy/Sell 信号(带 indicators/reason)
 ```
 
 ---
@@ -204,6 +226,8 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 | `order_quantity`(atomic) | 由配置 | — | 单笔开仓量(R 按此复算) |
 
 > 默认值 = 初值,待 `tools/backtest_sweep.py` 标定;**铁律语义随参数变化的是频率与 R 大小,不是纪律本身**——任何一组参数跑出"高频率 + 小止损"形态,都直接违反 R1/R6,评审一票否决。
+>
+> `news_windows`(§4.6)是**实例级 TOML 键**(结构化时间表,double 通道装不下),不在上表 / 不在 `--param` 语法内;回测以可重复 `--news TIME[/X[/Y]]` 注入(缺省 X/Y = 15/15)。
 
 ---
 
@@ -215,6 +239,8 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 - [ ] 单测:R6 计数(日界重置/连亏停手/日亏停手/日笔数上限);
 - [ ] 回测验收:BTC futures 近周(08-30→09-06)默认参数:信号数应为个位数(低频特征),若 > 30 笔/周 → 视为闸门失效,红;
 - [ ] 回测对比:E1 对照——同窗 IronTrader vs momentum 低闸 254 笔 −50.25,应显著优于(纪律溢价可量化);
+- [x] 单测:事件闸四用例(2026-09-06):① 黑名单禁开 ② 持仓跨 T−X 恰一根 Flat(news_blackout,exit_reason/indicators 校验)③ 窗口过后恢复开仓 ④ 破位机跨事件停摆(首根回来只 re-arm 不秒确认)—— 全绿(1032 全量);
+- [x] E2E(2026-09-06,BTC futures 08-30→09-06):`--news 2026-08-31T05:46:30Z/10/5` → 基线 37 分钟持仓(05:28→06:05)被强平为 05:28→**05:37**(首根 open_time ≥ T−X=05:36:30),其余 25 笔交易逐笔不变;事件窗盖住入场点时 → 入场信号被吞、禁闭窗内零开仓;
 - 初值实测(2026-09-06,BTC futures 08-30→09-06,9,839 根,qty=20):默认参数 **26 笔/周、净 −4.74(胜率 15%,手续费 4.10)**;`sep_gate/sl_atr/cooldown/动能周期` 单独收严均**不降频**(BTC 1m 的 |sep| 天然巨大,换手由结构窗内小回踩事件数决定)→ 频率杠杆在**冷却/持仓间隔与时间尺度**,参数标定走 `backtest_sweep.py`;maker 费率(0.02%)下手续费减半(−2.28),实盘优先 maker-first;
 - **sweep 标定(2026-09-06,480 组合 = 240×2 数据集,数据存 `results/sweep_iron_{futures,spot}.csv`)**:
   - futures 6.9d:taker 口径 **240 组合 0 盈利**(最好 −1.18);maker(0.02%,费用线性换算+确认跑)最好 **+1.37**(cd40/sl5/trend400/box60/sep0.3),但**最大单笔 +1.05 = 净利 77%** → 单笔运气,不可提拔;
@@ -245,7 +271,7 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 | G2 sep ATR 归一 | 信号板设计 §4 方向过滤 + C 方案(置信 ATR 归一修复的工程结论) | 新实现(修复 E3 的关键) |
 | T-B 确认制/RSI 对冲/复证 | 复盘 #5/#6/M22 回合 130–132/回合 446 | 新实现 |
 | 时间止损/冷却/日界 | 任务书 §4/日界教训 | 可回测 ✅ |
-| 真事件日历门闸、maker-first 变体、intra-bar SL/TP | 任务书 g7/B2;M16;M33 路线图 | [实盘增强] / 待里程碑,本期不做 |
+| 真事件日历门闸(§4.6)、maker-first 变体、intra-bar SL/TP | 任务书 g7/B2;M16;M33 路线图;XAU RED_WINDOW | 回测/信号侧 ✅(2026-09-06 落地,预置 UTC 窗 + Flat news_blackout);实盘强平执行(OrderFlowExecutor 吃 Flat)仍 [实盘增强];maker-first 变体、intra-bar SL/TP 待里程碑 |
 
 ---
 
@@ -258,3 +284,4 @@ sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m �
 | v1.2-draft | 2026-09-06 | 用户裁定:资金闸改用 **% 口径**(R 单位退役)——新增 R0 纸面权益记账;R1 单笔止损成本 ≤ 2%×日初权益(超限拒发信号);R6 日亏 ≥ 5%×日初权益停手;保本/时间止损改用"止损距离倍数"(`it_be_x_sl`/`it_timeout_x_sl`);参数换入 `it_equity_ref_usd`/`it_risk_pct`/`it_day_loss_pct` |
 | v1.3 | 2026-09-06 | C++ 落地(1016 全绿):注册键 `iron_trader`;BacktestAccount 增 **Flat = 只平不开**通道;置信公式对齐实现(§5);补 `it_quanto_est`/`it_fee_est` [近似] 参数;§9 增 Flat 通道映射;回测初值表见 §8(默认参数 26 笔/周 −4.74,闸门收严不降频——BTC 1m 结构性结论,参数标定走 sweep) |
 | v1.4 | 2026-09-06 | 480 组合 sweep 标定结论落档(§8 + results/ 两份 CSV):taker 下无盈利组合;maker 最好角 +1.37 但 77% 来自单笔;spot 全负;1m 毛利≈0 → 默认参数保持初值,边际杠杆在时间尺度与 maker-first |
+| v1.5 | 2026-09-06 | **重大消息事件闸落地**(§4.6,1032 全绿 + E2E 实录):预置 UTC 窗实例级 `news_windows`(回测 `--news`),禁开 [T−X, T+Y) + 持仓跨 T−X 强制 Flat(`news_blackout`),框架级通用(NewsGate.hpp 纯逻辑 + UnifiedScalper 基类兜底),iron_trader 首个接线;**口径修正声明**:时段分层/日界/本闸一律以 K 线 **open_time** UTC 判定(早期 §4.1/§6 行文写 close_time,与实现不符,现文档与实现统一为 open_time) |

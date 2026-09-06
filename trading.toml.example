@@ -140,6 +140,10 @@ poll_interval_ms = 500
 # custom_params  = { eth_atr_step = 0.05, eth_spike_filter_usd = 120.0, eth_min_confidence_scale = 1.0 }
 # order_type      = "maker_first"   # "market"（默认）| "post_only" | "maker_first"
 # maker_timeout_ms = 500            # 挂单超时毫秒，超时撤单改市价（仅 maker_first）
+# news_windows    = [              # 重大消息事件闸(iron-trader §4.6, 框架级通用):
+#     { time = "2026-09-16T18:00:00Z" },            # ISO UTC; X/Y 缺省 15/15 分
+#     { time = 1789000000, close_before_min = 30, resume_after_min = 30 },
+# ]                                # time 亦接受裸 epoch(< 1e12 视为秒);空 = 闸关
 
 # ── 五周期 EMA 共振策略示例: ema_resonance_scalper（2026-08-23）────────
 # EMA 7/14/30/60/200 全排列对齐才出信号: 严格递增 = 多头共振 Buy,

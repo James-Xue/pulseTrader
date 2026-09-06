@@ -9,9 +9,10 @@
 #include "backtest/BacktestEngine.hpp"
 #include "backtest/backtest_types.hpp"
 #include "core/PulseError.hpp"
+#include "core/TimeUtil.hpp"
+#include "core/config.hpp"
 #include "core/types.hpp"
 
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -55,6 +56,11 @@ void printBacktestUsage(const char *prog)
         << "                        stop_loss_pct, take_profit_pct) set the hot params;\n"
         << "                        ANY other key routes to custom_params (eth_*,\n"
         << "                        res_ema_p1..p5, ...). CLI wins over --config values.\n"
+        << "  --news TIME[/X[/Y]]   preset UTC news window (repeatable): entries blocked\n"
+        << "                        [T-X, T+Y); a position opened before T is flattened\n"
+        << "                        from T-X (major-news gate, iron-trader rules §4.6).\n"
+        << "                        X = close_before_min, Y = resume_after_min, default\n"
+        << "                        15/15; e.g. --news 2026-09-16T18:00:00Z/15/15\n"
         << "  --no-api              disable Gate API gap fill (local data only)\n"
         << "  --no-cache            do not write API-fetched candles back to sqlite\n"
         << "  --config PATH         trading.toml for instance params (quantity/confidence/\n"
@@ -66,49 +72,12 @@ void printBacktestUsage(const char *prog)
 
 /// Parse a time argument: bare epoch (<=10 digits = seconds, else ms), or
 /// ISO UTC "YYYY-MM-DD" / "YYYY-MM-DDTHH:MM:SS". Returns 0 on parse error
-/// (callers distinguish 0 = unset).
+/// (callers distinguish 0 = unset). Shared logic: core::parseEpochMsText.
 std::int64_t parseTimeArg(const std::string &text, bool *ok_flag)
 {
-    // Pure numeric → epoch (seconds if < 1e12, else ms).
-    bool all_digits = !text.empty();
-    for (const char c : text)
-    {
-        all_digits = all_digits && (c >= '0' && c <= '9');
-    }
-    if (all_digits)
-    {
-        const std::int64_t v = std::stoll(text);
-        *ok_flag = true;
-        return (v < 1'000'000'000'000LL) ? v * 1000 : v;
-    }
-
-    // ISO UTC. Accept "YYYY-MM-DD" (midnight) and "YYYY-MM-DDTHH:MM:SS".
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    if (6 > std::sscanf(text.c_str(), "%d-%d-%dT%d:%d:%d",
-                        &year, &month, &day, &hour, &minute, &second)
-        && 3 > std::sscanf(text.c_str(), "%d-%d-%d", &year, &month, &day))
-    {
-        *ok_flag = false;
-        return 0;
-    }
-
-    std::tm tm{};
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month - 1;
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = minute;
-    tm.tm_sec = second;
-    tm.tm_isdst = 0;
-
-    const std::time_t secs = timegm(&tm);
-    if (-1 == secs)
-    {
-        *ok_flag = false;
-        return 0;
-    }
-    *ok_flag = true;
-    return static_cast<std::int64_t>(secs) * 1000;
+    std::int64_t parsed = 0;
+    *ok_flag = parseEpochMsText(text, parsed);
+    return *ok_flag ? parsed : 0;
 }
 
 } // anonymous namespace
@@ -243,6 +212,49 @@ int runBacktest(int argc, char *argv[])
                 return 2;
             }
             opts.param_overrides[kv.substr(0, eq)] = std::stod(kv.substr(eq + 1));
+        }
+        else if ("--news" == arg)
+        {
+            // Grammar: TIME[/close_before_min[/resume_after_min]] — repeatable,
+            // one window per occurrence. Fractional minutes allowed.
+            const std::string spec = next();
+            if (spec.empty())
+            {
+                std::cerr << "--news expects TIME[/X[/Y]] "
+                             "(e.g. --news 2026-09-16T18:00:00Z/15/15)\n";
+                return 2;
+            }
+            NewsWindow win;
+            const std::size_t slash = spec.find('/');
+            const std::string time_text = spec.substr(0, slash);
+            bool ok_flag = false;
+            win.event_open_ms = parseTimeArg(time_text, &ok_flag);
+            if (!ok_flag)
+            {
+                std::cerr << "Could not parse --news time: " << time_text << "\n";
+                return 2;
+            }
+            if (std::string::npos != slash)
+            {
+                const std::size_t slash2 = spec.find('/', slash + 1);
+                const std::string x_text = spec.substr(slash + 1, slash2 - slash - 1);
+                const std::string y_text = (std::string::npos != slash2)
+                    ? spec.substr(slash2 + 1) : std::string{};
+                if (!x_text.empty())
+                {
+                    win.close_before_min = std::stod(x_text);
+                }
+                if (!y_text.empty())
+                {
+                    win.resume_after_min = std::stod(y_text);
+                }
+            }
+            if (win.close_before_min < 0.0 || win.resume_after_min < 0.0)
+            {
+                std::cerr << "--news X/Y must be >= 0 (got: " << spec << ")\n";
+                return 2;
+            }
+            opts.news_windows.push_back(win);
         }
         else if ("--no-api" == arg)
         {

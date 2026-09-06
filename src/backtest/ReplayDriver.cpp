@@ -32,6 +32,8 @@ ReplayDriver::ReplayDriver(const BacktestOptions &opts,
     // strategies read them in klineNeeded() (EmaResonance's res_ema_p5 gates
     // its warmup from the first candle on).
     ctx.config.custom_params = opts.custom_params;
+    // 重大消息事件闸 windows ride the same construction-time path.
+    ctx.config.news_windows = opts.news_windows;
     ctx.market_feed = &m_feed;
 
     m_strategy = registry.create(opts.strategy_name, ctx);
