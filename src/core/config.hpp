@@ -334,6 +334,13 @@ struct SqliteConfig
     std::string dbPath = "trades.db";    ///< SQLite database file path.
     bool recordMarketData = false;       ///< Persist ticker/kline to SQLite (M18).
 
+    /// Persist every strategy signal to the `signals` table (M32 signal
+    /// journal) — the raw pre-aggregation stream + aggregator consensus rows,
+    /// replay source for the A/B weight trial. Append-only. Independent of
+    /// record_market; requires enabled=true. Default true: signal journaling
+    /// is cheap and is the strategy-behavior audit trail (set false to stop).
+    bool recordSignals = true;
+
     /// Markets whose KLINE data is NOT persisted to kline_bars (M30).
     /// Ticker recording (ticker_ticks) is never affected. Gate REST serves
     /// live futures candles (~30s fresh), so futures self-recording is

@@ -62,12 +62,14 @@
 
 #ifdef PULSE_ENABLE_SQLITE
 #include "trade_recorder/MarketRecorder.hpp"
+#include "trade_recorder/SignalRecorder.hpp"
 #include "trade_recorder/TradeRecorder.hpp"
 #else
 // Forward declaration keeps the non-SQLite call sites uniform (null recorder).
 namespace pulse::trade_recorder
 {
 class TradeRecorder;
+class SignalRecorder;
 }
 #endif
 
@@ -106,6 +108,45 @@ static std::string envOr(const char* name, const std::string& fallback)
     const char* val = std::getenv(name);
     return (val && val[0]) ? std::string(val) : fallback;
 }
+
+// SignalType → lowercase wire string ("buy" / "sell" / "flat") for the
+// signal journal; mirrors the SignalBoard entry serialization.
+static const char *signalTypeWire(pulse::strategy::SignalType type)
+{
+    switch (type)
+    {
+    case pulse::strategy::SignalType::Buy:
+        return "buy";
+    case pulse::strategy::SignalType::Sell:
+        return "sell";
+    case pulse::strategy::SignalType::Flat:
+        return "flat";
+    }
+    return "flat";
+}
+
+// TradingSignal → journal record (M32). Used at both journaling points:
+// raw strategy stream (strategy callback) and consensus emissions
+// (aggregator output callback, which self-identifies via its strategy id).
+#ifdef PULSE_ENABLE_SQLITE
+static pulse::trade_recorder::SignalRecord toSignalRecord(
+    const pulse::strategy::TradingSignal &sig)
+{
+    return pulse::trade_recorder::SignalRecord{
+        .ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     sig.timestamp.time_since_epoch())
+                     .count(),
+        .strategy_id = sig.strategy_id,
+        .symbol = sig.symbol,
+        .market_type = toString(sig.market_type),
+        .type = signalTypeWire(sig.type),
+        .confidence = sig.confidence,
+        .price = sig.price,
+        .reason = sig.reason,
+        .indicators = sig.indicators.dump(),
+    };
+}
+#endif
 
 static void printUsage(const char* prog)
 {
@@ -832,6 +873,44 @@ static int runTrade(int argc, char* argv[])
         log->info("[L8+] Market data recording disabled "
                   "(set sqlite.record_market = true)");
     }
+
+    // M32 signal journal: appends every raw strategy signal (pre-aggregation,
+    // regardless of the auto_trade gate) plus aggregator consensus rows to the
+    // `signals` table — the replay source for the A/B weight trial. Third WAL
+    // connection to the same file; failure is warn-only.
+    std::unique_ptr<pulse::trade_recorder::SignalRecorder> signal_recorder;
+
+    if (cfg.sqlite.enabled && cfg.sqlite.recordSignals)
+    {
+        auto sr_result = pulse::trade_recorder::SignalRecorder::open(
+            cfg.sqlite.dbPath);
+
+        if (pulse::ok(sr_result))
+        {
+            signal_recorder = std::move(pulse::value(sr_result));
+            log->info("[L8+] Signal journal opened: '{}'",
+                      cfg.sqlite.dbPath);
+        }
+        else
+        {
+            log->warn("[L8+] Signal journal failed to open: {}",
+                      pulse::error(sr_result).message);
+        }
+    }
+    else
+    {
+        log->info("[L8+] Signal journal disabled "
+                  "(set sqlite.record_signals = true)");
+    }
+#endif
+
+    // Uniform raw pointer for the unconditional signal callbacks (null in
+    // non-SQLite builds).
+#ifdef PULSE_ENABLE_SQLITE
+    pulse::trade_recorder::SignalRecorder *signal_recorder_ptr =
+        signal_recorder.get();
+#else
+    pulse::trade_recorder::SignalRecorder *signal_recorder_ptr = nullptr;
 #endif
 
     // ------------------------------------------------------------------
@@ -943,9 +1022,18 @@ static int runTrade(int argc, char* argv[])
     // with auto_trade=0 (signals-only) must be stopped before aggregation.
     // It still publishes to the board (get_signals stays live for testing).
     strategy_mgr.setSignalCallback(
-        [&aggregator, board, &strategy_mgr](const pulse::strategy::TradingSignal& sig)
+        [&aggregator, board, &strategy_mgr,
+         signal_recorder_ptr](const pulse::strategy::TradingSignal& sig)
         {
             board->publish(sig);
+            // M32 journal: raw stream is recorded BEFORE the auto_trade gate
+            // so counterfactual weight policies can be replayed offline.
+#ifdef PULSE_ENABLE_SQLITE
+            if (signal_recorder_ptr)
+            {
+                signal_recorder_ptr->record(toSignalRecord(sig));
+            }
+#endif
             const auto *params = strategy_mgr.paramsByName(sig.strategy_id);
             if (nullptr == params
                 || params->auto_trade.load(std::memory_order_acquire) != 0.0)
@@ -1092,11 +1180,21 @@ static int runTrade(int argc, char* argv[])
     }
 
     aggregator.setOutputCallback(
-        [&order_flow, board](const pulse::strategy::TradingSignal& sig)
+        [&order_flow, board,
+         signal_recorder_ptr](const pulse::strategy::TradingSignal& sig)
         {
             // Published in BOTH modes: in signal-only mode this is the only
             // observable trace of the aggregator consensus.
             board->publishAggregate(sig);
+            // M32 journal: consensus rows self-identify via their strategy id
+            // ("signal_aggregator") and are excluded from replay inputs; they
+            // exist so a later auto-trade run can cross-check replay fidelity.
+#ifdef PULSE_ENABLE_SQLITE
+            if (signal_recorder_ptr)
+            {
+                signal_recorder_ptr->record(toSignalRecord(sig));
+            }
+#endif
             // In signal-only mode onSignal is a no-op (gate inside).
             order_flow.onSignal(sig);
         });
@@ -1535,6 +1633,16 @@ static int runTrade(int argc, char* argv[])
     if (spot_feed) { spot_feed->stop(); }
     if (cfd_feed) { cfd_feed->stop(); }
     log->info("[L3] Market feed(s) stopped");
+
+    // M32 signal journal — drains + checkpoints (strategies are already
+    // stopped above, so no signal can arrive after this point).
+#ifdef PULSE_ENABLE_SQLITE
+    if (signal_recorder)
+    {
+        signal_recorder->stop();
+        log->info("[L8+] Signal journal stopped");
+    }
+#endif
 
     // L8+: Market data recorder — drains + checkpoints the WAL (must stop
     // AFTER the feeds so no events are lost, BEFORE the trade recorder).

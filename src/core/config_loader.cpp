@@ -797,6 +797,7 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
     out.recordMarketData = toml::find_or(sec, "record_market", out.recordMarketData);
+    out.recordSignals = toml::find_or(sec, "record_signals", out.recordSignals);
 
     // M31: daily kline archival sync (opt-in, defaults false).
     out.dailyKlineSync = toml::find_or(sec, "daily_kline_sync", out.dailyKlineSync);
