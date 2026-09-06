@@ -21,7 +21,10 @@ TOML=deploy/cloud-out/trading.vps-futures.toml
 PATCH_VER=$(git rev-parse --short HEAD)
 
 echo "==> [1/4] scp 新 bundle(二进制+lib)到 VPS"
-scp -r "$BUNDLE"/pulsetrader "$BUNDLE"/lib "${VPS}:${VPS_DIR}/"
+# 运行中的可执行文件不能原地写(ETXTBSY)→ scp 到临时名后 mv 覆盖
+# (rename 对运行中进程无害:旧进程持有旧 inode,kill 后重启才 exec 新文件)
+scp -r "$BUNDLE"/lib "${VPS}:${VPS_DIR}/"
+scp "$BUNDLE"/pulsetrader "${VPS}:${VPS_DIR}/pulsetrader.new"
 
 echo "==> [2/4] scp 派生 trading.toml + trial 工具链"
 scp "$TOML" "${VPS}:${VPS_DIR}/trading.toml"
@@ -30,10 +33,11 @@ scp tools/trial/paper_engine.py tools/trial/run_replay.py \
     tools/trial/daily_rollup.py tools/trial/calibrate_fill_model.py \
     "${VPS}:${VPS_DIR}/tools/trial/"
 
-echo "==> [3/4] 备份旧二进制 → kill -9 触发 systemd 自愈重启"
+echo "==> [3/4] 备份旧二进制 → mv 覆盖 → kill -9 触发 systemd 自愈重启"
 ssh "${VPS}" "
   set -e
   cp ${VPS_DIR}/pulsetrader ${VPS_DIR}/pulsetrader.bak-${PATCH_VER//\//-}
+  mv -f ${VPS_DIR}/pulsetrader.new ${VPS_DIR}/pulsetrader
   pkill -9 -f '^./pulsetrader ' || pkill -9 -f 'pulsetrader trade' || true
   sleep 1
 "
