@@ -83,6 +83,10 @@ case "$1" in
         shift
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" kline-store "$@"
         ;;
+    sweep)
+        shift
+        python3 "$(dirname "$0")/tools/backtest_sweep.py" "$@"
+        ;;
     mcp)
         # MCP 走 stdio 协议: stdout 必须是纯 JSON-RPC, 禁止 echo 污染
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
