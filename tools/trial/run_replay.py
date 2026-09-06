@@ -113,21 +113,23 @@ def tick_reader(db_path: str, symbol: str,
 
 
 def run_arm(db_path: str, symbol: str, weights: Dict[str, float],
-            cfg: dict, args) -> tuple:
-    since_ms = args.since_ns // 1_000_000 if args.since_ns else 0
-    until_ms = args.until_ns // 1_000_000 if args.until_ns else (1 << 62)
+            cfg: dict, since_ns: int = 0, until_ns: int = 0,
+            notional_usdt: float = DEF_NOTIONAL,
+            maker_fee: float = DEF_MAKER_FEE,
+            taker_fee: float = DEF_TAKER_FEE) -> tuple:
+    since_ms = since_ns // 1_000_000
+    until_ms = until_ns // 1_000_000 if until_ns else (1 << 62)
 
     agg = AggregatorReplica(cfg["threshold"], cfg["cooldown_s"], weights)
     trader = PaperTrader(
         symbol=symbol,
-        maker_fee=args.maker_fee, taker_fee=args.taker_fee,
+        maker_fee=maker_fee, taker_fee=taker_fee,
         maker_timeout_s=cfg.get("maker_timeout_s", DEF_MAKER_TIMEOUT_S),
-        notional_usdt=args.notional,
+        notional_usdt=notional_usdt,
         tp_targets_pct=cfg["tp_targets"], tp_fractions=cfg["tp_fractions"],
         sl_trailing_pct=cfg["sl_trailing_pct"], max_hold_s=cfg["max_hold_s"])
 
-    signals = iter_signals(db_path, symbol, args.since_ns or 0,
-                           args.until_ns or (1 << 62))
+    signals = iter_signals(db_path, symbol, since_ns, until_ns or (1 << 62))
     ticks = tick_reader(db_path, symbol, since_ms, until_ms)
     next_tick = next(ticks, None)
     n_signals = 0
@@ -246,7 +248,11 @@ def main() -> int:
 
     weights = (load_weights(args.weights_file) if args.arm == "ai"
                else {})  # equal: 全缺省 → 聚合器默认权重 1.0
-    agg, trader, n_signals = run_arm(args.db, args.symbol, weights, cfg, args)
+    agg, trader, n_signals = run_arm(
+        args.db, args.symbol, weights, cfg,
+        since_ns=args.since_ns, until_ns=args.until_ns,
+        notional_usdt=args.notional, maker_fee=args.maker_fee,
+        taker_fee=args.taker_fee)
     print(f"  信号流: {n_signals} 条 → 聚合发射 {agg.emissions} 次")
     summarize(trader, agg, args.symbol, args.arm, cfg, args)
     return 0
