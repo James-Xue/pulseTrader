@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS kline_bars (
     close       REAL NOT NULL,
     volume      REAL NOT NULL,
     closed      INTEGER NOT NULL,
-    PRIMARY KEY (symbol, open_time)
+    PRIMARY KEY (symbol, market_type, open_time)
 );
 )";
 
@@ -61,14 +61,61 @@ INSERT INTO ticker_ticks
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 )";
 
-// INSERT OR IGNORE — PK (symbol, open_time) dedupes re-pushed candles
-// (WS forming-bar repeats, CFD backfill re-fetches after restart).
+// INSERT OR IGNORE — PK (symbol, market_type, open_time) dedupes re-pushed
+// candles (WS forming-bar repeats, CFD backfill re-fetches after restart)
+// while keeping both markets' rows for the same minute.
 constexpr const char *kInsertKline = R"(
 INSERT OR IGNORE INTO kline_bars
     (symbol, market_type, open_time, close_time, open, high, low, close,
      volume, closed)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 )";
+
+constexpr const char *kKlineIndexV2 = R"(CREATE INDEX IF NOT EXISTS
+    idx_kline_sym_type_time ON kline_bars(symbol, market_type, open_time))";
+
+/// Idempotent kline_bars schema upgrade (M33): v1 PK was
+/// (symbol, open_time), which let INSERT OR IGNORE silently drop one
+/// market's row whenever spot and futures shared the same minute. v2 widens
+/// the PK to (symbol, market_type, open_time). CREATE TABLE IF NOT EXISTS
+/// cannot upgrade an existing v1 table, so detect via PRAGMA table_info and
+/// rebuild. Mirrored in src/backtest/SqliteKlineReader.cpp — keep in sync.
+void ensureKlineSchemaV2(SQLite::Database &db)
+{
+    bool table_exists = false;
+    int pk_columns = 0;
+    {
+        // table_info columns: cid, name, type, notnull, dflt_value, pk.
+        SQLite::Statement pragma(db, "PRAGMA table_info(kline_bars)");
+        while (pragma.executeStep())
+        {
+            table_exists = true;
+            if (pragma.getColumn(5).getInt() > 0)
+            {
+                ++pk_columns;
+            }
+        }
+    }
+
+    if (table_exists && pk_columns == 2)
+    {
+        SQLite::Transaction tx(db);
+        db.exec("ALTER TABLE kline_bars RENAME TO kline_bars_v1");
+        // Re-run the full DDL: kline_bars is recreated with the v2 PK;
+        // ticker_ticks / indexes are IF NOT EXISTS no-ops.
+        db.exec(kCreateTables);
+        db.exec("INSERT INTO kline_bars (symbol, market_type, open_time, "
+                "close_time, open, high, low, close, volume, closed) "
+                "SELECT symbol, market_type, open_time, close_time, open, "
+                "high, low, close, volume, closed FROM kline_bars_v1");
+        db.exec("DROP TABLE kline_bars_v1");
+        tx.commit();
+        PULSE_LOG_INFO("market_recorder", "kline_bars migrated to schema v2 "
+            "(PK symbol,market_type,open_time)");
+    }
+
+    db.exec(kKlineIndexV2);
+}
 
 /// Copy a std::string into the fixed char array, NUL-terminated.
 void copySymbol(char (&dst)[32], const std::string &src)
@@ -103,6 +150,7 @@ Result<std::unique_ptr<MarketRecorder>> MarketRecorder::open(
         // concurrent writers; busy_timeout arbitrates contention.
         db->exec("PRAGMA busy_timeout=5000");
         db->exec(kCreateTables);
+        ensureKlineSchemaV2(*db); // one-time v1 → v2 PK migration + index
 
         // Direct new-expression (member context): std::make_unique cannot
         // access the private constructor.

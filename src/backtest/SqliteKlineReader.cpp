@@ -2,12 +2,87 @@
 
 #include "backtest/SqliteKlineReader.hpp"
 
+#include "logging/Logger.hpp"
+
 #include <SQLiteCpp/Database.h>
 #include <SQLiteCpp/Statement.h>
 #include <SQLiteCpp/Transaction.h>
 
 namespace pulse::backtest
 {
+
+namespace
+{
+
+// ---------------------------------------------------------------------------
+// kline_bars schema v2 (M33)
+//
+// v1 PK was (symbol, open_time) — market_type was not part of the key, so
+// INSERT OR IGNORE silently dropped one market's row whenever spot and
+// futures shared the same minute (on the VPS, M31 daily-sync futures rows
+// were being discarded behind continuously-recorded spot rows). v2 widens
+// the PK to (symbol, market_type, open_time).
+// Mirrored in src/trade_recorder/MarketRecorder.cpp — keep both in sync.
+// ---------------------------------------------------------------------------
+
+constexpr const char *kKlineTableV2 = R"(CREATE TABLE IF NOT EXISTS kline_bars (
+    symbol      TEXT NOT NULL,
+    market_type TEXT NOT NULL,
+    open_time   INTEGER NOT NULL,
+    close_time  INTEGER NOT NULL,
+    open        REAL NOT NULL,
+    high        REAL NOT NULL,
+    low         REAL NOT NULL,
+    close       REAL NOT NULL,
+    volume      REAL NOT NULL,
+    closed      INTEGER NOT NULL,
+    PRIMARY KEY (symbol, market_type, open_time)
+))";
+
+constexpr const char *kKlineIndexV2 = R"(CREATE INDEX IF NOT EXISTS
+    idx_kline_sym_type_time ON kline_bars(symbol, market_type, open_time))";
+
+/// Idempotent schema upgrade: detect the v1 PK via PRAGMA table_info
+/// (CREATE TABLE IF NOT EXISTS alone cannot upgrade an existing v1 table)
+/// and rebuild with the v2 PK. Legacy rows are copied verbatim — pairs that
+/// v1 could not hold together were already lost and history is not relabelled.
+/// Fresh DBs (created v2 above) take the no-op path.
+void ensureKlineSchemaV2(SQLite::Database &db)
+{
+    bool table_exists = false;
+    int pk_columns = 0;
+    {
+        // table_info columns: cid, name, type, notnull, dflt_value, pk.
+        SQLite::Statement pragma(db, "PRAGMA table_info(kline_bars)");
+        while (pragma.executeStep())
+        {
+            table_exists = true;
+            if (pragma.getColumn(5).getInt() > 0)
+            {
+                ++pk_columns;
+            }
+        }
+    }
+
+    if (table_exists && pk_columns == 2)
+    {
+        SQLite::Transaction tx(db);
+        db.exec("ALTER TABLE kline_bars RENAME TO kline_bars_v1");
+        db.exec(kKlineTableV2);
+        db.exec("INSERT INTO kline_bars (symbol, market_type, open_time, "
+                "close_time, open, high, low, close, volume, closed) "
+                "SELECT symbol, market_type, open_time, close_time, open, "
+                "high, low, close, volume, closed FROM kline_bars_v1");
+        db.exec("DROP TABLE kline_bars_v1");
+        tx.commit();
+        PULSE_LOG_INFO("backtest", "kline_bars migrated to schema v2 "
+            "(PK symbol,market_type,open_time)");
+    }
+
+    db.exec(kKlineIndexV2);
+}
+
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -47,15 +122,10 @@ Result<SQLite::Database *> SqliteKlineReader::open()
             m_dbPath, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
         m_db->exec("PRAGMA journal_mode=WAL");
         m_db->exec("PRAGMA busy_timeout=5000");
-        // The kline_bars table may not exist yet (fresh DB): create it with
-        // the same DDL as MarketRecorder so write-back works standalone.
-        m_db->exec("CREATE TABLE IF NOT EXISTS kline_bars ("
-                   "symbol TEXT NOT NULL, market_type TEXT NOT NULL,"
-                   "open_time INTEGER NOT NULL, close_time INTEGER NOT NULL,"
-                   "open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL,"
-                   "close REAL NOT NULL, volume REAL NOT NULL,"
-                   "closed INTEGER NOT NULL,"
-                   "PRIMARY KEY (symbol, open_time))");
+        // Same schema DDL as MarketRecorder so write-back works standalone,
+        // plus the one-time v1 → v2 PK migration and the composite index.
+        m_db->exec(kKlineTableV2);
+        ensureKlineSchemaV2(*m_db);
         return m_db.get();
     }
     catch (const SQLite::Exception &e)
