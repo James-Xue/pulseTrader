@@ -46,7 +46,7 @@ struct BacktestOptions
     std::int64_t interval_ms = 60'000;  ///< Bar size; also gap detection + API pagination.
     double order_quantity = 0.0;        ///< 0 = take the config instance value.
     double min_confidence = 0.6;        ///< Signal confidence gate (seed, like live).
-    double leverage = 1.0;              ///< Display only — does not affect PnL.
+    double leverage = 5.0;              ///< Display only — does not affect PnL.
     double quanto_multiplier = 0.0;     ///< Futures contract size; 0 = auto-resolve
                                         ///< from the Gate contract list (spot = 1.0).
     double taker_fee_rate = 0.0;        ///< <0 = no fees, 0 = market default

@@ -42,7 +42,7 @@ void printBacktestUsage(const char *prog)
         << "  --interval MS         bar size in ms (default 60000; API fill is 1m only)\n"
         << "  --quantity QTY        order size (contracts for futures); 0 = trading.toml value\n"
         << "  --min-confidence C    confidence gate (default 0.6)\n"
-        << "  --leverage L          display only, does not affect PnL (default 1)\n"
+        << "  --leverage L          display only, does not affect PnL (default 5)\n"
         << "  --quanto Q            futures contract size (default: auto from Gate\n"
         << "                        contract list, cached 12h; spot = 1.0)\n"
         << "  --contracts-cache P   contract list cache path (default data/contracts_cache.json)\n"

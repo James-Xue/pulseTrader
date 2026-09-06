@@ -81,6 +81,8 @@ std::string BacktestReport::formatTable() const
     out += fmt::format(
         "=== Backtest Report: {} / {} ({}) ===\n",
         m_opts.strategy_name, m_opts.symbol, marketLabel(m_opts.market_type));
+    out += fmt::format("Leverage  : {:.0f}x (display only — PnL unaffected; "
+                       "no margin/liquidation model)\n", m_opts.leverage);
 
     out += fmt::format(
         "Data      : {} candles (sqlite {} + api {}), {} .. {}\n",
@@ -160,6 +162,7 @@ nlohmann::json BacktestReport::toJson() const
     j["symbol"] = m_opts.symbol;
     j["market_type"] = marketLabel(m_opts.market_type);
     j["quantity"] = m_opts.order_quantity;
+    j["leverage"] = m_opts.leverage;   // Display only (see BacktestOptions).
     j["quanto_multiplier"] = m_opts.quanto_multiplier;
     j["fee_rate"] = m_opts.taker_fee_rate;
     j["close_mode"] = (CloseMode::Flip == m_opts.close_mode) ? "flip" : "independent";
