@@ -74,10 +74,6 @@ namespace
 
 constexpr double kMaxRelativeJump = 0.25; ///< |c[i]-c[i-1]| / c[i-1] beyond this → drop.
 
-/// Gate REST serves at most ~10000 recent 1m points per symbol (~6.9 days);
-/// API gaps wider than this can never be backfilled.
-constexpr std::int64_t kApiDepthLimitMs = 9'995 * 60'000;
-
 bool looksPlausible(const market::Kline &k)
 {
     return k.open > 0.0 && k.high > 0.0 && k.low > 0.0 && k.close > 0.0
@@ -148,8 +144,10 @@ Result<std::vector<market::Kline>> KlineLoader::load(
 
     std::vector<market::Kline> merged;
 
-    // 1. Local data first.
-    if (m_sqlite)
+    // 1. Local data first. The kline_bars store captures 1m bars only
+    //    (no interval column), so non-1m requests must go straight to the
+    //    API — otherwise 1m rows would be replayed as 5m/15m candles.
+    if (m_sqlite && 60'000 == req.interval_ms)
     {
         auto local = m_sqlite->fetch(req.symbol, req.market_type, req.from_ms, req.to_ms);
         if (!ok(local))
@@ -170,22 +168,25 @@ Result<std::vector<market::Kline>> KlineLoader::load(
         const auto gaps = findKlineGaps(merged, req.from_ms, req.to_ms, req.interval_ms);
         stats.missing_range_count = static_cast<int>(gaps.size());
 
+        // Gate REST serves only the ~10000 most recent bars per symbol
+        // (≈6.9 days at 1m, ~35 days at 5m, ~104 days at 15m); gaps deeper
+        // than that can never be API-filled (every paginated request would
+        // 400) — one clean warning instead of N failures.
+        const std::int64_t api_depth_limit_ms = 9'995LL * req.interval_ms;
         for (const auto &[gap_from, gap_to] : gaps)
         {
             if (gap_to < gap_from)
             {
                 continue; // Degenerate edge gap (e.g. first candle at from_ms).
             }
-            // Gate REST retains only ~10000 recent 1m points per symbol; a
-            // gap deeper than that can never be API-filled (every paginated
-            // request would 400) — one clean warning instead of N failures.
-            if (gap_to - gap_from > kApiDepthLimitMs)
+            if (gap_to - gap_from > api_depth_limit_ms)
             {
                 stats.warnings.push_back(
                     "API gap [" + std::to_string(gap_from) + ", "
                     + std::to_string(gap_to) + "] is older than the REST "
-                    "retention depth (~6.9 days of 1m) — skipped; store "
-                    "history daily with kline-store to fill it over time");
+                    "retention depth (~10000 bars of this interval) — "
+                    "skipped; store history daily with kline-store to fill "
+                    "it over time");
                 PULSE_LOG_WARN("backtest", "API gap [{}, {}] beyond REST "
                                "retention depth — skipped (use kline-store to "
                                "accumulate deep history)",
@@ -224,8 +225,11 @@ Result<std::vector<market::Kline>> KlineLoader::load(
 
     stats.rows_total = merged.size();
 
-    // 4. Cache write-back.
-    if (req.cache_writeback && m_sqlite && !merged.empty() && 0 < stats.rows_api)
+    // 4. Cache write-back. 1m only — kline_bars rows key on open_time
+    //    without an interval column, so 5m/15m rows would collide with (and
+    //    corrupt) the 1m capture.
+    if (req.cache_writeback && m_sqlite && 60'000 == req.interval_ms
+        && !merged.empty() && 0 < stats.rows_api)
     {
         auto written = m_sqlite->writeBack(req.symbol, req.market_type, merged);
         if (ok(written))

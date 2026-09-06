@@ -224,7 +224,7 @@ Result<std::string> BacktestEngine::run()
     ExchangeConfig rest_cfg;
     rest_cfg.restBaseUrl = "https://api.gateio.ws";
     exchange::GateRestClient rest(rest_cfg, m_opts.market_type);
-    GateKlineFetcher api_fetcher(rest);
+    GateKlineFetcher api_fetcher(rest, m_opts.interval_ms);
 
     // 2.5 Auto-resolve the futures contract multiplier unless --quanto was
     // passed explicitly. The contract list is public REST, cached to

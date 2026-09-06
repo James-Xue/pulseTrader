@@ -27,7 +27,13 @@ class GateKlineFetcher final : public IKlineSource
 {
   public:
     /// Wrap a REST client. The client must outlive this fetcher.
-    explicit GateKlineFetcher(exchange::GateRestClient &rest);
+    /// interval_ms selects the bar size served by fetch() (default 1m).
+    explicit GateKlineFetcher(exchange::GateRestClient &rest,
+                              std::int64_t interval_ms = 60'000);
+
+    /// Re-target the bar size for subsequent fetch() calls (e.g. a backtest
+    /// run with --interval 300000 fetches 5m bars).
+    void setInterval(std::int64_t interval_ms);
 
     /// Fetch candles in [from_ms, to_ms] by paginating backward from `to_ms`
     /// in chunks of `max_rows_per_request` × interval. Public endpoints.
@@ -64,6 +70,7 @@ class GateKlineFetcher final : public IKlineSource
 
   private:
     exchange::GateRestClient &m_rest;
+    std::int64_t m_interval_ms{ 60'000 };
 };
 
 } // namespace pulse::backtest

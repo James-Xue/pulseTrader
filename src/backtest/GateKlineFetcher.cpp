@@ -39,9 +39,16 @@ std::optional<double> cellToDouble(const nlohmann::json &cell)
 // Construction
 // ---------------------------------------------------------------------------
 
-GateKlineFetcher::GateKlineFetcher(exchange::GateRestClient &rest)
+GateKlineFetcher::GateKlineFetcher(exchange::GateRestClient &rest,
+                                   std::int64_t interval_ms)
     : m_rest{ rest }
+    , m_interval_ms{ interval_ms }
 {
+}
+
+void GateKlineFetcher::setInterval(std::int64_t interval_ms)
+{
+    m_interval_ms = interval_ms;
 }
 
 std::string GateKlineFetcher::description() const
@@ -232,7 +239,6 @@ Result<std::vector<market::Kline>> GateKlineFetcher::fetch(
     std::int64_t from_ms, std::int64_t to_ms)
 {
     constexpr std::int64_t kMaxRowsPerRequest = 1000;
-    constexpr std::int64_t kIntervalMs = 60'000; // MVP fetches 1m bars only.
 
     if (MarketType::Cfd == market_type)
     {
@@ -241,13 +247,13 @@ Result<std::vector<market::Kline>> GateKlineFetcher::fetch(
             "time-range API)" };
     }
 
-    auto interval_str = intervalToString(kIntervalMs);
+    auto interval_str = intervalToString(m_interval_ms);
     if (!ok(interval_str))
     {
         return error(interval_str);
     }
 
-    const auto chunks = splitRange(from_ms, to_ms, kIntervalMs, kMaxRowsPerRequest);
+    const auto chunks = splitRange(from_ms, to_ms, m_interval_ms, kMaxRowsPerRequest);
 
     std::vector<market::Kline> all;
     for (const auto &[chunk_from, chunk_to] : chunks)
@@ -268,7 +274,7 @@ Result<std::vector<market::Kline>> GateKlineFetcher::fetch(
                 + "]: " + error(resp).message };
         }
 
-        auto parsed = parseCandles(value(resp), market_type, kIntervalMs);
+        auto parsed = parseCandles(value(resp), market_type, m_interval_ms);
         if (!ok(parsed))
         {
             return error(parsed);
