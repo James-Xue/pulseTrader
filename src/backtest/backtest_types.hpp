@@ -47,7 +47,8 @@ struct BacktestOptions
     double order_quantity = 0.0;        ///< 0 = take the config instance value.
     double min_confidence = 0.6;        ///< Signal confidence gate (seed, like live).
     double leverage = 1.0;              ///< Display only — does not affect PnL.
-    double quanto_multiplier = 1.0;     ///< Futures contract size (ETH_USDT = 0.01).
+    double quanto_multiplier = 0.0;     ///< Futures contract size; 0 = auto-resolve
+                                        ///< from the Gate contract list (spot = 1.0).
     double taker_fee_rate = 0.0;        ///< <0 = no fees, 0 = market default
                                         ///< (futures 0.0005, spot 0.001), >0 = explicit.
     double cooldown_seconds = 0.0;      ///< 0 = replay disables wall-clock cooldown.
@@ -57,6 +58,9 @@ struct BacktestOptions
     std::string sqlite_db_path = "data/trades.db";
     std::string config_path;            ///< Optional trading.toml for instance params.
     std::string json_export_path;       ///< Optional JSON report export path.
+    std::string contract_cache_path = "data/contracts_cache.json";
+                                        ///< Contract list cache (empty = disabled);
+                                        ///< --no-contract-cache clears it.
 
     // --- Parameter injection (M33) ---
     /// Raw "--param KEY=VALUE" overrides from the CLI. Resolved by the engine

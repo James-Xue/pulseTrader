@@ -42,7 +42,10 @@ void printBacktestUsage(const char *prog)
         << "  --quantity QTY        order size (contracts for futures); 0 = trading.toml value\n"
         << "  --min-confidence C    confidence gate (default 0.6)\n"
         << "  --leverage L          display only, does not affect PnL (default 1)\n"
-        << "  --quanto Q            futures contract size; defaults ETH_USDT=0.01 BTC_USDT=0.0001\n"
+        << "  --quanto Q            futures contract size (default: auto from Gate\n"
+        << "                        contract list, cached 12h; spot = 1.0)\n"
+        << "  --contracts-cache P   contract list cache path (default data/contracts_cache.json)\n"
+        << "  --no-contract-cache   always fetch the contract list, never read the cache\n"
         << "  --fee-rate R          taker fee; <0 none, 0 market default (futures 0.0005)\n"
         << "  --cooldown SEC        replay cooldown (default 0 = disabled)\n"
         << "  --close-mode MODE     flip | independent (default flip)\n"
@@ -197,6 +200,14 @@ int runBacktest(int argc, char *argv[])
         {
             opts.quanto_multiplier = std::stod(next());
         }
+        else if ("--no-contract-cache" == arg)
+        {
+            opts.contract_cache_path.clear(); // always fetch the contract list
+        }
+        else if ("--contracts-cache" == arg)
+        {
+            opts.contract_cache_path = next();
+        }
         else if ("--fee-rate" == arg)
         {
             opts.taker_fee_rate = std::stod(next());
@@ -273,23 +284,8 @@ int runBacktest(int argc, char *argv[])
         return 2;
     }
 
-    // Default futures quanto from the known contract sizes.
-    if (opts.quanto_multiplier <= 0.0)
-    {
-        if ("ETH_USDT" == opts.symbol)
-        {
-            opts.quanto_multiplier = 0.01;
-        }
-        else if ("BTC_USDT" == opts.symbol)
-        {
-            opts.quanto_multiplier = 0.0001;
-        }
-        else
-        {
-            opts.quanto_multiplier = 1.0;
-        }
-    }
-
+    // quanto <= 0 means "unset": BacktestEngine auto-resolves futures
+    // contract sizes from the public Gate contract list (cached), spot = 1.0.
     backtest::BacktestEngine engine(opts);
     auto report = engine.run();
     if (!ok(report))

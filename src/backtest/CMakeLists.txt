@@ -7,6 +7,7 @@ add_library(pulse_backtest STATIC
     DailyKlineSync.cpp
     GateKlineFetcher.cpp
     KlineLoader.cpp
+    QuantoResolver.cpp
     ReplayDriver.cpp
     WarmupSeeder.cpp
 )

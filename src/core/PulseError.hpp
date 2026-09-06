@@ -116,6 +116,8 @@ enum class ErrorCode : std::uint32_t
     BacktestApiFetchFailed = 9303,    ///< Gate REST kline fetch failed.
     BacktestNoCandles = 9304,         ///< Kline load produced zero candles.
     BacktestConfigInvalid = 9305,     ///< Backtest options/strategy config invalid.
+    BacktestContractUnknown = 9306,   ///< Symbol not in the futures contract list.
+    BacktestContractFetchFailed = 9307, ///< Could not fetch/cache the contract list.
 
     // Internal (9xxx)
     InternalError = 9000,

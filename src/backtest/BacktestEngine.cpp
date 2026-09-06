@@ -6,6 +6,7 @@
 #include "backtest/BacktestReport.hpp"
 #include "backtest/GateKlineFetcher.hpp"
 #include "backtest/KlineLoader.hpp"
+#include "backtest/QuantoResolver.hpp"
 #include "backtest/ReplayDriver.hpp"
 #include "backtest/SqliteKlineReader.hpp"
 #include "core/config_loader.hpp"
@@ -218,6 +219,24 @@ Result<std::string> BacktestEngine::run()
     rest_cfg.restBaseUrl = "https://api.gateio.ws";
     exchange::GateRestClient rest(rest_cfg, m_opts.market_type);
     GateKlineFetcher api_fetcher(rest);
+
+    // 2.5 Auto-resolve the futures contract multiplier unless --quanto was
+    // passed explicitly. The contract list is public REST, cached to
+    // data/contracts_cache.json (12h TTL) so sweeps do not refetch per run.
+    // Unknown symbols fail here — before any kline fetch.
+    if (m_opts.quanto_multiplier <= 0.0)
+    {
+        QuantoResolver resolver(rest, m_opts.contract_cache_path);
+        auto resolved = resolver.resolveQuanto(m_opts.symbol, m_opts.market_type);
+        if (!ok(resolved))
+        {
+            return error(resolved);
+        }
+        m_opts.quanto_multiplier = value(resolved);
+        PULSE_LOG_INFO("backtest", "Contract meta: {} ({}) quanto={:.6g}",
+                       m_opts.symbol, toString(m_opts.market_type),
+                       m_opts.quanto_multiplier);
+    }
 
     // 3. Resolve the window, then load candles.
     auto window = resolveWindow(m_opts, sqlite);
