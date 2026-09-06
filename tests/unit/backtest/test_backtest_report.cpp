@@ -171,6 +171,33 @@ TEST(BacktestReportTest, ToJson_AllSectionsPresent)
     EXPECT_DOUBLE_EQ(2.5, j["equity_curve"][1]["equity"].get<double>());
 }
 
+TEST(BacktestReportTest, Params_EchoedInTableAndJson)
+{
+    BacktestOptions opts = makeOpts();
+    opts.atomic_params["ema_fast_period"] = 5.0;
+    opts.atomic_params["min_confidence"] = 0.3;
+    opts.custom_params["res_ema_p5"] = 50.0;
+
+    const auto report = BacktestReport(opts, makeStats(), makeLoad(), {}, 202, 367);
+    const std::string text = report.formatTable();
+    EXPECT_NE(std::string::npos, text.find("Params(atomic): ema_fast_period=5"));
+    EXPECT_NE(std::string::npos, text.find("Params(custom): res_ema_p5=50"));
+
+    const auto j = report.toJson();
+    ASSERT_TRUE(j.contains("params"));
+    EXPECT_DOUBLE_EQ(5.0, j["params"]["atomic"]["ema_fast_period"].get<double>());
+    EXPECT_DOUBLE_EQ(0.3, j["params"]["atomic"]["min_confidence"].get<double>());
+    EXPECT_DOUBLE_EQ(50.0, j["params"]["custom"]["res_ema_p5"].get<double>());
+}
+
+TEST(BacktestReportTest, Params_EmptyByDefault)
+{
+    const auto j = BacktestReport(makeOpts(), makeStats(), makeLoad(), {}, 202, 367).toJson();
+    ASSERT_TRUE(j.contains("params"));
+    EXPECT_TRUE(j["params"]["atomic"].empty());
+    EXPECT_TRUE(j["params"]["custom"].empty());
+}
+
 TEST(BacktestReportTest, ToJson_EmptyTradeList)
 {
     BacktestOptions opts = makeOpts();

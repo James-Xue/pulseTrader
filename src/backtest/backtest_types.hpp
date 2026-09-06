@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,18 @@ struct BacktestOptions
     std::string sqlite_db_path = "data/trades.db";
     std::string config_path;            ///< Optional trading.toml for instance params.
     std::string json_export_path;       ///< Optional JSON report export path.
+
+    // --- Parameter injection (M33) ---
+    /// Raw "--param KEY=VALUE" overrides from the CLI. Resolved by the engine
+    /// into atomic_params / custom_params (CLI values win over config seeds).
+    std::map<std::string, double> param_overrides;
+    /// Atomic hot-reload keys (see strategy::atomicParamKeys) to apply AFTER
+    /// the strategy is created — they beat the legacy flags on conflicts.
+    std::map<std::string, double> atomic_params;
+    /// custom_params-channel keys, seeded from the config instance and then
+    /// overlaid with CLI custom keys. Applied BEFORE strategy construction
+    /// (some strategies read them in klineNeeded() from candle one).
+    std::map<std::string, double> custom_params;
 };
 
 // ---------------------------------------------------------------------------

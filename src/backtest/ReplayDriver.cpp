@@ -2,6 +2,9 @@
 
 #include "backtest/ReplayDriver.hpp"
 
+#include "logging/Logger.hpp"
+#include "strategy/StrategyParams.hpp"
+
 namespace pulse::backtest
 {
 
@@ -25,6 +28,10 @@ ReplayDriver::ReplayDriver(const BacktestOptions &opts,
     ctx.config.order_quantity = (opts.order_quantity > 0.0)
         ? opts.order_quantity : 0.001;
     ctx.config.min_confidence = opts.min_confidence;
+    // Custom-channel params must be in place BEFORE registry.create: some
+    // strategies read them in klineNeeded() (EmaResonance's res_ema_p5 gates
+    // its warmup from the first candle on).
+    ctx.config.custom_params = opts.custom_params;
     ctx.market_feed = &m_feed;
 
     m_strategy = registry.create(opts.strategy_name, ctx);
@@ -39,6 +46,17 @@ ReplayDriver::ReplayDriver(const BacktestOptions &opts,
     m_strategy->params().cooldown_seconds.store(opts.cooldown_seconds,
                                                 std::memory_order_release);
     m_strategy->params().auto_trade.store(0.0, std::memory_order_release);
+
+    // --param atomic overrides land last so they beat the legacy flags on
+    // conflicts (e.g. --param min_confidence=0.3 wins over --min-confidence).
+    for (const auto &[key, value] : opts.atomic_params)
+    {
+        if (!strategy::applyAtomicParam(m_strategy->params(), key, value))
+        {
+            PULSE_LOG_WARN("backtest", "--param '{}' is not an atomic strategy "
+                           "key — ignored", key);
+        }
+    }
 
     // Wire the signal callback: collect non-Flat signals and forward every
     // signal to the account. The candle open time and feed index ride in via

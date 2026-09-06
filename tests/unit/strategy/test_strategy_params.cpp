@@ -99,3 +99,46 @@ TEST(StrategyParams, IndependentInstances)
     EXPECT_DOUBLE_EQ(0.05, params_a.order_quantity.load());
     EXPECT_DOUBLE_EQ(0.10, params_b.order_quantity.load());
 }
+
+// ---------------------------------------------------------------------------
+// M33 atomic key registry — pinned so the EngineServices getter/setter tables
+// and the backtest --param classifier cannot silently drift apart.
+// ---------------------------------------------------------------------------
+
+TEST(StrategyParams, AtomicKeyRegistry_MatchesDocumentedSet)
+{
+    const auto &keys = atomicParamKeys();
+    const std::vector<std::string> expected = {
+        "order_quantity",
+        "min_confidence",
+        "ema_fast_period",
+        "ema_slow_period",
+        "bb_period",
+        "bb_std_dev",
+        "ob_imbalance_threshold",
+        "ob_depth",
+        "supertrend_period",
+        "supertrend_multiplier",
+        "cooldown_seconds",
+        "stop_loss_pct",
+        "take_profit_pct",
+        "auto_trade",
+    };
+    EXPECT_EQ(expected, keys);
+}
+
+TEST(StrategyParams, ApplyAtomicParam_RoundtripAndUnknownKeys)
+{
+    StrategyParams params;
+    EXPECT_TRUE(applyAtomicParam(params, "ema_fast_period", 15.0));
+    EXPECT_DOUBLE_EQ(15.0, params.ema_fast_period.load());
+    EXPECT_TRUE(applyAtomicParam(params, "min_confidence", 0.4));
+    EXPECT_DOUBLE_EQ(0.4, params.min_confidence.load());
+    EXPECT_TRUE(applyAtomicParam(params, "auto_trade", 0.0));
+    EXPECT_DOUBLE_EQ(0.0, params.auto_trade.load());
+
+    // Custom-channel and unknown keys are rejected (not atomic params).
+    EXPECT_FALSE(applyAtomicParam(params, "eth_atr_step", 0.05));
+    EXPECT_FALSE(applyAtomicParam(params, "res_ema_p5", 50.0));
+    EXPECT_FALSE(applyAtomicParam(params, "not_a_key", 1.0));
+}

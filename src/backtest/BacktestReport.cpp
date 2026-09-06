@@ -97,6 +97,27 @@ std::string BacktestReport::formatTable() const
     }
 
     out += fmt::format("Candles   : {} fed, {} warmup\n", m_candlesFed, m_warmupCandles);
+    if (!m_opts.atomic_params.empty() || !m_opts.custom_params.empty())
+    {
+        std::string atomic_desc;
+        for (const auto &[key, value] : m_opts.atomic_params)
+        {
+            atomic_desc += fmt::format("{}={:.4g} ", key, value);
+        }
+        std::string custom_desc;
+        for (const auto &[key, value] : m_opts.custom_params)
+        {
+            custom_desc += fmt::format("{}={:.4g} ", key, value);
+        }
+        if (!atomic_desc.empty())
+        {
+            out += fmt::format("Params(atomic): {}\n", atomic_desc);
+        }
+        if (!custom_desc.empty())
+        {
+            out += fmt::format("Params(custom): {}\n", custom_desc);
+        }
+    }
     out += fmt::format("Signals   : {} (entries {}, ignored {})\n",
                        s.signal_count, s.entry_signal_count, s.ignored_signal_count);
     out += fmt::format("Trades    : {} closed, {} open at end\n",
@@ -142,6 +163,10 @@ nlohmann::json BacktestReport::toJson() const
     j["quanto_multiplier"] = m_opts.quanto_multiplier;
     j["fee_rate"] = m_opts.taker_fee_rate;
     j["close_mode"] = (CloseMode::Flip == m_opts.close_mode) ? "flip" : "independent";
+    j["params"] = {
+        { "atomic", m_opts.atomic_params },
+        { "custom", m_opts.custom_params },
+    };
 
     j["range"] = {
         { "from_ms", m_opts.from_ms },

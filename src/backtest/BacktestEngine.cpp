@@ -11,6 +11,7 @@
 #include "core/config_loader.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "logging/Logger.hpp"
+#include "strategy/StrategyParams.hpp"
 #include "strategy/StrategyRegistry.hpp"
 
 #include <algorithm>
@@ -26,6 +27,10 @@ namespace
 /// Default window when neither from nor to is given (7 days of 1m bars).
 constexpr std::int64_t kDefaultWindowMs = 7LL * 24 * 3600 * 1000;
 
+/// BacktestOptions.min_confidence default — doubles as the "CLI did not
+/// touch it" sentinel (same style as order_quantity's 0.0).
+constexpr double kDefaultMinConfidence = 0.6;
+
 /// Seed options from a trading.toml instance (CLI-explicit values win).
 /// Returns true when an instance matched (name + symbol).
 bool seedFromConfig(BacktestOptions &opts, const PulseConfig &cfg)
@@ -40,14 +45,41 @@ bool seedFromConfig(BacktestOptions &opts, const PulseConfig &cfg)
         {
             opts.order_quantity = inst.order_quantity;
         }
-        opts.min_confidence = inst.min_confidence;
-        if (opts.quanto_multiplier <= 0.0)
+        // Config custom_params reach the strategy context (some strategies
+        // read them in klineNeeded() from the very first candle). CLI
+        // "--param" custom keys are merged on top later and win.
+        opts.custom_params = inst.custom_params;
+        // Seed confidence only when the CLI left the default — the explicit
+        // "--min-confidence" flag must win over the config instance.
+        if (kDefaultMinConfidence == opts.min_confidence)
         {
-            opts.quanto_multiplier = 1.0;
+            opts.min_confidence = inst.min_confidence;
         }
         return true;
     }
     return false;
+}
+
+/// Classify raw --param overrides into the atomic (StrategyParams field) or
+/// custom_params channel. Runs after config seeding so CLI values win.
+void resolveParamOverrides(BacktestOptions &opts)
+{
+    const auto &atomic_keys = strategy::atomicParamKeys();
+    for (const auto &[key, value] : opts.param_overrides)
+    {
+        const bool is_atomic = std::find(atomic_keys.begin(), atomic_keys.end(), key)
+                               != atomic_keys.end();
+        if (is_atomic)
+        {
+            opts.atomic_params[key] = value;
+        }
+        else
+        {
+            opts.custom_params[key] = value;
+            PULSE_LOG_INFO("backtest", "--param '{}' is not an atomic strategy "
+                           "key — routed to the custom_params channel", key);
+        }
+    }
 }
 
 /// Resolve an unspecified window end from local coverage; falls back to a
@@ -135,6 +167,10 @@ Result<std::string> BacktestEngine::run()
         }
     }
 
+    // --param overrides classify into atomic / custom_params after config
+    // seeding so CLI values always win (echoed in the report).
+    resolveParamOverrides(m_opts);
+
     // No config and no --quantity: fall back to the strategy default size
     // (quantity is only a PnL scaling factor in backtest).
     if (m_opts.order_quantity <= 0.0)
@@ -159,6 +195,14 @@ Result<std::string> BacktestEngine::run()
         return PulseError{ ErrorCode::BacktestConfigInvalid,
             "Unknown strategy '" + m_opts.strategy_name
                 + "' (registered: " + known + ")" };
+    }
+
+    // orderbook_scalper only acts in onOrderbook(); its onKline is a no-op,
+    // so a kline replay will legitimately produce zero signals.
+    if ("orderbook_scalper" == m_opts.strategy_name)
+    {
+        PULSE_LOG_WARN("backtest", "orderbook_scalper is order-book driven — "
+                       "its onKline is empty under kline replay, expect zero signals");
     }
 
     // 2. Data sources. SqliteKlineReader is available even without the

@@ -136,6 +136,100 @@ TEST(ReplayDriverTest, TooFewCandles_NoWarmupNoSignals)
     EXPECT_FALSE(account.hasPosition());
 }
 
+// ---------------------------------------------------------------------------
+// M33 parameter injection — atomic_params / custom_params reach the strategy
+// ---------------------------------------------------------------------------
+
+TEST(ReplayDriverTest, AtomicParam_ShiftsMomentumWarmupGate)
+{
+    auto registry = strategy::makeBuiltinStrategyRegistry();
+
+    // 500 candles: 250 up, then 250 down.
+    auto trend = makeTrendCandles(250, 2000.0, 0.5);
+    auto down = makeTrendCandles(250, 2125.0, -0.5);
+    trend.insert(trend.end(), down.begin(), down.end());
+
+    // Baseline: default 9/21 EMAs cross early in the down leg.
+    BacktestOptions opts = makeOpts("momentum_scalper", "ETH_USDT");
+    ReplayDriver driver(opts, registry);
+    BacktestAccount account(opts);
+    const auto baseline = driver.run(trend, account);
+    ASSERT_TRUE(ok(baseline));
+    EXPECT_LT(value(baseline).warmup_candles, 300u);
+
+    // Slow window 300 → klineNeeded = 301, so no evaluation (and therefore
+    // no first signal) can precede candle 300 regardless of price action.
+    BacktestOptions slow_opts = makeOpts("momentum_scalper", "ETH_USDT");
+    slow_opts.atomic_params["ema_slow_period"] = 300.0;
+    ReplayDriver slow_driver(slow_opts, registry);
+    BacktestAccount slow_account(slow_opts);
+    const auto slowed = slow_driver.run(trend, slow_account);
+    ASSERT_TRUE(ok(slowed));
+    EXPECT_GE(value(slowed).warmup_candles, 300u);
+    EXPECT_GT(value(slowed).warmup_candles, value(baseline).warmup_candles);
+}
+
+TEST(ReplayDriverTest, CustomParam_ShrinksResonanceWarmup)
+{
+    auto registry = strategy::makeBuiltinStrategyRegistry();
+
+    // 60 flat candles then a ramp: too short for the default 201-bar warmup
+    // (res_ema_p5=200) — the control run never warms up. Shrinking the EMA
+    // windows via the custom_params channel drops the warmup to ~61.
+    std::vector<market::Kline> candles = makeTrendCandles(60, 2000.0, 0.0);
+    auto ramp = makeTrendCandles(40, 2000.0, 1.0);
+    candles.insert(candles.end(), ramp.begin(), ramp.end());
+
+    BacktestOptions control = makeOpts("ema_resonance_scalper", "ETH_USDT");
+    ReplayDriver control_driver(control, registry);
+    BacktestAccount control_account(control);
+    const auto control_result = control_driver.run(candles, control_account);
+    ASSERT_TRUE(ok(control_result));
+    EXPECT_TRUE(value(control_result).signals.empty());
+    EXPECT_EQ(100u, value(control_result).warmup_candles); // never warmed up
+
+    BacktestOptions tuned = makeOpts("ema_resonance_scalper", "ETH_USDT");
+    tuned.custom_params = {
+        { "res_ema_p1", 5.0 },
+        { "res_ema_p2", 10.0 },
+        { "res_ema_p3", 20.0 },
+        { "res_ema_p4", 40.0 },
+        { "res_ema_p5", 50.0 },
+    };
+    ReplayDriver tuned_driver(tuned, registry);
+    BacktestAccount tuned_account(tuned);
+    const auto tuned_result = tuned_driver.run(candles, tuned_account);
+    ASSERT_TRUE(ok(tuned_result));
+
+    // klineNeeded = res_ema_p5 + 1 = 51 → evaluation starts at candle 50.
+    // Candles 50..60 are flat (None); candle 61 is the first ramp close that
+    // moved (2001.0) → None→Bull transition fires the Buy there.
+    ASSERT_FALSE(value(tuned_result).signals.empty());
+    EXPECT_EQ(strategy::SignalType::Buy, value(tuned_result).signals.front().type);
+    EXPECT_DOUBLE_EQ(2001.0, value(tuned_result).signals.front().price);
+    EXPECT_EQ(61u, value(tuned_result).warmup_candles);
+}
+
+TEST(ReplayDriverTest, AtomicMinConfidence_ActsAsEmissionGate)
+{
+    auto registry = strategy::makeBuiltinStrategyRegistry();
+
+    auto trend = makeTrendCandles(250, 2000.0, 0.5);
+    auto down = makeTrendCandles(250, 2125.0, -0.5);
+    trend.insert(trend.end(), down.begin(), down.end());
+
+    // Confidence gate 1.0 — a momentum signal on a gentle synthetic trend
+    // has |ΔEMA|/ATR << 1.0, so nothing may emit (baseline min_confidence 0.0
+    // lets everything through).
+    BacktestOptions gate = makeOpts("momentum_scalper", "ETH_USDT");
+    gate.atomic_params["min_confidence"] = 1.0;
+    ReplayDriver gated_driver(gate, registry);
+    BacktestAccount gated_account(gate);
+    const auto gated = gated_driver.run(trend, gated_account);
+    ASSERT_TRUE(ok(gated));
+    EXPECT_TRUE(value(gated).signals.empty());
+}
+
 TEST(ReplayDriverTest, SignalPriceIsCandleClose_AndTimestampIsCandleOpen)
 {
     auto registry = strategy::makeBuiltinStrategyRegistry();

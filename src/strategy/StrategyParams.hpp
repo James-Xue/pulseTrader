@@ -12,9 +12,31 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace pulse::strategy
 {
+
+struct StrategyParams; // defined below — registry functions take a reference
+
+// ---------------------------------------------------------------------------
+// Atomic param key registry (M33)
+//
+// Backtest / sweep tooling must classify a raw key as either an atomic
+// hot-reload param (this table) or a custom_params channel key. The live
+// control plane keeps its own getter/setter tables in EngineServices.cpp —
+// keep them in sync with this list (pinned by a unit test on both sides).
+// ---------------------------------------------------------------------------
+
+/// Canonical list of hot-reloadable atomic param keys.
+[[nodiscard]] const std::vector<std::string> &atomicParamKeys();
+
+/// Set the atomic param named `key` to `value`. Returns false when `key` is
+/// not an atomic param (custom-channel keys belong to
+/// StrategyInstanceConfig::custom_params instead).
+[[nodiscard]] bool applyAtomicParam(StrategyParams &params,
+    const std::string &key, double value);
 
 // ---------------------------------------------------------------------------
 // StrategyParams — atomic parameters shared between strategy and AI advisor

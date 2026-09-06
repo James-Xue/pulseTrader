@@ -46,9 +46,16 @@ void printBacktestUsage(const char *prog)
         << "  --fee-rate R          taker fee; <0 none, 0 market default (futures 0.0005)\n"
         << "  --cooldown SEC        replay cooldown (default 0 = disabled)\n"
         << "  --close-mode MODE     flip | independent (default flip)\n"
+        << "  --param KEY=VALUE     strategy param override (repeatable): atomic keys\n"
+        << "                        (order_quantity, min_confidence, ema_fast_period,\n"
+        << "                        ema_slow_period, bb_*, supertrend_*, cooldown_seconds,\n"
+        << "                        stop_loss_pct, take_profit_pct) set the hot params;\n"
+        << "                        ANY other key routes to custom_params (eth_*,\n"
+        << "                        res_ema_p1..p5, ...). CLI wins over --config values.\n"
         << "  --no-api              disable Gate API gap fill (local data only)\n"
         << "  --no-cache            do not write API-fetched candles back to sqlite\n"
-        << "  --config PATH         trading.toml for instance params (quantity/confidence)\n"
+        << "  --config PATH         trading.toml for instance params (quantity/confidence/\n"
+        << "                        custom_params)\n"
         << "  --db PATH             kline_bars database (default data/trades.db)\n"
         << "  --json PATH           export full JSON report to PATH\n"
         << "  --help                this message\n";
@@ -214,6 +221,17 @@ int runBacktest(int argc, char *argv[])
                 std::cerr << "Unknown close mode: " << mode << " (flip|independent)\n";
                 return 2;
             }
+        }
+        else if ("--param" == arg)
+        {
+            const std::string kv = next();
+            const auto eq = kv.find('=');
+            if (std::string::npos == eq || 0 == eq || kv.size() - 1 == eq)
+            {
+                std::cerr << "--param expects KEY=VALUE (e.g. --param ema_fast_period=9)\n";
+                return 2;
+            }
+            opts.param_overrides[kv.substr(0, eq)] = std::stod(kv.substr(eq + 1));
         }
         else if ("--no-api" == arg)
         {
