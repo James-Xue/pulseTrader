@@ -381,7 +381,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
 - [x] **Risk-gate hardening** — single-evaluation order flow, futures quanto notional, symmetric fill tracking (M14, 2026-08-14)
 - [ ] **Dual-direction trading (M15)** — CFD (TradFi gold `XAUUSD`) + crypto futures as runtime-switchable directions. MarketType/config/exchange/execution foundation + live-API probe done (2026-08-15); L3 REST polling feed, L7 CFD risk, control-plane `switch_direction`, main.cpp wiring, tests pending. Phased plan in [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md)
-- [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
+- [x] **Backtesting engine (M29/M33)** — `./run.sh backtest` replays real strategies over 1m klines (any USDT-M coin, auto contract-size resolution, `--param` injection); `./run.sh kline-store` accumulates ~1-month local history daily; `./run.sh sweep` runs parameter combos. Full doc in [docs/backtest.md](docs/backtest.md). Pending: intra-bar SL/TP, funding, margin realism, multi-symbol portfolio
 - [ ] **Paper trading mode** — Full dry-run simulation with live market data but no real order submission
 - [ ] **P&L reporting** — Control-plane views with daily/weekly/monthly P&L, win rate, and profit factor
 - [ ] **Additional exchange support** — Binance and OKX adapters behind the same Layer 1 interface

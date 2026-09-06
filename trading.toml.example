@@ -274,3 +274,13 @@ spike_pct = 0.01                   # 1m 涨幅 > 1%
 spike_atr_mult = 3.0               # 或 > 3×ATR15m,任一触发即冻结
 state_file = "data/grid_state.json" # 状态文件(tmp+rename 原子写)
 force = false                      # 有非网格持仓时仍允许 grid_start
+
+# ---------------------------------------------------------------------------
+# [backtest] — 回测/kline-store 工具配置 (M33,可选段;缺省值如上)
+# docs/backtest.md 全量用法:kline-store 每日积累任意币种 1m K 线到本地
+# sqlite(Gate REST 只留最近 ~6.9 天,积累 ~30 天得 ~1 个月窗口)
+# ---------------------------------------------------------------------------
+# [backtest]
+# store_db = "data/trades.db"                  # kline-store 目标库
+# store_symbols = ["DOGE_USDT", "PEPE_USDT"]   # 积累清单;缺省 = 下方启用的 futures 策略实例符号
+# contract_cache_path = "data/contracts_cache.json"  # 合约表缓存(backtest 自动解析 quanto 用)

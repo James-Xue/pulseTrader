@@ -44,11 +44,12 @@ Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_par
 
 ## Run Modes
 
-`./run.sh` supports `{trade|cli|mcp|rest|ws|market|strategy|ai|test}` (the `webui` mode was removed with the WebUI):
+`./run.sh` supports `{trade|cli|mcp|backtest|kline-store|sweep|rest|ws|market|strategy|ai|test}` (the `webui` mode was removed with the WebUI):
 
 - `./run.sh trade` — trading engine (default subcommand `trade`); embeds a REPL when stdin is a TTY, and opens the JSON-RPC control socket (TCP 127.0.0.1:8081, `[control]` TOML section, `PULSE_CONTROL_PORT` env override)
 - `./run.sh cli` — remote-attach REPL over the control socket (auto-loads `trading.toml`; the engine must be running)
 - `./run.sh mcp` — stdio MCP server bridging to the control socket (auto-loads `trading.toml`), for LLM clients like Claude Desktop / Claude Code
+- `./run.sh backtest` — offline 1m-kline replay of real strategies on ANY USDT-M symbol (`--param` injection, auto quanto); `./run.sh kline-store` accumulates daily history; `./run.sh sweep` runs parameter combos. See [docs/backtest.md](docs/backtest.md)
 
 **Production deployment**: the engine runs as the systemd user service `pulsetrader.service` (`~/.config/systemd/user/`, `loginctl enable-linger`) — auto-start at boot, `Restart=on-failure`, journald logs (`journalctl --user -u pulsetrader -f`). Restart after rebuilding: `systemctl --user restart pulsetrader`.
 

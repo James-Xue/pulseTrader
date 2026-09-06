@@ -886,3 +886,34 @@ Check the following checklist item by item:
    0.01 手 ≈ 4348 USD 名义 ≈ 8.7 USD 保证金（500× 下）
 6. **未实施前手动验证**：可用任意 REST 客户端（签名方式同 `gate_auth.hpp`）
    调 `/tradfi/orders` 小额测试；实施后走 CLI/MCP `open` 命令
+
+---
+
+## 11. 本地回测数据积累 (M33)
+
+> 全量用法见 [backtest.md](backtest.md)。核心事实:Gate REST futures 1m 只留
+> 最近 ~10000 根 ≈ 6.9 天;要回测 ~1 个月窗口,**任何新盯的币种都要靠每日
+> 积累**(30 天后才有 30 天数据)。公开 REST、无需 API key、幂等(中断
+> ≤ ~6.9 天自愈,超 7 天旧洞永久缺)。
+
+### 11.1 cron(本机,一日两次,睡眠容错)
+
+```
+0 7,23 * * * ./run.sh kline-store --config trading.toml >> logs/kline_store.log 2>&1
+```
+
+(systemd user timer 备选:`OnCalendar=*-*-* 07,23:00`,ExecStart 同上;
+引擎若在本地跑也无冲突——WAL + busy_timeout 双写安全。)
+
+### 11.2 老盯盘币种跳启动
+
+本地/历史 `data/trades.db` 对 BTC/ETH/SNDK/UNITREE 已有数周积累,
+一次性导入:
+
+```
+./run.sh kline-store --import data/trades.db --symbols BTC_USDT,SNDK_USDT
+```
+
+### 11.3 待办
+
+- [ ] 若本地机不可靠(VPS 才 24/7),把 kline-store 也挂 VPS cron + 定期 rsync 回本地
