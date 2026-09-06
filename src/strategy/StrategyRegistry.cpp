@@ -5,6 +5,7 @@
 #include "logging/Logger.hpp"
 #include "strategy/scalping/EmaResonanceScalper.hpp"
 #include "strategy/scalping/EthScalper.hpp"
+#include "strategy/scalping/IronTrader.hpp"
 #include "strategy/scalping/MeanReversionScalper.hpp"
 #include "strategy/scalping/MomentumScalper.hpp"
 #include "strategy/scalping/OrderBookScalper.hpp"
@@ -79,6 +80,7 @@ StrategyRegistry makeBuiltinStrategyRegistry()
     registry.registerStrategy<OrderBookScalper>("orderbook_scalper");
     registry.registerStrategy<EthScalper>("eth_scalper");
     registry.registerStrategy<EmaResonanceScalper>("ema_resonance_scalper");
+    registry.registerStrategy<IronTrader>("iron_trader");
     return registry;
 }
 

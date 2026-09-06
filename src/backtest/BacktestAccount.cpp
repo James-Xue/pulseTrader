@@ -119,9 +119,17 @@ void BacktestAccount::closeSide(Side side, double exit_price,
 void BacktestAccount::onSignal(const strategy::TradingSignal &sig,
                                std::int64_t candle_open_ms)
 {
-    if (strategy::SignalType::Flat == sig.type || sig.price <= 0.0)
+    if (sig.price <= 0.0)
     {
-        return; // Status-channel signals are not trades.
+        return;
+    }
+    if (strategy::SignalType::Flat == sig.type)
+    {
+        // Close-only exit channel (IronTrader): flatten WITHOUT re-opening
+        // the opposite side. Counted as neither an entry nor an ignore.
+        // (The strategy layer already knows the position — see IronTrader.)
+        closeAll(candle_open_ms, sig.price);
+        return;
     }
 
     const bool buy_signal = (strategy::SignalType::Buy == sig.type);

@@ -1,8 +1,10 @@
 #pragma once
 // backtest_account.hpp — Lightweight virtual account / fill simulator (M29)
 //
-// The single-strategy MVP's order simulator: every non-Flat signal fills
-// instantly at the signal price (the current candle close) with taker fees.
+// The single-strategy MVP's order simulator: every Buy/Sell signal fills
+// instantly at the signal price (the current candle close) with taker fees;
+// a Flat signal flattens any open position WITHOUT re-opening (the close-only
+// exit channel used by IronTrader — counted as neither entry nor ignore).
 // No async, no book, no risk gate — replay-speed determinism beats execution
 // realism here. PnL formulas mirror PositionManager::closePosition so a later
 // "full-pipeline" fidelity mode produces identical numbers:

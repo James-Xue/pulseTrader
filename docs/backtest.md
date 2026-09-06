@@ -30,8 +30,13 @@ Gate REST futures 1m 端点**只保留最近 ~10000 根 ≈ 6.9 天**(实测;更
     --from 2026-09-01 --to 2026-09-06 --quantity 20 [--json run.json]
 ```
 
-注册策略:6 个,`--strategy` 任选。除 `orderbook_scalper` 外都吃 K 线
+注册策略:7 个,`--strategy` 任选。除 `orderbook_scalper` 外都吃 K 线
 (orderbook_scalper 只吃实时盘口,回放下预期零信号,引擎会告警)。
+
+`iron_trader`(2026-09-06 新增)= 铁律交易员:低频纪律型趋势跟随,规则文档
+`docs/strategies/iron-trader.md`。注意其**退出 = Flat 信号(只平仓不反手)**:
+BacktestAccount 自 2026-09-06 起把 Flat 当只平通道(原语义:状态信号非交易);
+旧策略不发 Flat,行为不变,1003→1016 测试全绿。
 
 ### 关键 flag
 

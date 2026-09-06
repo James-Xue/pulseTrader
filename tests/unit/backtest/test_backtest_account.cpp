@@ -151,6 +151,22 @@ TEST(BacktestAccountTest, FlatSignalNotCounted)
     EXPECT_FALSE(account.hasPosition());
 }
 
+TEST(BacktestAccountTest, FlatClosesPositionWithoutReopening)
+{
+    // Close-only exit channel (IronTrader): a Flat signal flattens the open
+    // long WITHOUT opening the opposite side (no flip).
+    BacktestAccount account(makeOpts());
+    account.onSignal(makeSignal(strategy::SignalType::Buy, 2000.0), 1'000'000);
+    account.onSignal(makeSignal(strategy::SignalType::Flat, 1980.0), 1'060'000);
+
+    ASSERT_EQ(1u, account.trades().size());
+    EXPECT_EQ(Side::Buy, account.trades()[0].side);
+    EXPECT_DOUBLE_EQ(1980.0, account.trades()[0].exit_price);
+    EXPECT_FALSE(account.hasPosition());
+    EXPECT_EQ(1, account.entrySignalCount());   // one entry, zero re-entries
+    EXPECT_EQ(0, account.ignoredSignalCount());
+}
+
 // ---------------------------------------------------------------------------
 // Equity curve + stats
 // ---------------------------------------------------------------------------

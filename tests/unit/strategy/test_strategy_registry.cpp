@@ -9,6 +9,7 @@
 #include "strategy/StrategyRegistry.hpp"
 #include "strategy/scalping/EmaResonanceScalper.hpp"
 #include "strategy/scalping/EthScalper.hpp"
+#include "strategy/scalping/IronTrader.hpp"
 #include "strategy/scalping/MeanReversionScalper.hpp"
 #include "strategy/scalping/MomentumScalper.hpp"
 #include "strategy/scalping/OrderBookScalper.hpp"
@@ -186,15 +187,26 @@ TEST(StrategyRegistry, CreatesEmaResonanceScalper)
     EXPECT_EQ("ema_resonance_scalper_ETH_USDT", strat->id());
 }
 
+TEST(StrategyRegistry, CreatesIronTrader)
+{
+    const auto registry = makeBuiltinStrategyRegistry();
+    auto strat = registry.create("iron_trader", make_ctx("iron_trader", "BTC_USDT"));
+    ASSERT_NE(nullptr, strat);
+    EXPECT_NE(nullptr, dynamic_cast<IronTrader *>(strat.get()));
+    EXPECT_EQ("IronTrader", strat->name());
+    EXPECT_EQ("iron_trader_BTC_USDT", strat->id());
+}
+
 TEST(StrategyRegistry, RegisteredNamesListed)
 {
     const auto registry = makeBuiltinStrategyRegistry();
     const auto names = registry.registeredNames();
-    EXPECT_EQ(6u, names.size());
+    EXPECT_EQ(7u, names.size());
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "momentum_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "orderbook_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "mean_reversion_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "supertrend_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "eth_scalper"));
     EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "ema_resonance_scalper"));
+    EXPECT_NE(names.end(), std::find(names.begin(), names.end(), "iron_trader"));
 }
