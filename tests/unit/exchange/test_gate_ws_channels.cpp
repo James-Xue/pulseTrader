@@ -285,24 +285,25 @@ TEST(GateWsChannelsTest, ActiveChannels)
 }
 
 // ---------------------------------------------------------------------------
-// Test 10: GetPayload — verify payload retrieval for re-subscription
+// Test 10: PayloadsForAccumulates — every payload for a channel is retained
 // ---------------------------------------------------------------------------
-TEST(GateWsChannelsTest, GetPayload)
+TEST(GateWsChannelsTest, PayloadsForAccumulates)
 {
     GateWsChannels channels;
 
     // 1. Unknown channel returns empty
-    EXPECT_TRUE(channels.getPayload("spot.tickers").empty());
+    EXPECT_TRUE(channels.payloadsFor("spot.tickers").empty());
 
-    // 2. Subscribe with specific payload
-    const std::vector<std::string> payload = { "BTC_USDT", "ETH_USDT" };
-    channels.subscribe("spot.tickers", payload, [](const nlohmann::json &, const nlohmann::json &) {});
+    // 2. Subscribe the same channel twice with different payloads
+    //    (production pattern: one subscribe call per symbol)
+    channels.subscribe("spot.tickers", { "BTC_USDT", "ETH_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
+    channels.subscribe("spot.tickers", { "SOL_USDT" }, [](const nlohmann::json &, const nlohmann::json &) {});
 
-    // 3. Verify payload is returned correctly
-    const auto retrieved = channels.getPayload("spot.tickers");
-    EXPECT_EQ(2u, retrieved.size());
-    EXPECT_EQ("BTC_USDT", retrieved[0]);
-    EXPECT_EQ("ETH_USDT", retrieved[1]);
+    // 3. Both payloads are retained, in subscription order
+    const auto payloads = channels.payloadsFor("spot.tickers");
+    ASSERT_EQ(2u, payloads.size());
+    EXPECT_EQ((std::vector<std::string>{ "BTC_USDT", "ETH_USDT" }), payloads[0]);
+    EXPECT_EQ((std::vector<std::string>{ "SOL_USDT" }), payloads[1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -332,9 +333,11 @@ TEST(GateWsChannelsTest, DispatchWithNullResult)
 }
 
 // ---------------------------------------------------------------------------
-// Test 12: SubscribeReplacesExisting — re-subscribe overwrites previous entry
+// Test 12: SubscribeAccumulatesPayloadsCallbackLastWins — re-subscribing a
+// channel keeps BOTH payloads (needed for reconnect replay) while the newest
+// callback serves the channel
 // ---------------------------------------------------------------------------
-TEST(GateWsChannelsTest, SubscribeReplacesExisting)
+TEST(GateWsChannelsTest, SubscribeAccumulatesPayloadsCallbackLastWins)
 {
     GateWsChannels channels;
     std::atomic<int> first_count{ 0 };
@@ -358,10 +361,106 @@ TEST(GateWsChannelsTest, SubscribeReplacesExisting)
     EXPECT_EQ(0, first_count.load());
     EXPECT_EQ(1, second_count.load());
 
-    // 4. Payload should be the new one
-    const auto payload = channels.getPayload("spot.tickers");
-    EXPECT_EQ(1u, payload.size());
-    EXPECT_EQ("ETH_USDT", payload[0]);
+    // 4. BOTH payloads are retained for reconnect replay
+    const auto payloads = channels.payloadsFor("spot.tickers");
+    ASSERT_EQ(2u, payloads.size());
+    EXPECT_EQ("BTC_USDT", payloads[0][0]);
+    EXPECT_EQ("ETH_USDT", payloads[1][0]);
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: ResubscribeMsgsCoverEverySymbol — regression for the reconnect bug
+//
+// Production pattern (MarketFeed::start): tickers subscribe with ALL symbols in
+// one payload, while candlesticks / order_book subscribe once per symbol.
+// Reconnect replay must emit one message per (channel, payload) — collapsing a
+// channel to its last payload stranded 3 of 4 symbols (09-17 incident: kline /
+// order-book feeds dead while tickers stayed alive).
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, ResubscribeMsgsCoverEverySymbol)
+{
+    GateWsChannels channels;
+    const std::vector<std::string> symbols = { "BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT" };
+    const auto noop = [](const nlohmann::json &, const nlohmann::json &) {};
+
+    // 1. Mirror the MarketFeed::start() subscription shape
+    channels.subscribe("futures.tickers", symbols, noop);
+    for (const auto &symbol : symbols)
+    {
+        channels.subscribe("futures.candlesticks", { "1m", symbol }, noop);
+        channels.subscribe("futures.order_book_update", { symbol, "100ms", "20" }, noop);
+    }
+
+    // 2. Replay set = 1 tickers + 4 candlesticks + 4 order_book messages
+    const auto msgs = channels.buildResubscribeMsgs();
+    ASSERT_EQ(9u, msgs.size());
+
+    // 3. Every symbol must be restorable from the replay messages
+    std::vector<std::string> candle_symbols;
+    std::vector<std::string> ob_symbols;
+    std::size_t ticker_msgs = 0;
+    for (const auto &msg : msgs)
+    {
+        const auto ch = msg["channel"].get<std::string>();
+        if ("futures.tickers" == ch)
+        {
+            ++ticker_msgs;
+            EXPECT_EQ(symbols, msg["payload"].get<std::vector<std::string>>());
+        }
+        else if ("futures.candlesticks" == ch)
+        {
+            candle_symbols.push_back(msg["payload"][1].get<std::string>());
+        }
+        else if ("futures.order_book_update" == ch)
+        {
+            ob_symbols.push_back(msg["payload"][0].get<std::string>());
+        }
+    }
+    EXPECT_EQ(1u, ticker_msgs);
+    EXPECT_EQ(symbols, candle_symbols); // one message per symbol, subscription order
+    EXPECT_EQ(symbols, ob_symbols);
+
+    // 4. Each replay message is a well-formed subscribe event
+    for (const auto &msg : msgs)
+    {
+        EXPECT_EQ("subscribe", msg["event"].get<std::string>());
+        EXPECT_TRUE(msg.contains("payload"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: SubscribeDeduplicatesIdenticalPayload — the same (channel, payload)
+// registered twice yields a single replay message
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, SubscribeDeduplicatesIdenticalPayload)
+{
+    GateWsChannels channels;
+    const std::vector<std::string> payload = { "BTC_USDT", "ETH_USDT" };
+
+    channels.subscribe("futures.tickers", payload, [](const nlohmann::json &, const nlohmann::json &) {});
+    channels.subscribe("futures.tickers", payload, [](const nlohmann::json &, const nlohmann::json &) {});
+
+    EXPECT_EQ(1u, channels.payloadsFor("futures.tickers").size());
+    EXPECT_EQ(1u, channels.buildResubscribeMsgs().size());
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: UnsubscribeClearsResubscribeSet — unsubscribe drops every payload
+// of the channel from the replay set
+// ---------------------------------------------------------------------------
+TEST(GateWsChannelsTest, UnsubscribeClearsResubscribeSet)
+{
+    GateWsChannels channels;
+    const auto noop = [](const nlohmann::json &, const nlohmann::json &) {};
+
+    channels.subscribe("futures.candlesticks", { "1m", "BTC_USDT" }, noop);
+    channels.subscribe("futures.candlesticks", { "1m", "ETH_USDT" }, noop);
+    ASSERT_EQ(2u, channels.buildResubscribeMsgs().size());
+
+    channels.unsubscribe("futures.candlesticks");
+
+    EXPECT_TRUE(channels.payloadsFor("futures.candlesticks").empty());
+    EXPECT_TRUE(channels.buildResubscribeMsgs().empty());
 }
 
 } // namespace pulse::exchange::test

@@ -45,18 +45,27 @@ using ChannelCallback = std::function<void(const nlohmann::json &result, const n
 // GateWsChannels — subscription registry and message builder
 //
 // Responsibilities:
-//   1. Store channel → (payload, callback) mappings
+//   1. Store channel → (payloads, callback) mappings
 //   2. Dispatch incoming frames to the matching callback
 //   3. Build subscribe/unsubscribe JSON messages per Gate.io v4 protocol
 //   4. Build pong replies for server-initiated pings
-//   5. Expose active channels for re-subscription after reconnect
+//   5. Expose active subscriptions for re-subscription after reconnect
 // ---------------------------------------------------------------------------
 class GateWsChannels
 {
   public:
     /// Register a callback for a Gate.io channel.
     ///
-    /// If the channel already exists, the callback and payload are replaced.
+    /// Payloads ACCUMULATE per channel: each distinct payload is remembered so
+    /// that a reconnect can re-subscribe every one of them. This matters for
+    /// channels whose payload is positional and cannot be batched across
+    /// symbols (e.g. futures.candlesticks ["1m", "<contract>"], which is
+    /// subscribed once per symbol). Subscribing an identical (channel, payload)
+    /// pair again is a no-op for the payload list.
+    ///
+    /// The callback is REPLACED on each call (last registration wins) — all
+    /// subscriptions of one channel receive the same frames, so a single
+    /// callback per channel is the dispatch model.
     ///
     /// Parameters:
     ///   1. channel  — Gate.io channel name (e.g. "spot.tickers")
@@ -66,7 +75,7 @@ class GateWsChannels
     /// Thread safety: exclusive write lock.
     void subscribe(const std::string &channel, const std::vector<std::string> &payload, ChannelCallback callback);
 
-    /// Remove a channel subscription.
+    /// Remove a channel subscription — all accumulated payloads.
     ///
     /// After this call, dispatch() will no longer invoke the callback for this channel.
     /// No-op if the channel is not currently subscribed.
@@ -108,23 +117,37 @@ class GateWsChannels
     [[nodiscard]] static nlohmann::json buildPong(const nlohmann::json &ping_frame,
         MarketType mt = MarketType::Spot);
 
-    /// Returns a list of currently subscribed channel names.
+    /// Returns a list of currently subscribed channel names (unique).
     ///
     /// Thread safety: shared read lock.
     [[nodiscard]] std::vector<std::string> activeChannels() const;
 
-    /// Returns the payload for a given channel (used for re-subscription on reconnect).
+    /// Returns every payload registered for a channel, in subscription order.
     ///
-    /// Returns an empty vector if the channel is not subscribed.
+    /// One entry per distinct payload (e.g. a per-symbol candlesticks channel
+    /// yields one payload per symbol). Used to build per-payload unsubscribe
+    /// messages. Returns an empty vector if the channel is not subscribed.
+    ///
     /// Thread safety: shared read lock.
-    [[nodiscard]] std::vector<std::string> getPayload(const std::string &channel) const;
+    [[nodiscard]] std::vector<std::vector<std::string>> payloadsFor(const std::string &channel) const;
+
+    /// Build one subscribe message per registered (channel, payload) pair —
+    /// the complete re-subscription set for a fresh connection.
+    ///
+    /// Payloads must be replayed as separate messages because positional
+    /// payloads cannot be merged across symbols. Order: channel order is
+    /// unspecified (hash map), payload order within a channel is
+    /// subscription order.
+    ///
+    /// Thread safety: shared read lock.
+    [[nodiscard]] std::vector<nlohmann::json> buildResubscribeMsgs() const;
 
   private:
     /// Internal storage for one channel subscription.
     struct ChannelEntry
     {
-        std::vector<std::string> payload;
-        ChannelCallback callback;
+        std::vector<std::vector<std::string>> payloads; ///< All distinct payloads, subscription order.
+        ChannelCallback callback;                       ///< Last registration wins.
     };
 
     mutable std::shared_mutex m_mutex;

@@ -8,6 +8,7 @@
 #include "exchange/EndpointRouter.hpp"
 #include "logging/Logger.hpp"
 
+#include <algorithm>
 #include <chrono>
 
 namespace pulse::exchange
@@ -21,10 +22,18 @@ void GateWsChannels::subscribe(const std::string &channel,
     ChannelCallback callback)
 {
     // 1. Acquire exclusive write lock
-    // 2. Insert or replace the channel entry
+    // 2. Accumulate the payload (skip exact duplicates — reconnect replays all)
+    // 3. Replace the callback (last registration wins for the channel)
     std::unique_lock lock(m_mutex);
-    m_channels[channel] = ChannelEntry{ payload, std::move(callback) };
-    PULSE_LOG_DEBUG("exchange", "Channel subscribed: {}", channel);
+    auto &entry = m_channels[channel];
+    const bool known_payload = std::any_of(entry.payloads.begin(), entry.payloads.end(),
+        [&payload](const std::vector<std::string> &existing) { return existing == payload; });
+    if (!known_payload)
+    {
+        entry.payloads.push_back(payload);
+    }
+    entry.callback = std::move(callback);
+    PULSE_LOG_DEBUG("exchange", "Channel subscribed: {} ({} payload(s))", channel, entry.payloads.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -150,19 +159,40 @@ std::vector<std::string> GateWsChannels::activeChannels() const
 }
 
 // ---------------------------------------------------------------------------
-// getPayload
+// payloadsFor
 // ---------------------------------------------------------------------------
-std::vector<std::string> GateWsChannels::getPayload(const std::string &channel) const
+std::vector<std::vector<std::string>> GateWsChannels::payloadsFor(const std::string &channel) const
 {
     // 1. Acquire shared read lock
-    // 2. Return the payload if the channel exists, empty vector otherwise
+    // 2. Return all payloads if the channel exists, empty vector otherwise
     std::shared_lock lock(m_mutex);
     const auto it = m_channels.find(channel);
     if (m_channels.end() == it)
     {
         return {};
     }
-    return it->second.payload;
+    return it->second.payloads;
+}
+
+// ---------------------------------------------------------------------------
+// buildResubscribeMsgs
+// ---------------------------------------------------------------------------
+std::vector<nlohmann::json> GateWsChannels::buildResubscribeMsgs() const
+{
+    // 1. Acquire shared read lock
+    // 2. One subscribe message per (channel, payload) pair — positional
+    //    payloads (e.g. candlesticks ["1m", "<contract>"]) cannot be merged
+    //    across symbols, so replay must not collapse a channel to one payload.
+    std::shared_lock lock(m_mutex);
+    std::vector<nlohmann::json> msgs;
+    for (const auto &[name, entry] : m_channels)
+    {
+        for (const auto &payload : entry.payloads)
+        {
+            msgs.push_back(buildSubscribeMsg(name, payload));
+        }
+    }
+    return msgs;
 }
 
 } // namespace pulse::exchange
