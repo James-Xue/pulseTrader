@@ -419,7 +419,9 @@ claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp -
 ```
 
 **MCP troubleshooting**:
-- The trading engine must be running for `tools/call` to work (each call is forwarded over the control socket). `initialize` and `tools/list` work offline.
+- The trading engine must be running for `tools/call` to work (each call is forwarded over the control socket). `initialize`, `server/discover` and `tools/list` work offline — the tool catalog is compiled in, so the tools appear even when the engine is down and only the calls fail.
+- The server is **dual-era**: it answers both the legacy `initialize` handshake (revisions up to 2025-11-25) and the stateless modern era (2026-07-28 and later, which has no handshake, requires `server/discover`, and requires every result to carry `resultType`). `tools/list` and `tools/call` are served under both, with nothing gated on session state.
+- If a client reports `missing required resultType`, or the tools list is empty while the server shows as Connected, the client is speaking the modern era and the server's modern path is broken — check that `server/discover` replies with `supportedVersions` (not `protocolVersions`) and that results are stamped.
 - Logs go to `logs/` as usual. In MCP mode stdout is reserved for the protocol stream, so console logging is forced off (`toConsole = false`) — diagnose MCP problems via `logs/*.log`, not stdout.
 - `./run.sh cli` reports "cannot reach engine control socket" when the engine is down — start `./run.sh trade` first.
 

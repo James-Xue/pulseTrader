@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -13,9 +14,21 @@ namespace pulse::control
 namespace
 {
 
-constexpr const char *kProtocolVersion = "2025-06-18";
 constexpr const char *kServerName = "pulsetrader";
 constexpr const char *kServerVersion = "0.1.0";
+
+/// The `_meta` key a MODERN (2026-07-28 and later) request uses to declare the
+/// revision governing it. A legacy client states its version inside
+/// `initialize` instead, so a version present here IS the era marker.
+constexpr const char *kProtocolVersionMetaKey =
+    "io.modelcontextprotocol/protocolVersion";
+
+/// The value a modern result must carry. Revision 2026-07-28 requires it on
+/// every result, and the "absent means complete" bridge is granted only to
+/// earlier-revision servers — a client that saw 2026-07-28 in our version list
+/// rejects a result without it, and a rejected tools/list means the model is
+/// handed NO TOOLS while the server still looks connected.
+constexpr const char *kResultTypeComplete = "complete";
 
 nlohmann::json makeError(int code, const std::string &message)
 {
@@ -36,6 +49,27 @@ nlohmann::json textContent(const std::string &text, bool is_error)
     };
 }
 
+/// The capabilities block, byte-identical in `initialize` and
+/// `server/discover` because it describes the SERVER rather than a session.
+///
+/// `listChanged:false` is not a placeholder: the tool catalog is derived from
+/// the control-plane method list, so it cannot change while the process runs.
+nlohmann::json capabilitiesPayload()
+{
+    return nlohmann::json{
+        { "tools", nlohmann::json{ { "listChanged", false } } },
+    };
+}
+
+/// Server identity, shaped as the spec's ServerInfo (name + version).
+nlohmann::json serverInfoPayload()
+{
+    return nlohmann::json{
+        { "name", kServerName },
+        { "version", kServerVersion },
+    };
+}
+
 /// A JSON-Schema property entry for a string parameter. Required-ness is
 /// expressed by the schema-level "required" array, never a per-property
 /// boolean (an invalid "required": true is rejected by API schema validators).
@@ -49,6 +83,89 @@ nlohmann::json stringParam(const std::string &name,
 }
 
 } // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// Protocol revisions
+// ---------------------------------------------------------------------------
+const std::vector<std::string> &McpServer::legacyProtocolVersions()
+{
+    // Ascending, newest last. 2024-10-07 is the revision before the first one
+    // most clients name; leaving it out means a client asking for it gets
+    // counter-offered a version it may not know, and the negotiation then has
+    // nowhere to go.
+    static const std::vector<std::string> versions{
+        "2024-10-07",
+        "2024-11-05",
+        "2025-03-26",
+        "2025-06-18",
+        "2025-11-25",
+    };
+    return versions;
+}
+
+const std::string &McpServer::newestLegacyProtocolVersion()
+{
+    return legacyProtocolVersions().back();
+}
+
+const std::vector<std::string> &McpServer::supportedProtocolVersions()
+{
+    // Modern first, then legacy descending — the order the spec's own example
+    // uses (["2026-07-28", "2025-11-25"]), so a client that walks the list and
+    // takes the first entry it recognises lands on the newest revision it can
+    // speak rather than the oldest.
+    static const std::vector<std::string> versions = [] {
+        std::vector<std::string> all{ "2026-07-28" };
+        const std::vector<std::string> &legacy = legacyProtocolVersions();
+        all.insert(all.end(), legacy.rbegin(), legacy.rend());
+        return all;
+    }();
+    return versions;
+}
+
+std::string McpServer::negotiateLegacyVersion(const std::string &requested)
+{
+    const std::vector<std::string> &legacy = legacyProtocolVersions();
+    if (std::find(legacy.begin(), legacy.end(), requested) != legacy.end())
+    {
+        // The spec requires echoing a supported version verbatim; a client that
+        // asked for 2025-06-18 and is answered with 2025-11-25 has to decide
+        // whether to continue, and the answer is only ever "yes" by luck.
+        return requested;
+    }
+    return newestLegacyProtocolVersion();
+}
+
+std::string McpServer::declaredProtocolVersion(const nlohmann::json &params)
+{
+    if (!params.is_object())
+    {
+        return std::string{};
+    }
+
+    // Note the two shapes a client can use. A string is the documented form; an
+    // object is what a few clients send, carrying the revision under a nested
+    // key. Both are read because the alternative — treating the object form as
+    // "no version declared" — silently downgrades a modern client to the legacy
+    // path, which is the failure this whole mechanism exists to prevent.
+    const auto meta = params.find("_meta");
+    if (params.end() == meta || !meta->is_object())
+    {
+        return std::string{};
+    }
+
+    const auto entry = meta->find(kProtocolVersionMetaKey);
+    if (meta->end() == entry)
+    {
+        return std::string{};
+    }
+    if (entry->is_string())
+    {
+        return entry->get<std::string>();
+    }
+
+    return std::string{};
+}
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -422,6 +539,19 @@ std::string McpServer::handleLine(const std::string &line, Backend &backend,
     const std::string method = req["method"].get<std::string>();
     const bool is_notification = !req.contains("id") || req["id"].is_null();
 
+    // params is optional in JSON-RPC. An absent (or non-object) key becomes an
+    // empty object so every branch below can read it unconditionally, and a
+    // non-object value is normalised rather than rejected here because the
+    // per-method checks own that verdict.
+    const nlohmann::json params =
+        (req.contains("params") && req["params"].is_object()) ? req["params"]
+                                                             : nlohmann::json::object();
+
+    // Whether this request arrived through the modern (per-request metadata)
+    // era. Set at the gate below and read by the respond funnel, so it must be
+    // declared before the lambda that captures it.
+    bool modern_request = false;
+
     auto respond = [&](const nlohmann::json &payload)
     {
         if (is_notification)
@@ -433,20 +563,91 @@ std::string McpServer::handleLine(const std::string &line, Backend &backend,
             { "id", req["id"] },
         };
         resp.update(payload);
+
+        // Modern results must be self-describing. 2026-07-28 requires
+        // `resultType` on every result, and the "absent means complete" bridge
+        // is granted only to earlier-revision servers. The cost of omitting it
+        // is not a warning: a client that saw 2026-07-28 in our version list
+        // rejects the result outright, and a rejected tools/list means the
+        // model is handed NO TOOLS while the server still reports Connected.
+        //
+        // Stamped in the one funnel so no future method can forget it, and only
+        // for modern requests — a legacy client predates the field.
+        if (modern_request && resp.contains("result") && resp["result"].is_object())
+        {
+            resp["result"]["resultType"] = kResultTypeComplete;
+        }
         return resp.dump();
     };
+
+    // --- protocol-version gate (modern era) ---
+    // A request that declares a revision in `_meta` and names one this server
+    // does not speak is refused with -32022 plus the supported list. That is
+    // not a dead end: the spec makes it the negotiation step — the client reads
+    // the list, picks a revision both sides speak, and retries.
+    //
+    // A request declaring nothing (a legacy client, which states its version
+    // inside `initialize` instead) sails straight through, which is what lets
+    // one dispatch path serve both eras. Because the refusal goes through the
+    // funnel, a NOTIFICATION declaring an unsupported revision is dropped in
+    // silence rather than provoking an illegal reply.
+    const std::string declared = declaredProtocolVersion(params);
+    modern_request = !declared.empty();
+    if (modern_request)
+    {
+        const std::vector<std::string> &supported = supportedProtocolVersions();
+        if (std::find(supported.begin(), supported.end(), declared) == supported.end())
+        {
+            return respond(nlohmann::json{
+                { "error", nlohmann::json{
+                      { "code", kErrorUnsupportedProtocolVersion },
+                      { "message", "Unsupported protocol version: " + declared },
+                      // Exactly the two keys the client reads. A list under any
+                      // other name is unreadable to it, and an unreadable list
+                      // makes it abandon negotiation and fall back to
+                      // `initialize` with no diagnostic whatsoever.
+                      { "data", nlohmann::json{
+                            { "supported", supported },
+                            { "requested", declared } } } } } });
+        }
+    }
+
+    // --- server/discover (the modern entry point) ---
+    if ("server/discover" == method)
+    {
+        // ttlMs and cacheScope are stated rather than left to the client's
+        // defaults: the reply describes THIS build of THIS server, so caching
+        // it would be wrong. `serverInfo` is included by analogy with
+        // `initialize`; it lives at the top level here because the modern
+        // result schema is a loose object.
+        return respond(nlohmann::json{
+            { "result", nlohmann::json{
+                  { "supportedVersions", supportedProtocolVersions() },
+                  { "capabilities", capabilitiesPayload() },
+                  { "serverInfo", serverInfoPayload() },
+                  { "ttlMs", 0 },
+                  { "cacheScope", "private" } } } });
+    }
 
     // --- initialize ---
     if ("initialize" == method)
     {
+        // The requested revision lives in `params.protocolVersion` here, NOT in
+        // `_meta`: that placement is the whole distinction between the eras. A
+        // missing or wrong-typed value is not an error — negotiation can still
+        // succeed by counter-offer, and throwing on client input would turn a
+        // recoverable mismatch into a crash.
+        std::string requested;
+        if (params.contains("protocolVersion") && params["protocolVersion"].is_string())
+        {
+            requested = params["protocolVersion"].get<std::string>();
+        }
+
         return respond(nlohmann::json{
             { "result", nlohmann::json{
-                  { "protocolVersion", kProtocolVersion },
-                  { "capabilities", nlohmann::json{
-                        { "tools", nlohmann::json{ { "listChanged", false } } } } },
-                  { "serverInfo", nlohmann::json{
-                        { "name", kServerName },
-                        { "version", kServerVersion } } } } } });
+                  { "protocolVersion", negotiateLegacyVersion(requested) },
+                  { "capabilities", capabilitiesPayload() },
+                  { "serverInfo", serverInfoPayload() } } } });
     }
 
     // --- notifications ---
