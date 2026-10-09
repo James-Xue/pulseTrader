@@ -327,6 +327,14 @@ TEST(McpServerDualEra, AModernResultCarriesResultTypeAndALegacyOneDoesNot)
         backend, should_exit));
     ASSERT_TRUE(modern.contains("result"));
     EXPECT_EQ("complete", modern["result"].value("resultType", std::string{}));
+    // tools/list is the ONE result whose 2026-07-28 schema also requires these
+    // two. A live client rejected the reply with
+    //   ttlMs: expected number, received undefined
+    //   cacheScope: Invalid option: expected one of "public"|"private"
+    // and the model was left with no tools at all — so they are pinned here.
+    ASSERT_TRUE(modern["result"].contains("ttlMs"));
+    EXPECT_EQ(0, modern["result"]["ttlMs"].get<int>());
+    EXPECT_EQ("private", modern["result"]["cacheScope"].get<std::string>());
 
     // Legacy: nothing declared, so the field predates the client and must be
     // absent rather than described to a client that does not know it.
@@ -335,6 +343,8 @@ TEST(McpServerDualEra, AModernResultCarriesResultTypeAndALegacyOneDoesNot)
         backend, should_exit));
     ASSERT_TRUE(legacy.contains("result"));
     EXPECT_FALSE(legacy["result"].contains("resultType"));
+    // The catalog must be intact under both eras, stamping or not.
+    EXPECT_EQ(McpServer::toolDefinitions().size(), legacy["result"]["tools"].size());
 }
 
 TEST(McpServerDualEra, AModernToolsListStillCarriesEveryTool)

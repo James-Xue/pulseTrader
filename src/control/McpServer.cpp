@@ -670,8 +670,23 @@ std::string McpServer::handleLine(const std::string &line, Backend &backend,
     // --- tools/list ---
     if ("tools/list" == method)
     {
+        // No session check, deliberately: a modern client calls this as its
+        // first (or only) message, a legacy client calls it after `initialize`,
+        // and both get the same answer. That coexistence is the contract.
+        //
+        // ttlMs and cacheScope are REQUIRED by the 2026-07-28 schema for this
+        // result (unlike the other results, which do not carry them), and a
+        // modern client rejects the reply outright without them — leaving the
+        // model with no tools while the server still reports Connected. Zero ttl
+        // means "do not cache"; the catalog is compiled in, so caching would be
+        // safe, but a stale tool list is the kind of failure that looks like a
+        // broken server and this call is cheap. `private` because the reply
+        // describes this build of this server, not a shared resource.
         return respond(nlohmann::json{
-            { "result", nlohmann::json{ { "tools", toolDefinitions() } } } });
+            { "result", nlohmann::json{
+                  { "tools", toolDefinitions() },
+                  { "ttlMs", 0 },
+                  { "cacheScope", "private" } } } });
     }
 
     // --- tools/call ---
