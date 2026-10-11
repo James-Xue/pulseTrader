@@ -74,6 +74,11 @@ data/
 # Frontend deps (WebUI removed on headless; leftover from M13 era)
 frontend/node_modules/
 
+# Chat-archive output wrongly written into the repo (2026-08-20 incident).
+# Conversation archives belong in ~/1_Code/codex-brain/archive/, never here.
+# Leading slash anchors to the repo root so nested "archive" dirs stay trackable.
+/archive/
+
 # CMake in-source build artifacts (prevent accidental in-source builds)
 CMakeCache.txt
 CMakeFiles/
