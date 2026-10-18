@@ -53,6 +53,10 @@ build_no_sqlite/
 # Runtime logs
 logs/
 
+# Runtime lock files (flock single-instance guards — empty by design, recreated on demand)
+# relay.lock: leftover from relay scripts that cd into this repo for MCP tool discovery
+relay.lock
+
 # Environment variables (API keys)
 .env
 
