@@ -36,6 +36,60 @@ This table is the honest boundary between "engineered and tested" and "hoped for
 
 ---
 
+## Quick start
+
+You do not need exchange keys, a funded account or the C++ toolchain to see the
+protocol working.
+
+### 1. Run the demo engine (Docker)
+
+```bash
+docker build -f docker/demo.Dockerfile -t pulsetrader-demo .
+docker run --rm -p 8081:8081 pulsetrader-demo
+```
+
+It serves the real control-plane contract with fixed sample payloads. It is a
+fixture, not a simulator — nothing is computed from market data.
+
+### 2. Query it from a terminal
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get_status"}' | nc 127.0.0.1 8081
+```
+
+### 3. Build the Qt client and connect
+
+```bash
+cmake -S client/qt -B build_qt -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64
+cmake --build build_qt
+PULSE_CLIENT_HOST=127.0.0.1 PULSE_CLIENT_PORT=8081 ./build_qt/pulseTraderQt
+```
+
+### Building the engine itself
+
+```bash
+cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+```
+
+## What this is not
+
+- **Not a profitable bot.** No strategy here has demonstrated a robust positive
+  expectancy. The negative result is documented in
+  [Project status](#project-status).
+- **Not a simulator.** There is no paper-trading engine yet; the demo serves
+  fixed sample data. Backtesting (`./run.sh backtest`) replays stored klines and
+  does not model funding, margin, liquidation or slippage.
+- **Not multi-exchange.** Gate.io only, by design.
+- **Not an unattended money machine.** The gap analysis in
+  [docs/btc-auto-trading-gap-analysis-2026-10-04.md](docs/btc-auto-trading-gap-analysis-2026-10-04.md)
+  lists eight blockers (exchange-side stops, drawdown wiring, alerting, idempotent
+  retries, private WS replay) that must be closed before unsupervised trading.
+- **Not financial advice.**
+
+---
+
 ## Architecture Overview
 
 pulseTrader is organised into nine vertical layers, each with a single well-defined responsibility:
