@@ -254,6 +254,30 @@ struct ControlConfig
     /// time or "+08:00" for Beijing. Lets you align displayed times with a
     /// phone app showing a different timezone.
     std::string displayTimezone = "local";
+
+    // -----------------------------------------------------------------------
+    // Transport security (M-Q4).
+    //
+    // Defaults keep the historical behaviour: plaintext on loopback, no
+    // authentication. Both security features are opt-in, and each is
+    // independent — a tunnel (Tailscale/SSH) can replace TLS, but the token
+    // still protects against any local process that reaches the port.
+    // -----------------------------------------------------------------------
+
+    /// Wrap accepted sockets in TLS. Requires tlsCertPath and tlsKeyPath.
+    bool tlsEnabled = false;
+    /// PEM certificate chain presented to clients.
+    std::string tlsCertPath;
+    /// PEM private key matching the certificate.
+    std::string tlsKeyPath;
+    /// CA bundle used to verify client certificates (mTLS only).
+    std::string tlsCaPath;
+    /// Require and verify a client certificate. Off in v1.
+    bool tlsRequireClientCert = false;
+    /// Shared bearer secret. Empty disables authentication. Prefer
+    /// token = "from_env:PULSE_CONTROL_TOKEN" so the secret stays out of the
+    /// TOML file.
+    std::string token;
 };
 
 // ---------------------------------------------------------------------------

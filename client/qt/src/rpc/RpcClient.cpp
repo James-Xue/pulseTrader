@@ -242,11 +242,55 @@ void RpcClient::clearPending(qint64 id)
 void RpcClient::onConnected()
 {
     m_backoffMs = 1000;
-    setState(State::Ready);
+
+    // 1. No token configured: go straight to Ready. If the engine actually
+    //    requires one, the first real request returns 9106 and the call fails
+    //    with AuthFailed, which the UI renders as "authentication required".
+    if (m_token.isEmpty())
+    {
+        setState(State::Ready);
+        return;
+    }
+
+    // 2. Token configured: negotiate before any other request. The engine
+    //    accepts exactly one auth line and nothing else first.
+    setState(State::Authenticating);
+
+    const qint64 id = m_nextId++;
+    m_authId = id;
+
+    QJsonObject params;
+    params[QStringLiteral("token")] = m_token;
+
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    connect(timer, &QTimer::timeout, this, [this, id]()
+    {
+        clearPending(id);
+        m_wantConnected = false;
+        emit authenticationFailed(QStringLiteral("auth handshake timed out"));
+        if (nullptr != m_socket)
+        {
+            m_socket->abort();
+        }
+    });
+    timer->start(5000);
+    m_pending.insert(id, Pending{ QStringLiteral("auth"), timer });
+
+    QJsonObject request;
+    request[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    request[QStringLiteral("id")] = id;
+    request[QStringLiteral("method")] = QStringLiteral("auth");
+    request[QStringLiteral("params")] = params;
+
+    QByteArray line = QJsonDocument(request).toJson(QJsonDocument::Compact);
+    line.append('\n');
+    m_socket->write(line);
 }
 
 void RpcClient::onDisconnected()
 {
+    m_authId = -1;
     failAll(RpcError{ RpcErrorKind::Transport, QStringLiteral("connection closed"), 0, 0 });
     m_buffer.clear();
     setState(State::Disconnected);
@@ -337,16 +381,42 @@ void RpcClient::handleReply(const QJsonObject& reply)
     const qint64 id = static_cast<qint64>(idValue.toDouble());
 
     // 2. A late reply for an already-timed-out call is dropped silently.
-    if (!m_pending.contains(id))
+    auto pendingIt = m_pending.find(id);
+    if (pendingIt == m_pending.end())
     {
         return;
     }
 
+    // Capture the method before clearPending invalidates the iterator: the
+    // auth reply is routed differently from a normal call reply.
+    const QString method = pendingIt->method;
     clearPending(id);
+
+    const bool hasError = reply.contains(QStringLiteral("error"));
+
+    if (QStringLiteral("auth") == method)
+    {
+        if (hasError)
+        {
+            const QJsonObject error = reply.value(QStringLiteral("error")).toObject();
+            // A rejected token is not transient: stop reconnecting so the UI
+            // can show the reason instead of a reconnect loop.
+            m_wantConnected = false;
+            m_authId = -1;
+            emit authenticationFailed(
+                error.value(QStringLiteral("message")).toString());
+            setState(State::Disconnected);
+            m_socket->abort();
+            return;
+        }
+        m_authId = -1;
+        setState(State::Ready);
+        return;
+    }
 
     // 3. Error object shape: code, message, and data.code carrying the
     //    PulseError value. Both codes are preserved.
-    if (reply.contains(QStringLiteral("error")))
+    if (hasError)
     {
         const QJsonObject error = reply.value(QStringLiteral("error")).toObject();
         RpcError rpcError;

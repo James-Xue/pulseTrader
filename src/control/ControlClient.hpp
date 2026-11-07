@@ -33,6 +33,11 @@ class ControlClient
     bool connect(const std::string &host, std::uint16_t port,
                  int timeout_ms = 3000);
 
+    /// Configure the bearer token used by an engine that requires
+    /// authentication (M-Q4). Empty keeps the connection unauthenticated,
+    /// which is what an engine with no `[control] token` expects.
+    void setToken(std::string token);
+
     void disconnect();
 
     [[nodiscard]] bool connected() const;
@@ -55,6 +60,10 @@ class ControlClient
     [[nodiscard]] Result<nlohmann::json>
     tryCallOnce(const std::string &method, const nlohmann::json &params);
 
+    /// Send the `auth` request once per connection. Returns false when the
+    /// engine rejects the token.
+    bool authenticate();
+
     std::unique_ptr<asio::io_context> m_ioCtx;
     std::unique_ptr<asio::ip::tcp::socket> m_sock;
     std::string m_lineBuffer;
@@ -62,6 +71,8 @@ class ControlClient
     std::string m_host;          ///< Last connect() endpoint (auto-reconnect).
     std::uint16_t m_port{ 0 };
     int m_timeoutMs{ 3000 };
+    std::string m_token;         ///< Empty = no authentication.
+    bool m_authenticated = false;
 };
 
 } // namespace pulse::control

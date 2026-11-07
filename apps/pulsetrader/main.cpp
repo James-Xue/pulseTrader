@@ -1282,6 +1282,44 @@ static int runTrade(int argc, char* argv[])
     {
         control_server = std::make_unique<pulse::control::JsonRpcServer>(
             cfg.control.bindAddress, cfg.control.port, control_registry);
+
+        // Transport security (M-Q4). Defaults in ControlConfig keep the
+        // socket plaintext and unauthenticated, so an untouched config is
+        // unchanged.
+        pulse::control::JsonRpcServer::Security security;
+        security.tlsEnabled = cfg.control.tlsEnabled;
+        security.certPath = cfg.control.tlsCertPath;
+        security.keyPath = cfg.control.tlsKeyPath;
+        security.caPath = cfg.control.tlsCaPath;
+        security.requireClientCert = cfg.control.tlsRequireClientCert;
+        security.token = cfg.control.token;
+        control_server->setSecurity(std::move(security));
+
+        // Insecure-but-expressible combinations are warnings, not errors: the
+        // validator only rejects configurations that cannot start at all.
+        const bool loopback = ("127.0.0.1" == cfg.control.bindAddress
+                               || "::1" == cfg.control.bindAddress
+                               || "localhost" == cfg.control.bindAddress);
+        if (!loopback && !cfg.control.tlsEnabled && cfg.control.token.empty())
+        {
+            PULSE_LOG_WARN("control",
+                           "control socket is exposed on {} with neither TLS "
+                           "nor a token — anyone who can reach the port can "
+                           "place orders",
+                           cfg.control.bindAddress);
+        }
+        if (!cfg.control.token.empty() && !cfg.control.tlsEnabled)
+        {
+            PULSE_LOG_WARN("control",
+                           "control token is sent over plaintext — use TLS or "
+                           "a tunnel");
+        }
+        if (cfg.control.tlsEnabled && cfg.control.token.empty())
+        {
+            PULSE_LOG_WARN("control",
+                           "control TLS is enabled without a token — any local "
+                           "process can still drive the engine");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1856,6 +1894,9 @@ int runCli(int argc, char *argv[])
     const auto cfg = loadControlConfig(args);
 
     pulse::control::ControlClient client;
+    // An engine with [control] token set requires the handshake before any
+    // other request; an empty token leaves the connection unauthenticated.
+    client.setToken(cfg.control.token);
     if (!client.connect(cfg.control.bindAddress, cfg.control.port))
     {
         std::cerr << "Error: cannot reach engine control socket at "
@@ -1887,6 +1928,7 @@ int runMcp(int argc, char *argv[])
     pulse::logging::Logger::init(mcp_cfg.log);
 
     auto client = std::make_shared<pulse::control::ControlClient>();
+    client->setToken(mcp_cfg.control.token);
     // Connect lazily: initialize/tools/list work even if the engine is
     // down; tools/call surface the unreachable error.
     client->connect(mcp_cfg.control.bindAddress, mcp_cfg.control.port, 1000);

@@ -32,9 +32,10 @@ public:
     /// Connection lifecycle as seen by the UI.
     enum class State
     {
-        Disconnected, ///< No socket, or a reconnect is pending.
-        Connecting,   ///< TCP connect (and TLS handshake) in progress.
-        Ready,        ///< Connected and able to carry calls.
+        Disconnected,   ///< No socket, or a reconnect is pending.
+        Connecting,     ///< TCP connect (and TLS handshake) in progress.
+        Authenticating, ///< Token handshake sent, waiting for the verdict.
+        Ready,          ///< Connected and able to carry calls.
     };
     Q_ENUM(State)
 
@@ -74,6 +75,10 @@ signals:
     void callSucceeded(qint64 id, const QJsonObject& result);
     void callFailed(qint64 id, const pulse::client::RpcError& error);
 
+    /// The engine rejected the configured token. Retrying is pointless, so the
+    /// client stops reconnecting until connectToEngine() is called again.
+    void authenticationFailed(const QString& message);
+
 private:
     /// Per-request bookkeeping: the method name for diagnostics and the timer
     /// that turns a missing reply into a Timeout error.
@@ -106,6 +111,7 @@ private:
     QByteArray m_buffer;
     QHash<qint64, Pending> m_pending;
     qint64 m_nextId = 1;
+    qint64 m_authId = -1; ///< Request id of the in-flight auth handshake.
 
     State m_state = State::Disconnected;
     bool m_wantConnected = false;

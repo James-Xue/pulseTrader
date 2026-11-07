@@ -896,6 +896,16 @@ PulseError parseControl(const toml::value &root, ControlConfig &out)
     out.displayTimezone = toml::find_or(
         sec, "display_timezone", out.displayTimezone);
 
+    // Transport security (M-Q4). Defaults keep the socket plaintext and
+    // unauthenticated, so an untouched trading.toml behaves exactly as before.
+    out.tlsEnabled = toml::find_or(sec, "tls_enabled", out.tlsEnabled);
+    out.tlsCertPath = toml::find_or(sec, "tls_cert_path", out.tlsCertPath);
+    out.tlsKeyPath = toml::find_or(sec, "tls_key_path", out.tlsKeyPath);
+    out.tlsCaPath = toml::find_or(sec, "tls_ca_path", out.tlsCaPath);
+    out.tlsRequireClientCert = toml::find_or(
+        sec, "tls_require_client_cert", out.tlsRequireClientCert);
+    out.token = toml::find_or(sec, "token", out.token);
+
     return {};
 }
 

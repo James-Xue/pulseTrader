@@ -12,6 +12,7 @@
 #include "core/config_validator.hpp"
 
 #include <cmath>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -408,6 +409,50 @@ PulseError validateConfig(const PulseConfig &cfg)
                               "control.display_timezone must be \"local\", "
                               "\"utc\" or \"±HH:MM\" (got \""
                                   + cfg.control.displayTimezone + "\")"};
+        }
+
+        // -------------------------------------------------------------------
+        // Transport security (M-Q4).
+        //
+        // Only hard failures are rejected here. Insecure-but-expressible
+        // combinations (non-loopback without TLS, token over plaintext, TLS
+        // without a token) are logged at startup by runTrade(), because the
+        // validator has no warning channel.
+        // -------------------------------------------------------------------
+        if (cfg.control.tlsEnabled)
+        {
+            // 1. Both PEM files are mandatory; a half-configured TLS listener
+            //    would otherwise fail at the first handshake.
+            if (cfg.control.tlsCertPath.empty()
+                || cfg.control.tlsKeyPath.empty())
+            {
+                return PulseError{
+                    ErrorCode::ControlTlsInitFailed,
+                    "control.tls_enabled requires both tls_cert_path and "
+                    "tls_key_path"};
+            }
+
+            // 2. Fail before binding rather than at the first client: a missing
+            //    or unreadable PEM is an operator error, not a runtime event.
+            for (const std::string &path :
+                 {cfg.control.tlsCertPath, cfg.control.tlsKeyPath})
+            {
+                std::ifstream probe(path);
+                if (!probe.good())
+                {
+                    return PulseError{
+                        ErrorCode::ControlTlsInitFailed,
+                        "control TLS file is not readable: " + path};
+                }
+            }
+
+            // 3. mTLS needs a CA bundle to verify against.
+            if (cfg.control.tlsRequireClientCert && cfg.control.tlsCaPath.empty())
+            {
+                return PulseError{
+                    ErrorCode::ControlTlsInitFailed,
+                    "control.tls_require_client_cert requires tls_ca_path"};
+            }
         }
     }
 

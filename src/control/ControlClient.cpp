@@ -76,6 +76,37 @@ bool ControlClient::connect(const std::string &host, std::uint16_t port,
     }
 
     m_lineBuffer.clear();
+    // A fresh socket has not authenticated yet, even if the previous one had.
+    m_authenticated = false;
+    return true;
+}
+
+void ControlClient::setToken(std::string token)
+{
+    m_token = std::move(token);
+    m_authenticated = false;
+}
+
+bool ControlClient::authenticate()
+{
+    // 1. No token configured: nothing to negotiate. An engine that requires
+    //    one answers the first real call with 9106, which the caller sees as
+    //    ControlAuthFailed.
+    if (m_token.empty())
+    {
+        m_authenticated = true;
+        return true;
+    }
+
+    // 2. One auth round-trip per connection, before any other request.
+    const nlohmann::json params{ { "token", m_token } };
+    auto result = tryCallOnce("auth", params);
+    if (!ok(result))
+    {
+        m_authenticated = false;
+        return false;
+    }
+    m_authenticated = true;
     return true;
 }
 
@@ -120,6 +151,13 @@ ControlClient::call(const std::string &method, const nlohmann::json &params)
                 return PulseError{ ErrorCode::ControlEngineUnreachable,
                                    "not connected to the trading engine control socket" };
             }
+        }
+
+        // Authenticate once per connection before the first real request.
+        if (!m_authenticated && !authenticate())
+        {
+            return PulseError{ ErrorCode::ControlAuthFailed,
+                               "control socket authentication failed" };
         }
 
         auto result = tryCallOnce(method, params);
@@ -167,6 +205,18 @@ ControlClient::tryCallOnce(const std::string &method, const nlohmann::json &para
         if (resp.contains("error"))
         {
             const auto &err = resp["error"];
+            // The control plane reports logical failures with -32603 plus a
+            // PulseError in error.data.code. 9106 means the token was missing
+            // or wrong — a distinct outcome from a generic protocol error.
+            const int dataCode = err.contains("data") && err["data"].is_object()
+                                     ? err["data"].value("code", 0)
+                                     : 0;
+            if (static_cast<int>(ErrorCode::ControlAuthFailed) == dataCode)
+            {
+                return PulseError{ ErrorCode::ControlAuthFailed,
+                                   err.value("message",
+                                             "control authentication failed") };
+            }
             return PulseError{
                 ErrorCode::ControlProtocolError,
                 err.value("message", "JSON-RPC error")
