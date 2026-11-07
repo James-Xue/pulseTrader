@@ -69,6 +69,18 @@ cmake --build build_qt
 PULSE_CLIENT_HOST=127.0.0.1 PULSE_CLIENT_PORT=8081 ./build_qt/pulseTraderQt
 ```
 
+### 4. Or drive the engine from an LLM client
+
+The control-plane method names are the MCP tool names, so an MCP client can read
+the engine directly:
+
+```bash
+python3 tools/mcp_demo.py     # discover -> tools/list -> four tool calls
+```
+
+See [docs/demo-mcp.md](docs/demo-mcp.md) for the transcript and the 60-second
+screencast script.
+
 ### Building the engine itself
 
 ```bash
