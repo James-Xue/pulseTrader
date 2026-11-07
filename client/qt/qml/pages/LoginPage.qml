@@ -4,118 +4,59 @@ import QtQuick.Layouts
 import QtCore
 import Pulse.Client
 
-/// Full-window login view for the L9 control socket.
+/// Local account gate.
 ///
-/// Shown instead of the main shell until the controller reports Ready. The
-/// credential is the shared control-plane token (not an exchange API key):
-///
-/// 1. The engine operator sets `[control] token` in trading.toml. When it is
-///    empty, authentication is disabled and the token field may stay blank.
-/// 2. The token is sent through the `auth` JSON-RPC handshake that RpcClient
-///    performs before the first poll.
-/// 3. The form persists host/port/TLS unconditionally; the token is written
-///    to QSettings only when "Remember" is checked, so a shared machine does
-///    not keep the secret on disk by default.
+/// First run shows the account-creation form; later runs show the unlock form.
+/// The password derives an AES-256-GCM key that protects the vault holding the
+/// Gate.io API credentials. Main.qml switches to the profile page as soon as
+/// `account.unlocked` becomes true.
 Rectangle {
     id: root
 
-    property var controller
+    property var account
 
-    /// Set while a connection attempt is in flight. The fields go read-only
-    /// and the primary button reports progress instead of accepting a second
-    /// click that would race the first handshake.
-    readonly property bool connecting: root.controller
-                                       && root.controller.connectionState
-                                          === EngineController.Connecting
-
-    /// Validation message produced locally (bad port) — kept separate from
-    /// the controller's lastError so a stale engine error does not mask it.
-    property string localError: ""
+    /// True when no vault exists yet. The account service re-reads the file on
+    /// construction, so this is stable for the lifetime of the window.
+    readonly property bool createMode: root.account ? !root.account.hasAccount : true
 
     color: Style.windowBackground
     bottomLeftRadius: Style.windowRadius
     bottomRightRadius: Style.windowRadius
 
-    /// Persisted connection preferences.
-    ///
-    /// `autoLogin` is separate from `remember` on purpose: remembering the
-    /// host without remembering the token is useful, but reconnecting
-    /// automatically without a saved token would silently land in whatever
-    /// state the engine accepts.
+    /// Last account name typed, kept in plain QSettings (never the password).
     Settings {
-        id: connection
-        category: "connection"
-        property string host: "127.0.0.1"
-        property int port: 8081
-        property bool tls: false
-        property bool remember: true
-        property string token: ""
-        property bool autoLogin: false
+        id: preferences
+        category: "account"
+        property string username: ""
     }
 
     Component.onCompleted: {
-        hostField.text = connection.host
-        portField.text = String(connection.port)
-        tokenField.text = connection.token
-        tlsBox.checked = connection.tls
-        rememberBox.checked = connection.remember
-
-        // Reconnect without showing the form only when the user asked for it
-        // AND the saved token is available.
-        if (connection.autoLogin && connection.remember) {
-            attemptConnect()
+        usernameField.text = preferences.username
+        if (root.createMode) {
+            usernameField.forceActiveFocus()
         } else {
-            hostField.forceActiveFocus()
+            passwordField.forceActiveFocus()
         }
     }
 
-    /// Validate the form, persist what the user chose, and ask the controller
-    /// to open the three sockets. Kept in one function so the button, the
-    /// Return key and the startup restore path cannot drift apart.
-    function attemptConnect() {
-        const host = hostField.text.trim()
-        const port = parseInt(portField.text)
-
-        // 1. Reject input the socket layer cannot represent.
-        if (0 === host.length) {
-            root.localError = qsTr("Enter a host name or address.")
+    function submit() {
+        if (!root.account) {
             return
         }
-        if (!(port > 0 && port < 65536)) {
-            root.localError = qsTr("Enter a port between 1 and 65535.")
-            return
-        }
-        root.localError = ""
 
-        // 2. Host/port/TLS are always remembered; the token only on request.
-        connection.host = host
-        connection.port = port
-        connection.tls = tlsBox.checked
-        connection.remember = rememberBox.checked
-        if (rememberBox.checked) {
-            connection.token = tokenField.text
-            connection.autoLogin = true
+        const username = usernameField.text.trim()
+        preferences.username = username
+
+        if (root.createMode) {
+            root.account.createAccount(username, passwordField.text,
+                                       confirmField.text)
         } else {
-            connection.token = ""
-            connection.autoLogin = false
-        }
-
-        // 3. Hand off to the controller; Main.qml switches to the shell when
-        //    the aggregate state becomes Ready.
-        if (root.controller) {
-            root.controller.connectToEngine(host, port, tlsBox.checked,
-                                            tokenField.text)
+            root.account.unlock(username, passwordField.text)
         }
     }
 
-    /// Error line. A local validation message wins; otherwise the controller's
-    /// last error is shown only while disconnected, so a stale message from a
-    /// previous session does not flash during a new handshake.
-    readonly property string visibleError: root.localError.length > 0
-        ? root.localError
-        : (root.controller
-           && root.controller.connectionState === EngineController.Disconnected
-           ? root.controller.lastError : "")
+    /// Local validation errors and vault errors share one line.
+    readonly property string visibleError: root.account ? root.account.lastError : ""
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -144,7 +85,9 @@ Rectangle {
 
             Text {
                 Layout.alignment: Qt.AlignHCenter
-                text: qsTr("Connect to the engine")
+                text: root.createMode
+                      ? qsTr("Create a local account")
+                      : qsTr("Unlock your local account")
                 color: Style.secondaryText
                 font.pixelSize: Style.fontSize
             }
@@ -165,45 +108,20 @@ Rectangle {
                 anchors.margins: Style.pad
                 spacing: Style.gap
 
-                RowLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: Style.gap
+                    spacing: Style.gapSmall
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.gapSmall
-
-                        Text {
-                            text: qsTr("Host")
-                            color: Style.secondaryText
-                            font.pixelSize: Style.fontSizeSmall
-                        }
-
-                        MacTextField {
-                            id: hostField
-                            Layout.fillWidth: true
-                            enabled: !root.connecting
-                            placeholderText: qsTr("127.0.0.1")
-                        }
+                    Text {
+                        text: qsTr("Username")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
                     }
 
-                    ColumnLayout {
-                        Layout.preferredWidth: 96
-                        spacing: Style.gapSmall
-
-                        Text {
-                            text: qsTr("Port")
-                            color: Style.secondaryText
-                            font.pixelSize: Style.fontSizeSmall
-                        }
-
-                        MacTextField {
-                            id: portField
-                            Layout.fillWidth: true
-                            enabled: !root.connecting
-                            inputMethodHints: Qt.ImhDigitsOnly
-                            placeholderText: qsTr("8081")
-                        }
+                    MacTextField {
+                        id: usernameField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("local account name")
                     }
                 }
 
@@ -212,44 +130,51 @@ Rectangle {
                     spacing: Style.gapSmall
 
                     Text {
-                        text: qsTr("Token")
+                        text: qsTr("Password")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
                     }
 
                     MacTextField {
-                        id: tokenField
+                        id: passwordField
                         Layout.fillWidth: true
-                        enabled: !root.connecting
                         echoMode: TextInput.Password
-                        placeholderText: qsTr("control-plane token (blank if none)")
-                        onAccepted: root.attemptConnect()
+                        placeholderText: root.createMode
+                                         ? qsTr("at least 8 characters")
+                                         : qsTr("vault password")
+                        onAccepted: root.submit()
                     }
                 }
 
-                MacCheckBox {
-                    id: tlsBox
-                    enabled: !root.connecting
-                    text: qsTr("Use TLS")
-                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gapSmall
+                    visible: root.createMode
 
-                MacCheckBox {
-                    id: rememberBox
-                    enabled: !root.connecting
-                    text: qsTr("Remember this connection")
+                    Text {
+                        text: qsTr("Confirm password")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    MacTextField {
+                        id: confirmField
+                        Layout.fillWidth: true
+                        echoMode: TextInput.Password
+                        placeholderText: qsTr("repeat the password")
+                        onAccepted: root.submit()
+                    }
                 }
 
                 MacButton {
                     Layout.fillWidth: true
                     primary: true
-                    enabled: !root.connecting
-                    text: root.connecting ? qsTr("Connecting…") : qsTr("Connect")
-                    onClicked: root.attemptConnect()
+                    text: root.createMode ? qsTr("Create account") : qsTr("Unlock")
+                    onClicked: root.submit()
                 }
             }
         }
 
-        // -- Error / hint ---------------------------------------------------
         Text {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
@@ -264,8 +189,12 @@ Rectangle {
         Text {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("The token is set by the engine in [control] token. "
-                       + "Leave it empty when the engine has no token.")
+            text: root.createMode
+                  ? qsTr("The password encrypts the local vault that stores "
+                         + "your exchange keys. It is never stored; if you "
+                         + "forget it, the vault cannot be recovered.")
+                  : qsTr("Your exchange keys are decrypted only while this "
+                         + "window is unlocked.")
             color: Style.tertiaryText
             font.pixelSize: Style.fontSizeSmall
             horizontalAlignment: Text.AlignHCenter

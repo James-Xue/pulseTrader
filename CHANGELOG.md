@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Qt client local account: the password derives an AES-256-GCM vault key
+  (PBKDF2-HMAC-SHA256), and the unlocked profile screen selects the Gate.io
+  network/market and stores the API credentials encrypted on disk.
+- The Qt client now starts and owns the engine process, generating a
+  per-run signal-only config in the user runtime directory.
+
+### Fixed
+
+- Qt client retries the first control-socket connection when it is refused,
+  which is the normal case while a newly spawned engine is binding its port.
+
 ## [0.1.0] - 2026-11-07
 
 First tagged release. The engine, the control plane and the desktop client are

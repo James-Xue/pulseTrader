@@ -3,11 +3,17 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Pulse.Client
 
-/// Connection settings and polling controls.
+/// Connection summary, polling controls and the sign-out action.
+///
+/// The connection itself is configured on the profile page before the engine
+/// starts; this page only reports it and offers a clean shutdown (stop the
+/// engine process, detach the sockets, wipe the vault key).
 ColumnLayout {
     id: root
 
     property var controller
+    property var account
+    property var launcher
 
     spacing: Style.gap
 
@@ -18,26 +24,38 @@ ColumnLayout {
         columnSpacing: Style.gap
         rowSpacing: Style.gap
 
-        Text { text: qsTr("Host"); color: Style.secondaryText; font.pixelSize: 12 }
-        MacTextField { id: hostField; Layout.fillWidth: true; text: "127.0.0.1" }
+        Text { text: qsTr("Exchange"); color: Style.secondaryText; font.pixelSize: 12 }
+        Text { text: qsTr("Gate.io"); color: Style.text; font.pixelSize: 13 }
 
-        Text { text: qsTr("Port"); color: Style.secondaryText; font.pixelSize: 12 }
-        MacTextField {
-            id: portField
-            Layout.fillWidth: true
-            text: "8081"
-            inputMethodHints: Qt.ImhDigitsOnly
+        Text { text: qsTr("Network"); color: Style.secondaryText; font.pixelSize: 12 }
+        Text {
+            text: root.account ? root.account.profileNetwork : "—"
+            color: Style.text
+            font.pixelSize: 13
         }
 
-        Text { text: qsTr("TLS"); color: Style.secondaryText; font.pixelSize: 12 }
-        MacCheckBox { id: tlsBox; text: qsTr("encrypt the control socket") }
+        Text { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 12 }
+        Text {
+            text: root.account ? root.account.profileMarket : "—"
+            color: Style.text
+            font.pixelSize: 13
+        }
 
-        Text { text: qsTr("Token"); color: Style.secondaryText; font.pixelSize: 12 }
-        MacTextField {
-            id: tokenField
-            Layout.fillWidth: true
-            echoMode: TextInput.Password
-            placeholderText: qsTr("blank if the engine has no token")
+        Text { text: qsTr("Engine process"); color: Style.secondaryText; font.pixelSize: 12 }
+        Text {
+            text: root.launcher && root.launcher.running ? qsTr("running") : qsTr("stopped")
+            color: root.launcher && root.launcher.running ? Style.success : Style.secondaryText
+            font.pixelSize: 13
+        }
+
+        Text { text: qsTr("Control socket"); color: Style.secondaryText; font.pixelSize: 12 }
+        Text {
+            text: qsTr("State: %1").arg(root.controller
+                  ? (root.controller.connectionState === EngineController.Ready
+                     ? qsTr("ready") : qsTr("not ready"))
+                  : qsTr("no controller"))
+            color: Style.secondaryText
+            font.pixelSize: 13
         }
     }
 
@@ -47,41 +65,29 @@ ColumnLayout {
         Layout.rightMargin: Style.pad
         spacing: Style.gap
 
-        MacButton {
-            text: qsTr("Connect")
-            onClicked: {
-                if (root.controller) {
-                    root.controller.connectToEngine(hostField.text,
-                                                    parseInt(portField.text),
-                                                    tlsBox.checked,
-                                                    tokenField.text)
-                }
-            }
-        }
-
-        MacButton {
-            text: qsTr("Disconnect")
-            onClicked: if (root.controller) root.controller.disconnectFromEngine()
-        }
-
-        Item { Layout.fillWidth: true }
-
         MacSwitch {
             id: pollingSwitch
             text: qsTr("Polling")
             checked: root.controller ? root.controller.pollingEnabled : true
             onToggled: if (root.controller) root.controller.setPollingEnabled(checked)
         }
-    }
 
-    Text {
-        Layout.margins: Style.pad
-        text: qsTr("State: %1").arg(root.controller
-              ? (root.controller.connectionState === EngineController.Ready
-                 ? qsTr("ready") : qsTr("not ready"))
-              : qsTr("no controller"))
-        color: Style.secondaryText
-        font.pixelSize: 11
+        Item { Layout.fillWidth: true }
+
+        MacButton {
+            text: qsTr("Stop engine & sign out")
+            onClicked: {
+                if (root.launcher) {
+                    root.launcher.stop()
+                }
+                if (root.controller) {
+                    root.controller.disconnectFromEngine()
+                }
+                if (root.account) {
+                    root.account.signOut()
+                }
+            }
+        }
     }
 
     Item { Layout.fillHeight: true }

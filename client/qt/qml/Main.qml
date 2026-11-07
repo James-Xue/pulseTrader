@@ -12,9 +12,10 @@ import Pulse.Client
 /// (startSystemMove), double-click to maximize, edge and corner resizing
 /// (WindowResizer), and the three window buttons.
 ///
-/// Two content states share the chrome: the login view until the control
-/// socket is Ready, and the dashboard shell after that. The login view is
-/// skipped entirely when PULSE_CLIENT_HOST started the auto-connect path.
+/// Three content states share the chrome: the local account forms while the
+/// vault is locked, the exchange profile once it is unlocked, and the
+/// dashboard shell when the control socket is Ready. The PULSE_CLIENT_HOST
+/// auto-connect path skips the first two for captures and scripts.
 ApplicationWindow {
     id: root
 
@@ -53,6 +54,17 @@ ApplicationWindow {
 
     EngineController {
         id: engine
+    }
+
+    /// Local account vault and the engine process the client owns. Both are
+    /// destroyed with the window, and the launcher stops the engine in its
+    /// destructor.
+    AccountService {
+        id: accounts
+    }
+
+    EngineLauncher {
+        id: launcher
     }
 
     /// Colour scheme persistence. Style is a singleton, so the value is copied
@@ -158,16 +170,28 @@ ApplicationWindow {
             visible: root.showShell && engine.lastError.length > 0
         }
 
-        // -- Login or shell -------------------------------------------------
+        // -- Login, profile or shell ---------------------------------------
+        //
+        // Three states, in order: the vault is locked → account forms; the
+        // vault is unlocked but no engine is attached → exchange profile;
+        // the control socket is Ready → dashboard shell. The PULSE_CLIENT_HOST
+        // auto-connect path jumps straight to the shell for captures.
         StackLayout {
             id: content
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: root.showShell ? 1 : 0
+            currentIndex: root.showShell ? 2 : (accounts.unlocked ? 1 : 0)
 
             LoginPage {
                 id: login
-                controller: engine
+                account: accounts
+            }
+
+            ProfilePage {
+                id: profile
+                account: accounts
+                launcher: launcher
+                engine: engine
             }
 
             // -- Sidebar + pages --------------------------------------------
@@ -208,7 +232,11 @@ ApplicationWindow {
                         OrdersPage { controller: engine }
                         SignalsPage { controller: engine }
                         MarketPage { controller: engine }
-                        SettingsPage { controller: engine }
+                        SettingsPage {
+                            controller: engine
+                            account: accounts
+                            launcher: launcher
+                        }
                     }
                 }
             }

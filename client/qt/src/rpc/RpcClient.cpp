@@ -128,6 +128,31 @@ void RpcClient::connectToEngine()
     connect(m_socket, &QTcpSocket::readyRead, this, &RpcClient::onReadyRead);
     connect(m_socket, &QTcpSocket::disconnected, this, &RpcClient::onDisconnected);
 
+    // A connection that is refused (or reset before reaching Connected) emits
+    // no `disconnected`, so onDisconnected() never runs. The launcher starts
+    // the engine and connects immediately, which makes this the common path:
+    // without this handler the client would sit in Connecting forever.
+    connect(m_socket, &QAbstractSocket::errorOccurred, this,
+            [this](QAbstractSocket::SocketError)
+    {
+        // A healthy socket reports its own failure through `disconnected`,
+        // which already handles the retry. Only the pre-Ready failures are
+        // ours to recover here.
+        if (State::Ready == m_state)
+        {
+            return;
+        }
+
+        failAll(RpcError{ RpcErrorKind::Transport,
+                          QStringLiteral("connection failed"), 0, 0 });
+        setState(State::Disconnected);
+
+        if (m_wantConnected && !m_reconnectTimer.isActive())
+        {
+            scheduleReconnect();
+        }
+    });
+
     setState(State::Connecting);
     if (m_tls)
     {

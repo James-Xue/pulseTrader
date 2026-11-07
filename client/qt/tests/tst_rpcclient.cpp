@@ -28,6 +28,7 @@ private slots:
     void timeoutProducesTimeoutError();
     void splitFramesAreReassembled();
     void unknownReplyIdIsIgnored();
+    void reconnectsAfterInitialRefusal();
 
 private:
     /// Read one newline-terminated request from `peer` and return it parsed.
@@ -280,6 +281,33 @@ void TestRpcClient::unknownReplyIdIsIgnored()
              static_cast<int>(failed.takeFirst().at(1).value<RpcError>().kind));
 
     disconnect(&server, nullptr, &context, nullptr);
+}
+
+void TestRpcClient::reconnectsAfterInitialRefusal()
+{
+    // Bind a port, then close it: the first connect attempt is refused exactly
+    // as it is while the launcher's engine is still binding its socket.
+    quint16 freePort = 0;
+    {
+        QTcpServer probe;
+        QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+        freePort = probe.serverPort();
+        probe.close();
+    }
+
+    RpcClient client(QStringLiteral("retry"));
+    client.setEndpoint(QStringLiteral("127.0.0.1"), freePort, false);
+    client.connectToEngine();
+
+    // Let the refused attempt happen, then bring the "engine" up. The client
+    // must retry on its own; a client that only reconnects after a successful
+    // connection would stay in Disconnected forever.
+    QTest::qWait(400);
+
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, freePort));
+
+    QTRY_VERIFY_WITH_TIMEOUT(RpcClient::State::Ready == client.state(), 8000);
 }
 
 QTEST_MAIN(TestRpcClient)

@@ -840,6 +840,18 @@ Do not change `dispatchLine` semantics while doing this: all 12 dispatch tests a
 - Refuse to start if the key file is group- or other-readable. This repo has a documented history of world-readable secret files (`.env` at mode 664).
 - A self-signed leaf with a long expiry is the realistic first iteration, but document rotation at the same time: token rotation and cert rotation both mean "restart the engine" in v1.
 
+### 5.10 Local account and vault (desktop flow)
+
+The desktop client adds a local gate in front of the control socket:
+
+1. **Account.** First launch asks for a username and password; later launches ask for the password. The password is never stored. It derives a 256-bit key with PBKDF2-HMAC-SHA256 (600k iterations, random 16-byte salt).
+2. **Vault.** `~/.config/pulseTrader/vault.bin` (0600) holds `{username, profile}` encrypted with AES-256-GCM and a fresh 96-bit IV per save. A wrong password fails the GCM tag check, so no password hash exists on disk.
+3. **Profile.** The unlocked screen selects Gate.io, the network (mainnet/testnet) and the market (spot/futures/cfd), then collects the API key and secret. Gate.io testnet is futures-only, so the market is pinned to futures while testnet is selected.
+4. **Engine ownership.** Connect writes a per-run TOML into the user runtime directory (`$XDG_RUNTIME_DIR/pulseTrader`, tmpfs), spawns `pulsetrader --config <path>`, and deletes the config on stop. The generated config always sets `signal_only = true`: the desktop client streams signals and balances but never places orders.
+5. **Shutdown.** Sign-out or window close terminates the engine (SIGTERM, then SIGKILL after five seconds) and wipes the in-memory key with `OPENSSL_cleanse`.
+
+The control-socket token in 5.2 remains available for the `cli`/`mcp` clients and for a remote Qt client; the desktop client leaves it empty because the generated config is local and the socket stays on loopback.
+
 ---
 
 ## 6. Client architecture

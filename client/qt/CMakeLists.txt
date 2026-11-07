@@ -14,6 +14,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # the test targets below.
 find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
 
+# AES-256-GCM and PBKDF2 for the local vault. Qt has no GCM primitive, and the
+# engine already depends on OpenSSL, so this adds no new third-party library.
+find_package(OpenSSL REQUIRED)
+
 # Enables AUTOMOC and policy QTP0001, which gives QML files the default
 # resource prefix /qt/qml so loadFromModule() works without an import path.
 qt_standard_project_setup(REQUIRES 6.5)
@@ -32,6 +36,7 @@ qt_add_qml_module(pulseTraderQt
         qml/Main.qml
         qml/Style.qml
         qml/pages/LoginPage.qml
+        qml/pages/ProfilePage.qml
         qml/pages/DashboardPage.qml
         qml/pages/PositionsPage.qml
         qml/pages/OrdersPage.qml
@@ -58,7 +63,10 @@ qt_add_qml_module(pulseTraderQt
         src/rpc/RpcClient.cpp          src/rpc/RpcClient.hpp
         src/rpc/RpcError.cpp           src/rpc/RpcError.hpp
         src/rpc/RpcMethods.hpp
+        src/security/SecretStore.cpp   src/security/SecretStore.hpp
+        src/account/AccountService.cpp src/account/AccountService.hpp
         src/engine/EngineController.cpp src/engine/EngineController.hpp
+        src/engine/EngineLauncher.cpp  src/engine/EngineLauncher.hpp
         src/models/JsonListModel.cpp   src/models/JsonListModel.hpp
         src/models/PositionsModel.hpp
         src/models/OrdersModel.hpp
@@ -75,12 +83,15 @@ qt_add_qml_module(pulseTraderQt
 target_include_directories(pulseTraderQt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/account
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/security)
 
 target_link_libraries(pulseTraderQt PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network
+    OpenSSL::Crypto)
 
 set_target_properties(pulseTraderQt PROPERTIES
     WIN32_EXECUTABLE TRUE
