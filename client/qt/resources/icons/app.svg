@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Simple mark: a pulse trace inside a rounded square. -->
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="#1b2029" stroke="#2a3140" stroke-width="2"/>
+  <polyline points="18,70 38,70 48,42 60,92 72,56 82,70 110,70"
+            fill="none" stroke="#4c9aff" stroke-width="7"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

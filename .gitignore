@@ -1,6 +1,18 @@
 #Compile Dir
 build
 build_headless/
+build_qt/
+build_qt_android/
+
+# Qt client build artifacts
+android-build/
+*.apk
+*.aab
+*.aar
+
+# Local credential backups (never commit a copy of .env)
+.env.bak*
+.aqtinstall.log
 
 # Prerequisites
 *.d
