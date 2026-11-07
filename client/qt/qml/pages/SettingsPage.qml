@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtCore
 import Pulse.Client
 
 /// Connection summary, polling controls and the sign-out action.
@@ -18,20 +17,9 @@ ColumnLayout {
 
     spacing: Style.gap
 
-    /// Dashboard preferences. Kept here because this is the only page that
-    /// edits them; SettingsPage is instantiated at startup, so the saved
-    /// choice is applied before the first account poll.
-    Settings {
-        id: dashboardPreferences
-        category: "dashboard"
-        property bool spotHoldings: true
-    }
-
-    Component.onCompleted: {
-        if (root.controller) {
-            root.controller.setSpotHoldingsEnabled(dashboardPreferences.spotHoldings)
-        }
-    }
+    // The spot-holdings preference is owned by EngineController (persisted as
+    // [dashboard] spotHoldings) so the Dashboard switch and this page stay in
+    // sync without a second copy of the setting.
 
     GridLayout {
         Layout.fillWidth: true
@@ -84,9 +72,8 @@ ColumnLayout {
         MacSwitch {
             id: holdingsSwitch
             text: qsTr("Alt-coin spot holdings")
-            checked: dashboardPreferences.spotHoldings
+            checked: root.controller ? root.controller.spotHoldingsEnabled : false
             onToggled: {
-                dashboardPreferences.spotHoldings = checked
                 if (root.controller) {
                     root.controller.setSpotHoldingsEnabled(checked)
                 }
@@ -100,6 +87,14 @@ ColumnLayout {
             color: Style.tertiaryText
             font.pixelSize: Style.fontSizeSmall
             wrapMode: Text.WordWrap
+        }
+    }
+
+    Connections {
+        target: root.controller
+
+        function onSpotHoldingsEnabledChanged() {
+            holdingsSwitch.checked = root.controller.spotHoldingsEnabled
         }
     }
 

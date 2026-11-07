@@ -97,11 +97,40 @@ Flickable {
             }
         }
 
-        Text {
-            text: qsTr("Account")
-            color: Style.secondaryText
-            font.pixelSize: 12
+        // Account header with the live holdings switch. The breakdown costs
+        // extra REST pricing calls, so the control sits next to the data it
+        // changes instead of three pages away in Settings.
+        RowLayout {
+            Layout.fillWidth: true
             Layout.topMargin: Style.gap
+            spacing: Style.gap
+
+            Text {
+                text: qsTr("Account")
+                color: Style.secondaryText
+                font.pixelSize: 12
+            }
+
+            Item { Layout.fillWidth: true }
+
+            MacSwitch {
+                id: holdingsSwitch
+                text: qsTr("Alt-coin holdings")
+                checked: root.controller ? root.controller.spotHoldingsEnabled : false
+                onToggled: {
+                    if (root.controller) {
+                        root.controller.setSpotHoldingsEnabled(checked)
+                    }
+                }
+            }
+        }
+
+        Connections {
+            target: root.controller
+
+            function onSpotHoldingsEnabledChanged() {
+                holdingsSwitch.checked = root.controller.spotHoldingsEnabled
+            }
         }
 
         GridLayout {

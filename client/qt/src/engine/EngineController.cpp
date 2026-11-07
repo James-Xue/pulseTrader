@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QSettings>
 #include <QVariantMap>
 
 #include "models/AccountModel.hpp"
@@ -112,6 +113,14 @@ EngineController::EngineController(QObject* parent)
     connect(&m_signalsTimer, &QTimer::timeout, this, &EngineController::pollSignals);
     connect(&m_accountTimer, &QTimer::timeout, this, &EngineController::pollAccount);
 
+    // 2b. Dashboard preference, persisted across sessions under
+    //     [dashboard] spotHoldings. Read here so the very first account poll
+    //     already uses the saved choice.
+    QSettings settings;
+    m_spotHoldingsEnabled = settings
+                                .value(QStringLiteral("dashboard/spotHoldings"), true)
+                                .toBool();
+
     // 3. Optional headless auto-connect. PULSE_CLIENT_HOST turns the dialog off
     //    and connects at startup, which is what the smoke test uses.
     //    PULSE_CLIENT_PORT defaults to 8081, PULSE_CLIENT_TLS enables TLS and
@@ -188,6 +197,7 @@ void EngineController::setSpotHoldingsEnabled(bool enabled)
         return;
     }
     m_spotHoldingsEnabled = enabled;
+    QSettings().setValue(QStringLiteral("dashboard/spotHoldings"), enabled);
     emit spotHoldingsEnabledChanged();
 
     // Ask for a fresh snapshot right away so the table appears or clears
