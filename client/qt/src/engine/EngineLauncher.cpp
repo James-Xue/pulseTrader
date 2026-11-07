@@ -8,6 +8,12 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
+#ifdef Q_OS_LINUX
+#include <csignal>
+#include <sys/prctl.h>
+#include <unistd.h>
+#endif
+
 namespace pulse::client
 {
 
@@ -73,6 +79,11 @@ QString runtimeDirectory()
 EngineLauncher::EngineLauncher(QObject* parent)
     : QObject(parent)
 {
+    // Normal quit (window closed, application quit) must stop the engine and
+    // delete the runtime config before the event loop ends. Surviving a hard
+    // kill is handled by the PDEATHSIG modifier in start().
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+            this, &EngineLauncher::stop);
 }
 
 EngineLauncher::~EngineLauncher()
@@ -255,6 +266,23 @@ bool EngineLauncher::start(const QString& apiKey, const QString& apiSecret,
                                      QIODevice::Append);
     m_process->setStandardErrorFile(runtimeDir + QStringLiteral("/engine.log"),
                                     QIODevice::Append);
+
+#ifdef Q_OS_LINUX
+    // Tie the engine's lifetime to this process. Without this, killing the
+    // client (or a crash) leaves an orphaned engine: it keeps the single
+    // instance lock and the credentials file, and the next launch cannot
+    // start a replacement. PR_SET_PDEATHSIG delivers SIGTERM when the parent
+    // dies; the getppid check closes the fork()/prctl() race.
+    m_process->setChildProcessModifier([]
+    {
+        ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+
+        if (1 == ::getppid())
+        {
+            ::_exit(1);
+        }
+    });
+#endif
 
     connect(m_process, &QProcess::finished, this,
             [this](int exitCode, QProcess::ExitStatus)
