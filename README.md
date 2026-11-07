@@ -1,21 +1,38 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1054%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
-**AI-driven scalping framework with adaptive strategy tuning via real-time social signals.**
+**A C++20 trading-engine framework for Gate.io.** Production-grade plumbing — 9 layers, 1054 tests, a JSON-RPC/MCP control plane and a Qt client — plus an **experimental, unverified** AI parameter-tuning loop.
 
 ---
 
 ## Overview
 
-pulseTrader is a C++20 quantitative trading framework purpose-built for high-frequency scalping on Gate.io. It combines a low-latency market data pipeline with a periodic AI analysis cycle that ingests live social and news signals, calls a Large Language Model, and automatically nudges strategy parameters in response to changing market conditions — all without interrupting the hot WebSocket path.
+pulseTrader is a C++20 quantitative trading framework built for high-frequency scalping on Gate.io. Its market-data hot path is deliberately separated from everything slow: a background analysis cycle can call a Large Language Model and publish parameter deltas through lock-free atomics without ever blocking the WebSocket path.
 
-The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
+**That AI loop is experimental and unverified.** It is implemented, schema-validated and unit-tested, but it has never been validated in production and there is no evidence that it improves trading results. Treat it as an architectural demonstration, not as alpha. The same caution applies to the strategies themselves — see [Project status](#project-status).
+
+The framework ships six scalping strategies and a clean abstract base class for adding custom ones. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
 
 **Milestones M1–M15 achieved** — all 9 layers operational with full spot + futures dual-market support plus switchable TradFi/CFD gold (XAUUSD), TOML configuration, SQLite trade recording, EndpointRouter for market-type-aware routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket. Single-instance enforcement prevents two engines from trading at once, and a systemd user service provides auto-start + crash restart.
+
+---
+
+## Project status
+
+This table is the honest boundary between "engineered and tested" and "hoped for".
+
+| Area | Status |
+|---|---|
+| 9-layer engine: market data, strategy, risk, execution | Implemented; 1054 automated tests green |
+| JSON-RPC control socket, MCP server, CLI REPL | Implemented and exercised |
+| Qt 6.12 desktop client (read-only) | Implemented; transport covered by unit tests |
+| **AI parameter tuning (LLM every 5 minutes)** | **Experimental, unverified.** Schema-validated and unit-tested, never validated in production; no measured effect on results |
+| **Strategy edge / profitability** | **No evidence.** A 480-combination sweep on 1-minute BTC found no robust positive expectancy; the A/B weighting experiment was stopped before a verdict |
+| Live trading | Runs against Gate.io. Treat as research code, not investment advice |
 
 ---
 
@@ -41,15 +58,15 @@ For the full architecture document including module responsibilities, key files,
 
 ## Key Features
 
-- **5-minute AI heartbeat** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread.
-- **Real-time social signal ingestion** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed directly into each AI prompt.
+- **5-minute AI heartbeat — experimental, unverified** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread. The loop runs; whether it helps is untested.
+- **Real-time social signal ingestion — experimental** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed into the AI prompt. This only feeds the unverified loop above; it has no effect on the strategies when the AI cycle is disabled.
 - **Six built-in scalping strategies** — the four base scalpers (`MomentumScalper` EMA crossover, `OrderBookScalper` bid/ask imbalance, `MeanReversionScalper` Bollinger Band reversion, `SuperTrendScalper` ATR trend reversal) plus two coin-specific ones (`EthScalper` EMA chase-short with spike filter; `EmaResonanceScalper` five-period EMA 7/14/30/60/200 full-alignment resonance), each running on its own `std::jthread`. Rules for every strategy are documented in `docs/strategies/`.
-- **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights updated after each AI cycle.
+- **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights. Weight updates driven by the AI cycle are part of the experimental path.
 - **Gate.io spot + futures integration** — Native REST (HMAC-SHA512 signed) and WebSocket channels for both spot and USDT perpetual futures, with EndpointRouter for market-type-aware routing, incremental order book updates, proxy tunnel support, and dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker).
 - **Testnet support** — `PULSE_NETWORK=testnet` env switch routes REST API to Gate.io testnet (`api-testnet.gateapi.io`) for virtual fund trading while using mainnet WebSocket for identical real-time market data. TOML `testnet = true` in `[exchange]` section for file-driven config. Validator rejects spot strategies in testnet mode (futures-only).
 - **Lock-free parameter hot-reload** — Strategy tunable values are stored as `std::atomic<double>`; `ParamAdvisor` updates them from the AI thread with zero locking overhead on the strategy side.
 - **Layered risk management** — Fixed, trailing, and time-based stops; partial take-profit ladders; cross-strategy position limits; daily drawdown circuit breaker; token-bucket order rate limiter; futures-specific leverage limit and margin sufficiency checks with liquidation price estimation.
-- **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
+- **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, so malformed output is discarded rather than parsed loosely. This makes the (still unverified) parameter updates deterministic in form, not in effect.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
 - **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 32 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`.
@@ -276,7 +293,7 @@ claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp -
 
 ## How It Works
 
-The core innovation in pulseTrader is the separation of the latency-critical market data path from the AI analysis cycle, connected by a lock-free parameter update mechanism.
+The core architectural idea in pulseTrader is the separation of the latency-critical market data path from the slow analysis cycle, connected by a lock-free parameter update mechanism. The mechanism is real and tested; the AI half that drives it is experimental and unverified (see [Project status](#project-status)).
 
 ```
                      ┌─────────────────────────────────────┐
@@ -328,7 +345,7 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 |---|---|---|
 | M1 | End-to-end Exchange → Market Data → Execution pipeline | ✅ |
 | M2 | Automatic trading: Market Data → Strategy → Risk → Execution | ✅ |
-| M3 | AI adaptive — strategy parameters auto-tune every 5 min | ✅ |
+| M3 | AI adaptive — strategy parameters auto-tune every 5 min (implemented; **unverified**) | ⚠️ |
 | M4 | Complete product — all 9 layers operational, control plane (REPL + MCP + JSON-RPC socket) | ✅ |
 | M5 | Trading engine — 9-layer wiring into runnable process | ✅ |
 | M6 | TOML config — file-driven configuration, validation, 46 tests | ✅ |
