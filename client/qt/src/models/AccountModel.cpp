@@ -34,9 +34,12 @@ void AccountModel::setFromJson(const QJsonObject& account)
     m_futuresPositionMargin = numberOr(futures, QStringLiteral("position_margin"));
     m_futuresOrderMargin = numberOr(futures, QStringLiteral("order_margin"));
 
-    // 2. Spot block.
+    // 2. Spot block. This is the only block a spot-only API key can populate,
+    //    so the UI must be able to show it with no futures data at all.
     const QJsonObject spot = account.value(QStringLiteral("spot")).toObject();
     m_spotPresent = !spot.isEmpty();
+    m_spotCurrency = spot.value(QStringLiteral("currency")).toString();
+    m_spotTotal = numberOr(spot, QStringLiteral("total"));
     m_spotAvailable = numberOr(spot, QStringLiteral("available"));
 
     // 3. CFD block.

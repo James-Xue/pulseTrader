@@ -24,6 +24,8 @@ class AccountModel : public QObject
     Q_PROPERTY(double futuresPositionMargin READ futuresPositionMargin NOTIFY changed)
     Q_PROPERTY(double futuresOrderMargin READ futuresOrderMargin NOTIFY changed)
     Q_PROPERTY(bool spotPresent READ spotPresent NOTIFY changed)
+    Q_PROPERTY(QString spotCurrency READ spotCurrency NOTIFY changed)
+    Q_PROPERTY(double spotTotal READ spotTotal NOTIFY changed)
     Q_PROPERTY(double spotAvailable READ spotAvailable NOTIFY changed)
     Q_PROPERTY(bool cfdPresent READ cfdPresent NOTIFY changed)
     Q_PROPERTY(double cfdAvailable READ cfdAvailable NOTIFY changed)
@@ -44,6 +46,8 @@ public:
     [[nodiscard]] double futuresPositionMargin() const { return m_futuresPositionMargin; }
     [[nodiscard]] double futuresOrderMargin() const { return m_futuresOrderMargin; }
     [[nodiscard]] bool spotPresent() const { return m_spotPresent; }
+    [[nodiscard]] QString spotCurrency() const { return m_spotCurrency; }
+    [[nodiscard]] double spotTotal() const { return m_spotTotal; }
     [[nodiscard]] double spotAvailable() const { return m_spotAvailable; }
     [[nodiscard]] bool cfdPresent() const { return m_cfdPresent; }
     [[nodiscard]] double cfdAvailable() const { return m_cfdAvailable; }
@@ -61,6 +65,8 @@ private:
     double m_futuresPositionMargin = 0.0;
     double m_futuresOrderMargin = 0.0;
     bool m_spotPresent = false;
+    QString m_spotCurrency;
+    double m_spotTotal = 0.0;
     double m_spotAvailable = 0.0;
     bool m_cfdPresent = false;
     double m_cfdAvailable = 0.0;

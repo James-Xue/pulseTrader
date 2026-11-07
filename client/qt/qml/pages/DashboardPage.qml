@@ -8,6 +8,19 @@ Flickable {
 
     property var controller
 
+    /// Account blocks are reported independently: a spot-only API key yields a
+    /// spot block and no futures block. Tiles are rendered per present block so
+    /// the dashboard never shows a futures "unknown" placeholder in front of a
+    /// user whose balance is actually on the spot account.
+    readonly property var account: root.controller ? root.controller.accountModel : null
+    readonly property bool spotPresent: account ? account.spotPresent : false
+    readonly property bool futuresPresent: account ? account.futuresPresent : false
+    readonly property bool cfdPresent: account ? account.cfdPresent : false
+    readonly property bool anyAccount: spotPresent || futuresPresent || cfdPresent
+    readonly property double unrealised: futuresPresent
+        ? account.futuresUnrealised
+        : (cfdPresent ? account.cfdUnrealised : 0.0)
+
     contentWidth: width
     contentHeight: content.implicitHeight + 2 * Style.pad
     clip: true
@@ -66,34 +79,59 @@ Flickable {
             rowSpacing: Style.gap
 
             MetricTile {
-                label: qsTr("Futures equity")
-                present: root.controller ? root.controller.accountModel.futuresPresent : false
-                value: root.controller
-                       ? "%1 %2".arg(root.controller.accountModel.futuresTotal.toFixed(2))
-                                 .arg(root.controller.accountModel.futuresCurrency)
+                visible: root.spotPresent
+                label: qsTr("Spot equity")
+                value: root.account
+                       ? "%1 %2".arg(root.account.spotTotal.toFixed(2))
+                                 .arg(root.account.spotCurrency)
                        : "—"
             }
 
             MetricTile {
-                label: qsTr("Futures available")
-                present: root.controller ? root.controller.accountModel.futuresPresent : false
-                value: root.controller
-                       ? root.controller.accountModel.futuresAvailable.toFixed(2) : "—"
+                visible: root.spotPresent
+                label: qsTr("Spot available")
+                value: root.account
+                       ? "%1 %2".arg(root.account.spotAvailable.toFixed(2))
+                                 .arg(root.account.spotCurrency)
+                       : "—"
             }
 
             MetricTile {
-                label: qsTr("Unrealised PnL")
-                present: root.controller ? root.controller.accountModel.futuresPresent : false
-                value: root.controller
-                       ? root.controller.accountModel.futuresUnrealised.toFixed(2) : "—"
-                valueColor: {
-                    if (!root.controller || !root.controller.accountModel.futuresPresent) {
-                        return Style.secondaryText
-                    }
-                    return root.controller.accountModel.futuresUnrealised >= 0
-                           ? Style.success : Style.danger
-                }
+                visible: root.futuresPresent
+                label: qsTr("Futures equity")
+                value: root.account
+                       ? "%1 %2".arg(root.account.futuresTotal.toFixed(2))
+                                 .arg(root.account.futuresCurrency)
+                       : "—"
             }
+
+            MetricTile {
+                visible: root.futuresPresent
+                label: qsTr("Futures available")
+                value: root.account
+                       ? root.account.futuresAvailable.toFixed(2) : "—"
+            }
+
+            MetricTile {
+                visible: root.cfdPresent
+                label: qsTr("CFD available")
+                value: root.account
+                       ? root.account.cfdAvailable.toFixed(2) : "—"
+            }
+
+            MetricTile {
+                visible: root.futuresPresent || root.cfdPresent
+                label: qsTr("Unrealised PnL")
+                value: root.account ? root.unrealised.toFixed(2) : "—"
+                valueColor: root.unrealised >= 0 ? Style.success : Style.danger
+            }
+        }
+
+        Text {
+            visible: root.controller && !root.anyAccount
+            text: qsTr("The engine did not report any account balance yet.")
+            color: Style.secondaryText
+            font.pixelSize: Style.fontSizeSmall
         }
 
         Item { Layout.fillHeight: true }
