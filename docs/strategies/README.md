@@ -1,142 +1,142 @@
-# pulseTrader 策略对比总览
+# pulseTrader Strategy Comparison
 
-> 4 个内置剥头皮策略的风格、优缺点与适用场景对比。
+> Style, strengths, weaknesses and suitable regimes for the four built-in scalping strategies.
 
-## 策略速查表
+## Strategy quick reference
 
-| 策略 | 类型 | 数据源 | 信号频率 | 预热时间 | 最佳市场 |
-|------|------|--------|----------|----------|----------|
-| **MomentumScalper** | 趋势跟踪 | K线收盘价 | 低 | ~21 根 K 线 | 单边趋势 |
-| **OrderBookScalper** | 微观结构 | 订单簿深度 | 高 | 即时 | 震荡/高流动性 |
-| **MeanReversionScalper** | 均值回归 | K线收盘价 | 中 | ~20 根 K 线 | 震荡区间 |
-| **SuperTrendScalper** | 趋势跟踪 | K线 H/L/C | 中 | ~11 根 K 线 | 趋势/波动率上升 |
-
----
-
-## 优缺点对比
-
-### 1. MomentumScalper — EMA 交叉动量
-
-**优点**
-- 逻辑简单，信号可靠（交叉点是明确的趋势转折点）
-- 对噪声不敏感，EMA 本身有平滑效果
-- 适合捕捉中等长度的趋势波段
-- 参数少（fast/slow period），容易调优
-
-**缺点**
-- 滞后性明显：EMA 是滞后指标，交叉发生时趋势已走了一段
-- 震荡市表现差：频繁假交叉导致"锯齿亏损"
-- 信号频率低：需要等待完整的交叉周期
-- 无法捕捉急速反转
-
-**风格**：经典趋势跟踪，适合 BTC/ETH 等主流币的日线级别趋势。
+| Strategy | Type | Data source | Signal frequency | Warm-up | Best regime |
+|----------|------|-------------|------------------|---------|-------------|
+| **MomentumScalper** | Trend following | Kline close price | Low | ~21 bars | Sustained trend |
+| **OrderBookScalper** | Microstructure | Order-book depth | High | None | Range-bound / high liquidity |
+| **MeanReversionScalper** | Mean reversion | Kline close price | Medium | ~20 bars | Range-bound |
+| **SuperTrendScalper** | Trend following | Kline H/L/C | Medium | ~11 bars | Trending / rising volatility |
 
 ---
 
-### 2. OrderBookScalper — 订单簿失衡
+## Pros and cons
 
-**优点**
-- 信号领先：订单簿压力是价格变动的先行指标
-- 信号频率高：每次订单簿更新都可以评估
-- 无需预热：只要有深度数据即可工作
-- 适合高频交易：100ms 轮询，低延迟响应
+### 1. MomentumScalper — EMA crossover momentum
 
-**缺点**
-- 假信号多：订单簿可以被快速撤销（spoofing）
-- 深度数据噪音大：需要合理设置阈值过滤
-- 不适合趋势市：只看微观压力，忽略宏观方向
-- 对数据质量依赖高：需要稳定的 WS 连接
+**Pros**
+- Simple logic with reliable signals: a crossover is an unambiguous trend turning point
+- Insensitive to noise, because the EMA already smooths the series
+- Suited to capturing medium-length trend swings
+- Few parameters (fast/slow period), so it is easy to tune
 
-**风格**：微观结构交易，适合高流动性市场（BTC/ETH 合约）的短线剥头皮。
+**Cons**
+- Clearly lagging: the EMA is a lagging indicator, so the trend has already moved by the time the crossover prints
+- Poor in choppy markets: frequent false crossovers produce a "sawtooth" of small losses
+- Low signal frequency: it has to wait for a full crossover cycle
+- Cannot catch a fast reversal
 
----
-
-### 3. MeanReversionScalper — 布林带均值回归
-
-**优点**
-- 逆势交易：在超买/超卖极端位置入场
-- 胜率较高：价格大概率会向均值回归
-- 信号明确：触碰布林带是清晰的触发条件
-- 适合震荡市：大部分时间市场处于震荡区间
-
-**缺点**
-- 趋势市亏损大：单边趋势中价格持续突破带外
-- 逆势加仓风险：需要严格止损配合
-- 信号频率中等：需要等待价格触及上下轨
-- 参数敏感：std_dev 倍数影响信号质量
-
-**风格**：均值回归，适合横盘震荡市场的反弹/回落交易。
+**Style**: classic trend following, suited to daily-scale trends on majors such as BTC/ETH.
 
 ---
 
-### 4. SuperTrendScalper — ATR 趋势翻转
+### 2. OrderBookScalper — order-book imbalance
 
-**优点**
-- 自适应波动率：ATR 自动调整带宽，适应不同市场环境
-- 信号较及时：趋势翻转时立即触发
-- 止损清晰：SuperTrend 线本身可作为动态止损位
-- 参数鲁棒：multiplier 在较大范围内都有效
+**Pros**
+- Leading signal: order-book pressure moves ahead of price
+- High signal frequency: it can evaluate every order-book update
+- No warm-up: it works as soon as depth data exists
+- Built for high frequency: 100 ms polling with a low-latency response
 
-**缺点**
-- 计算复杂：需要 H/L/C 数据和多步计算
-- 震荡市假信号：价格在带附近反复穿越
-- 预热稍长：需要 period+1 根 K 线
-- 对跳空敏感：大幅跳空可能导致 ATR 异常
+**Cons**
+- Many false signals: orders can be pulled quickly (spoofing)
+- Noisy depth data: thresholds have to be set sensibly to filter it
+- Unsuitable in trending markets: it reads only micro pressure and ignores the macro direction
+- Highly dependent on data quality: it needs a stable WS connection
 
-**风格**：波动率自适应趋势跟踪，适合波动率变化大的市场。
-
----
-
-## 策略组合建议
-
-### 激进组合（高频率）
-- OrderBookScalper（主）+ MomentumScalper（辅）
-- 适用：高流动性市场，追求短线利润
-- 风险：高频信号噪音大，需要严格风控
-
-### 稳健组合（低频率）
-- SuperTrendScalper（主）+ MeanReversionScalper（辅）
-- 适用：中等波动市场，追求稳定收益
-- 风险：信号较少，需要耐心等待
-
-### 平衡组合（当前默认）
-- 4 策略全部启用，SignalAggregator 聚合（阈值 0.6）
-- 适用：通用市场环境
-- 优势：多策略交叉验证，降低假信号
+**Style**: microstructure trading, suited to short-term scalping in highly liquid markets (BTC/ETH futures).
 
 ---
 
-## 参数调优指南
+### 3. MeanReversionScalper — Bollinger-band mean reversion
 
-| 策略 | 关键参数 | 默认值 | 调优方向 |
-|------|----------|--------|----------|
-| MomentumScalper | `ema_fast_period` | 9 | 缩短 → 更敏感但更多假信号 |
-| | `ema_slow_period` | 21 | 延长 → 更平滑但更滞后 |
-| OrderBookScalper | `ob_depth` | 5 | 增加 → 更稳定但响应慢 |
-| | `ob_imbalance_threshold` | 0.3 | 提高 → 信号更少但更可靠 |
-| MeanReversionScalper | `bb_period` | 20 | 缩短 → 更敏感 |
-| | `bb_std_dev` | 2.0 | 降低 → 信号更多 |
-| SuperTrendScalper | `supertrend_period` | 10 | 缩短 → 更快响应 |
-| | `supertrend_multiplier` | 3.0 | 降低 → 更紧的带 |
+**Pros**
+- Counter-trend entries at overbought/oversold extremes
+- Relatively high hit rate: price tends to revert to the mean
+- Clear signals: touching a Bollinger band is an unambiguous trigger
+- Suited to range-bound markets, where price spends most of its time
 
----
+**Cons**
+- Large losses in trending markets: in a sustained trend price keeps breaking outside the bands
+- Averaging into a losing counter-trend position is a real risk; strict stops are mandatory
+- Medium signal frequency: it waits for price to reach an outer band
+- Parameter-sensitive: the `std_dev` multiplier drives signal quality
 
-## 信号聚合机制
-
-所有策略的信号都进入 `SignalAggregator`，通过以下方式聚合：
-
-1. **冷却期**：每个策略独立冷却（默认 30 秒），避免同一策略连续发信号
-2. **阈值过滤**：只有 confidence ≥ 0.6 的信号才会被聚合器考虑
-3. **多策略验证**：多个策略同时发出同向信号时，最终信号置信度更高
-4. **风控拦截**：即使有强信号，风控层仍可能因仓位/回撤限制而拒绝执行
+**Style**: mean reversion, suited to bounce/fallback trades in sideways markets.
 
 ---
 
-## 详细文档
+### 4. SuperTrendScalper — ATR trend flip
 
-每个策略的详细实现文档：
+**Pros**
+- Volatility-adaptive: ATR adjusts the band width to the market regime
+- Reasonably timely: it triggers as soon as the trend flips
+- Clear stop level: the SuperTrend line itself can serve as a dynamic stop
+- Robust parameters: the multiplier stays effective across a wide range
 
-- [MomentumScalper — EMA 交叉动量](momentum-scalper.md)
-- [OrderBookScalper — 订单簿失衡](orderbook-scalper.md)
-- [MeanReversionScalper — 布林带均值回归](mean-reversion-scalper.md)
-- [SuperTrendScalper — ATR 趋势翻转](supertrend-scalper.md)
+**Cons**
+- More computation: it needs H/L/C data and a multi-step calculation
+- False signals in chop: price crosses back and forth around the band
+- Slightly longer warm-up: it needs period+1 bars
+- Sensitive to gaps: a large gap can distort ATR
+
+**Style**: volatility-adaptive trend following, suited to markets whose volatility changes sharply.
+
+---
+
+## Suggested combinations
+
+### Aggressive (high frequency)
+- OrderBookScalper (primary) + MomentumScalper (secondary)
+- Suited to: highly liquid markets, targeting short-term profit
+- Risk: high-frequency signal noise; strict risk control is required
+
+### Steady (low frequency)
+- SuperTrendScalper (primary) + MeanReversionScalper (secondary)
+- Suited to: medium-volatility markets, targeting steadier returns
+- Risk: fewer signals; patience is required
+
+### Balanced (current default)
+- All four strategies enabled, aggregated by `SignalAggregator` (threshold 0.6)
+- Suited to: general market conditions
+- Advantage: cross-validation between strategies reduces false signals
+
+---
+
+## Parameter tuning guide
+
+| Strategy | Key parameter | Default | Tuning direction |
+|----------|---------------|---------|------------------|
+| MomentumScalper | `ema_fast_period` | 9 | Shorter → more sensitive, more false signals |
+| | `ema_slow_period` | 21 | Longer → smoother, more lag |
+| OrderBookScalper | `ob_depth` | 5 | Higher → steadier, slower to react |
+| | `ob_imbalance_threshold` | 0.3 | Higher → fewer but more reliable signals |
+| MeanReversionScalper | `bb_period` | 20 | Shorter → more sensitive |
+| | `bb_std_dev` | 2.0 | Lower → more signals |
+| SuperTrendScalper | `supertrend_period` | 10 | Shorter → faster response |
+| | `supertrend_multiplier` | 3.0 | Lower → tighter band |
+
+---
+
+## Signal aggregation
+
+Every strategy publishes into `SignalAggregator`, which combines them as follows:
+
+1. **Cooldown** — each strategy cools down independently (30 s by default) so one strategy cannot fire continuously.
+2. **Threshold filter** — only signals with confidence ≥ 0.6 are considered by the aggregator.
+3. **Multi-strategy confirmation** — when several strategies emit the same direction at once, the resulting confidence is higher.
+4. **Risk gate** — even a strong signal can still be rejected by the risk layer because of position or drawdown limits.
+
+---
+
+## Detailed documents
+
+Implementation notes for each strategy:
+
+- [MomentumScalper — EMA crossover momentum](momentum-scalper.md)
+- [OrderBookScalper — order-book imbalance](orderbook-scalper.md)
+- [MeanReversionScalper — Bollinger-band mean reversion](mean-reversion-scalper.md)
+- [SuperTrendScalper — ATR trend flip](supertrend-scalper.md)

@@ -1,63 +1,63 @@
-# MeanReversionScalper — 布林带均值回归策略
+# MeanReversionScalper — Bollinger Band mean-reversion strategy
 
-> 利用布林带识别超买/超卖区域，在价格偏离均值时反向交易。
+> Uses Bollinger Bands to identify overbought/oversold zones and trades against the move when price deviates from the mean.
 
-## 核心原理
+## Core Principle
 
-### 布林带（Bollinger Bands）
+### Bollinger Bands
 
-布林带由三条线组成：
+Bollinger Bands consist of three lines:
 
 ```
-中轨（SMA）= 过去 N 根 K 线的收盘价平均值
-上轨 = SMA + k × 标准差
-下轨 = SMA - k × 标准差
+Middle band (SMA) = average close price over the past N kline bars
+Upper band = SMA + k × standard deviation
+Lower band = SMA - k × standard deviation
 ```
 
-- **SMA**：简单移动平均线（中轨）
-- **标准差**：衡量价格波动程度
-- **k**：标准差倍数（默认 2.0）
+- **SMA**: simple moving average (the middle band)
+- **Standard deviation**: measures how much price is fluctuating
+- **k**: standard-deviation multiplier (2.0 by default)
 
-### 信号逻辑
+### Signal logic
 
-| 条件 | 信号 | 含义 |
+| Condition | Signal | Meaning |
 |------|------|------|
-| `price <= lower_band` | Buy | 价格触及下轨，超卖，预期反弹 |
-| `price >= upper_band` | Sell | 价格触及上轨，超买，预期回落 |
+| `price <= lower_band` | Buy | Price touches the lower band, oversold, a bounce is expected |
+| `price >= upper_band` | Sell | Price touches the upper band, overbought, a pullback is expected |
 
-### 置信度计算
+### Confidence calculation
 
 ```
 confidence = clamp(|price - band| / band_width, 0.0, 1.0)
 ```
 
-- 价格偏离轨道越远，置信度越高
+- The further price deviates from the band, the higher the confidence
 - `band_width = upper_band - lower_band`
 
 ---
 
-## 实现细节
+## Implementation Details
 
-### 数据需求
+### Data requirements
 
-- **数据源**：K 线收盘价（`onKline()` 回调）
-- **最少 K 线数**：`bb_period`（默认 20 根）
-- **轮询间隔**：500ms
+- **Data source**: kline close price (`onKline()` callback)
+- **Minimum kline count**: `bb_period` (20 bars by default)
+- **Polling interval**: 500ms
 
-### 计算步骤
+### Calculation steps
 
 ```cpp
-// 1. 提取收盘价
+// 1. Extract the close prices
 std::vector<double> closes;
 for (const auto& c : candles) {
     closes.push_back(c.close);
 }
 
-// 2. 计算 SMA
+// 2. Compute the SMA
 double sum = std::accumulate(closes.begin(), closes.end(), 0.0);
 double sma = sum / closes.size();
 
-// 3. 计算标准差
+// 3. Compute the standard deviation
 double sq_sum = 0.0;
 for (double price : closes) {
     double diff = price - sma;
@@ -65,48 +65,48 @@ for (double price : closes) {
 }
 double stddev = std::sqrt(sq_sum / closes.size());
 
-// 4. 计算布林带
+// 4. Compute the Bollinger Bands
 double upper_band = sma + bb_std_dev * stddev;
 double lower_band = sma - bb_std_dev * stddev;
 ```
 
-### 预热机制
+### Warm-up mechanism
 
 ```cpp
 if (candles.size() < bb_period) {
-    // 每 30 秒打印一次预热进度
+    // Print warm-up progress once every 30 seconds
     PULSE_LOG_INFO("Warming up: {}/{} candles accumulated", 
         candles.size(), bb_period);
     return;
 }
 ```
 
-预热时间：
-- 1 分钟 K 线：需要 ~20 分钟
-- 5 分钟 K 线：需要 ~100 分钟
+Warm-up time:
+- 1-minute klines: ~20 minutes
+- 5-minute klines: ~100 minutes
 
-### 冷却机制
+### Cooldown mechanism
 
 ```cpp
 auto nowMs = current_time_ms();
 if (nowMs - m_lastSignalTimeMs < cooldown_ms) {
-    return; // 冷却期内不发信号
+    return; // do not emit a signal during the cooldown period
 }
 ```
 
 ---
 
-## 参数配置
+## Parameter Configuration
 
-### 策略参数（StrategyParams）
+### Strategy parameters (StrategyParams)
 
-| 参数 | 类型 | 默认值 | 说明 |
+| Parameter | Type | Default | Description |
 |------|------|--------|------|
-| `bb_period` | int | 20 | 布林带周期 |
-| `bb_std_dev` | double | 2.0 | 标准差倍数 |
-| `cooldown_seconds` | double | 30.0 | 信号冷却时间 |
+| `bb_period` | int | 20 | Bollinger Band period |
+| `bb_std_dev` | double | 2.0 | Standard-deviation multiplier |
+| `cooldown_seconds` | double | 30.0 | Signal cooldown time |
 
-### trading.toml 示例
+### trading.toml example
 
 ```toml
 [[strategy.instances]]
@@ -123,135 +123,135 @@ poll_interval_ms = 500
 
 ---
 
-## 优缺点分析
+## Pros and Cons Analysis
 
-### 优点
+### Pros
 
-1. **逆势交易**：在超买/超卖极端位置入场
-   - 捕捉价格回归均值的利润
-   - 适合震荡市
-2. **胜率较高**：价格大概率会向均值回归
-   - 统计上 95% 的价格在 2 倍标准差内
-   - 突破轨道是相对罕见的事件
-3. **信号明确**：触碰布林带是清晰的触发条件
-   - 不需要复杂的交叉判断
-   - 信号容易理解和验证
-4. **适合震荡市**：大部分时间市场处于震荡区间
-   - 横盘时布林带效果最好
-   - 提供明确的买卖点
+1. **Counter-trend trading**: enters at overbought/oversold extremes
+   - Captures the profit from price reverting to the mean
+   - Suited to ranging markets
+2. **Relatively high win rate**: price is likely to revert to the mean
+   - Statistically, 95% of prices lie within 2 standard deviations
+   - Breaking outside the bands is a relatively rare event
+3. **Clear signals**: touching a Bollinger Band is an unambiguous trigger condition
+   - No complicated crossover judgement needed
+   - Signals are easy to understand and verify
+4. **Suited to ranging markets**: most of the time the market is in a range
+   - Bollinger Bands work best when the market is sideways
+   - Provides clear buy and sell points
 
-### 缺点
+### Cons
 
-1. **趋势市亏损大**：单边趋势中价格持续突破带外
-   - "沿着轨道走"（walking the band）
-   - 逆势加仓会导致巨大亏损
-2. **逆势加仓风险**：需要严格止损配合
-   - 不能无限加仓摊平成本
-   - 必须设置最大回撤限制
-3. **信号频率中等**：需要等待价格触及上下轨
-   - 不是每次都会突破轨道
-   - 可能长时间无信号
-4. **参数敏感**：std_dev 倍数影响信号质量
-   - 倍数太低 → 信号太多，假信号多
-   - 倍数太高 → 信号太少，错过机会
-
----
-
-## 适用场景
-
-### 最佳市场条件
-
-- **横盘震荡**：价格在区间内波动，布林带效果最佳
-- **中等波动率**：波动太小信号少，波动太大假信号多
-- **无明显趋势**：避免单边趋势市场
-- **足够流动性**：确保 K 线数据连续
-
-### 不适合的市场
-
-- **强趋势市**：价格持续单边，突破轨道后不回归
-- **极端波动**：闪崩或暴涨时布林带失效
-- **低流动性**：K 线数据不连续，标准差计算失真
-- **重大事件**：新闻驱动的行情不受技术面约束
+1. **Large losses in trending markets**: in a one-directional trend price keeps breaking outside the bands
+   - "Walking the band"
+   - Adding to a losing counter-trend position leads to huge losses
+2. **Risk of adding to a losing counter-trend position**: requires strict stop-loss discipline
+   - You cannot keep adding positions forever to average down the cost
+   - A maximum-drawdown limit must be set
+3. **Medium signal frequency**: must wait for price to touch the upper or lower band
+   - Price does not break the bands every time
+   - There may be no signal for a long period
+4. **Parameter sensitive**: the std_dev multiplier affects signal quality
+   - Multiplier too low → too many signals, many false ones
+   - Multiplier too high → too few signals, missing opportunities
 
 ---
 
-## 调优建议
+## Applicable Scenarios
 
-### 提高灵敏度（更多信号）
+### Best market conditions
+
+- **Sideways range**: price oscillates within a range, where Bollinger Bands work best
+- **Medium volatility**: too little volatility means few signals, too much means false signals
+- **No clear trend**: avoid one-directional trending markets
+- **Sufficient liquidity**: ensures continuous kline data
+
+### Unsuitable markets
+
+- **Strong trending markets**: price keeps moving in one direction and does not revert after breaking the bands
+- **Extreme volatility**: Bollinger Bands fail during flash crashes or spikes
+- **Low liquidity**: kline data is discontinuous and the standard-deviation calculation is distorted
+- **Major events**: news-driven moves are not bound by technicals
+
+---
+
+## Tuning Recommendations
+
+### Increase sensitivity (more signals)
 
 ```
-bb_period = 15      # 缩短周期
-bb_std_dev = 1.5   # 降低标准差倍数
+bb_period = 15      # shorten the period
+bb_std_dev = 1.5   # lower the standard-deviation multiplier
 ```
 
-- 信号更频繁
-- 轨道更窄，更容易突破
-- 假信号更多
+- More frequent signals
+- Narrower bands, easier to break
+- More false signals
 
-### 提高稳定性（更少信号）
+### Increase stability (fewer signals)
 
 ```
-bb_period = 30      # 延长周期
-bb_std_dev = 2.5   # 提高标准差倍数
+bb_period = 30      # lengthen the period
+bb_std_dev = 2.5   # raise the standard-deviation multiplier
 ```
 
-- 信号更少但更可靠
-- 轨道更宽，突破更罕见
-- 胜率更高
+- Fewer but more reliable signals
+- Wider bands, breakouts are rarer
+- Higher win rate
 
-### 动态带宽
+### Dynamic band width
 
-根据市场波动率调整标准差倍数：
+Adjust the standard-deviation multiplier according to market volatility:
 
 ```cpp
 double dynamic_std_dev = base_std_dev * (1 + volatility_factor);
-// 高波动率时放宽轨道，低波动率时收紧轨道
+// Widen the bands in high volatility, tighten them in low volatility
 ```
 
-### 配合趋势过滤
+### Combine with trend filtering
 
-在趋势市中禁用均值回归：
+Disable mean reversion in trending markets:
 
 ```cpp
 if (adx > 25) {
-    // 强趋势，禁用均值回归策略
+    // Strong trend: disable the mean-reversion strategy
     return;
 }
 ```
 
 ---
 
-## 与其他策略的配合
+## Combining with Other Strategies
 
-### 与 MomentumScalper 配合
+### Combining with MomentumScalper
 
-- MomentumScalper 判断趋势状态
-- 趋势市时禁用 MeanReversionScalper
-- 震荡市时启用 MeanReversionScalper
+- MomentumScalper determines the trend state
+- In trending markets, MeanReversionScalper is disabled
+- In ranging markets, MeanReversionScalper is enabled
 
-### 与 OrderBookScalper 配合
+### Combining with OrderBookScalper
 
-- MeanReversionScalper 识别超买/超卖区域
-- OrderBookScalper 确认微观压力方向
-- 双重确认反转信号
+- MeanReversionScalper identifies overbought/oversold zones
+- OrderBookScalper confirms the direction of micro pressure
+- Double confirmation of the reversal signal
 
-### 与 SuperTrendScalper 配合
+### Combining with SuperTrendScalper
 
-- SuperTrend 判断趋势方向
-- 趋势方向与均值回归方向相反时，优先趋势
-- 趋势不明时，均值回归主导
-
----
-
-## 源码位置
-
-- **头文件**：`src/strategy/scalping/MeanReversionScalper.hpp`
-- **实现文件**：`src/strategy/scalping/MeanReversionScalper.cpp`
-- **参数定义**：`src/strategy/StrategyParams.hpp`
+- SuperTrend determines the trend direction
+- When the trend direction is opposite to the mean-reversion direction, the trend takes priority
+- When the trend is unclear, mean reversion leads
 
 ---
 
-## 日志示例
+## Source Locations
+
+- **Header**: `src/strategy/scalping/MeanReversionScalper.hpp`
+- **Implementation**: `src/strategy/scalping/MeanReversionScalper.cpp`
+- **Parameter definitions**: `src/strategy/StrategyParams.hpp`
+
+---
+
+## Log Examples
 
 ```
 [INFO] [strategy] [mean_reversion_scalper_ETH_USDT] Price at/below lower Bollinger Band 
