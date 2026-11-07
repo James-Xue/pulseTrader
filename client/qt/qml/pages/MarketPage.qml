@@ -27,19 +27,19 @@ ColumnLayout {
         Layout.margins: Style.pad
         spacing: Style.gap
 
-        ComboBox {
+        MacComboBox {
             id: symbolBox
             Layout.preferredWidth: 220
             model: root.controller ? root.controller.symbols : []
         }
 
-        TextField {
+        MacTextField {
             id: symbolField
             Layout.preferredWidth: 180
             placeholderText: qsTr("or type a symbol")
         }
 
-        Button {
+        MacButton {
             text: qsTr("Fetch")
             enabled: root.controller && root.controller.connectionState === EngineController.Ready
             onClicked: {

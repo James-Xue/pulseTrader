@@ -25,7 +25,7 @@ ColumnLayout {
 
         Item { Layout.fillWidth: true }
 
-        Button {
+        MacButton {
             text: qsTr("Refresh")
             onClicked: if (root.controller) root.controller.refreshAll()
         }

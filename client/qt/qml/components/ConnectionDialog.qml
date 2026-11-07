@@ -22,14 +22,14 @@ Dialog {
         anchors.fill: parent
         spacing: Style.gap
 
-        TextField {
+        MacTextField {
             id: hostField
             Layout.fillWidth: true
             text: "127.0.0.1"
             placeholderText: qsTr("host")
         }
 
-        TextField {
+        MacTextField {
             id: portField
             Layout.fillWidth: true
             text: "8081"
@@ -37,14 +37,14 @@ Dialog {
             inputMethodHints: Qt.ImhDigitsOnly
         }
 
-        TextField {
+        MacTextField {
             id: tokenField
             Layout.fillWidth: true
             echoMode: TextInput.Password
             placeholderText: qsTr("token (reserved for M-Q4)")
         }
 
-        CheckBox {
+        MacCheckBox {
             id: tlsBox
             text: qsTr("TLS")
         }
@@ -53,7 +53,7 @@ Dialog {
             Layout.fillWidth: true
             spacing: Style.gap
 
-            Button {
+            MacButton {
                 Layout.fillWidth: true
                 text: qsTr("Connect")
                 onClicked: {
@@ -68,7 +68,7 @@ Dialog {
                 }
             }
 
-            Button {
+            MacButton {
                 Layout.fillWidth: true
                 text: qsTr("Cancel")
                 onClicked: root.close()
