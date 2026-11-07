@@ -1,6 +1,7 @@
 #include "account/AccountService.hpp"
 
 #include <QDir>
+#include <QFile>
 #include <QStandardPaths>
 
 #include "security/SecretStore.hpp"
@@ -52,6 +53,8 @@ QString AccountService::vaultPath()
 
     // 2. Create it 0700 so another local user cannot even list the vault.
     QDir().mkpath(directory);
+    QFile::setPermissions(directory,
+                          QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
 
     return directory + QStringLiteral("/vault.bin");
 }
