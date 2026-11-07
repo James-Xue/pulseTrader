@@ -236,8 +236,19 @@ bool EngineLauncher::start(const QString& apiKey, const QString& apiSecret,
         return false;
     }
 
-    // 2. Write the per-run config 0600 into the runtime directory.
+    // 2. Write the per-run config 0600 into the runtime directory. Configs
+    //    left by an abrupt exit (crash, SIGKILL) are removed first: they hold
+    //    the exchange credentials and are useless once their engine is gone.
     const QString runtimeDir = runtimeDirectory();
+    QDir runtime(runtimeDir);
+    const QStringList staleConfigs =
+        runtime.entryList({ QStringLiteral("engine-*.toml") }, QDir::Files);
+
+    for (const QString& name : staleConfigs)
+    {
+        QFile::remove(runtime.filePath(name));
+    }
+
     m_configPath = QStringLiteral("%1/engine-%2.toml")
                        .arg(runtimeDir)
                        .arg(QCoreApplication::applicationPid());
