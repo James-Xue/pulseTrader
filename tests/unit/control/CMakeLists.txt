@@ -90,3 +90,16 @@ target_link_libraries(test_control_client
 )
 include(GoogleTest)
 gtest_discover_tests(test_control_client)
+
+add_executable(test_control_auth
+    test_control_auth.cpp
+)
+target_link_libraries(test_control_auth
+    PRIVATE
+        pulse::control
+        pulse::core
+        pulse::logging
+        GTest::gtest_main
+)
+include(GoogleTest)
+gtest_discover_tests(test_control_auth)

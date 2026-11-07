@@ -45,7 +45,7 @@ status table in the README).
 
 ### Tested
 
-- 1054 automated tests green (`ctest --test-dir build`).
+- 1061 automated tests green (`ctest --test-dir build`).
 
 ### Known limitations
 
