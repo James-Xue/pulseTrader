@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 - `get_account` reports every non-zero spot currency (`spot_balances`) with a
   best-effort USDT valuation from the ticker cache; the Qt dashboard lists
   those holdings with amount and value.
+- The spot breakdown is opt-in (`include_spot_balances`, default false)
+  because pricing unpriced coins costs REST calls on the shared mutex. The Qt
+  client exposes it as a Settings switch, so users who only need the balance
+  can turn the extra work off.
 
 ### Fixed
 

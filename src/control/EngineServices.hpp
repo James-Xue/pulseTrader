@@ -79,7 +79,15 @@ class EngineServices
 
     // --- Queries (each returns ready-to-serialize JSON) ---
     [[nodiscard]] nlohmann::json status() const;
-    [[nodiscard]] nlohmann::json account();
+
+    /// Account snapshot (futures + spot + CFD).
+    ///
+    /// `include_spot_balances` also returns `spot_balances`, the per-currency
+    /// spot breakdown. That breakdown may issue one public REST ticker call
+    /// per unpriced currency while holding the shared REST mutex, so it is
+    /// OFF by default: a caller that only needs the aggregate USDT balance
+    /// (the polling UI, the REPL, MCP) should not pay for it.
+    [[nodiscard]] nlohmann::json account(bool include_spot_balances = false);
     [[nodiscard]] nlohmann::json positions() const;
     [[nodiscard]] nlohmann::json orders() const;
     [[nodiscard]] nlohmann::json strategies() const;

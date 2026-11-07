@@ -359,7 +359,7 @@ nlohmann::json EngineServices::status() const
     return j;
 }
 
-nlohmann::json EngineServices::account()
+nlohmann::json EngineServices::account(bool include_spot_balances)
 {
     nlohmann::json j;
     j["available"] = false;
@@ -389,17 +389,23 @@ nlohmann::json EngineServices::account()
         auto spot = m_spotRest->getSpotAccounts();
         if (ok(spot))
         {
-            // `spot` stays the aggregate USDT view for backward compatibility;
-            // `spot_balances` carries every non-zero currency with its value.
-            // The lookup budget resets once per snapshot.
-            m_spotPriceLookups = 0;
+            // `spot` stays the aggregate USDT view for backward compatibility.
+            // The per-currency breakdown is opt-in: pricing an unpriced coin
+            // costs a REST call under the shared mutex, which delays every
+            // other REST consumer for as long as the calls take.
             j["spot"] = spotUsdtAccount(value(spot));
-            j["spot_balances"] = spotBalances(
-                value(spot),
-                [this](const std::string &currency)
-                {
-                    return spotPriceUsdt(currency);
-                });
+
+            if (include_spot_balances)
+            {
+                // The lookup budget resets once per snapshot.
+                m_spotPriceLookups = 0;
+                j["spot_balances"] = spotBalances(
+                    value(spot),
+                    [this](const std::string &currency)
+                    {
+                        return spotPriceUsdt(currency);
+                    });
+            }
         }
     }
 

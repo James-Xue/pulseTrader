@@ -52,6 +52,8 @@ class EngineController : public QObject
     Q_PROPERTY(int strategiesTotal READ strategiesTotal NOTIFY statusChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(bool pollingEnabled READ pollingEnabled NOTIFY pollingEnabledChanged)
+    Q_PROPERTY(bool spotHoldingsEnabled READ spotHoldingsEnabled
+               NOTIFY spotHoldingsEnabledChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect CONSTANT)
 
     Q_PROPERTY(pulse::client::PositionsModel* positionsModel READ positionsModel CONSTANT)
@@ -81,6 +83,12 @@ public:
     Q_INVOKABLE void setPollingEnabled(bool enabled);
     Q_INVOKABLE void fetchMarket(const QString& symbol);
 
+    /// Request the per-currency spot breakdown from get_account. Disabled by
+    /// default: pricing every unpriced coin costs public REST ticker calls on
+    /// the engine's shared REST mutex, which delays the account snapshot and
+    /// every other REST consumer. The setting persists in the UI layer.
+    Q_INVOKABLE void setSpotHoldingsEnabled(bool enabled);
+
     [[nodiscard]] ConnectionState connectionState() const { return m_connectionState; }
     [[nodiscard]] QString engineVersion() const { return m_engineVersion; }
     [[nodiscard]] double engineUptimeSec() const { return m_engineUptimeSec; }
@@ -93,6 +101,7 @@ public:
     [[nodiscard]] int strategiesTotal() const { return m_strategiesTotal; }
     [[nodiscard]] QString lastError() const { return m_lastError; }
     [[nodiscard]] bool pollingEnabled() const { return m_pollingEnabled; }
+    [[nodiscard]] bool spotHoldingsEnabled() const { return m_spotHoldingsEnabled; }
 
     /// True when PULSE_CLIENT_HOST was set at startup, in which case the
     /// controller connected without waiting for the dialog. Used by smoke
@@ -110,6 +119,7 @@ signals:
     void statusChanged();
     void lastErrorChanged();
     void pollingEnabledChanged();
+    void spotHoldingsEnabledChanged();
     void errorOccurred(const QString& message);
     void marketReceived(const QVariantMap& market);
 
@@ -171,6 +181,7 @@ private:
     int m_strategiesTotal = 0;
     QString m_lastError;
     bool m_pollingEnabled = true;
+    bool m_spotHoldingsEnabled = true;
     bool m_autoConnect = false;
 };
 

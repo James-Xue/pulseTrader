@@ -181,6 +181,24 @@ void EngineController::setPollingEnabled(bool enabled)
     }
 }
 
+void EngineController::setSpotHoldingsEnabled(bool enabled)
+{
+    if (enabled == m_spotHoldingsEnabled)
+    {
+        return;
+    }
+    m_spotHoldingsEnabled = enabled;
+    emit spotHoldingsEnabledChanged();
+
+    // Ask for a fresh snapshot right away so the table appears or clears
+    // without waiting up to 30 s for the next account poll. pollAccount()
+    // refuses to stack a second request while one is in flight.
+    if (RpcClient::State::Ready == m_slow->state())
+    {
+        pollAccount();
+    }
+}
+
 void EngineController::refreshAll()
 {
     pollStatus();
@@ -269,7 +287,13 @@ void EngineController::pollAccount()
     {
         return;
     }
-    const qint64 id = m_slow->call(methods::kGetAccount, QJsonObject{}, kAccountTimeoutMs);
+    // The engine only builds the per-currency breakdown when asked, because
+    // that path can issue public REST ticker calls while holding the shared
+    // REST mutex. The dashboard switch decides whether to pay for it.
+    QJsonObject params;
+    params[QStringLiteral("include_spot_balances")] = m_spotHoldingsEnabled;
+
+    const qint64 id = m_slow->call(methods::kGetAccount, params, kAccountTimeoutMs);
     m_inFlight.insert(id, PollKind::Account);
 }
 

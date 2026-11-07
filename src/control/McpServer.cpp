@@ -199,8 +199,18 @@ nlohmann::json McpServer::toolDefinitions()
         nlohmann::json::object(), {});
 
     add("get_account",
-        "Spot + futures account balance (REST).",
-        nlohmann::json::object(), {});
+        "Spot + futures account balance (REST). Set include_spot_balances to "
+        "also list every non-zero spot currency with a USDT valuation; that "
+        "breakdown can cost one public REST ticker call per unpriced currency "
+        "while the shared REST mutex is held.",
+        nlohmann::json{
+            { "include_spot_balances", {
+                { "type", "boolean" },
+                { "description",
+                  "Include the per-currency spot_balances breakdown "
+                  "(default false)." },
+            } },
+        }, {});
 
     add("get_positions",
         "Open positions with unrealized PnL + portfolio summary.",

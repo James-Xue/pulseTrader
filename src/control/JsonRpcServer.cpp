@@ -614,9 +614,12 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.status() };
     };
-    reg["get_account"] = [&services](const nlohmann::json &)
+    reg["get_account"] = [&services](const nlohmann::json &params)
     {
-        return RpcResult{ services.account() };
+        // Opt-in: see EngineServices::account(). Defaulting to false keeps
+        // the polled account snapshot free of pricing REST calls.
+        return RpcResult{ services.account(
+            params.value("include_spot_balances", false)) };
     };
     reg["get_positions"] = [&services](const nlohmann::json &)
     {
