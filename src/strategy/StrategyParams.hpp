@@ -12,9 +12,31 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace pulse::strategy
 {
+
+struct StrategyParams; // defined below — registry functions take a reference
+
+// ---------------------------------------------------------------------------
+// Atomic param key registry (M33)
+//
+// Backtest / sweep tooling must classify a raw key as either an atomic
+// hot-reload param (this table) or a custom_params channel key. The live
+// control plane keeps its own getter/setter tables in EngineServices.cpp —
+// keep them in sync with this list (pinned by a unit test on both sides).
+// ---------------------------------------------------------------------------
+
+/// Canonical list of hot-reloadable atomic param keys.
+[[nodiscard]] const std::vector<std::string> &atomicParamKeys();
+
+/// Set the atomic param named `key` to `value`. Returns false when `key` is
+/// not an atomic param (custom-channel keys belong to
+/// StrategyInstanceConfig::custom_params instead).
+[[nodiscard]] bool applyAtomicParam(StrategyParams &params,
+    const std::string &key, double value);
 
 // ---------------------------------------------------------------------------
 // StrategyParams — atomic parameters shared between strategy and AI advisor
@@ -36,6 +58,12 @@ namespace pulse::strategy
 //   11. take_profit_pct         — first take-profit target as fraction of entry
 //   12. supertrend_period       — ATR period for SuperTrend bands
 //   13. supertrend_multiplier   — ATR multiplier for SuperTrend bands
+//   14. auto_trade              — execution gate: 1.0 = signals feed the
+//                                 aggregator and may place orders; 0.0 =
+//                                 signals-only (publish to the signal board,
+//                                 never order). Runtime one-click toggle via
+//                                 set_strategy_trading; seeded at startup from
+//                                 [strategy] signal_only (fail-safe default).
 // ---------------------------------------------------------------------------
 struct StrategyParams
 {
@@ -65,6 +93,9 @@ struct StrategyParams
     // --- Risk (AI-tunable, mirrors StopLossConfig / TakeProfitConfig) ---
     std::atomic<double> stop_loss_pct{ 0.01 };         ///< Stop-loss distance fraction.
     std::atomic<double> take_profit_pct{ 0.005 };       ///< First take-profit target fraction.
+
+    // --- Execution gate (runtime one-click switch) ---
+    std::atomic<double> auto_trade{ 1.0 };             ///< 1.0 = auto-trade on; 0.0 = signals-only.
 };
 
 } // namespace pulse::strategy

@@ -1,0 +1,38 @@
+# pulseTrader trading engine — systemd user service
+#
+# Auto-starts the engine at login/boot, restarts it on crash, and logs to
+# journald (journalctl --user -u pulsetrader -f).
+#
+# The engine itself enforces single-instance (data/engine.lock via flock),
+# so starting this service while another engine is running will fail fast
+# on the second one instead of double-trading.
+#
+# Manage:
+#   systemctl --user status pulsetrader
+#   systemctl --user stop pulsetrader
+#   systemctl --user restart pulsetrader
+
+[Unit]
+Description=pulseTrader trading engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/pulseTrader  # adjust to your checkout
+
+# .env uses `export KEY=...` lines, which systemd's EnvironmentFile cannot
+# parse — source it in a shell, then exec the engine so signals (SIGTERM)
+# reach the engine directly for its graceful shutdown path.
+ExecStart=/bin/bash -c 'source .env && exec ./build_headless/apps/pulsetrader/pulsetrader --config trading.toml'
+
+# Crash (non-zero exit, signal) → restart after 5s. A clean exit (manual
+# stop, or another engine holding the lock) is NOT restarted.
+Restart=on-failure
+RestartSec=5
+
+# Graceful shutdown budget for the engine's Ctrl+C path.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

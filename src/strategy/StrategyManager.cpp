@@ -34,6 +34,11 @@ std::atomic<bool> &StrategyBase::active()
     return m_active;
 }
 
+std::atomic<bool> &StrategyBase::paused()
+{
+    return m_paused;
+}
+
 void StrategyBase::emitSignal(const TradingSignal &signal)
 {
     // 1. Drop if no callback is registered.
@@ -43,8 +48,12 @@ void StrategyBase::emitSignal(const TradingSignal &signal)
     }
 
     // 2. Drop if confidence is below the strategy's minimum threshold.
+    //    Flat state signals (confidence 0) bypass the gate: they are a
+    //    state channel (trend/spike publish, e.g. EthScalper v2), not
+    //    trade entries — the aggregator already ignores Flat, so they can
+    //    never trigger execution downstream.
     const double min_conf = params().min_confidence.load(std::memory_order_acquire);
-    if (signal.confidence < min_conf)
+    if (SignalType::Flat != signal.type && signal.confidence < min_conf)
     {
         return;
     }
@@ -153,6 +162,8 @@ std::vector<StrategySnapshot> StrategyManager::snapshot() const
         snap.symbol = s->context().config.symbol;
         snap.enabled = s->context().config.enabled;
         snap.running = s->active().load(std::memory_order_acquire);
+        snap.paused = s->paused().load(std::memory_order_acquire);
+        snap.auto_trade = s->params().auto_trade.load(std::memory_order_acquire) != 0.0;
         snap.poll_interval_ms = s->context().config.poll_interval_ms;
         result.push_back(std::move(snap));
     }
@@ -168,6 +179,58 @@ std::vector<StrategyParams *> StrategyManager::allParams()
         result.push_back(&s->params());
     }
     return result;
+}
+
+std::vector<StrategyHandle> StrategyManager::allHandles()
+{
+    std::vector<StrategyHandle> result;
+    result.reserve(m_strategies.size());
+    for (const auto &s : m_strategies)
+    {
+        const auto &cfg = s->context().config;
+        result.push_back({ s->id(), s->name(), cfg.symbol,
+                           toString(cfg.market_type), &s->params() });
+    }
+    return result;
+}
+
+bool StrategyManager::setPaused(const std::string &id, bool paused)
+{
+    for (const auto &s : m_strategies)
+    {
+        if (s->id() == id)
+        {
+            s->paused().store(paused, std::memory_order_release);
+            return true;
+        }
+    }
+    return false;
+}
+
+int StrategyManager::setPausedByMarket(MarketType mt, bool paused)
+{
+    int affected = 0;
+    for (const auto &s : m_strategies)
+    {
+        if (s->context().config.market_type == mt)
+        {
+            s->paused().store(paused, std::memory_order_release);
+            ++affected;
+        }
+    }
+    return affected;
+}
+
+StrategyParams *StrategyManager::paramsByName(const std::string &id) const
+{
+    for (const auto &s : m_strategies)
+    {
+        if (s->id() == id)
+        {
+            return &s->params();
+        }
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +249,13 @@ void StrategyManager::strategyLoop(StrategyBase &strategy, std::stop_token stoke
 
     while (!stoken.stop_requested() && strategy.active().load(std::memory_order_acquire))
     {
+        // Skip ticks while manually paused (thread stays alive).
+        if (strategy.paused().load(std::memory_order_acquire))
+        {
+            std::this_thread::sleep_for(poll_interval);
+            continue;
+        }
+
         auto *feed = strategy.context().market_feed;
         if (nullptr == feed)
         {

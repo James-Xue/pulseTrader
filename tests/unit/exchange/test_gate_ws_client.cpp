@@ -180,9 +180,9 @@ TEST(GateWsClientTest, ClientSubscribeRegistersCallback)
     const auto active = client.channels().activeChannels();
     EXPECT_EQ(1u, active.size());
 
-    const auto payload = client.channels().getPayload("spot.trades");
-    EXPECT_EQ(1u, payload.size());
-    EXPECT_EQ("ETH_USDT", payload[0]);
+    const auto payloads = client.channels().payloadsFor("spot.trades");
+    ASSERT_EQ(1u, payloads.size());
+    EXPECT_EQ("ETH_USDT", payloads[0][0]);
 }
 
 // ---------------------------------------------------------------------------

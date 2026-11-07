@@ -13,8 +13,15 @@
 symbols = ["BTC_USDT", "ETH_USDT"]
 
 # ── 默认市场类型（可选，默认 spot）──────────────────────────────────
-# 策略未指定 market_type 时使用此值。可选: "spot" | "futures"
+# 策略未指定 market_type 时使用此值。可选: "spot" | "futures" | "cfd"
 # default_market_type = "spot"
+
+# ── 活跃交易方向（可选，默认 futures）────────────────────────────────
+# 单活跃方向模型：任一时刻只有一个方向（futures / cfd）真实交易。
+# 另一方向的策略启动即暂停、切换时撤单；重启后回到此配置值。
+# 运行时切换: REPL `switch <futures|cfd>` 或 MCP switch_direction。
+# 2026-08-17 起本工程主力为黄金 CFD: 取消下行注释即为持久默认。
+active_market = "cfd"
 
 # ── 交易所 ────────────────────────────────────────────────────────────
 [exchange]
@@ -46,15 +53,35 @@ toFile    = true                   # 写入 logs/ 目录
 [strategy]
 signal_aggregator_threshold = 0.7  # 聚合信号置信度 ≥ 0.7 才执行
 signal_cooldown_sec         = 30   # 同币种信号冷却（秒）
+# signal_only = false              # true = 启动时把所有策略的 auto_trade 开关
+                                   #       置为 OFF: 只发信号(get_signals)永不下单;
+                                   #       运行时可用 set_strategy_trading /
+                                   #       `autotrade <id> on|off` 逐个一键开启
+                                   #       (重启回到此默认)。手动 open_order/
+                                   #       close_position 不受影响(子代理路径)
 
 # 每个 [[strategy.instances]] 定义一个策略实例。
 # name 必须是: momentum_scalper | orderbook_scalper | mean_reversion_scalper
+#
+# order_type（可选，默认 "market"）:
+#   "market"      — 市价单（吃单，taker 费率，如合约 0.05%/边）
+#   "post_only"   — 最优买卖价挂单（做市，maker 费率如 0.02%/边）；无行情簿
+#                   数据时丢弃信号，绝不吃单
+#   "maker_first" — 挂单优先 + 超时后撤单转市价兜底（见 maker_timeout_ms）
+# maker_timeout_ms（仅 maker_first 生效）: 挂单未成交等待毫秒数，超时撤单
+#   改市价单。示例: 0.01 手 XAUUSD 一轮 maker 可省约 0.06% 手续费
+#   注意: CFD 市场不支持 post_only（TradFi API 仅 market|trigger），
+#   验证器会拒绝 cfd + 非 market 的组合
 
 [[strategy.instances]]
 name            = "momentum_scalper"
 symbol          = "BTC_USDT"
 order_quantity  = 0.001            # 每笔 0.001 BTC（约 $65）
-min_confidence  = 0.6              # 信号置信度门槛（0.0–1.0）
+min_confidence  = 0.6              # 信号置信度门槛（0.0–1.0）；注意各策略置信度
+                                    # 尺度不同——momentum 的 EMA 间距归一化约 1e-4、
+                                    # mean_reversion 的带宽穿透比约 0.01-0.1，高门槛
+                                    # 会把它们永久静默（只留 distance/ATR 尺度的
+                                    # supertrend），低尺度策略请设 0.0
 enabled         = true
 poll_interval_ms = 200             # 行情轮询间隔（毫秒）
 
@@ -89,6 +116,68 @@ poll_interval_ms = 500
 # enabled         = true
 # poll_interval_ms = 200
 
+# ── 币种定制策略示例: eth_scalper（M26, 追空 + 自定义参数）────────────
+# 未注册的 name 会兜底为被动 UnifiedScalper(不发信号)并在启动日志 WARN;
+# 新增币种策略 = 继承 UnifiedScalper + 在 StrategyRegistry 注册 name。
+# custom_params 为币种专属参数表(静态, 无热更新), 缺省走策略默认值:
+#   eth_atr_step             (默认 0.05) — ATR 自适应止盈距离 suggested_tp = close - step×atr
+#   eth_spike_filter_usd     (默认 120.0) — 单根 kline 振幅超过此值视为暴拉/插针, 不追空
+#   eth_min_confidence_scale (默认 1.0)   — 置信度缩放系数。实测 |EMA9-EMA21|/ATR
+#                                           仅 ~0.03,乘 1.0 永远过不了 min_confidence=0.6
+#                                           闸,真信号被 emitSignal 静默丢弃;主网已用 20.0
+#                                           (典型交叉 ~0.65 过闸,仍守 0.6 语义)
+#
+# [[strategy.instances]]
+# name            = "eth_scalper"
+# symbol          = "ETH_USDT"
+# market_type     = "futures"
+# leverage        = 10
+# margin_mode     = "cross"
+# order_quantity  = 20               # 1 合约 = 0.01 ETH (~20 USD @2011)
+# min_confidence  = 0.6
+# enabled         = true
+# poll_interval_ms = 500
+# custom_params  = { eth_atr_step = 0.05, eth_spike_filter_usd = 120.0, eth_min_confidence_scale = 1.0 }
+# order_type      = "maker_first"   # "market"（默认）| "post_only" | "maker_first"
+# maker_timeout_ms = 500            # 挂单超时毫秒，超时撤单改市价（仅 maker_first）
+# news_windows    = [              # 重大消息事件闸(iron-trader §4.6, 框架级通用):
+#                                  #   禁开 [T−X, T+Y);持仓跨 T−X 强制 Flat(news_blackout)
+#                                  #   time = ISO UTC 或裸 epoch(< 1e12 视为秒);空 = 闸关
+#     { time = "2026-09-11T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # CPI
+#     { time = "2026-09-16T18:00:00Z", close_before_min = 15, resume_after_min = 45 },  # FOMC+SEP
+#     { time = "2026-10-02T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # NFP
+#     { time = "2026-10-14T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # CPI
+#     { time = "2026-10-28T18:00:00Z", close_before_min = 15, resume_after_min = 30 },  # FOMC
+#     { time = "2026-11-06T13:30:00Z", close_before_min = 15, resume_after_min = 30 },  # NFP(冬令时后)
+# ]                                # 示例 = 2026-09→11 官方宏观日历(过期自失效,滚动维护)
+
+# ── 五周期 EMA 共振策略示例: ema_resonance_scalper（2026-08-23）────────
+# EMA 7/14/30/60/200 全排列对齐才出信号: 严格递增 = 多头共振 Buy,
+# 严格递减 = 空头共振 Sell, 其余 mixed 无信号。入场为共振状态迁移触发
+# (非每根 K 线重发); 置信度 = clamp(|ema7-ema200|/ATR,0,1)×res_conf_scale。
+# custom_params 语义 (静态, 无热更新, 缺省走默认值):
+#   res_ema_p1      (默认 7)    — 最快 EMA 周期
+#   res_ema_p2      (默认 14)
+#   res_ema_p3      (默认 30)
+#   res_ema_p4      (默认 60)
+#   res_ema_p5      (默认 200)  — 最慢 EMA 周期
+#   res_conf_scale  (默认 1.0)  — 置信度缩放系数。实测 |ema7-ema200|/ATR ≈ 0.55
+#                                 不过 min_confidence=0.6 闸被静默丢弃;主网已用
+#                                 2.0 (典型对齐 ~1.0 过闸, 仍守 0.6 语义)
+# 规则文档: docs/strategies/ema-resonance-scalper.md
+#
+# [[strategy.instances]]
+# name            = "ema_resonance_scalper"
+# symbol          = "ETH_USDT"
+# market_type     = "futures"
+# leverage        = 10
+# margin_mode     = "cross"
+# order_quantity  = 20
+# min_confidence  = 0.6
+# enabled         = true
+# poll_interval_ms = 500
+# custom_params  = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
+
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]
 maxPositionNotional = 500          # 最大总持仓（USDT）
@@ -97,8 +186,10 @@ maxDailyDrawdown    = 0.02         # 日亏 ≥ 2% 停止开仓
 maxDrawdown         = 0.05         # 总回撤 ≥ 5% 全部停止
 maxOrdersPerSec     = 5            # 每秒最大下单数
 maxSymbolNotional   = 300          # 单币种最大持仓（USDT）
-max_leverage        = 10.0         # 合约最大杠杆倍数（1.0–125.0）
+max_leverage        = 10.0         # 最大杠杆倍数（1.0–500.0；CFD 杠杆阶梯 20/50/100/200/500）
 max_margin_used     = 0.5          # 保证金占总资产最大比例（0.0–1.0）
+# minAvailableAfterStopUsd = 6.0   # M22: CFD 带 SL 开仓后,可用资金-保证金-止损金额
+                                   # 必须 ≥ 此值;防止薄账户一笔止损即耗尽交易能力(默认关)
 
 [risk.stop_loss]
 mode            = "Trailing"       # Fixed | Trailing | TimeBased
@@ -114,10 +205,13 @@ fractions   = [0.33, 0.33, 0.34]   # 每档平仓比例（总和 ≤ 1.0）
 # ── AI 分析 ──────────────────────────────────────────────────────────
 # heartbeatIntervalSec = 0 关闭 AI 调参（推荐初期关闭）
 [ai]
-backend              = "openai"    # "openai" 或 "claude"
-model                = "gpt-4o"
-apiKey               = "from_env:OPENAI_API_KEY"
-heartbeatIntervalSec = 0           # AI 分析间隔（秒），0 = 关闭
+# AI 定期调参闭环:LLM 每 heartbeatIntervalSec 秒评估市场 + 每策略近期表现,
+# 经安全边界微调全部策略参数(变更可在 get_param_history 审计)。
+backend              = "claude"              # "claude" 或 "openai";可配 baseUrl 指向兼容网关
+model                = "claude-sonnet-4-6"
+apiKey               = "from_env:AI_API_KEY" # 无 key → AI 离线(安全禁用),key 一填即通电
+heartbeatIntervalSec = 300                   # AI 调参节奏(秒),0 = 关闭
+stats_lookback_hours = 24                    # AI prompt 中每策略表现统计窗口(小时)
 requestTimeoutMs     = 30000
 maxRetries           = 2
 
@@ -152,3 +246,65 @@ maxClients  = 4                    # 最大 WebSocket 连接数
 [sqlite]
 enabled = true
 dbPath  = "data/trades.db"         # SQLite 数据库文件路径
+record_market = false             # M18: 行情(ticker/kline)落库,同文件第二连接
+record_signals = true             # M32: 信号日志 — 每条策略信号落 signals 表(A/B 权重实验重放源,append-only)
+# skip_kline_markets = ["futures"]  # M30: 不写这些市场的 kline_bars(如合约,改由 REST 实时拉);ticker_ticks 不受影响
+# daily_kline_sync = true           # M31: 每日拉近 10000 根 1m k线合并入库(REST 深度上限)
+# daily_sync_hour = 8               # 北京时刻;UTC 00:00 == 北京 08:00
+
+# ── 引擎内网格服务 (M27) ─────────────────────────────────────────────
+# ETH 网格 v2 规则(commit_my_life gate交易/以太坊 策略文档 v2)的引擎原生实现。
+# 默认全部走 GridConfig 缺省值(enabled=false),此处为全字段示例。
+# 启用:enabled = true → 引擎重启时自动加载 data/grid_state.json;
+#   若状态为 Running(schema 2)→ 自动恢复运行(崩溃存活卖点);
+#   要手动接管:先 grid_pause 再停机(pause 会落盘)。
+[grid]
+enabled = false                    # true 时引擎启动即加载网格状态
+symbol = "ETH_USDT"                # 期货合约
+market_type = "futures"            # 仅支持 futures
+levels = 12                        # 网格格数
+qty_per_level = 0.02               # 每格张数(2 × 0.01 ETH)
+step_mode = "atr"                  # "atr"(clamp(0.5×ATR15m)) | "fixed"
+step_fixed = 5.0                   # fixed 模式的固定步进
+step_atr_mult = 0.5                # ATR 自适应步进系数
+step_min = 3.0                     # ATR 步进下限
+step_max = 8.0                     # ATR 步进上限
+atr_period = 40                    # ATR15m:1m TR 均值所用根数
+tp_distance_steps = 2.0            # 分格止盈 = 成交价 - n×step(reduce-only 限价买)
+anchor_offset_steps = 1.0          # 锚 = round(mid + n×step, step)
+lower_reanchor_steps = 3.0         # mid < 锚 - n×step → 下移重锚
+# (无 upper_reanchor_steps:涨穿网格不自动重锚 — v2 §3.1b 转保护线 A)
+protect_line_a_steps = 2.0         # 1m 收盘 > 顶 + n×step → 平网格份额+按 §3.1 重挂
+protect_line_b_usd = -30.0         # 网格浮亏 ≤ 此值 → 同保护线 A
+daily_loss_limit_usd = -10.0       # 日已实现亏损 ≤ 此值 → 冻结新格/重锚(存量 TP 照常)
+daily_reset_hour = 8               # 日界(北京 08:00 == UTC 00:00)
+reanchor_cooldown_min = 30         # 重锚冷却
+spike_freeze_min = 30              # 暴拉冻结期
+spike_pct = 0.01                   # 1m 涨幅 > 1%
+spike_atr_mult = 3.0               # 或 > 3×ATR15m,任一触发即冻结
+state_file = "data/grid_state.json" # 状态文件(tmp+rename 原子写)
+force = false                      # 有非网格持仓时仍允许 grid_start
+
+# ---------------------------------------------------------------------------
+# [backtest] — 回测/kline-store 工具配置 (M33,可选段;缺省值如上)
+# docs/backtest.md 全量用法:kline-store 每日积累任意币种 1m K 线到本地
+# sqlite(Gate REST 只留最近 ~6.9 天,积累 ~30 天得 ~1 个月窗口)
+# ---------------------------------------------------------------------------
+# [backtest]
+# store_db = "data/trades.db"                  # kline-store 目标库
+# store_symbols = ["DOGE_USDT", "PEPE_USDT"]   # 积累清单;缺省 = 下方启用的 futures 策略实例符号
+# contract_cache_path = "data/contracts_cache.json"  # 合约表缓存(backtest 自动解析 quanto 用)
+
+# ---------------------------------------------------------------------------
+# [funding_watch] — 资金费率窗口监视器(纯观察,永不下单)
+# 信号板亮灯(funding_watch_<SYMBOL>):连续 consec_events 次结算(8h/次)
+# 费率 > threshold → 窗口 OPEN(type=Sell = "做空收租窗口");回落即 CLOSED。
+# 7 年全史验证(2026-09-06,data/funding/):0.5bp 闸下 2020-21 牛市净收
+# +16~36%/年、平淡年 ≈0 —— 本服务 = 收割策略的"等情绪税出台"开关。
+# 开启示例:
+# [funding_watch]
+# enabled = true
+# symbols = ["BTC_USDT", "ETH_USDT"]
+# threshold = 0.0005        # 5bp/8h(牛市典型 5-10bp;当前平淡市 ~0.1-1bp)
+# consec_events = 6         # ≈ 48 小时持续
+# poll_sec = 1800           # 30 分钟轮询(费率 8h 才动一次)

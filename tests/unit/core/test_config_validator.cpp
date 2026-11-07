@@ -104,6 +104,45 @@ TEST(ConfigValidator, RejectsNegativePositionNotional)
     EXPECT_NE(std::string::npos, err.message.find("maxPositionNotional"));
 }
 
+TEST(ConfigValidator, RejectsNegativePerMarketPositionNotional)
+{
+    // Each per-market override must be > 0 when set.
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalFutures = -1.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalFutures"));
+    }
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalCfd = 0.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalCfd"));
+    }
+
+    // M22: the free-margin-after-stop floor must be non-negative when set.
+    {
+        auto cfg = valid_config();
+        cfg.risk.minAvailableAfterStopUsd = -1.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("minAvailableAfterStopUsd"));
+    }
+    {
+        auto cfg = valid_config();
+        cfg.risk.maxPositionNotionalSpot = -100.0;
+        auto err = validateConfig(cfg);
+        EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+        EXPECT_NE(std::string::npos,
+                  err.message.find("maxPositionNotionalSpot"));
+    }
+}
+
 TEST(ConfigValidator, RejectsZeroMaxOpenPositions)
 {
     auto cfg = valid_config();
@@ -347,7 +386,7 @@ TEST(ConfigValidator, RejectsLeverageExceedingMaxLeverage)
 TEST(ConfigValidator, RejectsMaxLeverageOutOfRange)
 {
     auto cfg = valid_config();
-    cfg.risk.max_leverage = 200.0; // > 125.0
+    cfg.risk.max_leverage = 501.0; // > 500.0 (CFD ladder tops out at 500x)
     auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("max_leverage"));
@@ -371,10 +410,10 @@ TEST(ConfigValidator, AcceptsDefaultLeverageOne)
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
-TEST(ConfigValidator, AcceptsMaxLeverageBoundary125)
+TEST(ConfigValidator, AcceptsMaxLeverageBoundary500)
 {
     auto cfg = valid_config();
-    cfg.risk.max_leverage = 125.0; // boundary value
+    cfg.risk.max_leverage = 500.0; // boundary value (CFD ladder maximum)
     auto err = validateConfig(cfg);
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
@@ -413,5 +452,138 @@ TEST(ConfigValidator, AcceptsMainnetWithSpotStrategy)
     EXPECT_EQ(ErrorCode::Ok, err.code);
 }
 
+// ---------------------------------------------------------------------------
+// order_type / maker_timeout_ms
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, RejectsCfdWithPostOnly)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Cfd;
+    cfg.strategy.strategies[0].order_type = OrderType::PostOnly;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("order_type"));
+}
+
+TEST(ConfigValidator, RejectsCfdWithMakerFirst)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Cfd;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 500;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("order_type"));
+}
+
+TEST(ConfigValidator, AcceptsFuturesWithMakerFirst)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 500;
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, RejectsMakerFirstWithoutTimeout)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::MakerFirst;
+    cfg.strategy.strategies[0].maker_timeout_ms = 0;   // must be > 0
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("maker_timeout_ms"));
+}
+
+TEST(ConfigValidator, AcceptsPostOnlyWithoutTimeout)
+{
+    auto cfg = valid_config();
+    cfg.strategy.strategies[0].market_type = MarketType::Futures;
+    cfg.strategy.strategies[0].order_type = OrderType::PostOnly;
+    cfg.strategy.strategies[0].maker_timeout_ms = 0;   // resting order, no fallback
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+// ---------------------------------------------------------------------------
+// M27 — [grid] section validation
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, GridDisabledSkipsChecks)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = false;
+    cfg.grid.symbol = "";        // would be invalid if enabled
+    cfg.grid.levels = 0;         // would be invalid if enabled
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, GridEnabledAcceptsValidConfig)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.symbol = "ETH_USDT";
+    cfg.grid.levels = 12;
+    cfg.grid.qty_per_level = 0.02;
+    cfg.grid.step_mode = "atr";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::Ok, err.code) << err.message;
+}
+
+TEST(ConfigValidator, GridEnabledRejectsEmptySymbol)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.symbol = "";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("grid.symbol"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsNonFuturesMarket)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.market_type = "cfd";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("futures"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsBadLevels)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.levels = 25; // > 24
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("levels"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsBadStepMode)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.step_mode = "warp";
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("step_mode"));
+}
+
+TEST(ConfigValidator, GridEnabledRejectsInvertedAtrClamps)
+{
+    auto cfg = valid_config();
+    cfg.grid.enabled = true;
+    cfg.grid.step_mode = "atr";
+    cfg.grid.step_min = 8.0;
+    cfg.grid.step_max = 3.0; // min > max
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("step_min"));
+}
 } // namespace
 } // namespace pulse

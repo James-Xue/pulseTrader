@@ -69,18 +69,21 @@ constexpr std::size_t kMaxKlinesInPrompt = 10;
 // them as a pair. The caller passes both to AIClient::analyze().
 // ---------------------------------------------------------------------------
 std::pair<std::string, std::string> PromptBuilder::build(
-        const MarketSnapshot &snapshot,
+        const PipelineContext &ctx,
         const std::string &tweet_text,
         const std::string &news_text,
         const strategy::StrategyParams &params) const
 {
-    PULSE_LOG_INFO("ai", "Building prompt for {} ({} klines, tweets={}, news={})",
-            snapshot.ticker.symbol,
-            snapshot.klines.size(),
+    PULSE_LOG_INFO("ai", "Building prompt for {} ({} klines, {} tickers, "
+                   "{} perf rows, tweets={}, news={})",
+            ctx.market.ticker.symbol,
+            ctx.market.klines.size(),
+            ctx.symbol_tickers.size(),
+            ctx.performance.size(),
             tweet_text.empty() ? "none" : "yes",
             news_text.empty() ? "none" : "yes");
 
-    return {systemPrompt(), userPrompt(snapshot, tweet_text, news_text, params)};
+    return {systemPrompt(), userPrompt(ctx, tweet_text, news_text, params)};
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,12 @@ Rules:
 - All param_deltas are signed adjustments to current parameter values
 - Keep deltas small and conservative (the system clamps extreme values)
 - Base your analysis on the data provided, not speculation
+- The same deltas are applied to EVERY strategy; keep them generic enough to
+  help all strategies without harming any single one
+- Use the per-strategy performance table: strategies with negative pnl or
+  low win rate deserve targeted tightening (reduce order_quantity or raise
+  min_confidence); well-performing strategies should get near-zero deltas
+  (keep their parameters stable)
 - Output ONLY the JSON object, no additional text)";
 }
 
@@ -126,14 +135,15 @@ Rules:
 // userPrompt — dynamic content assembled from live market data
 //
 // Sections:
-//   A. Market Overview — ticker summary (symbol, price, bid/ask, change, volume)
+//   A. Market Overview — ticker summary + one-line tickers for other symbols
 //   B. Recent Price Action — kline table (time, OHLCV)
 //   C. Social Signals — concatenated tweets (omitted if empty)
 //   D. News Headlines — concatenated news (omitted if empty)
-//   E. Current Strategy Parameters — all 11 atomic parameter values
+//   E. Current Strategy Parameters — primary strategy's atomic values
+//   F. Per-Strategy Recent Performance — trades DB feedback (omitted if empty)
 // ---------------------------------------------------------------------------
 std::string PromptBuilder::userPrompt(
-        const MarketSnapshot &snapshot,
+        const PipelineContext &ctx,
         const std::string &tweet_text,
         const std::string &news_text,
         const strategy::StrategyParams &params) const
@@ -141,18 +151,32 @@ std::string PromptBuilder::userPrompt(
     std::ostringstream out;
 
     // --- Section A: Market Overview ---
-    const auto &t = snapshot.ticker;
+    const auto &t = ctx.market.ticker;
     out << "## Market Overview\n\n";
     out << "- Symbol: " << t.symbol << "\n";
     out << "- Current Price: " << formatPrice(t.last) << "\n";
     out << "- Bid: " << formatPrice(t.bid) << " | Ask: " << formatPrice(t.ask) << "\n";
     out << "- 24h Change: " << formatPrice(t.change_pct) << "%\n";
-    out << "- 24h Volume: " << formatVolume(t.volume_24h) << "\n\n";
+    out << "- 24h Volume: " << formatVolume(t.volume_24h) << "\n";
+
+    // One-line tickers for every OTHER traded symbol — the LLM sees the
+    // whole portfolio surface, not just the primary symbol.
+    for (const auto &tick : ctx.symbol_tickers)
+    {
+        if (tick.symbol == t.symbol)
+        {
+            continue;
+        }
+        out << "- " << tick.symbol << ": price=" << formatPrice(tick.last)
+            << " 24h_change=" << formatPrice(tick.change_pct) << "%"
+            << " vol=" << formatVolume(tick.volume_24h) << "\n";
+    }
+    out << "\n";
 
     // --- Section B: Recent Price Action (K-line table) ---
     // Show up to kMaxKlinesInPrompt most recent closed candles in chronological order.
     // If more candles are available, take the last N (most recent).
-    const auto &all_klines = snapshot.klines;
+    const auto &all_klines = ctx.market.klines;
     const std::size_t start = (all_klines.size() > kMaxKlinesInPrompt)
                                       ? (all_klines.size() - kMaxKlinesInPrompt)
                                       : 0;
@@ -205,6 +229,28 @@ std::string PromptBuilder::userPrompt(
     out << "- cooldown_seconds: " << params.cooldown_seconds.load(std::memory_order_acquire) << "\n";
     out << "- stop_loss_pct: " << params.stop_loss_pct.load(std::memory_order_acquire) << "\n";
     out << "- take_profit_pct: " << params.take_profit_pct.load(std::memory_order_acquire) << "\n";
+    out << "- NOTE: these deltas apply to ALL strategies; the per-strategy "
+           "names/symbols are listed in the performance table below.\n\n";
+
+    // --- Section F: Per-Strategy Recent Performance ---
+    // Only included when the trades DB provides feedback. The LLM tunes
+    // against actual results: losing strategies get targeted tightening,
+    // winning strategies stay stable.
+    if (!ctx.performance.empty())
+    {
+        out << "## Per-Strategy Recent Performance\n\n";
+        out << "| strategy | market | trades | total_pnl | win_rate | fees |\n";
+        out << "|----------|--------|--------|-----------|----------|------|\n";
+        for (const auto &p : ctx.performance)
+        {
+            out << "| " << p.strategy_name << " | " << p.market_type
+                << " | " << p.trade_count << " | "
+                << std::fixed << std::setprecision(2) << p.total_pnl << " | "
+                << std::fixed << std::setprecision(2) << p.win_rate << " | "
+                << std::fixed << std::setprecision(2) << p.total_fees << " |\n";
+        }
+        out << "\n";
+    }
 
     return out.str();
 }

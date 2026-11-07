@@ -7,11 +7,19 @@
 
 add_library(pulse_strategy STATIC
     StrategyManager.cpp
+    StrategyParams.cpp
+    StrategyRegistry.cpp
+    scalping/UnifiedScalper.cpp
     scalping/MomentumScalper.cpp
     scalping/OrderBookScalper.cpp
     scalping/MeanReversionScalper.cpp
     scalping/SuperTrendScalper.cpp
+    scalping/EthScalper.cpp
+    scalping/EmaResonanceScalper.cpp
+    scalping/IronTrader.cpp
+    NewsGate.cpp
     signal/SignalAggregator.cpp
+    signal/SignalBoard.cpp
 )
 
 add_library(pulse::strategy ALIAS pulse_strategy)

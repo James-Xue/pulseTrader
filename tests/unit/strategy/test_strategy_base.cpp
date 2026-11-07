@@ -164,3 +164,29 @@ TEST(StrategyBase, EmitSignalWithoutCallback)
     // Should silently drop (no callback).
     strategy.test_emit_signal(signal);
 }
+
+TEST(StrategyBase, EmitSignalFlatBypassesConfidenceGate)
+{
+    MockStrategy strategy;
+    strategy.m_params.min_confidence.store(0.6, std::memory_order_release);
+
+    std::vector<TradingSignal> received;
+    strategy.setSignalCallback([&](const TradingSignal &s)
+        {
+            received.push_back(s);
+        });
+
+    // Flat state signal with confidence 0 — must bypass the confidence gate
+    // (state channel, e.g. EthScalper v2 trend/spike publish), otherwise the
+    // signal board never sees trend_state for the grid trend gate.
+    TradingSignal signal;
+    signal.type = SignalType::Flat;
+    signal.symbol = "ETH_USDT";
+    signal.confidence = 0.0; // Below 0.6 threshold, but Flat is exempt.
+
+    strategy.test_emit_signal(signal);
+
+    ASSERT_EQ(1u, received.size());
+    EXPECT_EQ(SignalType::Flat, received[0].type);
+    EXPECT_EQ("ETH_USDT", received[0].symbol);
+}

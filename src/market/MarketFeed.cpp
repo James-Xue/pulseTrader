@@ -4,6 +4,9 @@
 
 #include "exchange/EndpointRouter.hpp"
 #include "logging/Logger.hpp"
+#include "market/MarketDataSink.hpp"
+
+#include <chrono>
 
 namespace pulse::market
 {
@@ -11,22 +14,37 @@ namespace pulse::market
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
 
-MarketFeed::MarketFeed(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
-                       MarketType market_type)
+namespace
+{
+
+/// Current wall-clock time in Unix milliseconds (pulse::now() returns ns).
+std::int64_t nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+} // namespace
+
+MarketFeed::MarketFeed(exchange::GateWsClient *ws_client, exchange::GateRestClient &rest_client,
+                       MarketType market_type, std::mutex *rest_mutex)
     : m_wsClient{ ws_client }
     , m_restClient{ rest_client }
     , m_marketType{ market_type }
+    , m_restMutex{ rest_mutex }
     , m_symbolRegistry{ rest_client, market_type }
 {
 }
 
 void MarketFeed::start(const std::vector<Symbol> &symbols)
 {
-    const std::string mt_label = MarketType::Futures == m_marketType ? "futures" : "spot";
+    const std::string mt_label = toString(m_marketType);
     PULSE_LOG_INFO("market", "Starting {} MarketFeed for {} symbols", mt_label, symbols.size());
 
-    // 1. Load symbol metadata from REST.
-    if (!m_symbolRegistry.loadFromRest())
+    // 1. Load symbol metadata from REST (CFD requires the symbol list for the
+    //    authenticated /tradfi/symbols/detail query).
+    if (!m_symbolRegistry.loadFromRest(symbols))
     {
         PULSE_LOG_WARN("market", "Failed to load symbol registry — continuing without metadata");
     }
@@ -37,14 +55,30 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
         m_klineBuffers.try_emplace(symbol, 500);
     }
 
-    // 3. Subscribe to WebSocket channels (market-type-aware).
     m_subscribedSymbols = symbols;
+
+    // 3a. TradFi CFD: no WebSocket channel — run the REST polling loop instead.
+    if (MarketType::Cfd == m_marketType)
+    {
+        m_pollThread = std::jthread([this](std::stop_token st) { pollLoop(std::move(st)); });
+        PULSE_LOG_INFO("market", "cfd MarketFeed started — REST poll thread for {} symbols",
+                       symbols.size());
+        return;
+    }
+
+    // 3b. Subscribe to WebSocket channels (market-type-aware).
+    if (nullptr == m_wsClient)
+    {
+        PULSE_LOG_ERROR("market", "{} MarketFeed: ws_client is null for a WS-based market",
+                        mt_label);
+        return;
+    }
 
     const std::string tickers_ch = EndpointRouter::wsChannel(m_marketType, "tickers");
     const std::string candlesticks_ch = EndpointRouter::wsChannel(m_marketType, "candlesticks");
 
     // Tickers: real-time price updates.
-    m_wsClient.subscribe(tickers_ch,
+    m_wsClient->subscribe(tickers_ch,
         symbols,
         [this](const nlohmann::json &result, const nlohmann::json &full_frame)
         { onTickerUpdate(result, full_frame); });
@@ -57,25 +91,29 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
     for (const auto &symbol : symbols)
     {
         std::vector<std::string> ob_payload = { symbol, "100ms", "20" };
-        m_wsClient.subscribe(orderbook_update_ch,
+        m_wsClient->subscribe(orderbook_update_ch,
             ob_payload,
             [this](const nlohmann::json &result, const nlohmann::json &full_frame)
             { onOrderbookUpdate(result, full_frame); });
     }
 
     // K-lines: 1-minute interval.
-    // Gate.io format: payload = ["1m", "BTC_USDT"] (interval first, then symbols).
-    std::vector<std::string> kline_payload;
-    kline_payload.push_back("1m");
+    // Gate.io format: payload = ["1m", "<contract>"] — the server parses the
+    // array positionally as [interval, timezone, contract], so batching more
+    // than one symbol in a single payload puts the second symbol into the
+    // timezone slot ("invalid timezone provided: <symbol>"). Subscribe per
+    // symbol, exactly like the order-book channel below.
     for (const auto &symbol : symbols)
     {
-        kline_payload.push_back(symbol);
+        std::vector<std::string> kline_payload = { "1m", symbol };
+        // Futures candlestick pushes carry NO contract in the frame (unlike
+        // tickers) — capture the subscribed symbol here, or every futures
+        // kline would fall back into the first subscribed symbol's buffer.
+        m_wsClient->subscribe(candlesticks_ch,
+            kline_payload,
+            [this, symbol](const nlohmann::json &result, const nlohmann::json &full_frame)
+            { onKlineUpdate(result, full_frame, symbol); });
     }
-
-    m_wsClient.subscribe(candlesticks_ch,
-        kline_payload,
-        [this](const nlohmann::json &result, const nlohmann::json &full_frame)
-        { onKlineUpdate(result, full_frame); });
 
     PULSE_LOG_INFO("market", "{} MarketFeed started — subscribed to {} symbols",
                    mt_label, symbols.size());
@@ -83,10 +121,26 @@ void MarketFeed::start(const std::vector<Symbol> &symbols)
 
 void MarketFeed::stop()
 {
-    PULSE_LOG_INFO("market", "Stopping MarketFeed");
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "tickers"));
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "order_book_update"));
-    m_wsClient.unsubscribe(EndpointRouter::wsChannel(m_marketType, "candlesticks"));
+    PULSE_LOG_INFO("market", "Stopping {} MarketFeed", toString(m_marketType));
+
+    // TradFi CFD: stop and join the REST poll thread.
+    if (MarketType::Cfd == m_marketType)
+    {
+        if (m_pollThread.joinable())
+        {
+            m_pollThread.request_stop();
+            m_pollThread.join();
+        }
+        m_subscribedSymbols.clear();
+        return;
+    }
+
+    if (nullptr != m_wsClient)
+    {
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "tickers"));
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "order_book_update"));
+        m_wsClient->unsubscribe(EndpointRouter::wsChannel(m_marketType, "candlesticks"));
+    }
     m_subscribedSymbols.clear();
 }
 
@@ -124,6 +178,11 @@ FeedStats MarketFeed::stats() const
         .orderbook_count = m_orderbookCount.load(std::memory_order_relaxed),
         .kline_count     = m_klineCount.load(std::memory_order_relaxed),
     };
+}
+
+void MarketFeed::setMarketDataSink(MarketDataSink *sink)
+{
+    m_dataSink = sink;
 }
 
 void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
@@ -213,9 +272,13 @@ void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::js
             return; // Unknown format.
         }
 
-        ticker.timestamp = 0; // Will be set below from full_frame if available.
+        ticker.timestamp = nowMs(); // Stamp receive time (was hardcoded 0).
         m_tickerCache.update(ticker.symbol, ticker);
         m_tickerCount.fetch_add(1, std::memory_order_relaxed);
+        if (m_dataSink)
+        {
+            m_dataSink->onTicker(ticker.symbol, m_marketType, ticker);
+        }
     };
 
     if (result.is_array())
@@ -340,7 +403,9 @@ void MarketFeed::onOrderbookUpdate(const nlohmann::json &result, const nlohmann:
     m_orderbookCount.fetch_add(1, std::memory_order_relaxed);
 }
 
-void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
+void MarketFeed::onKlineUpdate(const nlohmann::json &result,
+                               const nlohmann::json &full_frame,
+                               const std::string &fallback_symbol)
 {
     // Gate.io K-line format:
     //
@@ -349,21 +414,24 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
     //             "v": "123.45", "n": "1m", "a": "6172800" }
     //   Symbol: full_frame["currency_pair"] = "BTC_USDT"
     //
-    // Futures — result is a JSON ARRAY with one element:
+    // Futures — result is a JSON ARRAY with one element (probed 08-21):
     //   result: [{ "t": 123, "o": "50000", "c": "50001", "h": "50100", "l": "49900",
-    //              "v": 120, "n": "1m", "contract": "BTC_USDT" }]
-    //   Symbol: element["contract"] = "BTC_USDT"
-    //   Note: "n" is the interval ("1m"), NOT the contract name.
+    //              "v": 120, "n": "1m_ETH_USDT", "w": false }]
+    //   Symbol: NO "contract" field — the contract rides in "n" as
+    //   "<interval>_<contract>". parseKlineSymbol strips the prefix.
     //
     // Processing:
     //   1. Normalize result to an iterable list of candle objects
-    //   2. Extract symbol per candle (spot: outer frame, futures: element field)
+    //   2. Extract symbol per candle — spot carries it in the outer frame;
+    //      futures pushes carry NO symbol at all (unlike tickers), so the
+    //      per-subscription captured symbol is the authority.
     //   3. Parse OHLCV and push to the appropriate KlineBuffer
 
     // 1. Normalize: build a list of candle references to process uniformly.
     //    For spot (object), wrap in a single-element span.
     //    For futures (array), iterate directly.
-    const auto process_candle = [this, &full_frame](const nlohmann::json &candle)
+    const auto process_candle = [this, &full_frame, fallback_symbol](
+                                    const nlohmann::json &candle)
     {
         if (!candle.is_object() || !candle.contains("t"))
         {
@@ -379,13 +447,27 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         }
         else if (candle.contains("contract"))
         {
-            // Futures: symbol in each candle element.
+            // Futures: symbol in each candle element (some endpoints do).
             symbol = candle["contract"].get<std::string>();
         }
-        else if (!m_subscribedSymbols.empty())
+        else if (candle.contains("n") && candle["n"].is_string())
         {
-            // Fallback: use the first subscribed symbol (single-symbol subscription).
-            symbol = m_subscribedSymbols[0];
+            // Futures candlestick pushes carry no "contract" — the contract
+            // rides in "n" as "<interval>_<contract>" (e.g. "1m_ETH_USDT",
+            // probed 08-21). Spot never reaches here (currency_pair wins).
+            const std::string n = candle["n"].get<std::string>();
+            const auto pos = n.find('_');
+            symbol = pos == std::string::npos ? n : n.substr(pos + 1);
+        }
+        else
+        {
+            // Last resort: the per-subscription captured symbol (safe for
+            // endpoints whose pushes carry no symbol at all).
+            symbol = fallback_symbol;
+            if (symbol.empty() && !m_subscribedSymbols.empty())
+            {
+                symbol = m_subscribedSymbols[0];
+            }
         }
 
         if (symbol.empty())
@@ -437,6 +519,10 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         auto &buffer = getKlineBuffer(symbol);
         buffer.push(kline);
         m_klineCount.fetch_add(1, std::memory_order_relaxed);
+        if (m_dataSink)
+        {
+            m_dataSink->onKline(symbol, m_marketType, kline);
+        }
     };
 
     if (result.is_array())
@@ -452,6 +538,219 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result, const nlohmann::jso
         // Spot format: single candle object.
         process_candle(result);
     }
+}
+
+// ---------------------------------------------------------------------------
+// TradFi CFD — REST polling mode
+// ---------------------------------------------------------------------------
+
+std::optional<Ticker> MarketFeed::parseCfdTicker(const nlohmann::json &obj,
+                                                 const Symbol &symbol)
+{
+    if (!obj.is_object() || !obj.contains("last_price"))
+    {
+        return std::nullopt;
+    }
+
+    Ticker ticker;
+    ticker.symbol = symbol;
+    ticker.last   = safeParseDouble(obj["last_price"].get<std::string>()).value_or(0.0);
+    if (ticker.last <= 0.0)
+    {
+        return std::nullopt;
+    }
+
+    if (obj.contains("bid_price") && obj["bid_price"].is_string())
+    {
+        ticker.bid = safeParseDouble(obj["bid_price"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("ask_price") && obj["ask_price"].is_string())
+    {
+        ticker.ask = safeParseDouble(obj["ask_price"].get<std::string>()).value_or(0.0);
+    }
+    if (obj.contains("price_change") && obj["price_change"].is_string())
+    {
+        ticker.change_pct = safeParseDouble(obj["price_change"].get<std::string>()).value_or(0.0);
+    }
+    // TradFi tickers carry no 24h volume — leave volume_24h at 0.
+    ticker.timestamp = 0;
+    return ticker;
+}
+
+std::optional<Kline> MarketFeed::parseCfdKline(const nlohmann::json &obj)
+{
+    if (!obj.is_object() || !obj.contains("t")
+        || !obj.contains("o") || !obj.contains("h")
+        || !obj.contains("l") || !obj.contains("c"))
+    {
+        return std::nullopt;
+    }
+
+    Kline kline;
+    kline.open_time = obj["t"].is_string()
+        ? std::stoll(obj["t"].get<std::string>()) * 1000
+        : obj["t"].get<std::int64_t>() * 1000; // Unix seconds → ms.
+    kline.close_time = kline.open_time + 60000; // 1m interval.
+
+    auto open  = safeParseDouble(obj["o"].get<std::string>());
+    auto high  = safeParseDouble(obj["h"].get<std::string>());
+    auto low   = safeParseDouble(obj["l"].get<std::string>());
+    auto close = safeParseDouble(obj["c"].get<std::string>());
+    if (!open || !high || !low || !close)
+    {
+        return std::nullopt;
+    }
+
+    kline.open  = open.value();
+    kline.high  = high.value();
+    kline.low   = low.value();
+    kline.close = close.value();
+    kline.volume = 0.0; // TradFi klines carry no volume field.
+    kline.closed = true;
+    return kline;
+}
+
+void MarketFeed::pollLoop(std::stop_token stoken)
+{
+    PULSE_LOG_INFO("market", "CFD poll loop started");
+
+    // Poll the REST API exactly once per minute for klines; the first fetch
+    // happens immediately (backfill of up to 500 candles = KlineBuffer capacity).
+    const auto start_time = std::chrono::steady_clock::now();
+    auto last_kline_poll = start_time - std::chrono::minutes(1);
+
+    const auto fetch_ticker = [this, &stoken](const Symbol &symbol)
+    {
+        Result<nlohmann::json> res;
+        if (m_restMutex)
+        {
+            std::lock_guard lock(*m_restMutex);
+            res = m_restClient.getCfdTicker(symbol);
+        }
+        else
+        {
+            res = m_restClient.getCfdTicker(symbol);
+        }
+        if (stoken.stop_requested())
+        {
+            return;
+        }
+        if (!ok(res))
+        {
+            PULSE_LOG_WARN("market", "CFD ticker poll failed for {}: {}",
+                           symbol, error(res).message);
+            return;
+        }
+        const auto &j = value(res);
+        if (!j.contains("data") || !j["data"].is_object())
+        {
+            return;
+        }
+        auto ticker_opt = parseCfdTicker(j["data"], symbol);
+        if (ticker_opt)
+        {
+            ticker_opt->timestamp = nowMs(); // Stamp poll receive time (parser stays pure).
+            m_tickerCache.update(ticker_opt->symbol, *ticker_opt);
+            m_tickerCount.fetch_add(1, std::memory_order_relaxed);
+            if (m_dataSink)
+            {
+                m_dataSink->onTicker(ticker_opt->symbol, m_marketType, *ticker_opt);
+            }
+        }
+    };
+
+    const auto fetch_klines = [this, &stoken](const Symbol &symbol)
+    {
+        Result<nlohmann::json> res;
+        if (m_restMutex)
+        {
+            std::lock_guard lock(*m_restMutex);
+            res = m_restClient.getCfdKlines(symbol, 500);
+        }
+        else
+        {
+            res = m_restClient.getCfdKlines(symbol, 500);
+        }
+        if (stoken.stop_requested())
+        {
+            return;
+        }
+        if (!ok(res))
+        {
+            PULSE_LOG_WARN("market", "CFD kline poll failed for {}: {}",
+                           symbol, error(res).message);
+            return;
+        }
+        const auto &j = value(res);
+        if (!j.contains("data") || !j["data"].is_object()
+            || !j["data"].contains("list") || !j["data"]["list"].is_array())
+        {
+            return;
+        }
+        auto &buffer = getKlineBuffer(symbol);
+        const auto latest_opt = buffer.latest();
+        const std::int64_t newest_known = latest_opt ? latest_opt->open_time : 0;
+        for (const auto &candle : j["data"]["list"])
+        {
+            auto kline_opt = parseCfdKline(candle);
+            if (!kline_opt)
+            {
+                continue;
+            }
+            // KlineBuffer::push does not dedupe — skip candles we already have.
+            if (kline_opt->open_time <= newest_known)
+            {
+                continue;
+            }
+            buffer.push(*kline_opt);
+            m_klineCount.fetch_add(1, std::memory_order_relaxed);
+            if (m_dataSink)
+            {
+                m_dataSink->onKline(symbol, m_marketType, *kline_opt);
+            }
+        }
+    };
+
+    while (!stoken.stop_requested())
+    {
+        // Ticker: ~1s cadence.
+        for (const auto &symbol : m_subscribedSymbols)
+        {
+            fetch_ticker(symbol);
+            if (stoken.stop_requested())
+            {
+                break;
+            }
+        }
+        if (stoken.stop_requested())
+        {
+            break;
+        }
+
+        // Klines: ~60s cadence.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_kline_poll >= std::chrono::minutes(1))
+        {
+            for (const auto &symbol : m_subscribedSymbols)
+            {
+                fetch_klines(symbol);
+                if (stoken.stop_requested())
+                {
+                    break;
+                }
+            }
+            last_kline_poll = std::chrono::steady_clock::now();
+        }
+
+        // Sleep in short chunks so stop() stays responsive; the mutex is held
+        // only per-request above, never during this wait.
+        for (int i = 0; i < 4 && !stoken.stop_requested(); ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+    }
+
+    PULSE_LOG_INFO("market", "CFD poll loop stopped");
 }
 
 } // namespace pulse::market

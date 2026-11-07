@@ -176,9 +176,9 @@ void WsInternal::drainQueue(WsClient &client,
         }
         case PendingAction::Type::Unsubscribe:
         {
-            // Callback already removed by unsubscribe(); just send the WS message.
-            const auto payload = channels.getPayload(action.channel);
-            const auto msg = channels.buildUnsubscribeMsg(action.channel, payload);
+            // Callback already removed by unsubscribe(); send with the payload
+            // captured at unsubscribe time (one action per payload).
+            const auto msg = channels.buildUnsubscribeMsg(action.channel, action.payload);
             client.send(hdl, msg.dump(), websocketpp::frame::opcode::text);
             PULSE_LOG_INFO("exchange", "WS unsubscribed from {}", action.channel);
             break;
@@ -246,9 +246,9 @@ void WsInternal::sendQueued(GateWsChannels &channels, const ExchangeConfig &conf
         }
         case PendingAction::Type::Unsubscribe:
         {
-            // Callback already removed by unsubscribe(); just send the WS message.
-            const auto payload = channels.getPayload(action.channel);
-            const auto msg = channels.buildUnsubscribeMsg(action.channel, payload);
+            // Callback already removed by unsubscribe(); send with the payload
+            // captured at unsubscribe time (one action per payload).
+            const auto msg = channels.buildUnsubscribeMsg(action.channel, action.payload);
             cli->send(hdl, msg.dump(), websocketpp::frame::opcode::text);
             PULSE_LOG_INFO("exchange", "WS unsubscribed from {}", action.channel);
             break;
@@ -352,14 +352,30 @@ void GateWsClient::subscribePrivate(const std::string &channel,
 
 void GateWsClient::unsubscribe(const std::string &channel)
 {
+    // Capture payloads BEFORE removal — each registered payload needs its own
+    // unsubscribe message (positional payloads cannot be merged).
+    const auto payloads = m_channels.payloadsFor(channel);
+
     // Remove from channel registry immediately.
     m_channels.unsubscribe(channel);
 
-    // Queue the unsubscribe message for sending on the I/O thread.
+    // Queue the unsubscribe message(s) for sending on the I/O thread.
     {
         std::lock_guard lock(m_internal->queue_mutex);
-        m_internal->pending_actions.push(
-            PendingAction{ PendingAction::Type::Unsubscribe, channel, {}, nullptr });
+        if (payloads.empty())
+        {
+            // Channel was not registered — keep the bare unsubscribe.
+            m_internal->pending_actions.push(
+                PendingAction{ PendingAction::Type::Unsubscribe, channel, {}, nullptr });
+        }
+        else
+        {
+            for (const auto &payload : payloads)
+            {
+                m_internal->pending_actions.push(
+                    PendingAction{ PendingAction::Type::Unsubscribe, channel, payload, nullptr });
+            }
+        }
     }
 
     if (WsConnectionState::Connected == m_state.load(std::memory_order_acquire))
@@ -467,15 +483,18 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
                     PULSE_LOG_INFO("exchange", "WS connected (market={})",
                         MarketType::Futures == m_marketType ? "futures" : "spot");
 
-                    // Re-subscribe all active channels
-                    const auto active = channels.activeChannels();
-                    PULSE_LOG_DEBUG("exchange", "Active channels: {}", active.size());
-                    for (const auto &ch : active)
+                    // Re-subscribe every registered (channel, payload) pair.
+                    // Each payload becomes its own message — collapsing a
+                    // channel to a single payload strands every other symbol
+                    // (the 09-17 reconnect incident: klines/order-book for 3 of
+                    // 4 symbols never came back).
+                    const auto resub_msgs = channels.buildResubscribeMsgs();
+                    PULSE_LOG_DEBUG("exchange", "Re-subscribing {} channel payload(s)", resub_msgs.size());
+                    for (const auto &msg : resub_msgs)
                     {
-                        const auto payload = channels.getPayload(ch);
-                        const auto msg = channels.buildSubscribeMsg(ch, payload);
                         client.send(hdl, msg.dump(), websocketpp::frame::opcode::text);
-                        PULSE_LOG_INFO("exchange", "WS re-subscribed to {}", ch);
+                        PULSE_LOG_INFO("exchange", "WS re-subscribed to {} payload={}",
+                            msg["channel"].get<std::string>(), msg["payload"].dump());
                     }
 
                     // Drain any pending actions queued while disconnected

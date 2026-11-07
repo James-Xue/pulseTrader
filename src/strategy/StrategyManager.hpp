@@ -20,6 +20,7 @@
 //   - m_signalCallback is set once before threads start (no race)
 
 #include "strategy/StrategyBase.hpp"
+#include "strategy/StrategyHandle.hpp"
 
 #include <functional>
 #include <memory>
@@ -43,6 +44,9 @@ struct StrategySnapshot
     std::string symbol;           ///< Trading pair.
     bool enabled;                 ///< Whether the strategy is configured as enabled.
     bool running;                 ///< Whether the strategy thread is currently active.
+    bool paused;                  ///< Whether the strategy is manually paused (ticks skipped).
+    bool auto_trade;              ///< Whether the strategy's signals may place orders
+                                  ///< (false = signals-only, board visible only).
     std::uint32_t poll_interval_ms; ///< Poll interval.
 
     StrategySnapshot()
@@ -51,6 +55,8 @@ struct StrategySnapshot
         , symbol{}
         , enabled{ false }
         , running{ false }
+        , paused{ false }
+        , auto_trade{ false }
         , poll_interval_ms{ 0 }
     {
     }
@@ -121,7 +127,43 @@ class StrategyManager
     /// Used by the AI pipeline (HeartbeatScheduler → ParamAdvisor) to write
     /// parameter deltas directly to each strategy's own StrategyParams.
     /// Must be called after all strategies are registered (before or after start()).
+    ///
+    /// NOTE: HeartbeatScheduler move-consumes the returned vector — the
+    /// control plane must use paramsByName() instead.
     [[nodiscard]] std::vector<StrategyParams *> allParams();
+
+    /// Identity + mutable-params handles for every registered strategy.
+    ///
+    /// Used by the AI snapshot collector and the audit layer (same iteration
+    /// as snapshot() but with the params pointer attached). Safe to call
+    /// while strategy threads are running.
+    [[nodiscard]] std::vector<StrategyHandle> allHandles();
+
+    /// Pause or resume a single strategy by instance ID.
+    ///
+    /// While paused, the strategy thread stays alive but skips all ticks.
+    /// Returns false if no strategy matches the ID.
+    ///
+    /// Parameters:
+    ///   1. id      — the strategy instance ID (e.g. "momentum_scalper_BTC_USDT")
+    ///   2. paused  — true to pause, false to resume
+    [[nodiscard]] bool setPaused(const std::string &id, bool paused);
+
+    /// Pause or resume every strategy instance whose market type matches.
+    ///
+    /// Used by the direction switch: on switching to CFD, all futures
+    /// instances pause ("strategies stopped") and all CFD instances resume. Thread-safe
+    /// (atomic stores per strategy); strategy threads keep ticking but skip.
+    ///
+    /// Returns the number of strategies affected.
+    [[nodiscard]] int setPausedByMarket(MarketType mt, bool paused);
+
+    /// Look up a strategy's params by instance ID (single-pointer lookup).
+    ///
+    /// Thread-safe: params are atomic-backed. Returns nullptr if the ID
+    /// does not match any registered strategy. Preferred over allParams()
+    /// for control-plane access.
+    [[nodiscard]] StrategyParams *paramsByName(const std::string &id) const;
 
   private:
     std::vector<std::unique_ptr<StrategyBase>> m_strategies;

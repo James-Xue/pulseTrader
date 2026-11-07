@@ -63,11 +63,33 @@ class RiskManager
     ///   1. Leverage <= config.max_leverage → else FuturesLeverageExceeded (7001)
     ///   2. Total margin + proposed margin <= equity * config.max_margin_used → else FuturesMarginInsufficient (7002)
     ///
+    /// NOTE: the futures margin formula (qty * price / leverage) deliberately
+    /// OMITS the contract multiplier — for BTC_USDT 1 contract ≈ 0.0001 BTC
+    /// this is conservative. CFD must include it (see evaluateCfdOrder).
+    ///
     /// Parameters:
     ///   - order:    the proposed order
     ///   - leverage: requested leverage multiplier
     ///   - equity:   current account equity (for margin sufficiency check)
     [[nodiscard]] RiskEvalResult evaluateFuturesOrder(
+        const execution::OrderRequest &order, double leverage, double equity);
+
+    /// Evaluate a TradFi CFD order — leverage and margin checks with the
+    /// contract volume included, then delegates to evaluateOrder().
+    ///
+    /// CFD margin = volume(lots) * contract_volume * price / leverage —
+    /// the multiplier is MANDATORY here: 0.01 lot XAUUSD = 0.01 * 100 * 4348
+    /// ≈ 4,348 USD notional (≈ 8.7 USD margin at 500x), not 43 USD.
+    ///
+    /// Additional checks:
+    ///   1. Leverage <= config.max_leverage → else CfdLeverageExceeded (7101)
+    ///   2. Total margin + proposed margin <= equity * config.max_margin_used → else CfdMarginInsufficient (7102)
+    ///
+    /// Parameters:
+    ///   - order:    the proposed order (order.quanto_multiplier = contract_volume)
+    ///   - leverage: requested leverage multiplier
+    ///   - equity:   current CFD account equity (USD)
+    [[nodiscard]] RiskEvalResult evaluateCfdOrder(
         const execution::OrderRequest &order, double leverage, double equity);
 
     // --- Access sub-components ---

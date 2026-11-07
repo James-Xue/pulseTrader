@@ -67,9 +67,11 @@ enum class Side : std::uint8_t
 /// Order types supported by Gate.io spot/futures API.
 enum class OrderType : std::uint8_t
 {
-    Market,   ///< Execute immediately at best available price.
-    Limit,    ///< Place at a specific price; may rest in the book.
-    PostOnly, ///< Rejected if it would match immediately (maker-only).
+    Market,    ///< Execute immediately at best available price.
+    Limit,     ///< Place at a specific price; may rest in the book.
+    PostOnly,  ///< Rejected if it would match immediately (maker-only).
+    MakerFirst ///< Config-level: post-only with taker fallback after a
+               ///< timeout (signals emit PostOnly requests in flight).
 };
 
 /// Lifecycle state of an order from submission to terminal state.
@@ -88,11 +90,13 @@ enum class OrderStatus : std::uint8_t
     Rejected,        ///< Rejected by exchange or risk engine — terminal state.
 };
 
-/// Market type discriminator: Spot or Futures (USDT-settled perpetual).
+/// Market type discriminator: Spot, Futures (USDT-settled perpetual) or
+/// TradFi CFD (e.g. XAUUSD gold; REST-only market data, lots, USD settlement).
 enum class MarketType : std::uint8_t
 {
     Spot,    ///< Spot trading — currency pairs like BTC_USDT.
     Futures, ///< Perpetual futures — contracts like BTC_USDT (USDT-settled).
+    Cfd,     ///< TradFi CFD — symbols like XAUUSD (volume in lots).
 };
 
 /// Margin mode for futures positions.
@@ -126,6 +130,79 @@ struct AccountBalance
     return Side::Buy == s ? Side::Sell : Side::Buy;
 }
 
+/// Parse "buy"/"sell" (case-insensitive) into Side. Nullopt on bad input.
+[[nodiscard]] inline std::optional<Side> parseSide(std::string_view sv) noexcept
+{
+    if ("buy" == sv || "BUY" == sv)
+    {
+        return Side::Buy;
+    }
+    if ("sell" == sv || "SELL" == sv)
+    {
+        return Side::Sell;
+    }
+    return std::nullopt;
+}
+
+/// Parse "market"/"limit"/"post_only"/"maker_first" (case-insensitive)
+/// into OrderType. Nullopt on bad input.
+[[nodiscard]] inline std::optional<OrderType> parseOrderType(std::string_view sv) noexcept
+{
+    if ("market" == sv || "MARKET" == sv)
+    {
+        return OrderType::Market;
+    }
+    if ("limit" == sv || "LIMIT" == sv)
+    {
+        return OrderType::Limit;
+    }
+    if ("post_only" == sv || "POST_ONLY" == sv)
+    {
+        return OrderType::PostOnly;
+    }
+    if ("maker_first" == sv || "MAKER_FIRST" == sv)
+    {
+        return OrderType::MakerFirst;
+    }
+    return std::nullopt;
+}
+
+/// Convert OrderType to a human-readable string.
+[[nodiscard]] constexpr const char* toString(OrderType ot) noexcept
+{
+    switch (ot)
+    {
+    case OrderType::Market:
+        return "market";
+    case OrderType::Limit:
+        return "limit";
+    case OrderType::PostOnly:
+        return "post_only";
+    case OrderType::MakerFirst:
+        return "maker_first";
+    }
+    return "unknown";
+}
+
+/// Parse "spot"/"futures"/"cfd" (case-insensitive) into MarketType.
+/// Nullopt on bad input.
+[[nodiscard]] inline std::optional<MarketType> parseMarketType(std::string_view sv) noexcept
+{
+    if ("spot" == sv || "SPOT" == sv)
+    {
+        return MarketType::Spot;
+    }
+    if ("futures" == sv || "FUTURES" == sv)
+    {
+        return MarketType::Futures;
+    }
+    if ("cfd" == sv || "CFD" == sv)
+    {
+        return MarketType::Cfd;
+    }
+    return std::nullopt;
+}
+
 /// Convert MarketType to a human-readable string.
 [[nodiscard]] constexpr const char* toString(MarketType mt) noexcept
 {
@@ -135,6 +212,8 @@ struct AccountBalance
         return "spot";
     case MarketType::Futures:
         return "futures";
+    case MarketType::Cfd:
+        return "cfd";
     }
     return "unknown";
 }

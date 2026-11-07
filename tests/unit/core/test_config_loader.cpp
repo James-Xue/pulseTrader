@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 #include <string>
 
 // Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
@@ -41,8 +42,8 @@ class TempToml
   public:
     explicit TempToml(const std::string &content)
         : path_(std::filesystem::temp_directory_path()
-                / ("pulsetrader_test_" + std::to_string(counter_++)
-                   + ".toml"))
+                / ("pulsetrader_test_" + std::to_string(::getpid())
+                   + "_" + std::to_string(counter_++) + ".toml"))
     {
         std::ofstream ofs(path_);
         ofs << content;
@@ -356,6 +357,62 @@ max_hold_seconds = 600
     EXPECT_EQ(600u, risk.stop_loss.max_hold_seconds);
 }
 
+TEST(ConfigLoader, ParseRisk_WithPerMarketNotionalCaps)
+{
+    TempToml tmp(R"(
+[risk]
+maxPositionNotional = 1000.0
+maxPositionNotionalFutures = 6000.0
+maxPositionNotionalCfd = 4000.0
+maxPositionNotionalSpot = 2000.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    EXPECT_DOUBLE_EQ(1000.0, risk.maxPositionNotional);
+    ASSERT_TRUE(risk.maxPositionNotionalFutures.has_value());
+    EXPECT_DOUBLE_EQ(6000.0, risk.maxPositionNotionalFutures.value());
+    ASSERT_TRUE(risk.maxPositionNotionalCfd.has_value());
+    EXPECT_DOUBLE_EQ(4000.0, risk.maxPositionNotionalCfd.value());
+    ASSERT_TRUE(risk.maxPositionNotionalSpot.has_value());
+    EXPECT_DOUBLE_EQ(2000.0, risk.maxPositionNotionalSpot.value());
+}
+
+TEST(ConfigLoader, ParseRisk_PerMarketCapsOptional)
+{
+    // Absent keys stay std::nullopt (fallback to maxPositionNotional).
+    TempToml tmp(R"(
+[risk]
+maxPositionNotional = 1000.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    EXPECT_FALSE(risk.maxPositionNotionalFutures.has_value());
+    EXPECT_FALSE(risk.maxPositionNotionalCfd.has_value());
+    EXPECT_FALSE(risk.maxPositionNotionalSpot.has_value());
+    EXPECT_FALSE(risk.minAvailableAfterStopUsd.has_value());
+}
+
+TEST(ConfigLoader, ParseRisk_MinAvailableAfterStopUsd)
+{
+    TempToml tmp(R"(
+[risk]
+minAvailableAfterStopUsd = 6.0
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &risk = value(result).risk;
+    ASSERT_TRUE(risk.minAvailableAfterStopUsd.has_value());
+    EXPECT_DOUBLE_EQ(6.0, risk.minAvailableAfterStopUsd.value());
+}
+
 TEST(ConfigLoader, ParseRisk_WithTakeProfit)
 {
     TempToml tmp(R"(
@@ -428,26 +485,52 @@ poll_interval_ms = 500
     EXPECT_FALSE(strat.strategies[2].enabled);
 }
 
-TEST(ConfigLoader, ParseWebui_AllFields)
+TEST(ConfigLoader, ParseStrategy_SignalOnly)
+{
+    // Explicit true.
+    TempToml enabled_toml(R"(
+[strategy]
+signal_only = true
+)");
+    auto enabled = loadConfigFile(enabled_toml.path());
+    ASSERT_TRUE(ok(enabled)) << error(enabled).message;
+    EXPECT_TRUE(value(enabled).strategy.signal_only);
+
+    // Omitted → default false (auto-trading behavior unchanged).
+    TempToml default_toml(R"(
+[strategy]
+signal_aggregator_threshold = 0.7
+)");
+    auto dflt = loadConfigFile(default_toml.path());
+    ASSERT_TRUE(ok(dflt)) << error(dflt).message;
+    EXPECT_FALSE(value(dflt).strategy.signal_only);
+
+    // Explicit false.
+    TempToml disabled_toml(R"(
+[strategy]
+signal_only = false
+)");
+    auto disabled = loadConfigFile(disabled_toml.path());
+    ASSERT_TRUE(ok(disabled)) << error(disabled).message;
+    EXPECT_FALSE(value(disabled).strategy.signal_only);
+}
+
+TEST(ConfigLoader, ParseControl_AllFields)
 {
     TempToml tmp(R"(
-[webui]
+[control]
 enabled = true
 bindAddress = "0.0.0.0"
-port = 9090
-authToken = "mytoken"
-maxClients = 8
+port = 9091
 )");
 
     auto result = loadConfigFile(tmp.path());
     ASSERT_TRUE(ok(result)) << error(result).message;
 
-    const auto &web = value(result).webui;
-    EXPECT_TRUE(web.enabled);
-    EXPECT_EQ("0.0.0.0", web.bindAddress);
-    EXPECT_EQ(9090, web.port);
-    EXPECT_EQ("mytoken", web.authToken);
-    EXPECT_EQ(8u, web.maxClients);
+    const auto &ctrl = value(result).control;
+    EXPECT_TRUE(ctrl.enabled);
+    EXPECT_EQ("0.0.0.0", ctrl.bindAddress);
+    EXPECT_EQ(9091, ctrl.port);
 }
 
 TEST(ConfigLoader, ParseTwitter_AndNews)
@@ -531,8 +614,13 @@ apiSecret = "s"
     // Risk defaults preserved.
     EXPECT_DOUBLE_EQ(1000.0, cfg.risk.maxPositionNotional);
     EXPECT_EQ(5, cfg.risk.maxOpenPositions);
-    // WebUI defaults preserved.
-    EXPECT_FALSE(cfg.webui.enabled);
+    // Per-market notional overrides default to unset (fallback semantics).
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalFutures.has_value());
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalCfd.has_value());
+    EXPECT_FALSE(cfg.risk.maxPositionNotionalSpot.has_value());
+    // Control defaults preserved.
+    EXPECT_TRUE(cfg.control.enabled);
+    EXPECT_EQ(8081, cfg.control.port);
     // AI defaults preserved.
     EXPECT_EQ("claude", cfg.ai.backend);
 }
@@ -808,6 +896,443 @@ futuresWsUrl = "wss://custom-fx.example.com/ws/usdt"
     EXPECT_EQ("https://custom-rest.example.com", ex.restBaseUrl);
     EXPECT_EQ("wss://custom-ws.example.com/ws/", ex.wsUrl);
     EXPECT_EQ("wss://custom-fx.example.com/ws/usdt", ex.futuresWsUrl);
+}
+
+// ---------------------------------------------------------------------------
+// order_type / maker_timeout_ms parsing
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_OrderTypeAndMakerTimeout)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+order_type = "maker_first"
+maker_timeout_ms = 800
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ(OrderType::MakerFirst, inst.order_type);
+    EXPECT_EQ(800u, inst.maker_timeout_ms);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_RejectsUnknownOrderType)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+order_type = "taker"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+    EXPECT_NE(std::string::npos, error(result).message.find("order_type"));
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_DefaultsOrderTypeToMarket)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "test"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ(OrderType::Market, inst.order_type);
+    EXPECT_EQ(0u, inst.maker_timeout_ms);
+}
+
+TEST(ConfigLoader, ParseSqlite_RecordMarketDefaultFalse)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+dbPath = "data/trades.db"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.enabled);
+    EXPECT_EQ("data/trades.db", sql.dbPath);
+    EXPECT_FALSE(sql.recordMarketData);
+}
+
+TEST(ConfigLoader, ParseSqlite_RecordMarketParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+dbPath = "data/trades.db"
+record_market = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.enabled);
+    EXPECT_TRUE(sql.recordMarketData);
+}
+
+// ---------------------------------------------------------------------------
+// M30: skip_kline_markets + preload_klines
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+skip_kline_markets = ["futures"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    ASSERT_EQ(1u, sql.skipKlineMarkets.size());
+    EXPECT_EQ(MarketType::Futures, sql.skipKlineMarkets[0]);
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsMultiple)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = ["spot", "cfd"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    ASSERT_EQ(2u, sql.skipKlineMarkets.size());
+    EXPECT_EQ(MarketType::Spot, sql.skipKlineMarkets[0]);
+    EXPECT_EQ(MarketType::Cfd, sql.skipKlineMarkets[1]);
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsInvalidRejected)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = ["nope"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsNotArrayRejected)
+{
+    TempToml tmp(R"(
+[sqlite]
+skip_kline_markets = "futures"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+}
+
+TEST(ConfigLoader, ParseSqlite_SkipKlineMarketsDefaultEmpty)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).sqlite.skipKlineMarkets.empty());
+}
+
+TEST(ConfigLoader, ParseSqlite_DailyKlineSyncParsed)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+daily_kline_sync = true
+daily_sync_hour = 6
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_TRUE(sql.dailyKlineSync);
+    EXPECT_EQ(6, sql.dailySyncHour);
+}
+
+TEST(ConfigLoader, ParseSqlite_DailyKlineSyncDefaults)
+{
+    TempToml tmp(R"(
+[sqlite]
+enabled = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &sql = value(result).sqlite;
+    EXPECT_FALSE(sql.dailyKlineSync);
+    EXPECT_EQ(8, sql.dailySyncHour); // Beijing 08:00 == UTC 00:00.
+}
+
+TEST(ConfigLoader, ParseStrategy_PreloadKlinesDefaultTrue)
+{
+    TempToml tmp(R"(
+[strategy]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).strategy.preloadKlines);
+}
+
+TEST(ConfigLoader, ParseStrategy_PreloadKlinesParsed)
+{
+    TempToml tmp(R"(
+[strategy]
+preload_klines = false
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_FALSE(value(result).strategy.preloadKlines);
+}
+
+// ---------------------------------------------------------------------------
+// custom_params — coin-specific instance parameter channel (M26)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsInlineTable)
+{
+    // Both float and integer values are accepted (int → double).
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = { eth_atr_step = 0.05, eth_spike_filter_usd = 120, eth_scale = 1.0 }
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+
+    const auto &inst = value(result).strategy.strategies[0];
+    ASSERT_EQ(3u, inst.custom_params.size());
+    EXPECT_DOUBLE_EQ(0.05, inst.custom_params.at("eth_atr_step"));
+    EXPECT_DOUBLE_EQ(120.0, inst.custom_params.at("eth_spike_filter_usd"));
+    EXPECT_DOUBLE_EQ(1.0, inst.custom_params.at("eth_scale"));
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsAbsent)
+{
+    // Legacy instances without custom_params → empty map (backward compatible).
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "momentum_scalper"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+    EXPECT_TRUE(value(result).strategy.strategies[0].custom_params.empty());
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsNonNumberRejected)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = { eth_atr_step = "abc" }
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_CustomParamsNonTableRejected)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "eth_scalper"
+symbol = "ETH_USDT"
+custom_params = 5
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    EXPECT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ConfigInvalidValue, error(result).code);
+}
+
+TEST(ConfigLoader, ParseGrid_AllFields)
+{
+    TempToml tmp(R"(
+[grid]
+enabled = true
+symbol = "ETH_USDT"
+market_type = "futures"
+levels = 12
+qty_per_level = 0.02
+step_mode = "atr"
+step_fixed = 5.0
+step_atr_mult = 0.5
+step_min = 3.0
+step_max = 8.0
+atr_period = 40
+tp_distance_steps = 2.0
+anchor_offset_steps = 1.0
+lower_reanchor_steps = 3.0
+protect_line_a_steps = 2.0
+protect_line_b_usd = -30.0
+daily_loss_limit_usd = -10.0
+daily_reset_hour = 8
+reanchor_cooldown_min = 30
+spike_freeze_min = 30
+spike_pct = 0.01
+spike_atr_mult = 3.0
+state_file = "data/grid_state_ETH_USDT.json"
+force = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &g = value(result).grid;
+    EXPECT_TRUE(g.enabled);
+    EXPECT_EQ("ETH_USDT", g.symbol);
+    EXPECT_EQ("futures", g.market_type);
+    EXPECT_EQ(12, g.levels);
+    EXPECT_DOUBLE_EQ(0.02, g.qty_per_level);
+    EXPECT_EQ("atr", g.step_mode);
+    EXPECT_DOUBLE_EQ(5.0, g.step_fixed);
+    EXPECT_DOUBLE_EQ(0.5, g.step_atr_mult);
+    EXPECT_DOUBLE_EQ(3.0, g.step_min);
+    EXPECT_DOUBLE_EQ(8.0, g.step_max);
+    EXPECT_EQ(40, g.atr_period);
+    EXPECT_DOUBLE_EQ(2.0, g.tp_distance_steps);
+    EXPECT_DOUBLE_EQ(1.0, g.anchor_offset_steps);
+    EXPECT_DOUBLE_EQ(3.0, g.lower_reanchor_steps);
+    EXPECT_DOUBLE_EQ(2.0, g.protect_line_a_steps);
+    EXPECT_DOUBLE_EQ(-30.0, g.protect_line_b_usd);
+    EXPECT_DOUBLE_EQ(-10.0, g.daily_loss_limit_usd);
+    EXPECT_EQ(8, g.daily_reset_hour);
+    EXPECT_EQ(30, g.reanchor_cooldown_min);
+    EXPECT_EQ(30, g.spike_freeze_min);
+    EXPECT_DOUBLE_EQ(0.01, g.spike_pct);
+    EXPECT_DOUBLE_EQ(3.0, g.spike_atr_mult);
+    EXPECT_EQ("data/grid_state_ETH_USDT.json", g.state_file);
+    EXPECT_TRUE(g.force);
+}
+
+TEST(ConfigLoader, ParseGrid_AbsentSectionKeepsDefaults)
+{
+    TempToml tmp(R"(
+[log]
+level = "info"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &g = value(result).grid;
+    EXPECT_FALSE(g.enabled);
+    EXPECT_EQ("ETH_USDT", g.symbol);
+    EXPECT_EQ(12, g.levels);
+}
+
+// ---------------------------------------------------------------------------
+// news_windows (major-news event gate)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindows)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "iron_trader"
+symbol = "BTC_USDT"
+order_quantity = 20.0
+custom_params = { it_sep_gate = 0.2 }
+news_windows = [
+    { time = "2026-09-16T18:00:00Z" },
+    { time = 1789000000, close_before_min = 30, resume_after_min = 45 },
+    { time = "2026-10-01", close_before_min = 0.5, resume_after_min = 0 },
+]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, value(result).strategy.strategies.size());
+
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_EQ("iron_trader", inst.name);
+    EXPECT_DOUBLE_EQ(0.2, inst.custom_params.at("it_sep_gate"));  // coexists
+
+    ASSERT_EQ(3u, inst.news_windows.size());
+    // ISO string; omitted X/Y → 15/15 defaults.
+    EXPECT_EQ(1'789'581'600'000LL, inst.news_windows[0].event_open_ms);
+    EXPECT_DOUBLE_EQ(15.0, inst.news_windows[0].close_before_min);
+    EXPECT_DOUBLE_EQ(15.0, inst.news_windows[0].resume_after_min);
+    // Bare epoch integer (< 1e12 → seconds); explicit X/Y overrides.
+    EXPECT_EQ(1'789'000'000'000LL, inst.news_windows[1].event_open_ms);
+    EXPECT_DOUBLE_EQ(30.0, inst.news_windows[1].close_before_min);
+    EXPECT_DOUBLE_EQ(45.0, inst.news_windows[1].resume_after_min);
+    // Date-only ISO; fractional minutes allowed; Y = 0 legal.
+    EXPECT_EQ(1'790'812'800'000LL, inst.news_windows[2].event_open_ms);
+    EXPECT_DOUBLE_EQ(0.5, inst.news_windows[2].close_before_min);
+    EXPECT_DOUBLE_EQ(0.0, inst.news_windows[2].resume_after_min);
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindowsErrors)
+{
+    struct Case
+    {
+        const char *windows;
+        const char *fragment;  // expected substring in the error message
+    };
+    const Case cases[] = {
+        { "5", "news_windows" },                            // not an array
+        { "[ 5 ]", "news_windows[0]" },                     // element not a table
+        { "[ { resume_after_min = 5 } ]", "news_windows[0]" },  // missing time
+        { "[ { time = \"not-a-time\" } ]", "news_windows[0]" }, // bad time string
+        { "[ { time = 12.5 } ]", "news_windows[0]" },       // time must be str/int
+        { "[ { time = \"2026-09-16T18:00:00Z\", close_before_min = -1 } ]",
+          "news_windows[0]" },                              // negative X
+    };
+
+    for (const auto &c : cases)
+    {
+        TempToml tmp(std::string(R"(
+[[strategy.instances]]
+name = "iron_trader"
+symbol = "BTC_USDT"
+news_windows = )")
+            + c.windows + "\n");
+
+        auto result = loadConfigFile(tmp.path());
+        EXPECT_FALSE(ok(result)) << "case should fail: " << c.windows;
+        EXPECT_NE(std::string::npos, error(result).message.find(c.fragment))
+            << "case: " << c.windows << " msg: " << error(result).message;
+    }
+}
+
+TEST(ConfigLoader, ParseStrategyInstance_NewsWindowsAbsentKeepsEmpty)
+{
+    TempToml tmp(R"(
+[[strategy.instances]]
+name = "momentum_scalper"
+symbol = "BTC_USDT"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &inst = value(result).strategy.strategies[0];
+    EXPECT_TRUE(inst.news_windows.empty());   // absent → gate off
 }
 
 } // namespace

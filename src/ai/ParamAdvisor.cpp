@@ -30,45 +30,12 @@ namespace pulse::ai
 {
 
 // ---------------------------------------------------------------------------
-// ParamAdvisor constructor — initializes default safety bounds
-//
-// Each bound is chosen to:
-//   1. Allow meaningful per-cycle adjustments (not too small)
-//   2. Prevent dangerous extremes (not too large)
-//   3. Cover the full useful operating range in hard_min/hard_max
+// ParamAdvisor constructor — initializes the shared default safety bounds
+// (see ParamBounds.hpp for the table and rationale).
 // ---------------------------------------------------------------------------
 ParamAdvisor::ParamAdvisor()
+    : m_bounds{ defaultParamBounds() }
 {
-    // Order sizing — order_quantity is in base currency (e.g., BTC)
-    // A delta of 0.0005 BTC per cycle allows reaching 0.1 from 0.001 in ~200 cycles
-    m_bounds["order_quantity"] = ParamBound{0.0005, 0.0001, 0.1};
-
-    // Confidence threshold — controls the minimum signal quality to emit
-    m_bounds["min_confidence"] = ParamBound{0.1, 0.1, 0.95};
-
-    // Momentum (EMA crossover) — fast EMA window in candle periods
-    m_bounds["ema_fast_period"] = ParamBound{2.0, 3.0, 50.0};
-
-    // Momentum (EMA crossover) — slow EMA window in candle periods
-    m_bounds["ema_slow_period"] = ParamBound{3.0, 10.0, 100.0};
-
-    // Mean reversion (Bollinger Bands) — BB window in candle periods
-    m_bounds["bb_period"] = ParamBound{3.0, 5.0, 50.0};
-
-    // Mean reversion (Bollinger Bands) — standard deviation multiplier
-    m_bounds["bb_std_dev"] = ParamBound{0.25, 1.0, 4.0};
-
-    // Order book scalping — imbalance threshold (0.0–1.0)
-    m_bounds["ob_imbalance_threshold"] = ParamBound{0.05, 0.1, 0.9};
-
-    // Timing — cooldown between signals per symbol (seconds)
-    m_bounds["cooldown_seconds"] = ParamBound{5.0, 5.0, 120.0};
-
-    // Risk — stop-loss distance as fraction of entry price
-    m_bounds["stop_loss_pct"] = ParamBound{0.002, 0.003, 0.05};
-
-    // Risk — take-profit target as fraction of entry price
-    m_bounds["take_profit_pct"] = ParamBound{0.001, 0.002, 0.03};
 }
 
 // ---------------------------------------------------------------------------

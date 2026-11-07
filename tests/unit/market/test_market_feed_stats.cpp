@@ -149,43 +149,110 @@ TEST(MarketFeedStats, SpotKlineFrameHasCurrencyPairInOuterFrame)
     EXPECT_EQ("1m", result["n"].get<std::string>());
 }
 
-TEST(MarketFeedStats, FuturesKlineFrameHasContractInResult)
+TEST(MarketFeedStats, FuturesKlineFrameCarriesSymbolInIntervalField)
 {
-    // Futures kline frame: symbol is INSIDE result as "n".
-    // The outer frame does NOT have "contract" or "currency_pair".
+    // Futures kline frame (probed 08-21): NEITHER the outer frame NOR a
+    // "contract" field carries the symbol — the contract rides in "n" as
+    // "<interval>_<contract>" (e.g. "1m_ETH_USDT"). The 08-21 bug: the
+    // parser never looked there, so every futures kline fell into the first
+    // subscribed symbol's buffer.
     const nlohmann::json frame = nlohmann::json::parse(R"({
         "time": 1542162490,
         "channel": "futures.candlesticks",
         "event": "update",
-        "result": { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": 120, "n": "BTC_USDT" }
+        "result": [ { "t": 1542162480, "o": "6350.1", "c": "6350.2", "h": "6350.2", "l": "6350.1", "v": 120, "n": "1m_ETH_USDT", "w": false } ]
     })");
 
     const auto &result = frame["result"];
 
-    // Futures: outer frame has NO contract field.
+    // Futures: outer frame has NO symbol fields, element has NO "contract".
     EXPECT_FALSE(frame.contains("currency_pair"));
     EXPECT_FALSE(frame.contains("contract"));
+    EXPECT_FALSE(result[0].contains("contract"));
 
-    // Symbol is in result["n"].
-    EXPECT_TRUE(result.contains("n"));
-    EXPECT_EQ("BTC_USDT", result["n"].get<std::string>());
+    // "n" = "<interval>_<contract>" — the parser strips the "1m_" prefix.
+    EXPECT_EQ("1m_ETH_USDT", result[0]["n"].get<std::string>());
 }
 
-TEST(MarketFeedStats, FuturesKlineSubscriptionPayloadOrder)
+TEST(MarketFeedStats, FuturesKlineSubscriptionPerSymbol)
 {
-    // Gate.io requires payload = ["1m", "BTC_USDT"] (interval first).
-    // This test documents the expected payload structure.
-    const std::vector<std::string> symbols = { "BTC_USDT", "ETH_USDT" };
+    // Gate.io parses the candlesticks payload positionally as
+    // [interval, timezone, contract] — batching multiple symbols in one
+    // payload puts the second symbol into the timezone slot ("invalid
+    // timezone provided: <symbol>", 2026-08-18 regression with SNDK_USDT).
+    // Subscribe per symbol with exactly two elements.
+    const std::vector<std::string> symbols = { "BTC_USDT", "SNDK_USDT" };
 
-    std::vector<std::string> payload;
-    payload.push_back("1m");
-    for (const auto &s : symbols)
+    for (const auto &symbol : symbols)
     {
-        payload.push_back(s);
+        const std::vector<std::string> payload = { "1m", symbol };
+        ASSERT_EQ(2u, payload.size());
+        EXPECT_EQ("1m",      payload[0]); // Interval first.
+        EXPECT_EQ(symbol,   payload[1]);
     }
+}
 
-    ASSERT_EQ(3u, payload.size());
-    EXPECT_EQ("1m",      payload[0]); // Interval first.
-    EXPECT_EQ("BTC_USDT", payload[1]);
-    EXPECT_EQ("ETH_USDT", payload[2]);
+// ---------------------------------------------------------------------------
+// M15: TradFi CFD feed parsers (pure static functions, no network)
+// ---------------------------------------------------------------------------
+
+TEST(MarketFeedCfd, ParseCfdTicker)
+{
+    // Probe-verified shape (2026-08-15): strings under data.
+    const nlohmann::json ticker = {
+        { "last_price", "4376.45" },
+        { "bid_price", "4376.35" },
+        { "ask_price", "4376.55" },
+        { "price_change", "0.58" },
+        { "status", "open" },
+    };
+
+    const auto parsed = MarketFeed::parseCfdTicker(ticker, "XAUUSD");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ("XAUUSD", parsed->symbol);
+    EXPECT_DOUBLE_EQ(4376.45, parsed->last);
+    EXPECT_DOUBLE_EQ(4376.35, parsed->bid);
+    EXPECT_DOUBLE_EQ(4376.55, parsed->ask);
+    EXPECT_DOUBLE_EQ(0.58, parsed->change_pct);
+    EXPECT_DOUBLE_EQ(0.0, parsed->volume_24h); // no volume in TradFi tickers
+}
+
+TEST(MarketFeedCfd, ParseCfdTickerRejectsMissingLast)
+{
+    EXPECT_FALSE(MarketFeed::parseCfdTicker(
+                     nlohmann::json{ { "bid_price", "4376.35" } }, "XAUUSD")
+                     .has_value());
+    EXPECT_FALSE(MarketFeed::parseCfdTicker(
+                     nlohmann::json{ { "last_price", "0" } }, "XAUUSD")
+                     .has_value());
+}
+
+TEST(MarketFeedCfd, ParseCfdKline)
+{
+    // Probe-verified shape: {o,h,l,c,t} with t in Unix seconds.
+    const nlohmann::json candle = {
+        { "o", "4375.88" },
+        { "h", "4375.91" },
+        { "l", "4375.40" },
+        { "c", "4375.62" },
+        { "t", 1786740960 },
+    };
+
+    const auto parsed = MarketFeed::parseCfdKline(candle);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(1786740960LL * 1000, parsed->open_time);
+    EXPECT_EQ(1786740960LL * 1000 + 60000, parsed->close_time);
+    EXPECT_DOUBLE_EQ(4375.88, parsed->open);
+    EXPECT_DOUBLE_EQ(4375.91, parsed->high);
+    EXPECT_DOUBLE_EQ(4375.40, parsed->low);
+    EXPECT_DOUBLE_EQ(4375.62, parsed->close);
+    EXPECT_DOUBLE_EQ(0.0, parsed->volume); // no volume field
+    EXPECT_TRUE(parsed->closed);
+}
+
+TEST(MarketFeedCfd, ParseCfdKlineRejectsMissingFields)
+{
+    EXPECT_FALSE(MarketFeed::parseCfdKline(
+                     nlohmann::json{ { "o", "1" }, { "h", "2" } })
+                     .has_value());
 }

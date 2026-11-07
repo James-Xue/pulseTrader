@@ -8,9 +8,11 @@
 // Call after loadConfigFile() or buildDefaultConfig() before starting
 // the trading engine.
 
+#include "core/TimeUtil.hpp"
 #include "core/config_validator.hpp"
 
 #include <cmath>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -88,11 +90,41 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.maxSymbolNotional must be > 0"};
     }
 
-    // Futures-specific risk limits.
-    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 125.0)
+    // Optional per-market notional overrides — must be positive when set.
+    if (cfg.risk.maxPositionNotionalFutures.has_value()
+        && cfg.risk.maxPositionNotionalFutures.value() <= 0.0)
     {
         return PulseError{ErrorCode::ConfigValidationError,
-                          "risk.max_leverage must be in [1.0, 125.0]"};
+                          "risk.maxPositionNotionalFutures must be > 0"};
+    }
+
+    if (cfg.risk.maxPositionNotionalCfd.has_value()
+        && cfg.risk.maxPositionNotionalCfd.value() <= 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.maxPositionNotionalCfd must be > 0"};
+    }
+
+    if (cfg.risk.maxPositionNotionalSpot.has_value()
+        && cfg.risk.maxPositionNotionalSpot.value() <= 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.maxPositionNotionalSpot must be > 0"};
+    }
+
+    // Optional minimum-free-margin-after-stop gate — must be non-negative.
+    if (cfg.risk.minAvailableAfterStopUsd.has_value()
+        && cfg.risk.minAvailableAfterStopUsd.value() < 0.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.minAvailableAfterStopUsd must be >= 0"};
+    }
+
+    // Futures-specific risk limits (CFD leverage ladder goes up to 500).
+    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 500.0)
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.max_leverage must be in [1.0, 500.0]"};
     }
 
     if (cfg.risk.max_margin_used < 0.0 || cfg.risk.max_margin_used > 1.0)
@@ -223,14 +255,53 @@ PulseError validateConfig(const PulseConfig &cfg)
                     + std::to_string(cfg.risk.max_leverage) + ")"};
         }
 
-        // Testnet only supports futures — spot has no testnet endpoint.
-        if (cfg.exchange.testnet && MarketType::Spot == s.market_type)
+        // Testnet only supports futures — spot has no testnet endpoint and
+        // CFD (TradFi) has no testnet sandbox.
+        if (cfg.exchange.testnet
+            && (MarketType::Spot == s.market_type
+                || MarketType::Cfd == s.market_type))
         {
             return PulseError{
                 ErrorCode::ConfigValidationError,
-                prefix + ".market_type \"spot\" is not supported in testnet "
-                    "mode (Gate.io testnet is futures-only). "
+                prefix + ".market_type \"" + toString(s.market_type)
+                    + "\" is not supported in testnet "
+                    "mode (Gate.io testnet is futures-only; CFD has no "
+                    "testnet sandbox). "
                     "Set market_type = \"futures\" or testnet = false."};
+        }
+
+        // Post-only / maker-first need an order book and exchange-side
+        // post-only support. TradFi CFD only accepts price_type
+        // "market"|"trigger" (docs/CFD_TRADFI.md) — no post-only orders.
+        if (OrderType::Market != s.order_type && MarketType::Cfd == s.market_type)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".order_type \"" + toString(s.order_type)
+                    + "\" is not supported on market_type \"cfd\" (TradFi "
+                      "API has no post-only orders; only \"market\" is "
+                      "allowed)"};
+        }
+
+        // maker_first must know when to give up and take liquidity.
+        if (OrderType::MakerFirst == s.order_type && 0 == s.maker_timeout_ms)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix + ".maker_timeout_ms must be > 0 when "
+                        "order_type = \"maker_first\""};
+        }
+
+        // OrderBookScalper needs the WS order-book channel — CFD has none.
+        if ("orderbook_scalper" == s.name && MarketType::Cfd == s.market_type)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                prefix
+                    + " strategy \"orderbook_scalper\" cannot run on "
+                      "market_type \"cfd\" (CFD has no order-book channel). "
+                      "Use momentum_scalper, mean_reversion_scalper or "
+                      "supertrend_scalper."};
         }
     }
 
@@ -250,6 +321,20 @@ PulseError validateConfig(const PulseConfig &cfg)
     // -----------------------------------------------------------------------
     if (cfg.ai.heartbeatIntervalSec > 0)
     {
+        if (cfg.ai.stats_lookback_hours < 1)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "ai.stats_lookback_hours must be ≥ 1 when AI is enabled"};
+        }
+
+        if (cfg.ai.apiKey.empty())
+        {
+            // No key → the AI stays offline (main.cpp gates the scheduler on
+            // !apiKey.empty()). The config remains valid so the key can be
+            // dropped into .env later without touching the toml.
+            return {};
+        }
+
         if ("openai" != cfg.ai.backend && "claude" != cfg.ai.backend)
         {
             return PulseError{ErrorCode::ConfigValidationError,
@@ -260,12 +345,6 @@ PulseError validateConfig(const PulseConfig &cfg)
         {
             return PulseError{ErrorCode::ConfigValidationError,
                               "ai.model must not be empty when AI is enabled"};
-        }
-
-        if (cfg.ai.apiKey.empty())
-        {
-            return PulseError{ErrorCode::ConfigValidationError,
-                              "ai.apiKey must not be empty when AI is enabled"};
         }
     }
 
@@ -304,6 +383,162 @@ PulseError validateConfig(const PulseConfig &cfg)
             return PulseError{ErrorCode::ConfigValidationError,
                               "sqlite.dbPath must not be empty when "
                               "sqlite.enabled is true"};
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 11. Control plane config (only validate when enabled)
+    // -----------------------------------------------------------------------
+    if (cfg.control.enabled)
+    {
+        if (0 == cfg.control.port)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.port must be in [1, 65535] (got "
+                                  + std::to_string(cfg.control.port) + ")"};
+        }
+        if (cfg.control.bindAddress.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.bindAddress must not be empty when "
+                              "control.enabled is true"};
+        }
+        if (!parseDisplayTimezone(cfg.control.displayTimezone))
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "control.display_timezone must be \"local\", "
+                              "\"utc\" or \"±HH:MM\" (got \""
+                                  + cfg.control.displayTimezone + "\")"};
+        }
+
+        // -------------------------------------------------------------------
+        // Transport security (M-Q4).
+        //
+        // Only hard failures are rejected here. Insecure-but-expressible
+        // combinations (non-loopback without TLS, token over plaintext, TLS
+        // without a token) are logged at startup by runTrade(), because the
+        // validator has no warning channel.
+        // -------------------------------------------------------------------
+        if (cfg.control.tlsEnabled)
+        {
+            // 1. Both PEM files are mandatory; a half-configured TLS listener
+            //    would otherwise fail at the first handshake.
+            if (cfg.control.tlsCertPath.empty()
+                || cfg.control.tlsKeyPath.empty())
+            {
+                return PulseError{
+                    ErrorCode::ControlTlsInitFailed,
+                    "control.tls_enabled requires both tls_cert_path and "
+                    "tls_key_path"};
+            }
+
+            // 2. Fail before binding rather than at the first client: a missing
+            //    or unreadable PEM is an operator error, not a runtime event.
+            for (const std::string &path :
+                 {cfg.control.tlsCertPath, cfg.control.tlsKeyPath})
+            {
+                std::ifstream probe(path);
+                if (!probe.good())
+                {
+                    return PulseError{
+                        ErrorCode::ControlTlsInitFailed,
+                        "control TLS file is not readable: " + path};
+                }
+            }
+
+            // 3. mTLS needs a CA bundle to verify against.
+            if (cfg.control.tlsRequireClientCert && cfg.control.tlsCaPath.empty())
+            {
+                return PulseError{
+                    ErrorCode::ControlTlsInitFailed,
+                    "control.tls_require_client_cert requires tls_ca_path"};
+            }
+        }
+    }
+
+    // [grid] section (M27 grid service). Validated when enabled — the grid
+    // trades real money on a futures contract, so bad geometry must fail
+    // loudly at startup, not mid-run.
+    if (cfg.grid.enabled)
+    {
+        if (cfg.grid.symbol.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.symbol must not be empty when grid.enabled"};
+        }
+        if (cfg.grid.market_type != "futures")
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.market_type must be \"futures\" (got \""
+                                  + cfg.grid.market_type + "\")"};
+        }
+        if (cfg.grid.levels < 1 || cfg.grid.levels > 24)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.levels must be in [1, 24] (got "
+                                  + std::to_string(cfg.grid.levels) + ")"};
+        }
+        if (cfg.grid.qty_per_level <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.qty_per_level must be > 0"};
+        }
+        if (cfg.grid.step_mode != "atr" && cfg.grid.step_mode != "fixed")
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_mode must be \"atr\" or \"fixed\" "
+                              "(got \"" + cfg.grid.step_mode + "\")"};
+        }
+        if (cfg.grid.step_mode == "atr"
+            && (cfg.grid.step_min <= 0.0 || cfg.grid.step_max < cfg.grid.step_min))
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_min/step_max invalid for atr mode"};
+        }
+        if (cfg.grid.step_mode == "fixed" && cfg.grid.step_fixed <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "grid.step_fixed must be > 0 in fixed mode"};
+        }
+    }
+
+    // [funding_watch] section (funding-window monitor). Validated when
+    // enabled — the service is pure observation, but a nonsense gate would
+    // spam the signal board.
+    if (cfg.funding_watch.enabled)
+    {
+        if (cfg.funding_watch.symbols.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.symbols must not be empty when "
+                              "funding_watch.enabled"};
+        }
+        if (cfg.funding_watch.threshold <= 0.0
+            || cfg.funding_watch.threshold > 0.01)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.threshold must be in (0, 0.01] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.threshold)
+                                  + ")"};
+        }
+        if (cfg.funding_watch.consec_events < 1
+            || cfg.funding_watch.consec_events > 24)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.consec_events must be in [1, 24] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.consec_events)
+                                  + ")"};
+        }
+        if (cfg.funding_watch.poll_sec < 60
+            || cfg.funding_watch.poll_sec > 86400)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "funding_watch.poll_sec must be in [60, 86400] "
+                              "(got "
+                                  + std::to_string(cfg.funding_watch.poll_sec)
+                                  + ")"};
         }
     }
 

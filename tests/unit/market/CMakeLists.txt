@@ -4,6 +4,7 @@ add_executable(test_market
     test_kline_buffer.cpp
     test_orderbook_manager.cpp
     test_market_feed_stats.cpp
+    test_market_feed_sink.cpp
 )
 
 target_link_libraries(test_market

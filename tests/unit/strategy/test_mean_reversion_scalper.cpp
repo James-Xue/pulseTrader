@@ -107,3 +107,30 @@ TEST(MeanReversionScalper, ConfidenceRange)
     EXPECT_GE(scalper->params().min_confidence.load(), 0.0);
     EXPECT_LE(scalper->params().min_confidence.load(), 1.0);
 }
+
+// ---------------------------------------------------------------------------
+// Confidence (ATR-normalized) — regression for the band-width scale problem
+//
+// 2026-08-18: the old formula divided band penetration by band width
+// (2σ band ⇒ ~60% width penetration needed for 0.6 — near-unreachable on 1m
+// gold), so mean-reversion signals were silently dropped by min_confidence.
+// ---------------------------------------------------------------------------
+
+TEST(MeanReversionScalper, ConfidenceAtrNormalized)
+{
+    // 0.5-point penetration on 1-point ATR = 0.5.
+    EXPECT_NEAR(0.5, MeanReversionScalper::computeConfidence(0.5, 1.0, 4.0), 1e-12);
+}
+
+TEST(MeanReversionScalper, ConfidenceBandWidthFallback)
+{
+    // Without ATR, falls back to the band-width ratio.
+    EXPECT_NEAR(0.125, MeanReversionScalper::computeConfidence(0.5, 0.0, 4.0), 1e-12);
+}
+
+TEST(MeanReversionScalper, ConfidenceClampedAndDegenerate)
+{
+    // Penetration beyond ATR clamps to 1.0; no normalizer at all gives 0.0.
+    EXPECT_DOUBLE_EQ(1.0, MeanReversionScalper::computeConfidence(3.0, 1.0, 4.0));
+    EXPECT_DOUBLE_EQ(0.0, MeanReversionScalper::computeConfidence(0.5, 0.0, 0.0));
+}

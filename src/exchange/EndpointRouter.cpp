@@ -20,6 +20,8 @@ std::string EndpointRouter::restPrefix(MarketType mt)
         return "/api/v4/spot";
     case MarketType::Futures:
         return "/api/v4/futures/usdt";
+    case MarketType::Cfd:
+        return "/api/v4/tradfi";
     }
     return "/api/v4/spot";
 }
@@ -35,6 +37,8 @@ std::string EndpointRouter::wsPrefix(MarketType mt)
         return "spot";
     case MarketType::Futures:
         return "futures";
+    case MarketType::Cfd:
+        return "cfd"; // No WS channels exist for TradFi — defensive only.
     }
     return "spot";
 }
@@ -77,6 +81,8 @@ std::string EndpointRouter::selectWsUrl(const ExchangeConfig &cfg, MarketType mt
         return cfg.wsUrl;
     case MarketType::Futures:
         return cfg.futuresWsUrl;
+    case MarketType::Cfd:
+        return cfg.wsUrl; // Unused — CFD has no WebSocket market data.
     }
     return cfg.wsUrl;
 }
@@ -103,6 +109,8 @@ std::string EndpointRouter::contractsPath(MarketType mt)
         return "/api/v4/spot/currency_pairs";
     case MarketType::Futures:
         return "/api/v4/futures/usdt/contracts";
+    case MarketType::Cfd:
+        return "/api/v4/tradfi/symbols";
     }
     return "/api/v4/spot/currency_pairs";
 }
@@ -112,8 +120,35 @@ std::string EndpointRouter::tickersPath(MarketType mt)
     return restPrefix(mt) + "/tickers";
 }
 
+// ---------------------------------------------------------------------------
+// klinesPath — historical candlesticks (backtest data source)
+//
+// Spot:    /api/v4/spot/candlesticks
+// Futures: /api/v4/futures/usdt/candlesticks
+// Cfd:     empty — CFD klines use the TradFi endpoint (cfdKlinesPath) which
+//          only supports limit-based backfill, no from/to.
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::klinesPath(MarketType mt)
+{
+    if (MarketType::Cfd == mt)
+    {
+        return ""; // TradFi klines are a different API shape (see cfdKlinesPath).
+    }
+    return restPrefix(mt) + "/candlesticks";
+}
+
+std::string EndpointRouter::fundingRatePath()
+{
+    // USDT-M perpetual funding history (8h cadence, newest first [{r,t}]).
+    return "/api/v4/futures/usdt/funding_rate";
+}
+
 std::string EndpointRouter::accountsPath(MarketType mt)
 {
+    if (MarketType::Cfd == mt)
+    {
+        return "/api/v4/tradfi/users/assets"; // TradFi balances live under /users/, not /accounts.
+    }
     return restPrefix(mt) + "/accounts";
 }
 
@@ -134,6 +169,42 @@ std::string EndpointRouter::orderPath(MarketType mt, const std::string &order_id
 }
 
 // ---------------------------------------------------------------------------
+// positionsPath — futures only (spot has no position endpoint; CFD has its
+// own getCfdPositions() with a different response shape)
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::positionsPath(MarketType mt)
+{
+    if (MarketType::Futures == mt)
+    {
+        return "/api/v4/futures/usdt/positions";
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// priceOrdersPath — futures only. Independent trigger orders (price_orders):
+// the TP/SL attached to a futures position live HERE, not in the position's
+// close_order field (2026-08-16 memo). Spot/CFD have no equivalent.
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::priceOrdersPath(MarketType mt)
+{
+    if (MarketType::Futures == mt)
+    {
+        return "/api/v4/futures/usdt/price_orders";
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// priceOrderPath — specific trigger order by ID
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::priceOrderPath(MarketType mt,
+                                           const std::string &order_id)
+{
+    return priceOrdersPath(mt) + "/" + order_id;
+}
+
+// ---------------------------------------------------------------------------
 // leveragePath — futures only
 // ---------------------------------------------------------------------------
 std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contract)
@@ -144,8 +215,55 @@ std::string EndpointRouter::leveragePath(MarketType mt, const std::string &contr
         return ""; // Not applicable for spot.
     case MarketType::Futures:
         return "/api/v4/futures/usdt/positions/" + contract + "/leverage";
+    case MarketType::Cfd:
+        return ""; // CFD leverage is account-level, not per-position.
     }
     return "";
+}
+
+// ---------------------------------------------------------------------------
+// TradFi (CFD) specific endpoint builders
+// ---------------------------------------------------------------------------
+std::string EndpointRouter::cfdSymbolsPath()
+{
+    return "/api/v4/tradfi/symbols";
+}
+
+std::string EndpointRouter::cfdSymbolsDetailPath()
+{
+    return "/api/v4/tradfi/symbols/detail";
+}
+
+std::string EndpointRouter::cfdTickerPath(const std::string &symbol)
+{
+    return "/api/v4/tradfi/symbols/" + symbol + "/tickers";
+}
+
+std::string EndpointRouter::cfdKlinesPath(const std::string &symbol)
+{
+    return "/api/v4/tradfi/symbols/" + symbol + "/klines";
+}
+
+std::string EndpointRouter::cfdAssetsPath()
+{
+    return "/api/v4/tradfi/users/assets";
+}
+
+std::string EndpointRouter::cfdPositionsPath()
+{
+    return "/api/v4/tradfi/positions";
+}
+
+std::string EndpointRouter::cfdPositionClosePath(const std::string &position_id)
+{
+    return "/api/v4/tradfi/positions/" + position_id + "/close";
+}
+
+std::string EndpointRouter::cfdPositionModifyPath(const std::string &position_id)
+{
+    // PUT /tradfi/positions/{id} — modify an open CFD position (dynamic
+    // SL/TP adjustment: request body takes price_sl / price_tp).
+    return "/api/v4/tradfi/positions/" + position_id;
 }
 
 } // namespace pulse::exchange

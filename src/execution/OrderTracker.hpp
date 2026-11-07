@@ -32,6 +32,7 @@ namespace pulse::execution
 struct OrderSnapshot
 {
     std::string order_id;
+    std::string client_order_id; ///< M27: client-assigned id (e.g. "eth-grid-2100").
     Symbol symbol;
     Side side;
     OrderType type;
@@ -43,6 +44,7 @@ struct OrderSnapshot
 
     OrderSnapshot()
         : order_id{}
+        , client_order_id{}
         , symbol{}
         , side{ Side::Buy }
         , type{ OrderType::Market }
@@ -67,8 +69,11 @@ class OrderTracker
     /// Construct an OrderTracker with WS and REST clients.
     ///
     /// market_type selects which WS channel and REST paths to use.
-    OrderTracker(exchange::GateWsClient &ws_client, exchange::GateRestClient &rest_client,
-                 MarketType market_type = MarketType::Spot);
+    /// ws_client may be nullptr when enable_ws=false (TradFi CFD has no
+    /// private WS channel): the tracker is REST-poll-only, all status comes
+    /// from pollOrderStatus / reconcileAll.
+    OrderTracker(exchange::GateWsClient *ws_client, exchange::GateRestClient &rest_client,
+                 MarketType market_type = MarketType::Spot, bool enable_ws = true);
 
     /// Start tracking an order.
     ///
@@ -109,15 +114,67 @@ class OrderTracker
     /// Returns the updated status, or PulseError on failure.
     [[nodiscard]] Result<OrderStatus> pollOrderStatus(const std::string &order_id);
 
+    /// Poll every tracked order's status via REST (reconcile fallback).
+    ///
+    /// Catches fills that arrived before the WS private-channel subscription
+    /// was established (market orders can fill within the same millisecond).
+    /// Individual failures are logged and tolerated; terminal orders emit
+    /// completion reports through the normal path.
+    void reconcileAll();
+
     /// Check if an order status is terminal (Filled or Cancelled).
     [[nodiscard]] static bool isTerminalStatus(OrderStatus status);
 
     /// Parse order status string from Gate.io API.
     [[nodiscard]] static OrderStatus parseStatus(const std::string &status_str);
 
+    /// Parse a futures order status from Gate.io API (status + finish_as).
+    ///
+    /// Futures uses status="open"/"finished" plus a separate finish_as
+    /// ("filled"/"cancelled"/"reduce_only"/"position_closed") that decides
+    /// the terminal outcome — status alone is ambiguous for a finished order.
+    [[nodiscard]] static OrderStatus parseFuturesStatus(const std::string &status,
+                                                        const std::string &finish_as);
+
+    /// Parse a TradFi CFD order object into an OrderStatus.
+    ///
+    /// CFD order objects use `state` (int) + `finished` (0/1) instead of the
+    /// spot/futures `status` string (probe-verified 2026-08-17). Mapping:
+    ///   finished != 0  → terminal; state == 1 → Cancelled (deleted),
+    ///                    otherwise → Filled
+    ///   finished == 0  → state >= 1 ? Open : Pending
+    /// Pure function — unit-tested.
+    [[nodiscard]] static OrderStatus parseCfdOrderStatus(const nlohmann::json &order_obj);
+
+    /// Find an order by id inside a TradFi open-orders list (`data.list`).
+    ///
+    /// order_id may be encoded as int or string in the list. Returns the
+    /// matching order object (a reference into the list), or a null JSON
+    /// value when not found or the list is not an array. Pure function.
+    [[nodiscard]] static nlohmann::json findCfdOrderInList(const nlohmann::json &list,
+                                                           const std::string &order_id);
+
+    /// Key-match fallback: find a TradFi order by symbol/side/volume/price
+    /// within the submit-time window, NOT by id.
+    ///
+    /// Used when the engine tracks a POST response's data.id while the list
+    /// carries the real exchange order id (list read lagged the POST —
+    /// 2026-08-17: trigger 47777 never matched by id, mis-cancelled while
+    /// 17654490 was still open). Market orders match on symbol/side/volume;
+    /// trigger orders additionally require price equality. Pure function.
+    [[nodiscard]] static nlohmann::json findCfdOrderByKey(
+        const nlohmann::json &list, const Symbol &symbol, Side side,
+        Quantity qty, OrderType type, Price price, std::int64_t submit_sec);
+
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
     [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
+
+    /// M27: active orders whose client_order_id starts with `prefix`
+    /// (e.g. "eth-grid-" for the grid service). Linear scan — tracked order
+    /// volume is small (<100). Empty prefix matches everything.
+    [[nodiscard]] std::vector<OrderSnapshot> findByClientIdPrefix(
+        const std::string &prefix) const;
 
     /// Returns the N most recent execution reports (completed orders).
     /// Thread-safe: takes shared read lock.
@@ -126,6 +183,13 @@ class OrderTracker
     ///   1. n — maximum number of reports to return (default: 20)
     [[nodiscard]] std::vector<ExecutionReport> recentReports(std::size_t n = 20) const;
 
+    /// Stash a terminal ExecutionReport that never passed through
+    /// trackOrder(). TradFi CFD closes use the dedicated position-close
+    /// endpoint (no order lifecycle), so the engine synthesizes the report
+    /// and records it here to keep recentReports / trades.db / execution.log
+    /// complete (2026-08-17 overnight: close side left zero trace without it).
+    void recordCompletedReport(const ExecutionReport &report);
+
   public:
     /// Test-only: simulate a WS order update event (calls processOrderUpdate).
     /// Allows unit tests to exercise the state machine without a real WS connection.
@@ -133,6 +197,18 @@ class OrderTracker
     {
         processOrderUpdate(event);
     }
+
+    /// Resolve a tracked (possibly data.id) key to the real exchange order id.
+    ///
+    /// TradFi CFD: POST returns data.id, the open-orders list carries the
+    /// real id. After pollCfdOrderStatus re-anchors a tracked key, this
+    /// returns the real id (callers like cancel need it). Returns the input
+    /// unchanged when no alias is recorded.
+    [[nodiscard]] std::string resolveExchangeId(const std::string &order_id) const;
+
+    /// Test-only: simulate a CFD list-poll result for one order (calls the
+    /// same apply+complete path as pollCfdOrderStatus, without network).
+    void testSimulateCfdPoll(const nlohmann::json &order_obj);
 
     /// Test-only: try to acquire a shared read lock (returns immediately).
     /// Used to verify that callbacks run outside the write lock.
@@ -143,7 +219,7 @@ class OrderTracker
     }
 
   private:
-    exchange::GateWsClient &m_wsClient;
+    exchange::GateWsClient *m_wsClient; ///< Null for REST-poll-only markets (CFD).
     exchange::GateRestClient &m_restClient;
     MarketType m_marketType;
 
@@ -163,19 +239,43 @@ class OrderTracker
         OrderStatus status;
         Timestamp submit_time;
         Timestamp last_update_time;
+        std::string exchange_position_id; ///< TradFi CFD only — exchange-side
+                                          ///< position id from the fill ("" elsewhere).
     };
 
     mutable std::shared_mutex m_mutex;
     std::unordered_map<std::string, TrackedOrder> m_trackedOrders;
     std::unordered_map<std::string, ExecutionReport> m_completedReports;
+    /// data.id → real exchange id (TradFi CFD re-anchor map). A POST returns
+    /// the internal submission number; the open-orders list carries the real
+    /// id, so the tracked key may be re-anchored by pollCfdOrderStatus. The
+    /// alias lets callers (cancel) resolve the tracked key to the real id.
+    std::unordered_map<std::string, std::string> m_idAliases;
     CompletionCallback m_completionCallback;
-    bool m_wsSubscribed; ///< Whether we've subscribed to spot.orders channel.
+    bool m_wsSubscribed; ///< Whether we've subscribed to the orders channel.
+    bool m_enableWs;     ///< False = REST-poll-only (TradFi CFD has no WS channel).
+
+    /// Poll a CFD order's status via the open-orders list (the single-order
+    /// GET /tradfi/orders/{id} endpoint does not exist — route-level 404).
+    /// Falls back to position-based fill detection when the order has left
+    /// the list (a filled market order disappears immediately).
+    [[nodiscard]] Result<OrderStatus> pollCfdOrderStatus(const std::string &order_id);
 
     /// WS callback for spot.orders channel events.
     void onOrderUpdate(const nlohmann::json &event);
 
     /// Parse WS order update event and update tracked order state.
     void processOrderUpdate(const nlohmann::json &event);
+
+    /// Shared lock-held state machine: apply an order object update to a
+    /// tracked order and, on terminal state, generate the report + stash the
+    /// callback for out-of-lock invocation. Returns the report if completed.
+    std::optional<ExecutionReport> applyUpdateAndMaybeComplete(const std::string &order_id,
+                                                               const nlohmann::json &update);
+
+    /// Apply a Gate.io order object (WS event result or REST response) to a
+    /// tracked order. Handles both spot and futures field layouts.
+    void applyOrderUpdate(const nlohmann::json &update, TrackedOrder &order);
 
     /// Generate ExecutionReport when order reaches terminal state.
     [[nodiscard]] ExecutionReport generateReport(const TrackedOrder &order, Timestamp fill_time) const;

@@ -77,7 +77,8 @@ class PositionManager
     /// Open a new position.
     ///
     /// Validates against portfolio limits before creating:
-    ///   1. Check total notional + proposed notional <= maxPositionNotional
+    ///   1. Check total notional + proposed notional <= notional limit for the
+    ///      position's market type (per-market cap, falls back to maxPositionNotional)
     ///   2. Check open position count < maxOpenPositions
     ///   3. Check per-symbol notional + proposed <= maxSymbolNotional
     ///
@@ -90,15 +91,53 @@ class PositionManager
     ///
     /// In addition to standard portfolio limits, computes:
     ///   - margin_used = qty * entry_price * quanto_multiplier / leverage
-    ///   - notional = qty * entry_price * quanto_multiplier * leverage
+    ///   - notional = qty * entry_price * quanto_multiplier
     ///   - liquidation_price (estimated)
     ///
     /// Returns position_id on success, PulseError if any limit is exceeded.
+    /// sl_price/tp_price (optional) carry the exchange-native protective
+    /// stops attached to the entry order (CFD) onto the tracked position, so
+    /// get_positions reflects the protection immediately after the fill.
     [[nodiscard]] Result<std::string> openPosition(
         const Symbol &symbol, Side side, Quantity qty, Price entry_price,
         const std::string &strategy_id,
         MarketType market_type, double leverage, MarginMode margin_mode,
-        double quanto_multiplier, double maintenance_rate);
+        double quanto_multiplier, double maintenance_rate,
+        double sl_price = 0.0, double tp_price = 0.0);
+
+    /// Import a position that already exists on the exchange (startup sync).
+    ///
+    /// Unlike openPosition(), NO portfolio-limit validation is applied: the
+    /// position is real money exposure on the exchange and must be visible
+    /// to the risk engine regardless of configured limits — hiding it would
+    /// undercount risk (drawdown, notional caps) and confuse displays.
+    ///
+    /// Dedup rules, in order:
+    ///   1. If exchange_position_id is non-empty and a tracked position
+    ///      already carries it (engine-opened fill, previous sync), the
+    ///      existing entry is updated IN PLACE — its position_id, strategy_id
+    ///      and open_time survive. Without this, a fill-tracked CFD position
+    ///      and its exchange twin would both show in get_positions.
+    ///   2. If exchange_position_id is EMPTY (futures), the exchange entry
+    ///      merges engine fills with external lots on the same
+    ///      (symbol, side, market). The synced entry then holds only the
+    ///      EXTERNAL remainder (exchange qty minus the summed fill-tracked
+    ///      quantities) so the total view equals the exchange quantity; a
+    ///      zero remainder drops the synced entry entirely (2026-08-19
+    ///      UNITREE double-count fix).
+    ///   3. Otherwise, idempotent per (symbol, side): re-syncing updates the
+    ///      existing synced entry (fresh prices/quantity). Synced positions
+    ///      use the id "<symbol>_<Buy|Sell>_sync", which cannot collide with
+    ///      engine-opened ids ("<symbol>_<Buy|Sell>_<n>").
+    /// liquidation_price is taken from the exchange (more accurate than the
+    /// estimate).
+    void syncPositionFromExchange(
+        const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+        Price mark_price, MarketType market_type, double leverage,
+        MarginMode margin_mode, double quanto_multiplier,
+        double maintenance_rate, Price liquidation_price,
+        Timestamp open_time = {}, double sl_price = 0.0, double tp_price = 0.0,
+        const std::string &exchange_position_id = {});
 
     /// Close a position (fully or partially).
     ///
@@ -108,11 +147,35 @@ class PositionManager
     /// Returns the realized PnL for the closed portion on success, or
     /// std::nullopt if position_id was not found.
     ///
-    /// Realized PnL formula (closed portion):
-    ///   long:  (exit_price - entry_price) * closed_qty * quanto * leverage
-    ///   short: (entry_price - exit_price) * closed_qty * quanto * leverage
+    /// Realized PnL formula (closed portion, leverage-free — leverage only
+    /// affects margin, never PnL):
+    ///   long:  (exit_price - entry_price) * closed_qty * quanto
+    ///   short: (entry_price - exit_price) * closed_qty * quanto
+    /// Record the EXCHANGE-side position id on an engine position.
+    ///
+    /// TradFi CFD only: the close endpoint takes the exchange position id
+    /// (e.g. "17653462"), which differs from the engine-local position_id
+    /// ("XAUUSD_Buy_1"). Called by OrderFlowExecutor after openPosition()
+    /// when the fill carries the exchange id.
+    void setExchangePositionId(const std::string &position_id,
+                               const std::string &exchange_position_id);
+
     [[nodiscard]] std::optional<double> closePosition(
         const std::string &position_id, Quantity close_qty, Price exit_price);
+
+    /// Remove a tracked position entirely (hot-sync ghost pruning).
+    ///
+    /// Used by the periodic/manual exchange reconciliation when a position
+    /// no longer exists on the exchange (e.g. the user closed it manually in
+    /// the app). Returns true if the position existed and was removed.
+    [[nodiscard]] bool removePosition(const std::string &position_id);
+
+    /// Refresh the exchange-native protective stops on a tracked position.
+    ///
+    /// Called after a successful modify_sl_tp so the local view reflects the
+    /// new prices immediately (the periodic sync would catch up anyway).
+    void updateExchangeStops(const std::string &position_id,
+                             double sl_price, double tp_price);
 
     /// Update mark price for a position (called on each tick for PnL recalculation).
     ///
@@ -149,10 +212,16 @@ class PositionManager
     /// Check whether a new position can be opened without exceeding any limit.
     ///
     /// Evaluates:
-    ///   1. Total notional + proposed <= maxPositionNotional
+    ///   1. Total notional + proposed <= notional limit for the position's
+    ///      market type (per-market cap, falls back to maxPositionNotional)
     ///   2. Open count < maxOpenPositions
     ///   3. Symbol notional + proposed <= maxSymbolNotional
-    [[nodiscard]] bool canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const;
+    ///
+    /// Notional = qty * price * quanto_multiplier; spot uses quanto = 1.0.
+    [[nodiscard]] bool canOpenPosition(
+        const Symbol &symbol, Quantity qty, Price price,
+        double quanto_multiplier = 1.0,
+        MarketType market_type = MarketType::Spot) const;
 
     /// Returns the current number of open positions.
     [[nodiscard]] int openPositionCount() const;
@@ -169,8 +238,34 @@ class PositionManager
     /// Returns a NotionalReservation with a unique reservation_id.
     /// The caller must later call consumeReservation() (on fill) or
     /// cancelReservation() (on failure) to release the budget.
+    ///
+    /// Notional = qty * price * quanto_multiplier; for spot, quanto=1.0 so
+    /// this reduces to qty * price. Futures qty is in contracts, so the
+    /// contract multiplier (e.g. 0.0001 BTC per BTC_USDT contract) must be
+    /// passed to compute the true notional value.
+    ///
+    /// The notional cap is enforced PER MARKET TYPE: totals are filtered by
+    /// market_type and compared against the per-market cap (maxPositionNotional
+    /// <Futures|Cfd|Spot>, falling back to maxPositionNotional), so a futures
+    /// position does not consume the CFD budget.
+    ///
+    /// reduce_only (M27): closing orders must never be blocked by the budget
+    /// they themselves created. When true:
+    ///   - the position-count limit (maxOpenPositions) is skipped entirely;
+    ///   - notional checks apply only to the EXCESS over the same-symbol
+    ///     opposite-side positions (excess = max(0, proposed - reverse));
+    ///   - excess <= 0 → Approved as-is (never Modified — shrinking a close
+    ///     order would leave the position half-uncovered);
+    ///   - excess > 0 → Modified/rejected against the remaining budget,
+    ///     with the reverse-covered quantity always granted.
+    /// This is the 9103 root-cause fix (2026-08-21 ETH grid review): the old
+    /// behavior counted reduce-only buy orders as fresh notional, freezing
+    /// the grid's TP re-hang cycle when the futures budget filled up.
     [[nodiscard]] NotionalReservation reserveNotional(
-        const Symbol &symbol, Quantity qty, Price price);
+        const Symbol &symbol, Quantity qty, Price price,
+        double quanto_multiplier = 1.0,
+        MarketType market_type = MarketType::Spot,
+        bool reduce_only = false, Side side = Side::Buy);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.
@@ -192,21 +287,31 @@ class PositionManager
         Symbol symbol;
         double notional;
         double qty;
+        MarketType market_type;
+        bool reduce_only{ false }; ///< Close orders don't count toward the slot limit.
     };
     std::unordered_map<std::uint64_t, PendingReservation> m_pendingReservations;
     std::uint64_t m_nextReservationId{ 1 }; ///< Monotonic reservation counter.
+
+    /// Resolve the position-notional cap for a market type: the per-market
+    /// override when set, else the global maxPositionNotional fallback.
+    [[nodiscard]] double notionalLimitFor(MarketType market_type) const noexcept;
 
     /// Generate a unique position ID from symbol, side, and counter.
     [[nodiscard]] std::string generatePositionId(const Symbol &symbol, Side side);
 
     /// Calculate unrealized PnL for a position.
-    /// Buy: (current - entry) * qty * quanto * leverage
-    /// Sell: (entry - current) * qty * quanto * leverage
-    /// Default leverage=1.0 and quanto_multiplier=1.0 make spot PnL identical
-    /// to the original formula.
+    /// Buy: (current - entry) * qty * quanto
+    /// Sell: (entry - current) * qty * quanto
+    /// Leverage is deliberately NOT part of PnL (it only scales margin); the
+    /// quanto_multiplier carries the contract-size conversion (100 oz/lot for
+    /// XAUUSD, BTC-per-contract for futures), so the result is real USD.
+    /// Defaults quanto_multiplier=1.0 make spot PnL identical to the original
+    /// formula. leverage is accepted (and ignored) for source compatibility.
     [[nodiscard]] static double calculateUnrealizedPnl(
         Side side, Price entry, Price current, Quantity qty,
         double leverage = 1.0, double quanto_multiplier = 1.0);
+
 };
 
 } // namespace pulse::risk

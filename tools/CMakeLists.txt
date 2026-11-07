@@ -81,28 +81,33 @@ target_link_libraries(test_balance_diag
         pulse::logging
 )
 
-if(PULSE_ENABLE_WEBUI)
-    add_executable(test_webui_server
-        test_webui.cpp
-    )
 
-    target_include_directories(test_webui_server
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets
-    )
 
-    target_link_libraries(test_webui_server
-        PRIVATE
-            pulse::webui
-            pulse::market
-            pulse::strategy
-            pulse::risk
-            pulse::execution
-            pulse::ai
-            pulse::exchange
-            pulse::logging
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
-            z
-    )
+add_executable(test_control_smoke
+    test_control_smoke.cpp
+)
+
+target_link_libraries(test_control_smoke
+    PRIVATE
+        pulse::control
+        pulse::core
+        pulse::logging
+)
+
+add_executable(backtest_data_check
+    backtest_data_check.cpp
+)
+
+target_link_libraries(backtest_data_check
+    PRIVATE
+        pulse::backtest
+        pulse::core
+        pulse::exchange
+        pulse::market
+        pulse::logging
+)
+
+if(PULSE_ENABLE_SQLITE)
+    target_link_libraries(backtest_data_check PRIVATE SQLiteCpp)
+    target_compile_definitions(backtest_data_check PRIVATE PULSE_ENABLE_SQLITE)
 endif()

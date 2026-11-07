@@ -34,6 +34,8 @@ struct ExecutionReport
     Timestamp submit_time;          ///< When the order was submitted.
     Timestamp fill_time;            ///< When the order was filled (or cancelled).
     OrderStatus final_status;       ///< Filled or Cancelled (terminal state).
+    std::string exchange_position_id; ///< TradFi CFD only — exchange-side position
+                                      ///< id ("" elsewhere; the close endpoint needs it).
 
     /// Default constructor — zero-initializes all fields.
     ExecutionReport()

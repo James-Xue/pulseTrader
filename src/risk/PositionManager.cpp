@@ -34,17 +34,158 @@ Result<std::string> PositionManager::openPosition(
                          MarketType::Spot, 1.0, MarginMode::Cross, 1.0, 0.0);
 }
 
+void PositionManager::syncPositionFromExchange(
+    const Symbol &symbol, Side side, Quantity qty, Price entry_price,
+    Price mark_price, MarketType market_type, double leverage,
+    MarginMode margin_mode, double quanto_multiplier, double maintenance_rate,
+    Price liquidation_price, Timestamp open_time, double sl_price,
+    double tp_price, const std::string &exchange_position_id)
+{
+    // Startup/hot reconciliation: import positions that already exist on the
+    // exchange (previous engine run, manual trading). No limit validation —
+    // the exposure is real and must be visible to the risk engine.
+    //
+    // Dedup first by exchange_position_id: a fill-tracked CFD position
+    // (e.g. "XAUUSD_Buy_1" opened via open_order) and its exchange twin
+    // share the same exchange id — importing a second "_sync" entry would
+    // double-count exposure in the risk engine and confuse displays.
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    std::string pos_id = symbol + "_"
+        + (Side::Buy == side ? "Buy" : "Sell") + "_sync";
+
+    if (!exchange_position_id.empty())
+    {
+        // Inline scan (the write lock is already held here — a helper that
+        // takes its own shared lock would self-deadlock).
+        for (const auto &[candidate_id, candidate] : m_positions)
+        {
+            if (candidate.exchange_position_id == exchange_position_id)
+            {
+                pos_id = candidate_id; // update the fill-tracked entry in place
+                break;
+            }
+        }
+    }
+
+    // Futures positions carry no exchange id: the exchange entry merges the
+    // engine's own fills with any external position on the same
+    // (symbol, side, market). Sync the _sync entry with only the EXTERNAL
+    // remainder so fill-tracked entries + _sync sum to the exchange
+    // quantity. Without this, the merged quantity is counted twice
+    // (2026-08-19 UNITREE: exchange 20 vs engine view 30).
+    double synced_qty = qty;
+    if (exchange_position_id.empty())
+    {
+        double tracked_qty = 0.0;
+        for (const auto &[candidate_id, candidate] : m_positions)
+        {
+            if (candidate_id != pos_id
+                && candidate.symbol == symbol
+                && candidate.side == side
+                && candidate.market_type == market_type)
+            {
+                tracked_qty += candidate.quantity;
+            }
+        }
+        synced_qty = std::max(0.0, qty - tracked_qty);
+    }
+
+    auto it = m_positions.find(pos_id);
+    if (m_positions.end() != it)
+    {
+        if (synced_qty <= 0.0)
+        {
+            // Fully explained by engine fills (or fully closed) — keeping a
+            // zero _sync entry would double-count the fill-tracked exposure.
+            m_positions.erase(it);
+            PULSE_LOG_INFO("risk",
+                "Position sync: dropped {} ({}, {} {} — fully covered by "
+                "engine fills)",
+                pos_id, symbol, (Side::Buy == side ? "long" : "short"), qty);
+            return;
+        }
+        // Re-sync: refresh prices/quantity in place; keep the original
+        // position_id, strategy_id (may be an engine fill) and open_time.
+        // entry_price stays the exchange average — the per-slice split
+        // between external and engine-filled lots is unknowable from the
+        // merged view (PnL of the external slice is an approximation).
+        auto &pos = it->second;
+        pos.side = side;
+        pos.quantity = synced_qty;
+        pos.entry_price = entry_price;
+        pos.market_type = market_type;
+        pos.leverage = leverage;
+        pos.margin_mode = margin_mode;
+        pos.quanto_multiplier = quanto_multiplier;
+        pos.margin_used = (leverage > 0.0)
+            ? synced_qty * entry_price * quanto_multiplier / leverage
+            : 0.0;
+        pos.liquidation_price = liquidation_price;
+        pos.current_price = mark_price;
+        pos.notional_value = synced_qty * mark_price * quanto_multiplier;
+        pos.unrealized_pnl = calculateUnrealizedPnl(
+            side, entry_price, mark_price, synced_qty, leverage,
+            quanto_multiplier);
+        pos.sl_price = sl_price;
+        pos.tp_price = tp_price;
+        if (!exchange_position_id.empty())
+        {
+            pos.exchange_position_id = exchange_position_id;
+        }
+        return;
+    }
+
+    if (synced_qty <= 0.0)
+    {
+        // Nothing external to represent — the engine's fill-tracked
+        // positions already account for the whole exchange position.
+        return;
+    }
+
+    Position pos;
+    pos.position_id = pos_id;
+    pos.symbol = symbol;
+    pos.side = side;
+    pos.quantity = synced_qty;
+    pos.entry_price = entry_price;
+    pos.current_price = mark_price;
+    pos.notional_value = synced_qty * mark_price * quanto_multiplier;
+    pos.open_time = (Timestamp{} == open_time) ? now() : open_time;
+    pos.strategy_id = ""; // Exchange-side position — no owning strategy.
+    pos.market_type = market_type;
+    pos.leverage = leverage;
+    pos.margin_mode = margin_mode;
+    pos.quanto_multiplier = quanto_multiplier;
+    pos.margin_used = (leverage > 0.0)
+        ? synced_qty * entry_price * quanto_multiplier / leverage
+        : 0.0;
+    pos.liquidation_price = liquidation_price;
+    pos.unrealized_pnl = calculateUnrealizedPnl(
+        side, entry_price, mark_price, synced_qty, leverage, quanto_multiplier);
+    pos.sl_price = sl_price;
+    pos.tp_price = tp_price;
+    pos.exchange_position_id = exchange_position_id;
+
+    m_positions[pos_id] = pos;
+    PULSE_LOG_INFO("risk",
+        "Synced exchange position {}: {} {} {} @ {} (mark {}, liq {})",
+        pos_id, symbol, (Side::Buy == side ? "long" : "short"), synced_qty,
+        entry_price, mark_price, liquidation_price);
+}
+
 Result<std::string> PositionManager::openPosition(
     const Symbol &symbol, Side side, Quantity qty, Price entry_price,
     const std::string &strategy_id,
     MarketType market_type, double leverage, MarginMode margin_mode,
-    double quanto_multiplier, double maintenance_rate)
+    double quanto_multiplier, double maintenance_rate,
+    double sl_price, double tp_price)
 {
     // Open a new position after validating all portfolio limits:
     // 1. Acquire exclusive (write) lock
     // 2. Compute proposed notional: qty * entry_price * quanto_multiplier
     //    (for spot, quanto_multiplier=1.0 so this is just qty * entry_price)
-    // 3. Check total notional + proposed <= maxPositionNotional
+    // 3. Check same-market notional + proposed <= per-market cap
     // 4. Check open position count < maxOpenPositions
     // 5. Check per-symbol notional + proposed <= maxSymbolNotional
     // 6. Generate unique position_id
@@ -53,19 +194,24 @@ Result<std::string> PositionManager::openPosition(
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     const double proposed_notional = qty * entry_price * quanto_multiplier;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // 3. Check total notional limit.
+    // 3. Check same-market total notional limit (per-market cap, so a
+    //    futures position does not consume the CFD budget).
     double total_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
     }
 
-    if (total_notional + proposed_notional > m_config.maxPositionNotional)
+    if (total_notional + proposed_notional > notional_limit)
     {
         PULSE_LOG_WARN("risk",
             "Position rejected: total notional {:.2f} + proposed {:.2f} exceeds limit {:.2f}",
-            total_notional, proposed_notional, m_config.maxPositionNotional);
+            total_notional, proposed_notional, notional_limit);
         return PulseError{ ErrorCode::PositionLimitHit,
             "Total notional limit exceeded" };
     }
@@ -114,6 +260,11 @@ Result<std::string> PositionManager::openPosition(
     pos.notional_value = proposed_notional;
     pos.open_time = now();
     pos.strategy_id = strategy_id;
+    // Exchange-native protective stops attached to the entry order (CFD):
+    // carry them onto the tracked position so get_positions reflects the
+    // protection immediately after the fill.
+    pos.sl_price = sl_price;
+    pos.tp_price = tp_price;
 
     // Futures-specific fields.
     pos.market_type = market_type;
@@ -167,11 +318,23 @@ Result<std::string> PositionManager::openPosition(
 
     PULSE_LOG_INFO("risk",
         "Opened {} position {} : {} {} {} @ {:.2f} (lev={:.1f}x, strategy: {})",
-        MarketType::Futures == market_type ? "futures" : "spot",
+        (MarketType::Futures == market_type) ? "futures"
+            : (MarketType::Cfd == market_type) ? "cfd" : "spot",
         pos_id, symbol, (Side::Buy == side ? "BUY" : "SELL"),
         qty, entry_price, leverage, strategy_id);
 
     return pos_id;
+}
+
+void PositionManager::setExchangePositionId(
+    const std::string &position_id, const std::string &exchange_position_id)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() != it)
+    {
+        it->second.exchange_position_id = exchange_position_id;
+    }
 }
 
 std::optional<double> PositionManager::closePosition(const std::string &position_id, Quantity close_qty, Price exit_price)
@@ -198,13 +361,14 @@ std::optional<double> PositionManager::closePosition(const std::string &position
     // Actual closed quantity (capped at position size for full close).
     const double closed_qty = std::min(close_qty, pos.quantity);
 
-    // Realized PnL for the closed portion.
-    //   long:  (exit - entry) * qty * quanto * leverage
-    //   short: (entry - exit) * qty * quanto * leverage
+    // Realized PnL for the closed portion. Leverage-free (same reasoning as
+    // calculateUnrealizedPnl): leverage scales margin, never PnL.
+    //   long:  (exit - entry) * qty * quanto
+    //   short: (entry - exit) * qty * quanto
     const double direction = (Side::Buy == pos.side) ? 1.0 : -1.0;
     const double realized_pnl =
         direction * (exit_price - pos.entry_price) * closed_qty
-        * pos.quanto_multiplier * pos.leverage;
+        * pos.quanto_multiplier;
 
     if (close_qty >= pos.quantity)
     {
@@ -264,6 +428,26 @@ void PositionManager::updatePrice(const std::string &position_id, Price current_
         pos.side, pos.entry_price, current_price, pos.quantity,
         pos.leverage, pos.quanto_multiplier);
     pos.notional_value = std::abs(pos.quantity * current_price * pos.quanto_multiplier);
+}
+
+bool PositionManager::removePosition(const std::string &position_id)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    return m_positions.erase(position_id) > 0;
+}
+
+void PositionManager::updateExchangeStops(const std::string &position_id,
+                                          double sl_price, double tp_price)
+{
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
+    {
+        return;
+    }
+    it->second.sl_price = sl_price;
+    it->second.tp_price = tp_price;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,28 +577,34 @@ double PositionManager::symbolNotional(const Symbol &symbol) const
 // Limit checks
 // ---------------------------------------------------------------------------
 
-bool PositionManager::canOpenPosition(const Symbol &symbol, Quantity qty, Price price) const
+bool PositionManager::canOpenPosition(
+    const Symbol &symbol, Quantity qty, Price price,
+    double quanto_multiplier, MarketType market_type) const
 {
     // Pre-check whether a new position would exceed any limit:
     // 1. Acquire shared lock
-    // 2. Compute proposed notional
-    // 3. Check total notional limit
+    // 2. Compute proposed notional (qty * price * quanto_multiplier)
+    // 3. Check same-market total notional limit (per-market cap)
     // 4. Check open position count limit
     // 5. Check per-symbol notional limit
     // 6. Return true only if all checks pass
 
     std::shared_lock<std::shared_mutex> read_lock(m_mutex);
 
-    const double proposed_notional = qty * price;
+    const double proposed_notional = qty * price * quanto_multiplier;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // 3. Check total notional limit.
+    // 3. Check same-market total notional limit.
     double total_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
     }
 
-    if (total_notional + proposed_notional > m_config.maxPositionNotional)
+    if (total_notional + proposed_notional > notional_limit)
     {
         return false;
     }
@@ -454,7 +644,8 @@ int PositionManager::openPositionCount() const
 // ---------------------------------------------------------------------------
 
 NotionalReservation PositionManager::reserveNotional(
-    const Symbol &symbol, Quantity qty, Price price)
+    const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier,
+    MarketType market_type, bool reduce_only, Side side)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -463,20 +654,33 @@ NotionalReservation PositionManager::reserveNotional(
     //
     // The reserved notional is added to m_pendingReservations, so subsequent
     // reserveNotional() calls see it and won't double-spend.
+    //
+    // Notional = qty * price * quanto_multiplier. Futures qty is in contracts
+    // (e.g. 1 BTC_USDT contract = 0.0001 BTC), so the contract multiplier
+    // converts to true notional value; spot uses quanto_multiplier = 1.0.
+    //
+    // The notional cap is PER MARKET TYPE: totals are filtered by market_type
+    // and compared against the per-market cap, so a futures position does not
+    // consume the CFD budget. Position count and per-symbol caps stay global.
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
 
     NotionalReservation res;
     res.reservation_id = m_nextReservationId++;
 
-    const double proposed_notional = qty * price;
+    const double notional_per_unit = price * quanto_multiplier;
+    const double proposed_notional = qty * notional_per_unit;
+    const double notional_limit = notionalLimitFor(market_type);
 
-    // Compute current totals under the lock.
+    // Compute current totals under the lock (same-market only for the cap).
     double total_notional = 0.0;
     double sym_notional = 0.0;
     for (const auto &[id, pos] : m_positions)
     {
-        total_notional += pos.notional_value;
+        if (pos.market_type == market_type)
+        {
+            total_notional += pos.notional_value;
+        }
         if (pos.symbol == symbol)
         {
             sym_notional += pos.notional_value;
@@ -486,20 +690,70 @@ NotionalReservation PositionManager::reserveNotional(
     // Add pending reservations to totals (prevents double-spend).
     for (const auto &[id, pend] : m_pendingReservations)
     {
-        total_notional += pend.notional;
+        if (pend.market_type == market_type)
+        {
+            total_notional += pend.notional;
+        }
         if (pend.symbol == symbol)
         {
             sym_notional += pend.notional;
         }
     }
 
+    // M27 reduce_only semantics: a close order is offset against the
+    // same-symbol opposite-side exposure — only the excess over that
+    // exposure consumes budget, and the position-count limit is skipped
+    // entirely (closing can never make the account MORE exposed).
+    double budgeted_notional = proposed_notional; // notional that must fit
+    double reverse_qty = 0.0;                     // qty covered by exposure
+    if (reduce_only)
+    {
+        // A reduce-only order closes the OPPOSITE side of the position
+        // (a reduce-only buy closes sells; a reduce-only sell closes buys).
+        double reverse_notional = 0.0;
+        for (const auto &[id, pos] : m_positions)
+        {
+            if (pos.symbol != symbol || pos.market_type != market_type)
+            {
+                continue;
+            }
+            if (opposite(pos.side) == side)
+            {
+                reverse_notional += pos.notional_value;
+            }
+        }
+        const double excess = std::max(0.0, proposed_notional - reverse_notional);
+        budgeted_notional = excess;
+        reverse_qty = (notional_per_unit > 0.0)
+                          ? std::min(qty, reverse_notional / notional_per_unit)
+                          : 0.0;
+        if (excess <= 0.0)
+        {
+            // Fully covered by existing exposure — approve as-is. NEVER
+            // Modified: shrinking a close order would leave the position
+            // half-uncovered (the 9103 grid freeze root cause).
+            res.approved = true;
+            res.decision = RiskDecision::Approved;
+            res.approved_qty = qty;
+            res.reserved_notional = proposed_notional;
+            res.reason_code = ErrorCode::Ok;
+            res.reason_message = "";
+            m_pendingReservations[res.reservation_id] = {
+                symbol, res.reserved_notional, res.approved_qty, market_type,
+                reduce_only };
+            return res;
+        }
+    }
+
     const int open_count = static_cast<int>(m_positions.size())
                          + static_cast<int>(m_pendingReservations.size());
 
+    const bool slot_ok = reduce_only || open_count < m_config.maxOpenPositions;
+
     // Check if the full order fits within all limits.
-    if (total_notional + proposed_notional <= m_config.maxPositionNotional
-        && open_count < m_config.maxOpenPositions
-        && sym_notional + proposed_notional <= m_config.maxSymbolNotional)
+    if (slot_ok
+        && total_notional + budgeted_notional <= notional_limit
+        && sym_notional + budgeted_notional <= m_config.maxSymbolNotional)
     {
         res.approved = true;
         res.decision = RiskDecision::Approved;
@@ -508,7 +762,7 @@ NotionalReservation PositionManager::reserveNotional(
         res.reason_code = ErrorCode::Ok;
         res.reason_message = "";
     }
-    else if (open_count >= m_config.maxOpenPositions)
+    else if (!slot_ok)
     {
         // Hard reject: position count limit reached.
         res.approved = false;
@@ -520,22 +774,34 @@ NotionalReservation PositionManager::reserveNotional(
     }
     else
     {
-        // Try reduced quantity.
-        const double remaining_pos = m_config.maxPositionNotional - total_notional;
+        // Try reduced quantity (same-market budget for the position cap).
+        const double remaining_pos = notional_limit - total_notional;
         const double remaining_sym = m_config.maxSymbolNotional - sym_notional;
         const double budget = std::min(remaining_pos, remaining_sym);
 
-        if (budget > 0.0 && price > 0.0)
+        if (budget > 0.0 && notional_per_unit > 0.0)
         {
-            const double reduced_qty = budget / price;
+            // reduce_only: the reverse-covered qty is always granted; only
+            // the excess gets shrunk to the remaining budget.
+            const double excess_budget = std::max(0.0, budget - reverse_qty * notional_per_unit);
+            const double reduced_qty = reduce_only
+                                           ? reverse_qty + excess_budget / notional_per_unit
+                                           : budget / notional_per_unit;
             if (reduced_qty > 0.0 && reduced_qty < qty)
             {
                 res.approved = true;
                 res.decision = RiskDecision::Modified;
                 res.approved_qty = reduced_qty;
-                res.reserved_notional = reduced_qty * price;
+                // Clamp to the granted budget: qty * price * quanto can exceed
+                // the limit by one ULP of floating point, which previously made
+                // subsequent reserveNotional() calls see a negative remaining
+                // budget and reject every later order (3002 reject loop).
+                res.reserved_notional = std::min(
+                    reduced_qty * notional_per_unit, budget + reverse_qty * notional_per_unit);
                 res.reason_code = ErrorCode::Ok;
-                res.reason_message = "Quantity reduced to fit position limit";
+                res.reason_message = reduce_only
+                                         ? "Reduce-only excess quantity reduced to fit position limit"
+                                         : "Quantity reduced to fit position limit";
             }
             else
             {
@@ -562,7 +828,8 @@ NotionalReservation PositionManager::reserveNotional(
     if (res.approved)
     {
         m_pendingReservations[res.reservation_id] = {
-            symbol, res.reserved_notional, res.approved_qty };
+            symbol, res.reserved_notional, res.approved_qty, market_type,
+            reduce_only };
 
         PULSE_LOG_INFO("risk",
             "Reserved notional: id={} {} qty={} notional={:.2f} (decision: {})",
@@ -619,6 +886,34 @@ void PositionManager::cancelReservation(std::uint64_t reservation_id)
 // Private helpers
 // ---------------------------------------------------------------------------
 
+double PositionManager::notionalLimitFor(MarketType market_type) const noexcept
+{
+    // Per-market override when set, else the global fallback cap. Keeps the
+    // cap per market type: a futures position never consumes the CFD budget.
+    switch (market_type)
+    {
+    case MarketType::Futures:
+        if (m_config.maxPositionNotionalFutures.has_value())
+        {
+            return m_config.maxPositionNotionalFutures.value();
+        }
+        break;
+    case MarketType::Cfd:
+        if (m_config.maxPositionNotionalCfd.has_value())
+        {
+            return m_config.maxPositionNotionalCfd.value();
+        }
+        break;
+    case MarketType::Spot:
+        if (m_config.maxPositionNotionalSpot.has_value())
+        {
+            return m_config.maxPositionNotionalSpot.value();
+        }
+        break;
+    }
+    return m_config.maxPositionNotional;
+}
+
 std::string PositionManager::generatePositionId(const Symbol &symbol, Side side)
 {
     ++m_nextPositionId;
@@ -630,16 +925,21 @@ double PositionManager::calculateUnrealizedPnl(
     Side side, Price entry, Price current, Quantity qty,
     double leverage, double quanto_multiplier)
 {
-    // Buy: profit when current > entry -> (current - entry) * qty * quanto * leverage
-    // Sell: profit when current < entry -> (entry - current) * qty * quanto * leverage
-    // For spot: leverage=1.0, quanto_multiplier=1.0 → original formula.
+    // Buy: profit when current > entry -> (current - entry) * qty * quanto
+    // Sell: profit when current < entry -> (entry - current) * qty * quanto
+    // Leverage is deliberately excluded: it scales MARGIN, not PnL. The
+    // quanto_multiplier carries the contract-size conversion (e.g. 100 oz per
+    // XAUUSD lot, BTC per futures contract), so the result is real USD.
+    // (leverage is accepted for source compatibility; spot passes 1.0/1.0
+    // which reduces to the original formula.)
+    (void)leverage;
     if (Side::Buy == side)
     {
-        return (current - entry) * qty * quanto_multiplier * leverage;
+        return (current - entry) * qty * quanto_multiplier;
     }
     else
     {
-        return (entry - current) * qty * quanto_multiplier * leverage;
+        return (entry - current) * qty * quanto_multiplier;
     }
 }
 

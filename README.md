@@ -1,21 +1,108 @@
 # pulseTrader
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-547%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1061%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-orange)
 
-**AI-driven scalping framework with adaptive strategy tuning via real-time social signals.**
+**A C++20 trading-engine framework for Gate.io.** Production-grade plumbing — 9 layers, 1054 tests, a JSON-RPC/MCP control plane and a Qt client — plus an **experimental, unverified** AI parameter-tuning loop.
+
+![pulseTrader desktop client](docs/images/ui-light.png)
+
+*Qt 6.12 client in light mode against the demo fixture. A dark mode is built in and toggles from the title bar. Both images are rendered by the client itself — `client/qt/packaging/screenshot.sh` — so they cannot drift from the code.*
 
 ---
 
 ## Overview
 
-pulseTrader is a C++20 quantitative trading framework purpose-built for high-frequency scalping on Gate.io. It combines a low-latency market data pipeline with a periodic AI analysis cycle that ingests live social and news signals, calls a Large Language Model, and automatically nudges strategy parameters in response to changing market conditions — all without interrupting the hot WebSocket path.
+pulseTrader is a C++20 quantitative trading framework built for high-frequency scalping on Gate.io. Its market-data hot path is deliberately separated from everything slow: a background analysis cycle can call a Large Language Model and publish parameter deltas through lock-free atomics without ever blocking the WebSocket path.
 
-The framework ships four production-ready scalping strategies out of the box and provides a clean abstract base class for adding custom strategies. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
+**That AI loop is experimental and unverified.** It is implemented, schema-validated and unit-tested, but it has never been validated in production and there is no evidence that it improves trading results. Treat it as an architectural demonstration, not as alpha. The same caution applies to the strategies themselves — see [Project status](#project-status).
 
-**Milestones M1–M13 achieved** — all 9 layers operational with full spot + futures dual-market support, TOML configuration, SQLite trade recording, EndpointRouter for spot/futures routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), WebUI with TypeScript + Vite + Golden Layout dockable panels, real-time TradingView candlestick chart, localStorage token caching and dev-mode no-auth, and a complete trading engine wiring all layers into a single runnable process.
+The framework ships six scalping strategies and a clean abstract base class for adding custom ones. Risk management, position tracking, stop-loss / take-profit logic, and SQLite trade recording are first-class components, not afterthoughts. The design philosophy is depth over breadth: one exchange, done properly.
+
+**Milestones M1–M15 achieved** — all 9 layers operational with full spot + futures dual-market support plus switchable TradFi/CFD gold (XAUUSD), TOML configuration, SQLite trade recording, EndpointRouter for market-type-aware routing, leverage-aware risk management, Gate.io testnet support (mainnet WS for market data + testnet REST for virtual fund trading), graceful shutdown (Ctrl+C exits in <1s via io_context stop + curl abort callback + ProxyTunnel poll-based cleanup), and a complete trading engine wiring all layers into a single runnable process. The WebUI was removed on the `headless` branch and replaced by a **control plane**: an embedded CLI REPL, a remote-attach `cli` REPL, an MCP (Model Context Protocol) server for LLM clients, and a JSON-RPC control socket. Single-instance enforcement prevents two engines from trading at once, and a systemd user service provides auto-start + crash restart.
+
+---
+
+## Project status
+
+This table is the honest boundary between "engineered and tested" and "hoped for".
+
+| Area | Status |
+|---|---|
+| 9-layer engine: market data, strategy, risk, execution | Implemented; 1054 automated tests green |
+| JSON-RPC control socket, MCP server, CLI REPL | Implemented and exercised |
+| Qt 6.12 desktop client (read-only) | Implemented; transport covered by unit tests |
+| **AI parameter tuning (LLM every 5 minutes)** | **Experimental, unverified.** Schema-validated and unit-tested, never validated in production; no measured effect on results |
+| **Strategy edge / profitability** | **No evidence.** A 480-combination sweep on 1-minute BTC found no robust positive expectancy; the A/B weighting experiment was stopped before a verdict |
+| Live trading | Runs against Gate.io. Treat as research code, not investment advice |
+
+---
+
+## Quick start
+
+You do not need exchange keys, a funded account or the C++ toolchain to see the
+protocol working.
+
+### 1. Run the demo engine (Docker)
+
+```bash
+docker build -f docker/demo.Dockerfile -t pulsetrader-demo .
+docker run --rm -p 8081:8081 pulsetrader-demo
+```
+
+It serves the real control-plane contract with fixed sample payloads. It is a
+fixture, not a simulator — nothing is computed from market data.
+
+### 2. Query it from a terminal
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get_status"}' | nc 127.0.0.1 8081
+```
+
+### 3. Build the Qt client and connect
+
+```bash
+cmake -S client/qt -B build_qt -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64
+cmake --build build_qt
+PULSE_CLIENT_HOST=127.0.0.1 PULSE_CLIENT_PORT=8081 ./build_qt/pulseTraderQt
+```
+
+### 4. Or drive the engine from an LLM client
+
+The control-plane method names are the MCP tool names, so an MCP client can read
+the engine directly:
+
+```bash
+python3 tools/mcp_demo.py     # discover -> tools/list -> four tool calls
+```
+
+See [docs/demo-mcp.md](docs/demo-mcp.md) for the transcript and the 60-second
+screencast script.
+
+### Building the engine itself
+
+```bash
+cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+```
+
+## What this is not
+
+- **Not a profitable bot.** No strategy here has demonstrated a robust positive
+  expectancy. The negative result is documented in
+  [Project status](#project-status).
+- **Not a simulator.** There is no paper-trading engine yet; the demo serves
+  fixed sample data. Backtesting (`./run.sh backtest`) replays stored klines and
+  does not model funding, margin, liquidation or slippage.
+- **Not multi-exchange.** Gate.io only, by design.
+- **Not an unattended money machine.** The gap analysis in
+  [docs/btc-auto-trading-gap-analysis-2026-10-04.md](docs/btc-auto-trading-gap-analysis-2026-10-04.md)
+  lists eight blockers (exchange-side stops, drawdown wiring, alerting, idempotent
+  retries, private WS replay) that must be closed before unsupervised trading.
+- **Not financial advice.**
 
 ---
 
@@ -33,7 +120,7 @@ pulseTrader is organised into nine vertical layers, each with a single well-defi
 | 6 | Strategy Engine | L3, L5 | Multi-strategy manager, abstract base, signal aggregator |
 | 7 | Risk Management | L6 | Order gate, position limits, stops, drawdown circuit breaker |
 | 8 | Order Execution | L7, L1 | Order submission, WS + REST order tracking, execution reports |
-| 9 | WebUI | All | uWebSockets server + TypeScript/Vite SPA dashboard with Golden Layout dockable panels, tiered polling (200ms–5min) |
+| 9 | Control Plane | All | CLI REPL (embedded + remote `cli`), stdio MCP server, JSON-RPC control socket (TCP 127.0.0.1:8081) |
 
 For the full architecture document including module responsibilities, key files, threading model, and design rationale, see [docs/architecture.md](docs/architecture.md).
 
@@ -41,19 +128,23 @@ For the full architecture document including module responsibilities, key files,
 
 ## Key Features
 
-- **5-minute AI heartbeat** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread.
-- **Real-time social signal ingestion** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed directly into each AI prompt.
-- **Four built-in scalping strategies** — `MomentumScalper` (EMA crossover), `OrderBookScalper` (bid/ask imbalance), `MeanReversionScalper` (Bollinger Band reversion), and `SuperTrendScalper` (ATR trend reversal), each running on its own `std::jthread`.
-- **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights updated after each AI cycle.
+- **5-minute AI heartbeat — experimental, unverified** — A dedicated background scheduler fires every 5 minutes, collects social and news context, calls an LLM (OpenAI GPT-4o or Anthropic Claude), and applies the resulting parameter deltas to live strategies without locking the market data thread. The loop runs; whether it helps is untested.
+- **Real-time social signal ingestion — experimental** — Streams tweets via X API v2 filtered stream and polls NewsAPI / CryptoPanic for crypto headlines, both fed into the AI prompt. This only feeds the unverified loop above; it has no effect on the strategies when the AI cycle is disabled.
+- **Six built-in scalping strategies** — the four base scalpers (`MomentumScalper` EMA crossover, `OrderBookScalper` bid/ask imbalance, `MeanReversionScalper` Bollinger Band reversion, `SuperTrendScalper` ATR trend reversal) plus two coin-specific ones (`EthScalper` EMA chase-short with spike filter; `EmaResonanceScalper` five-period EMA 7/14/30/60/200 full-alignment resonance), each running on its own `std::jthread`. Rules for every strategy are documented in `docs/strategies/`.
+- **Weighted signal aggregation** — When multiple strategies are active, a `SignalAggregator` combines their signals using per-strategy confidence weights. Weight updates driven by the AI cycle are part of the experimental path.
 - **Gate.io spot + futures integration** — Native REST (HMAC-SHA512 signed) and WebSocket channels for both spot and USDT perpetual futures, with EndpointRouter for market-type-aware routing, incremental order book updates, proxy tunnel support, and dual-market infrastructure (per-market REST/WS/Feed/Executor/Tracker).
 - **Testnet support** — `PULSE_NETWORK=testnet` env switch routes REST API to Gate.io testnet (`api-testnet.gateapi.io`) for virtual fund trading while using mainnet WebSocket for identical real-time market data. TOML `testnet = true` in `[exchange]` section for file-driven config. Validator rejects spot strategies in testnet mode (futures-only).
 - **Lock-free parameter hot-reload** — Strategy tunable values are stored as `std::atomic<double>`; `ParamAdvisor` updates them from the AI thread with zero locking overhead on the strategy side.
 - **Layered risk management** — Fixed, trailing, and time-based stops; partial take-profit ladders; cross-strategy position limits; daily drawdown circuit breaker; token-bucket order rate limiter; futures-specific leverage limit and margin sufficiency checks with liquidation price estimation.
-- **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, eliminating free-form parsing failures and making AI-driven parameter updates deterministic.
+- **Fixed JSON schema for AI output** — The system prompt enforces a strict JSON schema for LLM responses, so malformed output is discarded rather than parsed loosely. This makes the (still unverified) parameter updates deterministic in form, not in effect.
 - **TOML configuration** — File-driven configuration via `trading.toml` with `from_env:` syntax for sensitive values, semantic validation, and sensible defaults for all fields.
 - **SQLite trade recording** — 17-column `trades` table with WAL mode, 4 query APIs (by symbol/time/strategy, daily PnL), strategy tracking via `client_order_id`.
-- **WebUI dashboard** — uWebSockets-powered dark-theme SPA with TypeScript + Vite build pipeline, Golden Layout dockable panels (drag, resize, tab, save/restore layout), real-time TradingView candlestick chart (Chart/Table toggle), panel visibility menu bar with reset layout, tiered polling (200ms–5min), localStorage token caching (no re-prompt on refresh), and dev-mode no-auth when `authToken` is empty.
+- **Control plane (Layer 9)** — Single `pulsetrader` binary with subcommands: `trade` (default; trading engine + JSON-RPC control socket + embedded REPL when stdin is a TTY), `cli` (remote-attach REPL over the control socket), and `mcp` (stdio MCP server bridging to the control socket for LLM clients like Claude Desktop / Claude Code). 32 control-plane methods (method names = MCP tool names): `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`.
+- **Runtime control** — Per-strategy pause/resume (`pause_strategy` / `resume_strategy`, atomic `setPaused`), per-strategy one-click auto-trade switch (`set_strategy_trading` / REPL `autotrade <id> on|off`: off = signals-only, on = signals may place orders), manual trading halt (`halt_trading` / `resume_trading`), and live atomic strategy param get/set (`get_strategy_params` / `set_strategy_param`). Manual orders share the same `OrderFlowExecutor` as the signal aggregator.
 - **Trading engine** — Single `./run.sh trade` command wires all 9 layers into a runnable process with graceful shutdown (<1s: SIGINT → curl abort callback cancels in-flight REST → reverse-order stop → io_context::stop → ProxyTunnel poll+relay cleanup → SQLite close → Logger flush).
+- **Single-instance enforcement** — The engine takes an exclusive `flock` on `data/engine.lock` at startup; any second engine process (manual launch, another Claude session, a stale nohup) is refused immediately and exits. This prevents double trading — two engines placing orders independently caused the exchange position to drift from the engine view on 2026-08-16. The lock is kernel-managed, so crashes/SIGKILL leave no stale lock. Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
+- **Startup position reconciliation** — On startup the engine fetches real open positions from the exchange (`GET /futures/usdt/positions`, synced into the risk engine with entry/mark/liquidation prices, leverage and contract multiplier). Positions opened by a previous engine run or manually (e.g. SKHY shorts) are visible from the first second — displays, PnL and risk limits reflect true exposure, and a restart no longer forgets open positions. Synced ids use the `<symbol>_<Buy|Sell>_sync` form so they never collide with engine-opened ids. Note: the position-notional cap is enforced **per market type** (`maxPositionNotionalFutures/Cfd/Spot` with `maxPositionNotional` as fallback), so a large futures position blocks futures orders but not CFD orders; `maxOpenPositions` and `maxSymbolNotional` stay global.
+- **Configurable display timezone** — `[control] display_timezone` (`local` / `utc` / fixed offset like `"-04:00"` or `"+08:00"`) formats all human-readable timestamps in control-plane output (`*_str` fields in JSON-RPC responses, REPL tables, and every log line carries its UTC offset). Align the display with a phone app showing another timezone (e.g. US time vs Beijing time) so positions/orders can be cross-checked at a glance. Raw epoch fields stay untouched for machine consumption.
 
 ---
 
@@ -68,11 +159,6 @@ For the full architecture document including module responsibilities, key files,
 | String formatting | fmt | ≥ 10.0 |
 | Async I/O / timers | asio (standalone) | ≥ 1.28 |
 | WebSocket | websocketpp | ≥ 0.8.2 |
-| WebUI server | uWebSockets | vendored |
-| Charting | TradingView Lightweight Charts | ≥ 5.0 |
-| Docking UI | Golden Layout | ≥ 2.13 |
-| Frontend language | TypeScript | ≥ 5.5 |
-| Frontend build | Vite | ≥ 6.0 |
 | Config | toml11 | ≥ 4.0 |
 | SQLite | SQLiteCpp | ≥ 3.3 |
 | Testing | GTest | ≥ 1.14 |
@@ -86,18 +172,13 @@ For the full architecture document including module responsibilities, key files,
 ```
 pulseTrader/
 ├── apps/
-│   └── pulsetrader/        # Trading engine entry point (main.cpp, 9-layer wiring)
+│   └── pulsetrader/        # Single binary: trade (default) / cli / mcp subcommands
 ├── cmake/                  # CMake helper modules
 ├── docs/                   # Architecture, operational guide, API documentation
-├── frontend/               # WebUI SPA (TypeScript + Vite + Golden Layout)
-│   ├── src/                #   TypeScript modules (panels, data store, layout manager)
-│   ├── index.html          #   SPA entry point
-│   ├── package.json        #   npm dependencies
-│   ├── vite.config.ts      #   Vite build config (dev proxy to :8080)
-│   └── dist/               #   Build output (served by C++ WebServer)
 ├── src/
 │   ├── ai/                 # Layer 4 — AI analysis pipeline
 │   ├── app/                # Application-level helpers
+│   ├── control/            # Layer 9 — Control plane (JSON-RPC server, REPL, MCP, OrderFlowExecutor)
 │   ├── core/               # Config, types, errors, result
 │   ├── exchange/           # Layer 1 — Gate.io REST + WebSocket
 │   ├── execution/          # Layer 8 — Order executor + tracker
@@ -106,14 +187,11 @@ pulseTrader/
 │   ├── market/             # Layer 3 — Market data pipeline
 │   ├── risk/               # Layer 7 — Risk management (6 modules)
 │   ├── strategy/           # Layer 6 — Strategy engine (4 strategies)
-│   ├── trade_recorder/     # SQLite trade recording
-│   └── webui/              # Layer 9 — uWebSockets dashboard server
+│   └── trade_recorder/     # SQLite trade recording
 ├── tests/
 │   ├── unit/               # Unit tests (GTest)
 │   └── integration/        # Integration tests
 ├── third_party/
-│   ├── uWebSockets/        # Vendored uWebSockets source
-│   ├── uSockets/           # Vendored uSockets source
 │   └── websocketpp/        # websocketpp (git submodule)
 ├── tools/                  # Standalone test programs (smoke tests)
 ├── CMakeLists.txt
@@ -130,9 +208,8 @@ pulseTrader/
 ### Prerequisites
 
 - **CMake** ≥ 3.20
-- **vcpkg** (with `VCPKG_ROOT` environment variable set), **or** on Linux: apt-installed `libasio-dev`, `libwebsocketpp-dev`, `libsqlitecpp-dev` + vendored `third_party/uWebSockets`
+- **vcpkg** (with `VCPKG_ROOT` environment variable set), **or** on Linux: apt-installed `libasio-dev`, `libwebsocketpp-dev`, `libsqlitecpp-dev` + vendored `third_party/websocketpp`
 - A **C++20-capable compiler** (GCC ≥ 12, Clang ≥ 15, or MSVC ≥ 19.34)
-- **Node.js** ≥ 20 + **npm** (for building the WebUI frontend)
 - A **Gate.io API key and secret** with spot trading permissions
 - An **OpenAI API key** (GPT-4o) or **Anthropic API key** (Claude) for the AI analysis layer *(optional)*
 - An **X (Twitter) API v2 bearer token** for social signal ingestion *(optional)*
@@ -152,12 +229,12 @@ cmake -B build \
 # 3. Build
 cmake --build build --config Release -j$(nproc)
 
-# 4. Run tests (547 tests)
+# 4. Run tests (902 tests)
 ctest --test-dir build --output-on-failure
 ```
 
 <details>
-<summary><strong>Linux build without vcpkg</strong> (apt + vendored uWebSockets)</summary>
+<summary><strong>Linux build without vcpkg</strong> (apt + vendored websocketpp)</summary>
 
 ```bash
 # Install system dependencies
@@ -167,7 +244,7 @@ sudo apt install libasio-dev libwebsocketpp-dev libsqlitecpp-dev \
 
 # Configure (no vcpkg toolchain file needed)
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON
+      -DPULSE_ENABLE_SQLITE=ON
 
 # Build
 cmake --build build -j$(nproc)
@@ -178,7 +255,6 @@ Optional CMake flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `-DPULSE_ENABLE_WEBUI=ON` | OFF | Build Layer 9 WebUI dashboard server |
 | `-DPULSE_ENABLE_SQLITE=ON` | OFF | Build SQLite trade recorder |
 
 ### Configuration
@@ -201,8 +277,8 @@ GATE_TESTNET_API_SECRET=your_testnet_secret
 HTTPS_PROXY=http://127.0.0.1:7897
 HTTP_PROXY=http://127.0.0.1:7897
 
-# WebUI
-PULSE_WEBUI_TOKEN=your_webui_token
+# Control plane (optional; default 8081)
+PULSE_CONTROL_PORT=8081
 ```
 
 For strategy parameters, risk limits, and AI settings, copy and edit the example TOML config:
@@ -212,20 +288,46 @@ cp trading.toml.example trading.toml
 # Edit trading.toml to configure symbols, strategies, risk limits, etc.
 ```
 
+Control-plane timestamps are shown in the machine's local timezone by default. To match a phone app showing another timezone (e.g. US time vs Beijing time), set `[control] display_timezone` in `trading.toml`:
+
+```toml
+[control]
+display_timezone = "local"   # machine local time (default)
+# display_timezone = "utc"              # UTC
+# display_timezone = "-04:00"           # fixed offset, e.g. US Eastern summer time
+# display_timezone = "+08:00"           # Beijing time, explicit
+```
+
+Applies to the `*_str` human-readable timestamp fields in JSON-RPC responses and the REPL `positions`/`orders` tables; raw epoch fields remain unchanged.
+
 ### Run
 
-```bash
-# Build the frontend (required before first run or after frontend changes)
-cd frontend && npm install && npm run build && cd ..
+**Preferred: systemd user service** (auto-start at boot, crash restart, journald logs):
 
-# Start the trading engine (all 9 layers, auto-loads trading.toml if present)
+```bash
+systemctl --user start pulsetrader         # start the engine
+systemctl --user status pulsetrader        # status (active/running)
+systemctl --user restart pulsetrader       # restart (e.g. after a rebuild)
+journalctl --user -u pulsetrader -f        # live logs
+```
+
+The service sources `.env` and execs the same binary (`build_headless/.../pulsetrader --config trading.toml`). Boot-time startup is enabled via `loginctl enable-linger`. Because the engine refuses to start when `data/engine.lock` is held, at most one engine can ever run — the service and any manual launch cannot double-trade.
+
+**Manual launch** (foreground, same binary):
+
+```bash
+# Start the trading engine (all 9 layers, auto-loads trading.toml if present).
+# When stdin is a TTY an embedded REPL is enabled — type 'help' for commands.
 ./run.sh trade
 
 # Start with explicit config
 ./run.sh trade --config trading.toml
 
-# Open WebUI dashboard (browser → http://localhost:8080)
-./run.sh webui
+# Attach a remote REPL to a running engine over the control socket
+./run.sh cli
+
+# Run the stdio MCP server (bridges to the running engine's control socket)
+./run.sh mcp
 
 # Smoke test tools
 ./run.sh rest        # Test REST connection
@@ -233,29 +335,35 @@ cd frontend && npm install && npm run build && cd ..
 ./run.sh market      # Test L3 market data pipeline
 ./run.sh strategy    # Test strategy engine with mock data
 ./run.sh ai --mock   # Test AI pipeline (no real LLM call)
-./run.sh test        # Run all 547 unit tests
+./run.sh test        # Run all 902 unit tests
 ```
 
-### Frontend Development
+### MCP Client Configuration
 
-The WebUI frontend uses TypeScript + Vite with Golden Layout for dockable panels.
+The `mcp` subcommand serves the control plane's 32 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
 
 ```bash
-# One-time setup
-cd frontend && npm install
+# Claude Code
+claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml
+```
 
-# Development mode (HMR on :5173, proxies /ws to C++ backend on :8080)
-npm run dev
-
-# Production build (output to frontend/dist/, served by C++ server)
-npm run build
+```json
+// claude_desktop_config.json
+{
+  "mcpServers": {
+    "pulsetrader": {
+      "command": "/abs/path/build/apps/pulsetrader/pulsetrader",
+      "args": ["mcp", "--config", "/abs/path/trading.toml"]
+    }
+  }
+}
 ```
 
 ---
 
 ## How It Works
 
-The core innovation in pulseTrader is the separation of the latency-critical market data path from the AI analysis cycle, connected by a lock-free parameter update mechanism.
+The core architectural idea in pulseTrader is the separation of the latency-critical market data path from the slow analysis cycle, connected by a lock-free parameter update mechanism. The mechanism is real and tested; the AI half that drives it is experimental and unverified (see [Project status](#project-status)).
 
 ```
                      ┌─────────────────────────────────────┐
@@ -307,8 +415,8 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 |---|---|---|
 | M1 | End-to-end Exchange → Market Data → Execution pipeline | ✅ |
 | M2 | Automatic trading: Market Data → Strategy → Risk → Execution | ✅ |
-| M3 | AI adaptive — strategy parameters auto-tune every 5 min | ✅ |
-| M4 | Complete product — all 9 layers operational, WebUI dashboard | ✅ |
+| M3 | AI adaptive — strategy parameters auto-tune every 5 min (implemented; **unverified**) | ⚠️ |
+| M4 | Complete product — all 9 layers operational, control plane (REPL + MCP + JSON-RPC socket) | ✅ |
 | M5 | Trading engine — 9-layer wiring into runnable process | ✅ |
 | M6 | TOML config — file-driven configuration, validation, 46 tests | ✅ |
 | M7 | SQLite trade recorder — 17-column schema, 4 queries, 27 tests | ✅ |
@@ -318,6 +426,35 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 | M11 | Futures risk & PnL (leverage, margin, liquidation) | ✅ |
 | M12 | Futures execution + dual-market wiring | ✅ |
 | M13 | Testnet support — `PULSE_NETWORK` env switch, testnet URL override, validator guard | ✅ |
+| M14 | Risk-gate hardening — single-evaluation order flow (kills the 3002 reject loop + reservation leak), futures contract-multiplier notional (quanto), symmetric long/short fill tracking | ✅ |
+| M15 | Dual-direction trading (CFD gold + crypto futures, runtime-switchable) — `MarketType::Cfd`, TradFi REST paths, MT5 order schema verified live | 🚧 in progress |
+
+---
+
+## Recent Changes (2026-08-23)
+
+- **Per-strategy one-click auto-trade switch** — runtime `auto_trade` gate per strategy instance: OFF (default) = signals publish to the signal board but never place orders; ON = signals participate in aggregation and may place orders through the risk gate. One-click via MCP `set_strategy_trading` / REPL `autotrade <id> on|off` / `set_strategy_param auto_trade 0|1` (bounded + audited). The gate lives in the strategy→aggregator wiring (the aggregator output loses the strategy id); `[strategy] signal_only` now only seeds the startup default (fail-safe: restart returns to signals-only). Independent of the active-market direction gate and of manual orders. 902 tests green (898 + 4).
+- **Five-period EMA resonance strategy (`ema_resonance_scalper`)** — EMA 7/14/30/60/200 strict full-alignment resonance (all five ascending = Buy, all descending = Sell), transition-triggered entries, confidence = `clamp(|ema7−ema200|/ATR, 0, 1)`, fresh full-series EMA recompute per candle. Registered for `ETH_USDT` futures; signal-only under the current engine config. Rules doc: `docs/strategies/ema-resonance-scalper.md`. 898 tests green (891 + 7).
+- **Verification** — 902 tests green.
+
+## Recent Changes (2026-08-15)
+
+- **Dual-direction trading (M15)** — the engine now runs two runtime-switchable trading directions: TradFi CFD gold (`XAUUSD`) and crypto futures (`BTC_USDT`), with a **single active direction** at any time. Switching (`switch_direction` method / REPL `switch <futures|cfd>` / MCP tool) pauses the other direction's strategies ("strategies paused"), cancels its open orders ("all resting orders cancelled"), and resumes the new direction's; open positions stay until manually closed. The switch is ephemeral — restart returns to `active_market` in trading.toml (**default `"futures"`: CFD never trades until explicitly switched**).
+  - `MarketType::Cfd` third market type (parsers, config plumbing, `active_market`, `risk.max_leverage` 125 → 500, testnet + orderbook_scalper rejected on CFD), error codes `71xx` + `InactiveMarket 3008`
+  - L1+L8: `EndpointRouter` `/api/v4/tradfi/*` paths; `GateRestClient` 11 TradFi methods (symbols/tickers/klines/detail/assets/positions/orders/close/transfer); `OrderExecutor::buildOrderBody` static + MT5-style CFD body (`side` 2=buy/1=sell, `volume` lots, `price_type` market/trigger); `OrderTracker` REST-poll-only mode (CFD has no private WS channel)
+  - L3: `MarketFeed` REST-poll mode for CFD (ticker ~1s, 1m klines ~60s with 500-candle backfill, dedupe by open_time, `std::jthread`); `SymbolRegistry` CFD branch (`/tradfi/symbols/detail` → `contract_volume` as the quanto slot, min/step/max volume, price precision) + `mergeFrom` combining futures + CFD specs into one lookup
+  - L7: `RiskManager::evaluateCfdOrder` — margin = volume × contract_volume × price / leverage (7101/7102); CFD positions close via the dedicated `/tradfi/positions/{id}/close` endpoint (not an order)
+  - L9: `switch_direction` (17th method/tool), `get_market` market_type-aware feed selection, `open_order` defaults to the active direction, `status()` reports `active_market`, heartbeat shows CFD feed + USD balance
+  - Live-API probe (`tools/test_gate_rest --tradfi`, 2026-08-15): **MT5-style order schema confirmed** (spot-style variant rejected `INVALID_ARGUMENT`); responses wrap under `data`/`data.list`; order fields `order_id`/`state`/`finished`/`time_setup`; contract spec verified (100 oz/lot, 0.01 min/step, 15 max, leverage 20–500); CFD balance withdrawn to 0.00 (two leftover 08-14 probe orders await cancellation after the market reopens — `NOT_IN_TRADE` during close)
+- **Verification** — 632 tests green (595 + 37 new M15 tests).
+
+## Recent Changes (2026-08-14)
+
+- **Risk-gate single evaluation** — `OrderFlowExecutor` used to re-evaluate an order inside placement; a `Modified` (quantity-capped) order was then rejected against its own notional reservation, permanently exhausting the symbol budget (3002 reject loop). Evaluation now happens exactly once and the reservation is passed into placement — capped orders place correctly and failed placements release the reservation.
+- **Futures contract-multiplier notional** — risk evaluation treats a 1-contract futures order as 1 base-currency unit (1 BTC_USDT contract ≈ 6.29 USDT was sized as 1 BTC ≈ 62.9k USDT). `OrderRequest.quanto_multiplier` is now populated from the contract registry fetched at startup (`SymbolRegistry`, 919 contracts loaded), so notional = qty × price × quanto.
+- **Symmetric fill tracking** — a SELL fill with no long to close now opens a tracked short position (previously shorts were never recorded, leaving the risk gate blind to real short exposure); fills close opposite-direction positions first, then open the remainder.
+- **Verification** — 595 tests green (591 + 4 new regressions). Live mainnet verification: signals now pass the risk gate with correct 6.29 USDT notional at full 1-contract quantity; the remaining blocker was an API-key permission (`futures write`), resolved by the product pivot below.
+- **Product pivot: CFD (TradFi)** — trading direction moved from BTC_USDT perpetual futures to Gate.io's traditional-finance CFD product (gold, `XAUUSD`). The TradFi API was researched end-to-end and verified live against the account (symbols, tickers, contract specs, CFD account `mt5_uid 2017864`, 81.86 USD balance). See [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md) for the full API survey and the implementation plan. The futures engine remains operational but is halted pending the CFD integration.
 
 ---
 
@@ -326,12 +463,14 @@ The WebSocket thread and strategy threads never wait on AI I/O. The AI cycle com
 - [x] **Trading engine** — All 9 layers wired into a single runnable process
 - [x] **TOML configuration** — File-driven config with `from_env:` syntax and validation
 - [x] **SQLite trade recorder** — Persistent trade history with strategy tracking
-- [x] **WebUI dashboard** — TypeScript + Vite + Golden Layout dockable panels, real-time monitoring SPA
+- [x] **Control plane** — CLI REPL (embedded + remote `cli`), stdio MCP server, and JSON-RPC control socket (replaces the WebUI on the `headless` branch)
 - [x] **Futures support** — Gate.io USDT perpetual contracts (M10: market data, M11: risk/PnL, M12: execution + dual-market wiring)
 - [x] **Testnet support** — `PULSE_NETWORK` env switch, testnet REST + mainnet WS, TOML `testnet = true`, validator guard (M13)
-- [ ] **Backtesting engine** — Replay historical Gate.io tick data against any registered strategy with full order simulation
+- [x] **Risk-gate hardening** — single-evaluation order flow, futures quanto notional, symmetric fill tracking (M14, 2026-08-14)
+- [ ] **Dual-direction trading (M15)** — CFD (TradFi gold `XAUUSD`) + crypto futures as runtime-switchable directions. MarketType/config/exchange/execution foundation + live-API probe done (2026-08-15); L3 REST polling feed, L7 CFD risk, control-plane `switch_direction`, main.cpp wiring, tests pending. Phased plan in [docs/CFD_TRADFI.md](docs/CFD_TRADFI.md)
+- [x] **Backtesting engine (M29/M33)** — `./run.sh backtest` replays real strategies over 1m klines (any USDT-M coin, auto contract-size resolution, `--param` injection); `./run.sh kline-store` accumulates ~1-month local history daily; `./run.sh sweep` runs parameter combos. Full doc in [docs/backtest.md](docs/backtest.md). Pending: intra-bar SL/TP, funding, margin realism, multi-symbol portfolio
 - [ ] **Paper trading mode** — Full dry-run simulation with live market data but no real order submission
-- [ ] **P&L dashboard** — WebUI panel with daily/weekly/monthly P&L, win rate, and profit factor
+- [ ] **P&L reporting** — Control-plane views with daily/weekly/monthly P&L, win rate, and profit factor
 - [ ] **Additional exchange support** — Binance and OKX adapters behind the same Layer 1 interface
 - [ ] **Reinforcement learning adapter** — Replace the LLM-based `ParamAdvisor` with an RL agent trained on historical fills
 - [ ] **Portfolio-level optimisation** — Cross-symbol capital allocation using Kelly criterion and correlation-aware position sizing

@@ -113,3 +113,39 @@ TEST(MomentumScalper, ParamsHotReload)
     EXPECT_DOUBLE_EQ(12.0, scalper->params().ema_fast_period.load(std::memory_order_acquire));
     EXPECT_DOUBLE_EQ(26.0, scalper->params().ema_slow_period.load(std::memory_order_acquire));
 }
+
+// ---------------------------------------------------------------------------
+// Confidence (ATR-normalized) — regression for the price-scale bug
+//
+// 2026-08-18: the old formula divided EMA separation by price (~4397 for
+// XAUUSD), giving confidence ≈ 0.00007 — always below min_confidence, so
+// crossover signals were silently dropped and the signal board stayed empty.
+// ---------------------------------------------------------------------------
+
+TEST(MomentumScalper, ConfidenceAtrNormalized)
+{
+    // 1-point separation on 1-point ATR = full conviction.
+    EXPECT_NEAR(1.0, MomentumScalper::computeConfidence(4398.0, 4397.0, 1.0), 1e-12);
+
+    // 0.5-point separation on 1-point ATR = 0.5.
+    EXPECT_NEAR(0.5, MomentumScalper::computeConfidence(4397.5, 4397.0, 1.0), 1e-12);
+}
+
+TEST(MomentumScalper, ConfidenceScaleInvariant)
+{
+    // Same separation/ATR ratio at a 1/10000 price scale gives the same confidence.
+    EXPECT_NEAR(1.0, MomentumScalper::computeConfidence(0.4398, 0.4397, 0.0001), 1e-12);
+}
+
+TEST(MomentumScalper, ConfidenceFlatMarket)
+{
+    // Non-positive ATR (flat market) carries no conviction.
+    EXPECT_DOUBLE_EQ(0.0, MomentumScalper::computeConfidence(4398.0, 4397.0, 0.0));
+    EXPECT_DOUBLE_EQ(0.0, MomentumScalper::computeConfidence(4398.0, 4397.0, -1.0));
+}
+
+TEST(MomentumScalper, ConfidenceAtrClamped)
+{
+    // Separation larger than ATR clamps to 1.0.
+    EXPECT_DOUBLE_EQ(1.0, MomentumScalper::computeConfidence(4400.0, 4390.0, 1.0));
+}

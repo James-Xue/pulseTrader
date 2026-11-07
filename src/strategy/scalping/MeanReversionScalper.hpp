@@ -9,8 +9,11 @@
 //   5. Buy signal  — price touches or falls below lower band (oversold)
 //   6. Sell signal — price touches or rises above upper band (overbought)
 //
-// Confidence is derived from how far price has penetrated beyond the band:
-//   confidence = clamp(|price - band| / (upper - lower), 0.0, 1.0)
+// Confidence is derived from how far price has penetrated beyond the band,
+// normalized by ATR14 (falls back to band width when ATR is unavailable):
+//   confidence = clamp(|price - band| / ATR14, 0.0, 1.0)
+// (ATR normalization keeps confidence meaningful across price scales —
+// band-width ratio required ~60% of a 2σ band, near-unreachable on 1m gold)
 //
 // Data source:
 //   - onKline() reads closed candles from KlineBuffer
@@ -18,11 +21,13 @@
 //
 // Thread safety:
 //   - Runs on its own std::jthread (started by StrategyManager)
-//   - m_lastSignalTimeMs is only written from the strategy thread
+//   - Stateless between candles (cooldown timestamp lives in UnifiedScalper)
 
-#include "strategy/StrategyBase.hpp"
+#include "strategy/scalping/UnifiedScalper.hpp"
 
-#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace pulse::strategy
 {
@@ -30,36 +35,34 @@ namespace pulse::strategy
 // ---------------------------------------------------------------------------
 // MeanReversionScalper — Bollinger Band mean-reversion strategy
 // ---------------------------------------------------------------------------
-class MeanReversionScalper : public StrategyBase
+class MeanReversionScalper : public UnifiedScalper
 {
   public:
-    /// Construct with injected context.
-    explicit MeanReversionScalper(const StrategyContext &context);
+    // Inherit the UnifiedScalper(context) constructor (public API unchanged).
+    using UnifiedScalper::UnifiedScalper;
 
-    // --- StrategyBase overrides ---
-
-    [[nodiscard]] std::string name() const override;
-    [[nodiscard]] std::string id() const override;
-    [[nodiscard]] StrategyParams &params() override;
-
-    /// Called on each closed K-line candle.
+    /// Compute signal confidence from band penetration normalized by ATR.
     ///
-    /// Computes Bollinger Bands from the last N candles and emits Buy/Sell
-    /// signals when price touches or breaches the bands.
-    void onKline(const market::Kline &kline) override;
+    /// confidence = clamp(penetration / atr, 0.0, 1.0) when atr > 0,
+    /// otherwise falls back to clamp(penetration / band_width, 0.0, 1.0).
+    ///
+    /// Parameters:
+    ///   1. penetration — distance beyond the band (positive)
+    ///   2. atr         — average true range (same price units)
+    ///   3. band_width  — upper - lower band distance (fallback normalizer)
+    [[nodiscard]] static double computeConfidence(double penetration,
+        double atr,
+        double band_width);
 
-    /// Called on ticker updates — not used by this strategy.
-    void onTick(const market::Ticker &ticker) override;
+  protected:
+    // --- UnifiedScalper hooks ---
 
-    /// Called on orderbook updates — not used by this strategy.
-    void onOrderbook(const market::OrderBook &book) override;
-
-  private:
-    StrategyParams m_params;
-
-    std::int64_t m_lastSignalTimeMs{ 0 }; ///< Last signal timestamp (ms) for cooldown.
-    std::int64_t m_lastWarmupLogMs{ 0 };  ///< Throttle warmup log to every 30 s.
-    std::int64_t m_lastNoDataLogMs{ 0 }; ///< Throttle "no data" log to every 30 s.
+    [[nodiscard]] std::string className() const override;
+    [[nodiscard]] std::string idPrefix() const override;
+    [[nodiscard]] std::size_t klineNeeded() const override;
+    std::optional<EntryContext> evaluateEntry(
+        const std::vector<market::Kline> &candles) override;
+    void logSignal(const TradingSignal &sig) const override;
 };
 
 } // namespace pulse::strategy

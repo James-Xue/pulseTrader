@@ -344,6 +344,192 @@ Result<nlohmann::json> GateRestClient::request(
 }
 
 // ---------------------------------------------------------------------------
+// TradFi (CFD) endpoint wrappers
+// ---------------------------------------------------------------------------
+
+Result<nlohmann::json> GateRestClient::getCfdSymbols()
+{
+    return request("GET", EndpointRouter::cfdSymbolsPath());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdTicker(const std::string &symbol)
+{
+    return request("GET", EndpointRouter::cfdTickerPath(symbol));
+}
+
+Result<nlohmann::json> GateRestClient::getCfdKlines(const std::string &symbol, int limit)
+{
+    const std::string query = "kline_type=1m&limit=" + std::to_string(limit);
+    return request("GET", EndpointRouter::cfdKlinesPath(symbol), query);
+}
+
+// ---------------------------------------------------------------------------
+// Historical candlesticks (public, backtest data source)
+// ---------------------------------------------------------------------------
+
+Result<nlohmann::json> GateRestClient::getSpotKlines(const std::string &currency_pair,
+    const std::string &interval, std::int64_t from_sec, std::int64_t to_sec, int limit)
+{
+    // Gate rejects `limit` when `from`/`to` are present (probed 2026-08-23:
+    // "limit and from and to cannot be present at the same time").
+    std::string query = "currency_pair=" + currency_pair
+        + "&interval=" + interval
+        + "&from=" + std::to_string(from_sec)
+        + "&to=" + std::to_string(to_sec);
+    if (0 < limit)
+    {
+        query += "&limit=" + std::to_string(limit);
+    }
+    return request("GET", EndpointRouter::klinesPath(MarketType::Spot), query);
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesKlines(const std::string &contract,
+    const std::string &interval, std::int64_t from_sec, std::int64_t to_sec, int limit)
+{
+    std::string query = "contract=" + contract
+        + "&interval=" + interval
+        + "&from=" + std::to_string(from_sec)
+        + "&to=" + std::to_string(to_sec);
+    if (0 < limit)
+    {
+        query += "&limit=" + std::to_string(limit);
+    }
+    return request("GET", EndpointRouter::klinesPath(MarketType::Futures), query);
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesFundingRate(
+    const std::string &contract, int limit)
+{
+    std::string query = "contract=" + contract
+        + "&limit=" + std::to_string(limit);
+    return request("GET", EndpointRouter::fundingRatePath(), query);
+}
+
+Result<nlohmann::json> GateRestClient::getCfdSymbolsDetail(const std::vector<std::string> &symbols)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD contract details"};
+    }
+    std::string query = "symbols=";
+    for (std::size_t i = 0; i < symbols.size(); ++i)
+    {
+        if (i > 0)
+        {
+            query += ",";
+        }
+        query += symbols[i];
+    }
+    return request("GET", EndpointRouter::cfdSymbolsDetailPath(), query);
+}
+
+Result<nlohmann::json> GateRestClient::getCfdAssets()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD assets"};
+    }
+    return request("GET", EndpointRouter::cfdAssetsPath());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdPositions()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access CFD positions"};
+    }
+    return request("GET", EndpointRouter::cfdPositionsPath());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdTransfer(const std::string &asset,
+                                                       const std::string &change,
+                                                       const std::string &type)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot transfer CFD funds"};
+    }
+    nlohmann::json body;
+    body["asset"]  = asset;
+    body["change"] = change;
+    body["type"]   = type;
+    return request("POST", "/api/v4/tradfi/transactions", "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdPositionClose(const std::string &position_id,
+                                                            int close_type,
+                                                            double close_volume)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot close CFD position"};
+    }
+    nlohmann::json body;
+    body["close_type"] = close_type;
+    if (1 == close_type)
+    {
+        body["close_volume"] = std::to_string(close_volume);
+    }
+    return request("POST", EndpointRouter::cfdPositionClosePath(position_id), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::postCfdOrder(const nlohmann::json &body)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place CFD order"};
+    }
+    return request("POST", EndpointRouter::ordersPath(MarketType::Cfd), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::getCfdOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query CFD order"};
+    }
+    return request("GET", EndpointRouter::orderPath(MarketType::Cfd, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::getCfdOrders()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query CFD orders"};
+    }
+    return request("GET", EndpointRouter::ordersPath(MarketType::Cfd));
+}
+
+Result<nlohmann::json> GateRestClient::cancelCfdOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel CFD order"};
+    }
+    return request("DELETE", EndpointRouter::orderPath(MarketType::Cfd, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::putCfdPositionModify(
+    const std::string &position_id, const std::string &sl_price,
+    const std::string &tp_price)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError,
+                          "Missing API key/secret — cannot modify CFD position"};
+    }
+    // MT5-style modify: the request body carries the new protective prices
+    // as strings ("0" clears the stop). Both fields are always sent; the
+    // caller fills omitted ones with the current attached values.
+    nlohmann::json body{
+        { "price_sl", sl_price },
+        { "price_tp", tp_price },
+    };
+    return request("PUT", EndpointRouter::cfdPositionModifyPath(position_id),
+                   "", body.dump());
+}
+
+// ---------------------------------------------------------------------------
 // Public endpoint wrappers
 // ---------------------------------------------------------------------------
 
@@ -394,6 +580,36 @@ Result<nlohmann::json> GateRestClient::getFuturesAccounts()
     return request("GET", EndpointRouter::accountsPath(MarketType::Futures));
 }
 
+Result<nlohmann::json> GateRestClient::getFuturesPositions()
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot access authenticated endpoint"};
+    }
+
+    auto result = request("GET", EndpointRouter::positionsPath(MarketType::Futures));
+    if (!ok(result))
+    {
+        return result;
+    }
+
+    // The positions endpoint returns one object PER CONTRACT, including
+    // contracts with no open position (size == 0). Keep only real exposure.
+    const auto &raw = value(result);
+    nlohmann::json open = nlohmann::json::array();
+    if (raw.is_array())
+    {
+        for (const auto &p : raw)
+        {
+            if (0 != p.value("size", 0))
+            {
+                open.push_back(p);
+            }
+        }
+    }
+    return open;
+}
+
 Result<AccountBalance> GateRestClient::getFuturesAccountBalance()
 {
     auto result = getFuturesAccounts();
@@ -438,6 +654,66 @@ Result<nlohmann::json> GateRestClient::getFuturesOrder(const std::string &order_
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query futures order"};
     }
     return request("GET", EndpointRouter::orderPath(MarketType::Futures, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesOrders(const std::string &contract)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot list futures orders"};
+    }
+    const std::string query = "contract=" + contract + "&status=open";
+    return request("GET", EndpointRouter::ordersPath(MarketType::Futures), query);
+}
+
+// ---------------------------------------------------------------------------
+// Futures trigger orders (price_orders)
+// ---------------------------------------------------------------------------
+Result<nlohmann::json> GateRestClient::postFuturesPriceOrder(const nlohmann::json &body)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures trigger order"};
+    }
+    return request("POST", EndpointRouter::priceOrdersPath(MarketType::Futures), "", body.dump());
+}
+
+Result<nlohmann::json> GateRestClient::getFuturesPriceOrders(const std::string &contract)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot query futures trigger orders"};
+    }
+    // status=open: only live triggers are useful to a grid agent; finished
+    // ones are noise (each trigger creates a new object).
+    const std::string query = "contract=" + contract + "&status=open";
+    return request("GET", EndpointRouter::priceOrdersPath(MarketType::Futures), query);
+}
+
+Result<nlohmann::json> GateRestClient::cancelFuturesPriceOrder(const std::string &order_id)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot cancel futures trigger order"};
+    }
+    return request("DELETE", EndpointRouter::priceOrderPath(MarketType::Futures, order_id));
+}
+
+Result<nlohmann::json> GateRestClient::setFuturesLeverage(const std::string &contract,
+                                                          double leverage)
+{
+    if (!hasCredentials())
+    {
+        return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot set futures leverage"};
+    }
+
+    // Hedge-mode endpoint; parameters go in the QUERY STRING (not body).
+    // Cross margin: leverage=0 selects cross, cross_leverage_limit = multiple.
+    const std::string path = "/api/v4/futures/usdt/dual_comp/positions/"
+                           + contract + "/leverage";
+    const std::string query = "leverage=0&cross_leverage_limit="
+                            + std::to_string(static_cast<long long>(std::llround(leverage)));
+    return request("POST", path, query);
 }
 
 } // namespace pulse::exchange

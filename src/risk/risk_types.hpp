@@ -99,6 +99,15 @@ struct Position
     double margin_used;          ///< Margin used = qty * entry * quanto / leverage.
     Price liquidation_price;     ///< Estimated liquidation price (futures only).
     double quanto_multiplier;    ///< Contract multiplier (1.0 for spot).
+    std::string exchange_position_id; ///< Exchange-side position id (TradFi CFD
+                                      ///< only — the close endpoint requires it;
+                                      ///< the internal position_id is engine-local).
+
+    // Exchange-native protective stops (TradFi CFD only, from the position's
+    // price_sl / price_tp). 0.0 = none attached. Refreshed by position sync
+    // and by modify_sl_tp — the engine is NOT the source of truth here.
+    double sl_price;  ///< Attached stop-loss price (0 = none).
+    double tp_price;  ///< Attached take-profit price (0 = none).
 
     Position()
         : position_id{}
@@ -117,6 +126,9 @@ struct Position
         , margin_used{ 0.0 }
         , liquidation_price{ 0.0 }
         , quanto_multiplier{ 1.0 }
+        , exchange_position_id{}
+        , sl_price{ 0.0 }
+        , tp_price{ 0.0 }
     {
     }
 };

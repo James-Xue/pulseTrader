@@ -10,6 +10,7 @@
 // Unknown keys are silently ignored for forward compatibility.
 
 #include "core/config_loader.hpp"
+#include "core/TimeUtil.hpp"
 
 #include <toml.hpp>
 
@@ -120,6 +121,20 @@ double findDouble(const toml::value &tbl, const std::string &key,
 }
 
 // ---------------------------------------------------------------------------
+// findOptionalDouble — optional numeric field: std::nullopt when absent,
+// otherwise the TOML value (int or float) via findDouble.
+// ---------------------------------------------------------------------------
+std::optional<double> findOptionalDouble(const toml::value &tbl,
+                                         const std::string &key)
+{
+    if (!tbl.contains(key))
+    {
+        return std::nullopt;
+    }
+    return findDouble(tbl, key, 0.0);
+}
+
+// ---------------------------------------------------------------------------
 // parseStopMode — string to StopMode enum
 // ---------------------------------------------------------------------------
 PulseError parseStopMode(const std::string &str, StopMode &out)
@@ -162,10 +177,16 @@ PulseError parseMarketType(const std::string &str, MarketType &out)
         out = MarketType::Futures;
         return {};
     }
+    if ("cfd" == str)
+    {
+        out = MarketType::Cfd;
+        return {};
+    }
 
     return PulseError{
         ErrorCode::ConfigInvalidValue,
-        "market_type must be \"spot\" or \"futures\", got \"" + str + "\""};
+        "market_type must be \"spot\", \"futures\" or \"cfd\", got \""
+            + str + "\""};
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +208,33 @@ PulseError parseMarginMode(const std::string &str, MarginMode &out)
     return PulseError{
         ErrorCode::ConfigInvalidValue,
         "margin_mode must be \"cross\" or \"isolated\", got \"" + str + "\""};
+}
+
+// ---------------------------------------------------------------------------
+// parseOrderType — string to OrderType enum
+// ---------------------------------------------------------------------------
+PulseError parseOrderType(const std::string &str, OrderType &out)
+{
+    if ("market" == str)
+    {
+        out = OrderType::Market;
+        return {};
+    }
+    if ("post_only" == str)
+    {
+        out = OrderType::PostOnly;
+        return {};
+    }
+    if ("maker_first" == str)
+    {
+        out = OrderType::MakerFirst;
+        return {};
+    }
+
+    return PulseError{
+        ErrorCode::ConfigInvalidValue,
+        "order_type must be \"market\", \"post_only\" or \"maker_first\", got \""
+            + str + "\""};
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +365,8 @@ PulseError parseAi(const toml::value &root, AiConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "heartbeatIntervalSec",
                           static_cast<int>(out.heartbeatIntervalSec)));
+    out.stats_lookback_hours = toml::find_or(
+        sec, "stats_lookback_hours", out.stats_lookback_hours);
     out.requestTimeoutMs =
         static_cast<std::uint32_t>(
             toml::find_or(sec, "requestTimeoutMs",
@@ -529,6 +579,14 @@ PulseError parseRisk(const toml::value &root, RiskConfig &out)
                           static_cast<int>(out.maxOrdersPerSec)));
     out.maxSymbolNotional =
         findDouble(sec, "maxSymbolNotional", out.maxSymbolNotional);
+    out.maxPositionNotionalFutures =
+        findOptionalDouble(sec, "maxPositionNotionalFutures");
+    out.maxPositionNotionalCfd =
+        findOptionalDouble(sec, "maxPositionNotionalCfd");
+    out.maxPositionNotionalSpot =
+        findOptionalDouble(sec, "maxPositionNotionalSpot");
+    out.minAvailableAfterStopUsd =
+        findOptionalDouble(sec, "minAvailableAfterStopUsd");
     out.max_leverage =
         findDouble(sec, "max_leverage", out.max_leverage);
     out.max_margin_used =
@@ -592,6 +650,172 @@ PulseError parseStrategyInstance(const toml::value &tbl,
         }
     }
 
+    if (tbl.contains("order_type"))
+    {
+        std::string ot_str = toml::find<std::string>(tbl, "order_type");
+        auto err = parseOrderType(ot_str, out.order_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    out.maker_timeout_ms =
+        static_cast<std::uint32_t>(
+            toml::find_or(tbl, "maker_timeout_ms",
+                          static_cast<int>(out.maker_timeout_ms)));
+
+    // Coin-specific parameter channel: `custom_params = { key = value }`
+    // inline table (the only sub-table form legal inside an array-of-tables
+    // element). Parsed strictly — unlike the top-level "unknown keys are
+    // silently ignored" policy, a malformed custom_params is a hard error so
+    // a typo'd key type can't silently change strategy behavior.
+    if (tbl.contains("custom_params"))
+    {
+        const toml::value &cp = tbl.at("custom_params"); // Real element ref (no temporary).
+        if (!cp.is_table())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "strategy instance \"custom_params\" must be an "
+                              "inline table (e.g. custom_params = { key = 0.05 })"};
+        }
+
+        const auto &cp_table = cp.as_table(); // Keep a named reference (GCC -Wdangling-reference).
+        for (const auto &[key, value] : cp_table)
+        {
+            double parsed = 0.0;
+            if (value.is_floating())
+            {
+                parsed = value.as_floating();
+            }
+            else if (value.is_integer())
+            {
+                parsed = static_cast<double>(value.as_integer());
+            }
+            else
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance custom_params key \"" + key
+                                      + "\" must be a number (int or float)"};
+            }
+            out.custom_params[key] = parsed;
+        }
+    }
+
+    // Major-news event gate windows: `news_windows = [{ time = "...", ... }]`
+    // array of inline tables (one per scheduled event). Parsed strictly like
+    // custom_params — a typo'd event time silently disabling the gate would
+    // be dangerous. PRESET-only, no hot reload. Empty/absent = gate off.
+    if (tbl.contains("news_windows"))
+    {
+        const toml::value &nw = tbl.at("news_windows"); // Real element ref (no temporary).
+
+        if (!nw.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "strategy instance \"news_windows\" must be an "
+                              "array of tables (e.g. news_windows = [ { time = "
+                              "\"2026-09-16T18:00:00Z\" } ])"};
+        }
+
+        const auto &nw_array = nw.as_array(); // Keep a named reference (GCC -Wdangling-reference).
+        for (std::size_t i = 0; i < nw_array.size(); ++i)
+        {
+            const auto &elem = nw_array[i];
+            if (!elem.is_table())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] must be a table"};
+            }
+            const auto &win_table = elem.as_table();
+
+            NewsWindow win;
+            // time (required): ISO UTC string or bare epoch (seconds if
+            // < 1e12, else ms) — same convention as the backtest CLI.
+            if (!win_table.contains("time"))
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] missing required key \"time\""};
+            }
+            const toml::value &tv = win_table.at("time");
+            std::int64_t parsed_ms = 0;
+            if (tv.is_string())
+            {
+                if (!parseEpochMsText(tv.as_string(), parsed_ms))
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] \"time\" is not a valid ISO UTC "
+                                            "instant or epoch"};
+                }
+            }
+            else if (tv.is_integer())
+            {
+                // Route through the same digits convention (seconds/ms).
+                const std::string digits = std::to_string(tv.as_integer());
+                if (!parseEpochMsText(digits, parsed_ms))
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] \"time\" epoch out of range"};
+                }
+            }
+            else
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "strategy instance news_windows[" + std::to_string(i)
+                                      + "] \"time\" must be an ISO UTC string or "
+                                        "integer epoch"};
+            }
+            win.event_open_ms = parsed_ms;
+
+            // close_before_min / resume_after_min: optional, >= 0.0.
+            if (win_table.contains("close_before_min"))
+            {
+                const toml::value &cv = win_table.at("close_before_min");
+                if (!cv.is_floating() && !cv.is_integer())
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] close_before_min must be a number"};
+                }
+                win.close_before_min = cv.is_floating()
+                    ? cv.as_floating()
+                    : static_cast<double>(cv.as_integer());
+                if (win.close_before_min < 0.0)
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] close_before_min must be >= 0"};
+                }
+            }
+            if (win_table.contains("resume_after_min"))
+            {
+                const toml::value &rv = win_table.at("resume_after_min");
+                if (!rv.is_floating() && !rv.is_integer())
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] resume_after_min must be a number"};
+                }
+                win.resume_after_min = rv.is_floating()
+                    ? rv.as_floating()
+                    : static_cast<double>(rv.as_integer());
+                if (win.resume_after_min < 0.0)
+                {
+                    return PulseError{ErrorCode::ConfigInvalidValue,
+                                      "strategy instance news_windows[" + std::to_string(i)
+                                          + "] resume_after_min must be >= 0"};
+                }
+            }
+
+            out.news_windows.push_back(std::move(win));
+        }
+    }
+
     return {};
 }
 
@@ -611,6 +835,10 @@ PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
         static_cast<std::uint32_t>(
             toml::find_or(sec, "signal_cooldown_sec",
                           static_cast<int>(out.signal_cooldown_sec)));
+    out.signal_only =
+        toml::find_or(sec, "signal_only", out.signal_only);
+    out.preloadKlines =
+        toml::find_or(sec, "preload_klines", out.preloadKlines);
 
     if (sec.contains("instances"))
     {
@@ -652,24 +880,31 @@ PulseError parseStrategy(const toml::value &root, StrategyConfig &out)
     return {};
 }
 
-PulseError parseWebui(const toml::value &root, WebUiConfig &out)
+PulseError parseControl(const toml::value &root, ControlConfig &out)
 {
-    if (!root.contains("webui"))
+    if (!root.contains("control"))
     {
         return {};
     }
 
-    const auto &sec = root.at("webui");
+    const auto &sec = root.at("control");
 
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.bindAddress = toml::find_or(sec, "bindAddress", out.bindAddress);
     out.port = static_cast<std::uint16_t>(
         toml::find_or(sec, "port", static_cast<int>(out.port)));
-    out.authToken = toml::find_or(sec, "authToken", out.authToken);
-    out.maxClients =
-        static_cast<std::uint32_t>(
-            toml::find_or(sec, "maxClients",
-                          static_cast<int>(out.maxClients)));
+    out.displayTimezone = toml::find_or(
+        sec, "display_timezone", out.displayTimezone);
+
+    // Transport security (M-Q4). Defaults keep the socket plaintext and
+    // unauthenticated, so an untouched trading.toml behaves exactly as before.
+    out.tlsEnabled = toml::find_or(sec, "tls_enabled", out.tlsEnabled);
+    out.tlsCertPath = toml::find_or(sec, "tls_cert_path", out.tlsCertPath);
+    out.tlsKeyPath = toml::find_or(sec, "tls_key_path", out.tlsKeyPath);
+    out.tlsCaPath = toml::find_or(sec, "tls_ca_path", out.tlsCaPath);
+    out.tlsRequireClientCert = toml::find_or(
+        sec, "tls_require_client_cert", out.tlsRequireClientCert);
+    out.token = toml::find_or(sec, "token", out.token);
 
     return {};
 }
@@ -685,6 +920,162 @@ PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
 
     out.enabled = toml::find_or(sec, "enabled", out.enabled);
     out.dbPath = toml::find_or(sec, "dbPath", out.dbPath);
+    out.recordMarketData = toml::find_or(sec, "record_market", out.recordMarketData);
+    out.recordSignals = toml::find_or(sec, "record_signals", out.recordSignals);
+
+    // M31: daily kline archival sync (opt-in, defaults false).
+    out.dailyKlineSync = toml::find_or(sec, "daily_kline_sync", out.dailyKlineSync);
+    out.dailySyncHour =
+        static_cast<int>(toml::find_or(sec, "daily_sync_hour",
+                                       static_cast<int>(out.dailySyncHour)));
+
+    // M30: skip_kline_markets = ["futures"] — markets whose kline_bars
+    // persistence is disabled (ticker_ticks unaffected).
+    if (sec.contains("skip_kline_markets"))
+    {
+        const auto &arr = sec.at("skip_kline_markets");
+        if (!arr.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "sqlite.skip_kline_markets must be an array of strings"};
+        }
+
+        out.skipKlineMarkets.clear();
+        std::size_t idx = 0;
+        for (const auto &elem : arr.as_array())
+        {
+            if (!elem.is_string())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "sqlite.skip_kline_markets[" + std::to_string(idx)
+                                      + "] must be a string"};
+            }
+            MarketType mt{};
+            auto err = parseMarketType(elem.as_string(), mt);
+            if (ErrorCode::Ok != err.code)
+            {
+                return PulseError{err.code,
+                                  "sqlite.skip_kline_markets[" + std::to_string(idx)
+                                      + "]: " + err.message};
+            }
+            out.skipKlineMarkets.push_back(mt);
+            ++idx;
+        }
+    }
+
+    return {};
+}
+
+// [backtest] — kline-store / backtest tooling (M33). Optional section.
+PulseError parseBacktest(const toml::value &root, BacktestConfig &out)
+{
+    if (!root.contains("backtest"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("backtest");
+
+    out.store_db = toml::find_or(sec, "store_db", out.store_db);
+    out.contract_cache_path =
+        toml::find_or(sec, "contract_cache_path", out.contract_cache_path);
+
+    if (sec.contains("store_symbols"))
+    {
+        const auto &arr = sec.at("store_symbols");
+        if (!arr.is_array())
+        {
+            return PulseError{ErrorCode::ConfigInvalidValue,
+                              "backtest.store_symbols must be an array of strings"};
+        }
+        out.store_symbols.clear();
+        std::size_t idx = 0;
+        for (const auto &elem : arr.as_array())
+        {
+            if (!elem.is_string())
+            {
+                return PulseError{ErrorCode::ConfigInvalidValue,
+                                  "backtest.store_symbols[" + std::to_string(idx)
+                                      + "] must be a string"};
+            }
+            out.store_symbols.push_back(elem.as_string());
+            ++idx;
+        }
+    }
+    return {};
+}
+
+PulseError parseGrid(const toml::value &root, GridConfig &out)
+{
+    if (!root.contains("grid"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("grid");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.symbol = toml::find_or(sec, "symbol", out.symbol);
+    out.market_type = toml::find_or(sec, "market_type", out.market_type);
+    out.levels = toml::find_or(sec, "levels", out.levels);
+    out.qty_per_level = toml::find_or(sec, "qty_per_level", out.qty_per_level);
+    out.step_mode = toml::find_or(sec, "step_mode", out.step_mode);
+    out.step_fixed = toml::find_or(sec, "step_fixed", out.step_fixed);
+    out.step_atr_mult = toml::find_or(sec, "step_atr_mult", out.step_atr_mult);
+    out.step_min = toml::find_or(sec, "step_min", out.step_min);
+    out.step_max = toml::find_or(sec, "step_max", out.step_max);
+    out.atr_period = toml::find_or(sec, "atr_period", out.atr_period);
+    out.tp_distance_steps = toml::find_or(
+        sec, "tp_distance_steps", out.tp_distance_steps);
+    out.anchor_offset_steps = toml::find_or(
+        sec, "anchor_offset_steps", out.anchor_offset_steps);
+    out.lower_reanchor_steps = toml::find_or(
+        sec, "lower_reanchor_steps", out.lower_reanchor_steps);
+    // upper_reanchor_steps removed (M27 PR-6): no upward re-anchor exists in
+    // the v2 spec — a breakout goes to protection line A instead. A leftover
+    // key in a toml is silently ignored by find_or.
+    out.protect_line_a_steps = toml::find_or(
+        sec, "protect_line_a_steps", out.protect_line_a_steps);
+    out.protect_line_b_usd = toml::find_or(
+        sec, "protect_line_b_usd", out.protect_line_b_usd);
+    out.daily_loss_limit_usd = toml::find_or(
+        sec, "daily_loss_limit_usd", out.daily_loss_limit_usd);
+    out.daily_reset_hour = toml::find_or(
+        sec, "daily_reset_hour", out.daily_reset_hour);
+    out.reanchor_cooldown_min = toml::find_or(
+        sec, "reanchor_cooldown_min", out.reanchor_cooldown_min);
+    out.spike_freeze_min = toml::find_or(
+        sec, "spike_freeze_min", out.spike_freeze_min);
+    out.spike_pct = toml::find_or(sec, "spike_pct", out.spike_pct);
+    out.spike_atr_mult = toml::find_or(
+        sec, "spike_atr_mult", out.spike_atr_mult);
+    out.state_file = toml::find_or(sec, "state_file", out.state_file);
+    out.force = toml::find_or(sec, "force", out.force);
+
+    return {};
+}
+
+PulseError parseFundingWatch(const toml::value &root, FundingWatchConfig &out)
+{
+    if (!root.contains("funding_watch"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("funding_watch");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.threshold = toml::find_or(sec, "threshold", out.threshold);
+    out.consec_events = toml::find_or(sec, "consec_events", out.consec_events);
+    out.poll_sec = toml::find_or(sec, "poll_sec", out.poll_sec);
+    if (sec.contains("symbols") && sec.at("symbols").is_array())
+    {
+        out.symbols.clear();
+        for (const auto &sym : sec.at("symbols").as_array())
+        {
+            out.symbols.push_back(sym.as_string());
+        }
+    }
 
     return {};
 }
@@ -788,7 +1179,7 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
         return err;
     }
 
-    err = parseWebui(root, cfg.webui);
+    err = parseControl(root, cfg.control);
 
     if (ErrorCode::Ok != err.code)
     {
@@ -802,11 +1193,44 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
         return err;
     }
 
+    err = parseGrid(root, cfg.grid);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseFundingWatch(root, cfg.funding_watch);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseBacktest(root, cfg.backtest);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
     // Top-level default_market_type.
     if (root.contains("default_market_type"))
     {
         std::string mt_str = toml::find<std::string>(root, "default_market_type");
         err = parseMarketType(mt_str, cfg.default_market_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    // Top-level active_market — the single trading direction active at startup.
+    if (root.contains("active_market"))
+    {
+        std::string am_str = toml::find<std::string>(root, "active_market");
+        err = parseMarketType(am_str, cfg.active_market);
 
         if (ErrorCode::Ok != err.code)
         {

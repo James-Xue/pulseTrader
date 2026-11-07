@@ -124,6 +124,19 @@ class GateRestClient
     /// Requires valid API key and secret.
     [[nodiscard]] Result<nlohmann::json> getFuturesAccounts();
 
+    /// GET /api/v4/futures/usdt/positions — list open futures positions.
+    ///
+    /// Returns an array of position objects, one per contract, with fields:
+    /// contract, size (contracts, signed: +long/-short; 0 = no position),
+    /// entry_price, mark_price, leverage (0 = cross margin), mode,
+    /// liq_price, maintenance_rate, unrealised_pnl, margin, etc.
+    ///
+    /// Contracts without an open position (size == 0) are filtered out so
+    /// the result contains only real exposure. This is the startup
+    /// reconciliation source: positions opened by a previous engine run (or
+    /// manually) become visible to the risk engine after a restart.
+    [[nodiscard]] Result<nlohmann::json> getFuturesPositions();
+
     /// GET /api/v4/futures/usdt/accounts — fetch and parse futures account balance.
     ///
     /// Convenience wrapper around getFuturesAccounts() that returns a parsed
@@ -145,6 +158,145 @@ class GateRestClient
     ///
     /// Returns the order object with current status.
     [[nodiscard]] Result<nlohmann::json> getFuturesOrder(const std::string &order_id);
+
+    /// GET /api/v4/futures/usdt/orders?contract=X&status=open — list ALL open
+    /// futures orders for a contract from the exchange, including orders the
+    /// engine did not place itself (App-side orders, pre-restart leftovers).
+    /// The engine's tracker-based get_orders view misses those — M23 grid
+    /// management needs the exchange truth.
+    [[nodiscard]] Result<nlohmann::json> getFuturesOrders(const std::string &contract);
+
+    // -----------------------------------------------------------------------
+    // Futures trigger orders (price_orders) — the TP/SL attached to a futures
+    // position. They live on a SEPARATE endpoint from plain orders; the
+    // position's close_order field does NOT show them (2026-08-16 memo).
+    // -----------------------------------------------------------------------
+
+    /// POST /api/v4/futures/usdt/price_orders — create a futures trigger order.
+    ///
+    /// body: {"initial": {contract, size, price, tif, is_reduce_only, ...},
+    ///        "trigger": {price, rule (1=above / 2=below), price_type,
+    ///                    expiration}, "order_type": "close-short-position"}
+    /// Returns the trigger order object on success.
+    [[nodiscard]] Result<nlohmann::json> postFuturesPriceOrder(const nlohmann::json &body);
+
+    /// GET /api/v4/futures/usdt/price_orders?contract=X&status=open — list
+    /// open trigger orders for a contract (status=open filter hard-coded).
+    [[nodiscard]] Result<nlohmann::json> getFuturesPriceOrders(const std::string &contract);
+
+    // -----------------------------------------------------------------------
+    // Historical candlestick endpoints (public) — backtest data source (M29).
+    // The live feed only receives candles from the moment of subscription, so
+    // historical windows must be fetched via REST. Both endpoints return an
+    // array of candle arrays, see parseCandles() in src/backtest for the
+    // layout (which differs between spot and futures).
+    // -----------------------------------------------------------------------
+
+    /// GET /api/v4/spot/candlesticks — historical spot klines.
+    ///
+    /// Query: currency_pair=X&interval=1m&from=SEC&to=SEC&limit=N.
+    /// Timestamps are Unix seconds. Public endpoint — no credentials needed.
+    [[nodiscard]] Result<nlohmann::json> getSpotKlines(const std::string &currency_pair,
+        const std::string &interval, std::int64_t from_sec, std::int64_t to_sec,
+        int limit = 1000);
+
+    /// GET /api/v4/futures/usdt/candlesticks — historical futures klines.
+    ///
+    /// Query: contract=X&interval=1m&from=SEC&to=SEC&limit=N.
+    /// Timestamps are Unix seconds. Public endpoint — no credentials needed.
+    [[nodiscard]] Result<nlohmann::json> getFuturesKlines(const std::string &contract,
+        const std::string &interval, std::int64_t from_sec, std::int64_t to_sec,
+        int limit = 1000);
+
+    /// GET /api/v4/futures/usdt/funding_rate — USDT-M funding-rate history.
+    ///
+    /// Query: contract=X&limit=N (no from/to — retention ~180 days, newest
+    /// first). Response is a JSON array of {"r": rate-string, "t": sec}.
+    /// Public endpoint. Used by FundingWatch (harvest-window monitor).
+    [[nodiscard]] Result<nlohmann::json> getFuturesFundingRate(
+        const std::string &contract, int limit = 12);
+
+    /// DELETE /api/v4/futures/usdt/price_orders/{order_id} — cancel a trigger
+    /// order. Returns the cancelled trigger order object on success.
+    [[nodiscard]] Result<nlohmann::json> cancelFuturesPriceOrder(const std::string &order_id);
+
+    // -----------------------------------------------------------------------
+    // TradFi (CFD) endpoints — /api/v4/tradfi/*, MT5 account, USD settlement
+    // -----------------------------------------------------------------------
+
+    /// GET /api/v4/tradfi/symbols — list all CFD symbols (public).
+    [[nodiscard]] Result<nlohmann::json> getCfdSymbols();
+
+    /// GET /api/v4/tradfi/symbols/{symbol}/tickers — per-symbol CFD ticker (public).
+    [[nodiscard]] Result<nlohmann::json> getCfdTicker(const std::string &symbol);
+
+    /// GET /api/v4/tradfi/symbols/{symbol}/klines — per-symbol CFD klines.
+    ///
+    /// Query: kline_type=1m&limit=N (max 500). Times are Unix seconds.
+    [[nodiscard]] Result<nlohmann::json> getCfdKlines(const std::string &symbol, int limit = 500);
+
+    /// GET /api/v4/tradfi/symbols/detail?symbols={sym} — contract specs.
+    ///
+    /// Requires auth. Returns contract_volume, min/max/step_order_volume,
+    /// leverage/leverages[], price_precision, settlement_currency.
+    [[nodiscard]] Result<nlohmann::json> getCfdSymbolsDetail(const std::vector<std::string> &symbols);
+
+    /// GET /api/v4/tradfi/users/assets — CFD account balance (USD).
+    ///
+    /// Returns equity, balance, margin, margin_free, unrealized_pnl, storage, outable.
+    [[nodiscard]] Result<nlohmann::json> getCfdAssets();
+
+    /// POST /api/v4/tradfi/transactions — transfer funds between the main
+    /// account and the CFD (MT5) account.
+    ///
+    /// asset: "USDT" only. change: amount (≤2 decimals). type: "deposit"
+    /// (main → CFD) or "withdraw" (CFD → main).
+    [[nodiscard]] Result<nlohmann::json> postCfdTransfer(const std::string &asset,
+                                                         const std::string &change,
+                                                         const std::string &type);
+
+    /// GET /api/v4/tradfi/positions — active CFD positions.
+    [[nodiscard]] Result<nlohmann::json> getCfdPositions();
+
+    /// POST /api/v4/tradfi/positions/{position_id}/close — close a CFD position.
+    ///
+    /// close_type: 1 = partial (close_volume required), 2 = full.
+    [[nodiscard]] Result<nlohmann::json> postCfdPositionClose(const std::string &position_id,
+                                                              int close_type,
+                                                              double close_volume = 0.0);
+
+    /// POST /api/v4/tradfi/orders — place a CFD order (MT5-style body).
+    [[nodiscard]] Result<nlohmann::json> postCfdOrder(const nlohmann::json &body);
+
+    /// GET /api/v4/tradfi/orders/{order_id} — query a CFD order.
+    [[nodiscard]] Result<nlohmann::json> getCfdOrder(const std::string &order_id);
+
+    /// GET /api/v4/tradfi/orders — the open-orders list. Used for CFD order
+    /// id resolution and status polling (the single-order GET does not exist).
+    [[nodiscard]] Result<nlohmann::json> getCfdOrders();
+
+    /// DELETE /api/v4/tradfi/orders/{order_id} — cancel a CFD order.
+    [[nodiscard]] Result<nlohmann::json> cancelCfdOrder(const std::string &order_id);
+
+    /// Dynamically adjust the protective stops on an open CFD position —
+    /// PUT /tradfi/positions/{id} with price_sl / price_tp ("0" clears).
+    [[nodiscard]] Result<nlohmann::json> putCfdPositionModify(
+        const std::string &position_id, const std::string &sl_price,
+        const std::string &tp_price);
+
+    /// Set futures position leverage for a contract (dual/hedge mode).
+    ///
+    /// Gate.io applies leverage at the position level, NOT per order — a
+    /// new order silently inherits the account's current setting unless
+    /// this is called first. Cross margin semantics (engine default):
+    /// leverage="0" selects cross margin, cross_leverage_limit carries the
+    /// multiple. Uses the dual_comp (hedge mode) endpoint.
+    ///
+    /// Parameters:
+    ///   1. contract — futures contract (e.g. "BTC_USDT")
+    ///   2. leverage — leverage multiple (e.g. 10 for 10x cross margin)
+    [[nodiscard]] Result<nlohmann::json> setFuturesLeverage(const std::string &contract,
+                                                            double leverage);
 
     // -----------------------------------------------------------------------
     // Generic request (for future expansion)

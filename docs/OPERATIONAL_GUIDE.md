@@ -2,7 +2,7 @@
 
 > This document is intended for operators, explaining how to advance pulseTrader from its current state to a production-ready trading system.
 >
-> Last updated: 2026-06-23 (Candlestick chart + fast Ctrl+C shutdown + SuperTrendScalper)
+> Last updated: 2026-08-14 (M14 risk-gate hardening; product direction moved to CFD/TradFi gold)
 
 ---
 
@@ -17,6 +17,7 @@
 7. [Profitability Analysis](#7-profitability-analysis)
 8. [Risk Warnings](#8-risk-warnings)
 9. [FAQ](#9-faq)
+10. [CFD (TradFi) — Gold CFD Live Trading](#10-cfd-tradfi--gold-cfd-live-trading)
 
 ---
 
@@ -34,9 +35,15 @@
 | L6 | Strategy | EMA crossover / order book imbalance / Bollinger mean reversion / SuperTrend ATR | ✅ | 66 |
 | L7 | Risk Management | Position management / drawdown protection / rate limiting / stop-loss/take-profit / futures leverage risk control | ✅ | 104 |
 | L8 | Execution | Order lifecycle management (dual market) | ✅ | 26 |
-| L9 | WebUI | uWebSockets dark-themed SPA monitoring dashboard | ✅ | 57 |
+| L9 | Control Plane | JSON-RPC control socket (127.0.0.1:8081) + CLI REPL + stdio MCP server | ✅ | 65 |
 
-**547 tests all passing** | `main` branch only | Milestones M1–M13 all achieved
+**595 tests all passing** | `headless` branch (WebUI removed, replaced by the control plane) | Milestones M1–M14 all achieved
+
+> **2026-08-14 update** — Risk-gate hardening (M14): single-evaluation order flow
+> (fixed the 3002 reject loop + reservation leak), futures contract-multiplier
+> notional (`quanto_multiplier` from the startup contract registry), and
+> symmetric long/short fill tracking. Product direction: **CFD (TradFi) gold**
+> — see [CFD_TRADFI.md](CFD_TRADFI.md) and §10 below.
 
 ### Currently Available Commands
 
@@ -48,20 +55,21 @@
 ./run.sh market    # Test market data pipeline (WS → L3 components)
 ./run.sh strategy  # Test strategy engine (simulated market data driving 4 strategies)
 ./run.sh ai        # Test AI Pipeline (--mock mode, no real LLM calls)
-./run.sh webui     # Start WebUI monitoring dashboard (browser http://localhost:8080)
-./run.sh test      # Run all 547 unit tests
+./run.sh cli       # Attach interactive REPL to a running engine (control socket)
+./run.sh mcp       # Run stdio MCP server (bridges to the engine's control socket)
+./run.sh test      # Run all 595 unit tests
 ```
 
 ### Trading Main Program (Completed)
 
 `apps/pulsetrader/main.cpp` (~630 lines) chains all 9 layers into a complete trading system:
 
-- **Construction order**: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 WebUI
-- **Signal flow**: StrategyManager → SignalAggregator → app callback (risk check → OrderExecutor → OrderTracker)
+- **Construction order**: L2 Logger → L1 Exchange → L3 Market → L7 Risk → L8 Execution → L6 Strategy → L4 AI → L5 Heartbeat → L9 Control Plane
+- **Signal flow**: StrategyManager → SignalAggregator → app callback (risk check → OrderFlowExecutor → OrderTracker). Manual orders opened via the control plane share the same `OrderFlowExecutor`
 - **Order completion callback**: OrderTracker → PositionManager open/close + DrawdownGuard PnL update
-- **Graceful shutdown**: SIGINT/SIGTERM → atomic stop flag → reverse-order shutdown (WebUI → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger)
+- **Graceful shutdown**: SIGINT/SIGTERM → atomic stop flag → reverse-order shutdown (Control Plane → Strategy → Market → WS io_context::stop → ProxyTunnel poll+relay join → TradeRecorder → Logger)
 - **Strategy factory**: `create_strategy()` creates concrete strategy classes based on configured names (MomentumScalper / OrderBookScalper / MeanReversionScalper)
-- **Default config**: 2 strategies running on BTC_USDT, AI disabled, WebUI listening on :8080, credentials read from `.env`
+- **Default config**: 2 strategies running on BTC_USDT, AI disabled, control socket on 127.0.0.1:8081, credentials read from `.env`
 
 All existing commands are smoke test tools; `./run.sh trade` is the sole production-grade trade executor.
 
@@ -87,7 +95,7 @@ All existing commands are smoke test tools; `./run.sh trade` is the sole product
 |--------|-------------|------------------|
 | **Backtesting System** | Validate whether strategies are truly profitable using historical K-line data (currently no backtesting capability at all) | 1–2 days |
 | **Paper Trading Mode** | Gate.io testnet or local simulated matching, validate end-to-end flow | 4–6h |
-| **P&L Dashboard** | WebUI profit/loss statistics panel (daily/weekly/monthly P&L, win rate, profit/loss ratio) | 3–4h |
+| **P&L Dashboard** | Profit/loss statistics view (daily/weekly/monthly P&L, win rate, profit/loss ratio) on the control plane | 3–4h |
 
 ### Nice to Have (P2)
 
@@ -198,7 +206,7 @@ GATE_TESTNET_API_SECRET=your_testnet_secret
 
 HTTPS_PROXY=http://127.0.0.1:7897
 HTTP_PROXY=http://127.0.0.1:7897
-PULSE_WEBUI_TOKEN=your_webui_token
+PULSE_CONTROL_PORT=8081
 EOF
 
 # 5. Confirm .env is gitignored (already is)
@@ -257,8 +265,11 @@ poll_interval_ms = 500
 
 # --- Risk Control Configuration ---
 [risk]
-maxPositionNotional = 500            # Max position size 500 USDT
-maxOpenPositions = 3                 # Max 3 simultaneous open positions
+maxPositionNotional = 500            # Fallback position cap 500 USDT (per market)
+maxPositionNotionalFutures = 500     # Optional per-market override (futures)
+maxPositionNotionalCfd = 500         # Optional per-market override (CFD)
+maxPositionNotionalSpot = 500        # Optional per-market override (spot)
+maxOpenPositions = 3                 # Max 3 simultaneous open positions (all markets)
 maxDailyDrawdown = 0.02              # Daily loss ≥ 2% triggers halt
 maxDrawdown = 0.05                   # Total drawdown ≥ 5% stops everything
 maxOrdersPerSec = 5                  # Max 5 orders per second
@@ -282,23 +293,61 @@ apiKey = "from_env:OPENAI_API_KEY"
 heartbeatIntervalSec = 300           # AI analysis every 5 minutes
 requestTimeoutMs = 30000
 
-# --- WebUI Configuration ---
-[webui]
+# --- Control Plane Configuration ---
+[control]
 enabled = true
-bindAddress = "127.0.0.1"
-port = 8080
-authToken = ""                         # Empty string = no authentication (recommended for dev/testnet)
-                                       # For production, set a token or read from .env:
-                                       # authToken = "from_env:PULSE_WEBUI_TOKEN"
-maxClients = 4
+bindAddress = "127.0.0.1"              # Localhost only — do NOT expose to the network
+port = 8081                            # JSON-RPC control socket (env override: PULSE_CONTROL_PORT)
+display_timezone = "local"             # Human-readable timestamps in control output:
+                                       #   "local" (machine TZ) | "utc" | "±HH:MM"
+                                       #   e.g. "-04:00" = US Eastern summer time —
+                                       #   align with your phone app's timezone.
 ```
 
-> **WebUI Authentication Notes**:
-> - `authToken = ""` → no authentication, browser access works directly (suitable for testnet development)
-> - `authToken = "xxx"` → first visit shows an input dialog; after entering, cached in localStorage, no re-entry on refresh
-> - Can also bypass the dialog via URL parameter: `http://localhost:8080/?token=xxx`
+> **Control Socket Security Model**:
+> - The control socket binds to **127.0.0.1 only** by default and has **no authentication** — anyone who can reach the port can place orders. Keep `bindAddress = "127.0.0.1"`; never bind to `0.0.0.0` or a public interface.
+> - It speaks newline-delimited JSON-RPC 2.0 over TCP. Prefer the built-in `cli` REPL or the `mcp` server over raw socket access.
 
 ### 4.3 Start Trading
+
+**Preferred: systemd user service (auto-start + crash restart + single instance)**
+
+Install once (service file ships in `deploy/pulsetrader.service`):
+
+```bash
+cp deploy/pulsetrader.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now pulsetrader
+loginctl enable-linger $USER          # start at boot without a login session
+```
+
+```bash
+systemctl --user start pulsetrader        # start
+systemctl --user status pulsetrader       # status
+systemctl --user restart pulsetrader      # restart (e.g. after a rebuild)
+journalctl --user -u pulsetrader -f       # live logs (journald, not engine.log)
+```
+
+- Enabled at boot via `loginctl enable-linger` — no manual start needed after reboot.
+- The engine takes an exclusive `flock` on `data/engine.lock` at startup: a second
+  engine process (manual `./run.sh trade`, another Claude session, etc.) is
+  **refused immediately** — this prevents the 2026-08-16 double-engine incident
+  (two engines each trading independently, exchange position ≠ engine view).
+  Bypass with `PULSE_ALLOW_MULTI_INSTANCES=1` (not recommended).
+
+**Startup position reconciliation**: the engine imports real open positions from
+the exchange at startup (`GET /futures/usdt/positions`), so positions opened by a
+previous run or manually appear in `positions` / `get_positions` immediately —
+look for `[app] Position sync: ...` in the log. Synced positions count toward
+risk limits (that is the point — true exposure). The position-notional cap is
+enforced **per market type** (`maxPositionNotional{Futures,Cfd,Spot}` with
+`maxPositionNotional` as fallback), so a large manual futures position
+(e.g. a 5000-USDT SKHY short) blocks *futures* orders but not CFD orders;
+`maxOpenPositions` and `maxSymbolNotional` remain global. Note: startup sync
+covers futures only — CFD positions are not re-imported (CFD never trades
+unless `switch cfd` is used).
+
+**Alternative: manual launch (blocking, same binary)**
 
 ```bash
 # Terminal 1: Start trading main program
@@ -314,7 +363,7 @@ maxClients = 4
 #   - mean_reversion_scalper on ETH_USDT (500ms poll)
 # [INFO] Risk Manager: max notional 500 USDT, daily DD limit 2%
 # [INFO] AI Pipeline: heartbeat every 300s, next run in 5min
-# [INFO] WebUI: http://127.0.0.1:8080
+# [INFO] Control socket: 127.0.0.1:8081 (JSON-RPC, REPL + MCP)
 # [INFO] Trading engine started. Press Ctrl+C to stop.
 #
 # Approximately 60 seconds after startup, the system begins printing a heartbeat log line every 60 seconds:
@@ -323,11 +372,62 @@ maxClients = 4
 
 ### 4.4 Monitor Operation
 
-```bash
-# Terminal 2: Open WebUI
-# Browse to http://127.0.0.1:8080 (WebUI already configured in trading.toml)
+The WebUI was removed on the `headless` branch — monitoring and control now go through the **control plane**:
 
-# Or view logs directly
+```bash
+# Terminal 2: attach the remote REPL to the running engine (control socket)
+./run.sh cli
+
+# Or: if you started ./run.sh trade from an interactive terminal, an embedded
+# REPL is already active there (stdin is a TTY) — type 'help' for commands.
+```
+
+**REPL command reference** (`help` inside the REPL):
+
+| Command | Action |
+|---|---|
+| `status` | Engine status (uptime, feeds, halted) |
+| `account` \| `balance` | Spot + futures balance |
+| `positions` | Open positions + portfolio |
+| `orders` | Active orders + recent reports |
+| `strategies` | Registered strategies |
+| `params <id>` | Strategy params |
+| `set <id> <param> <value>` | Set strategy param (e.g. `set mom min_confidence 0.7`) |
+| `open <sym> <buy\|sell> <qty> [--type market\|limit\|post_only] [--price P] [--market spot\|futures] [--leverage N] [--reduce-only] [--client-id S] [--sl P] [--tp P]` | Open an order; `--sl`/`--tp` attach exchange-native stop-loss/take-profit (**CFD only**) |
+| `close <position_id> [qty] [price]` | Close a position |
+| `cancel <order_id>` | Cancel an open order |
+| `halt` / `resume` | Halt / resume all trading |
+| `pause <id>` / `resume-strategy <id>` | Pause / resume a single strategy |
+| `autotrade <id> on\|off` | One-click per-strategy auto-trade switch: `off` = signals-only (board visible, never orders), `on` = signals may place orders (needs the active direction to match; restart resets to config) |
+| `risk` | Risk snapshot (drawdown, rate limiter) |
+| `market <sym> [--levels N] [--klines N] [--market spot\|futures]` | Market snapshot |
+| `signals` | Signal board: latest per-strategy signals + indicators + aggregator consensus |
+| `modify <id> [--sl P] [--tp P]` | Adjust an open CFD position's exchange-native SL/TP live (0 clears a stop; omitted field keeps the current value) |
+| `sync` | Reconcile the engine position view with the exchange (imports missing positions, prunes ghosts from manual app-side closes) |
+| `help` / `quit` / `exit` | Help / leave the REPL |
+
+**Control-plane methods (= MCP tool names, 32 total)**: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`. REPL commands map 1:1 to these methods over the control socket.
+
+**Per-strategy auto-trade switch (2026-08-23)** — every strategy instance carries a runtime `auto_trade` gate: `off` = signals publish to the signal board (`get_signals` / REPL `signals`) but never place orders; `on` = signals participate in aggregation and may place orders through the normal risk gate. One-click via MCP `set_strategy_trading` / REPL `autotrade <id> on|off` / `set <id> auto_trade 0|1`. `[strategy] signal_only = true` (current default) seeds every strategy to `off` at startup — a restart returns to signals-only (fail-safe). The gate is independent of the active-market direction gate (a futures strategy also needs `switch futures` to actually trade) and of manual orders (`open_order`/`close_position` — the sub-agent's path — stay live). Each toggle is recorded in `get_param_history`. Board entries carry `ts_ms` + indicator snapshots — treat entries older than ~120 s as stale.
+
+**Hot position sync (M21)** — the engine reconciles positions against the exchange at startup, every ~10 s, and on demand (`sync_positions` / REPL `sync`): exchange-side positions are imported and local ghosts (positions closed manually in the Gate app — the user's normal habit) are pruned without a restart. **Dynamic SL/TP (M21)** — `modify_sl_tp` (REPL `modify <id> --sl P --tp P`) adjusts an open CFD position's exchange-native `price_sl`/`price_tp` over `PUT /tradfi/positions/{id}`; the stops live on the exchange, so they fire even if the engine or sub-agent dies. `get_positions` now reports each position's attached `sl_price`/`tp_price`.
+
+**MCP usage** — the `mcp` subcommand exposes the 32 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+
+```bash
+claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml
+```
+
+**MCP troubleshooting**:
+- The trading engine must be running for `tools/call` to work (each call is forwarded over the control socket). `initialize`, `server/discover` and `tools/list` work offline — the tool catalog is compiled in, so the tools appear even when the engine is down and only the calls fail.
+- The server is **dual-era**: it answers both the legacy `initialize` handshake (revisions up to 2025-11-25) and the stateless modern era (2026-07-28 and later, which has no handshake, requires `server/discover`, and requires every result to carry `resultType`). `tools/list` and `tools/call` are served under both, with nothing gated on session state.
+- If a client reports `missing required resultType`, or the tools list is empty while the server shows as Connected, the client is speaking the modern era and the server's modern path is broken — check that `server/discover` replies with `supportedVersions` (not `protocolVersions`) and that results are stamped.
+- Logs go to `logs/` as usual. In MCP mode stdout is reserved for the protocol stream, so console logging is forced off (`toConsole = false`) — diagnose MCP problems via `logs/*.log`, not stdout.
+- `./run.sh cli` reports "cannot reach engine control socket" when the engine is down — start `./run.sh trade` first.
+
+Or view logs directly:
+
+```bash
 tail -f logs/system.log      # System heartbeat (every 60s: market data rates, WS status, strategies, positions)
 tail -f logs/strategy.log    # Strategy signals + warm-up progress
 tail -f logs/exchange.log    # WS connection status
@@ -358,7 +458,7 @@ tail -f logs/ai.log          # AI analysis results
 ```bash
 # Graceful shutdown: Ctrl+C or send SIGTERM
 # Main program stops each layer in reverse order:
-#   1. L9: Stop WebUI server
+#   1. L9: Stop control plane (control socket, REPL)
 #   2. L6: Stop strategy engine (no new signals generated)
 #   3. L3: Stop market data subscriptions (WS unsubscribes channels)
 #   4. L1: Stop WS event loop (io_context::stop)
@@ -373,6 +473,42 @@ tail -f logs/ai.log          # AI analysis results
 
 ---
 
+## 4.6 Maker-First Orders (order_type / maker_timeout_ms)
+
+Strategy signals normally place market orders (taker fee — 0.05%/side on
+futures, 0.1% round trip). With `order_type = "post_only"` or
+`"maker_first"` on a strategy instance, signals instead place **post-only
+limit orders at the exact best bid (buy) / best ask (sell)** from the live
+order book (maker fee 0.02%/side — a 60% fee reduction):
+
+| Config | Behavior |
+|--------|----------|
+| `order_type = "market"` (default) | Market order, taker fee — unchanged behavior |
+| `order_type = "post_only"` | Maker order at best price; **never** crosses the spread. If no order-book data is available the signal is dropped |
+| `order_type = "maker_first"` + `maker_timeout_ms = 500` | Post-only at best price; if unfilled after the timeout, the engine cancels and re-issues a market order for the **remaining** quantity (partial fills are topped up, never doubled) |
+
+Key behavior:
+
+- **Coverage**: strategy exits flow through the same signal path, so both
+  open and close signals are maker-first. Manual `close_position` is
+  unchanged (market, or limit if a price is passed).
+- **No-chase policy**: if the exchange rejects a post-only order instantly
+  (the price moved and the order would have crossed), the engine does NOT
+  fall back to a taker order — the signal is dropped. Chasing a moved price
+  costs a scalper more than a missed signal.
+- **Book outage**: no book data → `maker_first` falls back to market
+  immediately; `post_only` drops the signal. Never a stale-priced order.
+- **Risk**: the fallback re-runs the full risk gate (rate limiter + notional
+  reservation), so a drawdown halt or direction switch mid-attempt blocks it
+  cleanly. `maker_timeout_ms` must be > 0 for `maker_first`.
+- **CFD**: not supported — the TradFi API only accepts
+  `price_type: market|trigger`. The config validator rejects any non-market
+  `order_type` on `market_type = "cfd"`.
+
+**Fee example**: 0.01 lot XAUUSD ≈ 4350 USDT notional — taker round trip
+0.10% ≈ 4.35 USDT vs maker round trip 0.04% ≈ 1.74 USDT (saves ≈ 2.6 USDT
+per round trip, if both legs fill as maker).
+
 ## 5. Key Parameter Tuning Guide
 
 ### 5.1 Strategy Parameters
@@ -384,6 +520,8 @@ tail -f logs/ai.log          # AI analysis results
 | `poll_interval_ms` | Market data polling frequency | Lower = better latency but higher CPU usage. Recommended 100–500ms |
 | `signal_aggregator_threshold` | Aggregated signal execution threshold | 0.6 = single strategy can trigger an order; with multi-strategy consensus, raise to 0.7+ |
 | `signal_cooldown_sec` | Per-symbol signal cooldown | Prevents consecutive order placement. For scalping, recommended 15–60 seconds |
+| `order_type` | `"market"` (default) / `"post_only"` / `"maker_first"` | Maker-first saves ~0.06% round-trip fees but risks missed fills in fast markets; raise `maker_timeout_ms` for liquid symbols, lower for volatile ones |
+| `maker_timeout_ms` | Maker fill wait before taker fallback (ms) | 300–1000 typical for scalping; too long = stale signals enter late, too short = rarely fills as maker |
 
 ### 5.2 EMA Crossover Strategy (momentum_scalper)
 
@@ -490,6 +628,7 @@ Tiered take-profit allows you to:
 - ✅ Use sub-accounts to isolate risk
 - ✅ IP whitelist restricts API access
 - ✅ `.env` file is gitignored
+- ✅ Control socket binds to **127.0.0.1 only** (no auth — never expose to the network)
 - ⚠️ Current configuration uses **mainnet** (not testnet) — real money
 
 ---
@@ -670,8 +809,8 @@ cat logs/strategy.log   # Abnormal signals?
 cat logs/risk.log       # Risk control triggered?
 cat logs/execution.log  # Order placement failures?
 
-# 6. WebUI
-# Open browser to http://127.0.0.1:8080 to view real-time status
+# 6. Control plane
+./run.sh cli    # Attach REPL — status / positions / risk / market to view real-time state
 ```
 
 ### Q7: No orders placed after startup?
@@ -700,9 +839,10 @@ Check the following checklist item by item:
 │              pulseTrader Operations Quick Reference      │
 ├─────────────────────────────────────────────────────────┤
 │  Start:   ./run.sh trade (auto-loads trading.toml)      │
-│  Monitor: ./run.sh webui → http://localhost:8080        │
+│  Monitor: ./run.sh cli (REPL) or embedded REPL in trade │
+│  MCP:     ./run.sh mcp — LLM clients via control socket │
 │  Stop:    Ctrl+C (<1s graceful shutdown)                │
-│  Test:    ./run.sh test (547 unit tests)                │
+│  Test:    ./run.sh test (583 unit tests)                │
 │  Logs:    tail -f logs/*.log                            │
 ├─────────────────────────────────────────────────────────┤
 │  .env:         PULSE_NETWORK / API Key / Proxy          │
@@ -717,3 +857,66 @@ Check the following checklist item by item:
 │  ⚠️  Testnet first, then small capital live trading     │
 └─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 10. CFD (TradFi) — Gold CFD Live Trading
+
+> Since 2026-08-14 the live-trading direction has moved from BTC_USDT perpetual futures to Gate.io traditional-finance CFDs (gold `XAUUSD`).
+> API research and account verification are complete (see [CFD_TRADFI.md](CFD_TRADFI.md)), and the engine extensions are implemented (M15): `MarketType::Cfd`, REST-polled market data, CFD risk control and direction switching (`switch_direction` / REPL `switch`). **Live trading is off by default** — with `active_market = "futures"` in `trading.toml` the CFD strategies stay paused and only activate after `switch cfd`.
+
+### 10.1 Current Account State (main account, measured 2026-08-14)
+
+| Item | Value |
+|---|---|
+| CFD account | Registered, `mt5_uid = 2017864` |
+| Balance / equity | **81.86 USD** (no positions) |
+| XAUUSD | Spot quote ~4348 USD/oz, 1 lot = 100 oz, minimum 0.01 lot |
+| Leverage | 20 / 50 / 100 / 200 / 500 selectable |
+| API key permissions | **CFD** is checked (futures permission is unrelated to CFD — the two are independent products) |
+
+### 10.2 Operating Notes
+
+1. **Funds transfer**: USDT → CFD account goes through `POST /api/v4/tradfi/transactions`
+   (`asset=USDT`, `type=deposit`); the CFD account settles in **USD**
+2. **Market data**: CFDs have no WebSocket, so the ticker is polled over REST (~1s) together with 1m klines (~60s; 500 bars are backfilled immediately on the first call); query it with `get_market XAUUSD`
+3. **Strategy compatibility**: momentum / mean_reversion / supertrend (kline-driven) work;
+   orderbook_scalper has no order-book data and cannot be used
+4. **Order semantics**: volume is in lots (0.01 step), side `1=sell / 2=buy`,
+   market `price_type=market`, limit `price_type=trigger`
+5. **Risk control**: notional = volume × 100 × price; margin = notional / leverage;
+   0.01 lot ≈ 4348 USD notional ≈ 8.7 USD margin (at 500×)
+6. **Manual verification before implementation**: any REST client (same signing scheme as `gate_auth.hpp`)
+   can call `/tradfi/orders` with a small size to test; once implemented, use the CLI/MCP `open` command
+
+---
+
+## 11. Local Backtest Data Accumulation (M33)
+
+> Full usage is in [backtest.md](backtest.md). The core fact: Gate REST futures 1m data only
+> keeps the most recent ~10000 bars ≈ 6.9 days; to backtest a ~1-month window **every newly
+> watched symbol has to be accumulated daily** (30 days of data only exist after 30 days).
+> Public REST, no API key needed, idempotent (an interruption of ≤ ~6.9 days heals itself;
+> gaps older than 7 days stay missing permanently).
+
+### 11.1 cron (local machine, twice a day, sleep-tolerant)
+
+```
+0 7,23 * * * ./run.sh kline-store --config trading.toml >> logs/kline_store.log 2>&1
+```
+
+(systemd user timer alternative: `OnCalendar=*-*-* 07,23:00`, ExecStart as above;
+running the engine locally does not conflict either — WAL + busy_timeout makes dual writes safe.)
+
+### 11.2 One-off import for long-watched symbols
+
+The local/historical `data/trades.db` already holds weeks of data for BTC/ETH/SNDK/UNITREE;
+import it once:
+
+```
+./run.sh kline-store --import data/trades.db --symbols BTC_USDT,SNDK_USDT
+```
+
+### 11.3 TODO
+
+- [ ] If the local machine is not reliable enough (only the VPS runs 24/7), also put kline-store on the VPS cron + rsync back to the local machine periodically.

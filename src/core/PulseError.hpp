@@ -26,7 +26,7 @@ namespace pulse
 //   6xxx   : trade recorder (SQLite)
 //   7xxx   : futures-specific (leverage, margin, liquidation)
 //   9xxx   : internal / programming errors
-//   91xx   : WebUI server errors
+//   91xx   : control plane (JSON-RPC / MCP)
 // ---------------------------------------------------------------------------
 enum class ErrorCode : std::uint32_t
 {
@@ -57,6 +57,10 @@ enum class ErrorCode : std::uint32_t
     StopLossTriggered = 3004,  ///< Position closed by stop-loss engine.
     TakeProfitTriggered = 3005, ///< Position partially/fully closed by take-profit engine.
     SymbolLimitHit = 3006,     ///< Per-symbol notional limit exceeded.
+    ManualHalt = 3007,         ///< Trading halted manually via CLI/MCP.
+    InactiveMarket = 3008,     ///< Order market_type is not the active trading direction.
+    InsufficientFreeMargin = 3009, ///< Free margin after the attached stop-loss would
+                                   ///< fall below risk.minAvailableAfterStopUsd.
 
     // AI (4xxx)
     AiResponseInvalid = 4000,  ///< LLM response could not be parsed or validated.
@@ -88,13 +92,34 @@ enum class ErrorCode : std::uint32_t
     FuturesFundingError = 7004,       ///< Funding rate settlement error.
     FuturesContractNotFound = 7005,   ///< Requested futures contract does not exist.
 
-    // WebUI (91xx)
-    WebUiBindFailed = 9100,     ///< Failed to bind to listen address/port.
-    WebUiAuthFailed = 9101,     ///< Bearer token authentication rejected.
-    WebUiHostInvalid = 9102,    ///< Host header validation failed (DNS rebinding attempt).
-    WebUiClientLimit = 9103,    ///< WebSocket client limit reached.
-    WebUiSnapshotError = 9104,  ///< Failed to assemble dashboard snapshot.
-    WebUiStaticNotFound = 9105, ///< Requested static file not found.
+    // TradFi CFD (71xx)
+    CfdLeverageExceeded = 7101,   ///< CFD leverage exceeds max_leverage or the account's available ladder.
+    CfdMarginInsufficient = 7102, ///< Not enough CFD margin (USD) to open/maintain position.
+    CfdContractNotFound = 7103,   ///< Requested CFD symbol has no contract spec.
+
+    // Control plane (91xx)
+    ControlBindFailed = 9100,      ///< Failed to bind control socket to address/port.
+    ControlInvalidRequest = 9101,  ///< JSON-RPC request malformed.
+    ControlMethodNotFound = 9102,  ///< Unknown JSON-RPC method.
+    ControlProtocolError = 9103,   ///< JSON-RPC/MCP protocol violation.
+    ControlEngineUnreachable = 9104, ///< Control socket cannot reach the engine.
+    ControlTlsInitFailed = 9105,     ///< TLS context / certificate / key setup failed.
+    ControlAuthFailed = 9106,        ///< Token authentication required or rejected.
+
+    // Grid service (92xx) — M27 engine-native grid execution service.
+    GridNotStarted = 9200,         ///< grid_status/pause/stop before grid_start.
+    GridAlreadyRunning = 9201,     ///< grid_start while already running.
+    GridNotPaused = 9202,          ///< grid_resume when the grid is not paused.
+
+    // Backtest (93xx) — historical replay engine (single-strategy MVP).
+    BacktestRangeInvalid = 9300,      ///< Requested time range is invalid (from > to).
+    BacktestDataUnavailable = 9301,   ///< No candle data for the requested range.
+    BacktestSqliteUnavailable = 9302, ///< SQLite kline_bars read failed.
+    BacktestApiFetchFailed = 9303,    ///< Gate REST kline fetch failed.
+    BacktestNoCandles = 9304,         ///< Kline load produced zero candles.
+    BacktestConfigInvalid = 9305,     ///< Backtest options/strategy config invalid.
+    BacktestContractUnknown = 9306,   ///< Symbol not in the futures contract list.
+    BacktestContractFetchFailed = 9307, ///< Could not fetch/cache the contract list.
 
     // Internal (9xxx)
     InternalError = 9000,

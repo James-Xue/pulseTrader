@@ -12,7 +12,7 @@
 ```
 L1 Exchange → L3 Market Data → L6 Strategy → L7 Risk → L8 Execution
 L5 Heartbeat → L4 AI → ParamAdvisor (atomic writes to L6)
-L2 Logging (cross-cutting) · L9 WebUI (cross-cutting, read-only, optional)
+L2 Logging (cross-cutting) · L9 Control Plane (JSON-RPC socket + CLI REPL + MCP, cross-cutting)
 ```
 
 **Key property**: the market data hot path (L1→L3→L6→L7→L8) must never block on AI inference, disk I/O, or external network calls. The AI pipeline runs on an isolated background thread (L5 heartbeat worker) and communicates with L6 via lock-free `std::atomic` parameter writes.
@@ -26,21 +26,38 @@ L2 Logging (cross-cutting) · L9 WebUI (cross-cutting, read-only, optional)
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
-# Configure without vcpkg (Linux: apt + vendored uWebSockets)
+# Configure without vcpkg (Linux: apt + vendored websocketpp)
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug \
-      -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON
+      -DPULSE_ENABLE_SQLITE=ON
 
 # Build
 cmake --build build -j$(nproc)
 
-# Run tests (547 tests)
+# Run tests (902 tests)
 ctest --test-dir build --output-on-failure
 
 # Optional features
-cmake -B build -S . -DPULSE_ENABLE_WEBUI=ON -DPULSE_ENABLE_SQLITE=ON -DPULSE_ENABLE_TOML=ON
+cmake -B build -S . -DPULSE_ENABLE_SQLITE=ON
 ```
 
-Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_party/`** (Linux alternative). On Linux, uWebSockets/uSockets are vendored in `third_party/`; do NOT add them to `vcpkg.json` if building without vcpkg.
+Dependencies are managed by **vcpkg** (preferred) or **apt + vendored `third_party/`** (Linux alternative). On Linux, websocketpp is vendored in `third_party/`; do NOT add it to `vcpkg.json` if building without vcpkg.
+
+## Run Modes
+
+`./run.sh` supports `{trade|cli|mcp|backtest|kline-store|sweep|rest|ws|market|strategy|ai|test}` (the `webui` mode was removed with the WebUI):
+
+- `./run.sh trade` — trading engine (default subcommand `trade`); embeds a REPL when stdin is a TTY, and opens the JSON-RPC control socket (TCP 127.0.0.1:8081, `[control]` TOML section, `PULSE_CONTROL_PORT` env override)
+- `./run.sh cli` — remote-attach REPL over the control socket (auto-loads `trading.toml`; the engine must be running)
+- `./run.sh mcp` — stdio MCP server bridging to the control socket (auto-loads `trading.toml`), for LLM clients like Claude Desktop / Claude Code
+- `./run.sh backtest` — offline 1m-kline replay of real strategies on ANY USDT-M symbol (`--param` injection, auto quanto); `./run.sh kline-store` accumulates daily history; `./run.sh sweep` runs parameter combos. See [docs/backtest.md](docs/backtest.md)
+
+**Production deployment**: the engine runs as the systemd user service `pulsetrader.service` (`~/.config/systemd/user/`, `loginctl enable-linger`) — auto-start at boot, `Restart=on-failure`, journald logs (`journalctl --user -u pulsetrader -f`). Restart after rebuilding: `systemctl --user restart pulsetrader`.
+
+**Single instance**: `runTrade()` takes an exclusive `flock` on `data/engine.lock` and exits if another engine holds it. NEVER start a second engine (manual `./run.sh trade`, another session, a nohup) while one is running — two engines trade independently and the engine view drifts from the exchange position (2026-08-16 incident). `PULSE_ALLOW_MULTI_INSTANCES=1` bypasses the lock for deliberate multi-instance setups only. `cli`/`mcp` subcommands must NOT take the lock.
+
+## Control Plane Rule
+
+The control socket speaks newline-delimited JSON-RPC 2.0 over TCP. **Method names on the control socket ARE the MCP tool names** — keep them identical when adding a method. The 32 methods/tools are: `get_status`, `get_account`, `get_positions`, `get_orders`, `list_strategies`, `get_strategy_params`, `set_strategy_param`, `set_strategy_trading`, `open_order`, `close_position`, `cancel_order`, `halt_trading`, `resume_trading`, `get_risk`, `get_market`, `pause_strategy`, `resume_strategy`, `switch_direction`, `get_signals`, `sync_positions`, `modify_sl_tp`, `get_param_history`, `get_strategy_performance`, `grid_start`, `grid_status`, `grid_pause`, `grid_resume`, `grid_stop`, `place_trigger_order`, `list_trigger_orders`, `list_futures_orders`, `cancel_trigger_order`. REPL commands in `CommandParser` map to these methods. Manual orders and the signal aggregator both flow through `OrderFlowExecutor` (Layer 8). **Per-strategy execution gate**: each strategy carries a runtime `auto_trade` flag (StrategyParams, audited); signals from disabled strategies still publish to the `SignalBoard` but never enter the aggregator — the gate lives in the strategy→aggregator wiring in `main.cpp`, NOT in `OrderFlowExecutor::onSignal` (the aggregator output loses the strategy id). `[strategy] signal_only = true` seeds every strategy's `auto_trade` to OFF at startup (fail-safe on restart); flip a single strategy at runtime via `set_strategy_trading` / REPL `autotrade <id> on|off`. The gate is independent of the active-market direction gate and of manual orders (`open_order` — the sub-agent's path — stays live). `get_signals` reads the `SignalBoard` (strategy signals + indicator snapshots + aggregator consensus). `sync_positions` reconciles the engine position view against the exchange (futures + CFD) and prunes local ghosts from manual app-side closes (runs at startup, every ~10s, and on demand). `modify_sl_tp` dynamically adjusts an open CFD position's exchange-native price_sl/price_tp (CFD only; 0 clears a stop).
 
 ---
 
@@ -119,7 +136,7 @@ All new code needs unit tests. Integration tests are required for any cross-laye
 
 ## Things to Avoid
 
-1. **Don't add Boost.** The project uses standalone `asio`, not `boost::asio`. `uWebSockets` was chosen over `crow`/`boost::beast` specifically to avoid a Boost dependency.
+1. **Don't add Boost.** The project uses standalone `asio`, not `boost::asio`. `websocketpp` was chosen over `crow`/`boost::beast` specifically to avoid a Boost dependency. (The WebUI's uWebSockets/uSockets were removed on the `headless` branch; only `third_party/websocketpp` remains vendored.)
 2. **Don't add new exchange abstractions.** pulseTrader targets Gate.io only — depth of integration over breadth.
 3. **Don't put blocking I/O on the market data thread.** AI calls, file writes, and REST requests go on dedicated background threads.
 4. **Don't parse LLM responses as free text.** AI output must conform to the fixed JSON schema in `analysis_result.hpp`. Validation failure → discard, keep old params.
@@ -133,7 +150,7 @@ All new code needs unit tests. Integration tests are required for any cross-laye
 - `docs/highLevelArchitecture.md` — condensed visual overview
 - `docs/howItWorks.md` — narrative walkthrough
 - `docs/implementation-roadmap.md` — phased build order (L2→L1→L3→L8→L7→L6→L5+L4→L9)
-- `frontend/` — WebUI SPA (vanilla JS) with TradingView Lightweight Charts v5 for K-line candlestick chart
+- `src/control/` — Layer 9 control plane: `JsonRpcServer` (TCP socket), `CommandParser` (REPL), `McpServer` (stdio MCP), `ControlClient`, `EngineServices`, `OrderFlowExecutor`
 
 When making architectural changes, update `architecture.md` to keep it as the source of truth.
 
@@ -144,6 +161,7 @@ When making architectural changes, update `architecture.md` to keep it as the so
 - Commit messages: conventional style (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
 - Keep commits atomic — one logical change per commit.
 - Don't commit API keys, secrets, or `.env` files. The `.gitignore` already covers `.claude/` and build artifacts.
+- **Every commit must be pushed to origin immediately** (user rule, 2026-08-23). Never leave local commits unpushed — after any commit, run `git push` (branch `headless`; on SSH failure, clear the ControlMaster first and retry).
 
 ---
 

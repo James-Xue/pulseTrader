@@ -4,6 +4,8 @@
 
 add_executable(pulsetrader
     main.cpp
+    backtest_cli.cpp
+    kline_store_cli.cpp
 )
 
 target_link_libraries(pulsetrader
@@ -19,22 +21,9 @@ target_link_libraries(pulsetrader
         pulse::core
 )
 
-if(PULSE_ENABLE_WEBUI)
-    target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_WEBUI=1)
-
-    target_include_directories(pulsetrader
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/third_party/uWebSockets
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets
-    )
-
-    target_link_libraries(pulsetrader
-        PRIVATE
-            pulse::webui
-            ${PROJECT_SOURCE_DIR}/third_party/uSockets/uSockets.a
-            z
-    )
-endif()
+target_link_libraries(pulsetrader PRIVATE pulse::control)
+target_link_libraries(pulsetrader PRIVATE pulse::backtest)
+target_link_libraries(pulsetrader PRIVATE pulse::funding)
 
 if(PULSE_ENABLE_SQLITE)
     target_compile_definitions(pulsetrader PRIVATE PULSE_ENABLE_SQLITE=1)

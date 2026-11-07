@@ -24,8 +24,10 @@
 //   - Pipeline execution happens on TaskQueue worker thread (isolated)
 
 #include "ai/AiPipeline.hpp"
+#include "ai/PipelineContext.hpp"
 #include "core/config.hpp"
 #include "heartbeat/TaskQueue.hpp"
+#include "strategy/StrategyHandle.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -49,11 +51,14 @@ class HeartbeatScheduler
     /// Parameters:
     ///   1. config     — AiConfig with heartbeat interval and retry settings
     ///   2. pipeline   — reference to the AiPipeline to execute on each beat
-    ///   3. allParams — mutable pointers to each strategy's StrategyParams;
-    ///                   the AI pipeline writes deltas to all of them
+    ///   3. strategies — strategy identity + params handles; the AI pipeline
+    ///                   writes deltas to all of them
+    ///   4. snapshot_provider — optional live-context collector; when absent
+    ///                   (or failing) the cycle degrades to an empty context
     HeartbeatScheduler(const AiConfig &config,
                        ai::AiPipeline &pipeline,
-                       std::vector<strategy::StrategyParams *> allParams);
+                       std::vector<strategy::StrategyHandle> strategies,
+                       ai::SnapshotProvider snapshot_provider = {});
 
     /// Destructor — calls stop() if still running.
     ~HeartbeatScheduler();
@@ -95,7 +100,8 @@ class HeartbeatScheduler
 
     AiConfig m_config;                            ///< Heartbeat configuration.
     ai::AiPipeline &m_pipeline;                   ///< AI pipeline reference.
-    std::vector<strategy::StrategyParams *> m_allParams; ///< Per-strategy params.
+    std::vector<strategy::StrategyHandle> m_strategies; ///< Strategy handles.
+    ai::SnapshotProvider m_snapshotProvider;      ///< Live context collector.
 
     asio::io_context m_ioCtx;                    ///< ASIO I/O context for timer.
     asio::steady_timer m_timer;                   ///< Periodic timer.

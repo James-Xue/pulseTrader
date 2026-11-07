@@ -8,7 +8,6 @@
 #   ./run.sh market     Test market data pipeline
 #   ./run.sh strategy   Test strategy engine
 #   ./run.sh ai         Test AI Pipeline (--mock mode)
-#   ./run.sh webui      Start WebUI server
 #   ./run.sh test       Run all unit tests
 
 set -euo pipefail
@@ -24,18 +23,24 @@ else
     echo "   Create .env with GATE_API_KEY and GATE_API_SECRET"
 fi
 
-BUILD_DIR="build"
+# Prefer the headless build if present (stale `build/` predates subcommand argv fix)
+BUILD_DIR="build_headless"
+[ -d "$BUILD_DIR" ] || BUILD_DIR="build"
 
 usage() {
-    echo "Usage: $0 {trade|rest|ws|market|strategy|ai|webui|test} [args...]"
+    echo "Usage: $0 {trade|cli|mcp|backtest|rest|ws|market|strategy|ai|test} [args...]"
     echo ""
     echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
+    echo "  cli [--config <path>]   Attach REPL to running engine"
+    echo "  mcp [--config <path>]   Run stdio MCP server (bridges to engine)"
+    echo "  backtest ...            Offline strategy replay (M29/M33), see --help"
+    echo "  kline-store ...         Daily 1m kline accumulation (M33), see --help"
+    echo "  sweep ...               Parameter sweep over backtest (M33)"
     echo "  rest      Test Gate.io REST API"
     echo "  ws        Test Gate.io WebSocket"
     echo "  market    Test market data pipeline"
     echo "  strategy  Test strategy engine"
     echo "  ai        Test AI Pipeline (mock)"
-    echo "  webui     Start WebUI server"
     echo "  test      Run all unit tests"
     exit 1
 }
@@ -68,6 +73,27 @@ case "$1" in
         echo "=== Market Data Pipeline ==="
         "$BUILD_DIR/tools/test_market_feed"
         ;;
+    cli)
+        echo "=== Control CLI (attach to running engine) ==="
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" cli --config trading.toml
+        ;;
+    backtest)
+        shift
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" backtest "$@"
+        ;;
+    kline-store)
+        shift
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" kline-store "$@"
+        ;;
+    sweep)
+        shift
+        python3 "$(dirname "$0")/tools/backtest_sweep.py" "$@"
+        ;;
+    mcp)
+        # MCP speaks the stdio protocol: stdout must be pure JSON-RPC, so no
+        # echo output is allowed to pollute it.
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
+        ;;
     strategy)
         echo "=== Strategy Engine ==="
         "$BUILD_DIR/tools/test_strategy"
@@ -75,10 +101,6 @@ case "$1" in
     ai)
         echo "=== AI Pipeline (mock) ==="
         "$BUILD_DIR/tools/test_ai_pipeline" --mock
-        ;;
-    webui)
-        echo "=== WebUI Server ==="
-        "$BUILD_DIR/tools/test_webui_server"
         ;;
     test)
         echo "=== Running all unit tests ==="

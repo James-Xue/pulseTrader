@@ -5,6 +5,8 @@
 // All fields have sensible defaults so the system can start with a minimal config.
 
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -125,6 +127,7 @@ struct AiConfig
     std::uint32_t heartbeatIntervalSec = 300; ///< AI cycle period (default 5 min).
     std::uint32_t requestTimeoutMs = 30'000;  ///< Max wait for a single LLM request.
     std::uint32_t maxRetries = 2;   ///< Retry count for transient LLM failures.
+    int stats_lookback_hours = 24;  ///< Per-strategy performance window for the AI prompt.
 };
 
 // ---------------------------------------------------------------------------
@@ -181,17 +184,32 @@ struct NewsConfig
 //   4. maxDrawdown         — Maximum total drawdown before trading halts
 //   5. maxOrdersPerSec     — Token-bucket capacity for order rate limiting
 //   6. maxSymbolNotional   — Maximum notional exposure per individual symbol (USDT)
-//   7. stop_loss           — Default stop-loss configuration for new positions
-//   8. take_profit         — Default take-profit ladder configuration
+//   7. maxPositionNotional{Futures,Cfd,Spot} — Optional per-market-type overrides
+//      for the position-notional cap; when unset, maxPositionNotional applies.
+//   8. stop_loss           — Default stop-loss configuration for new positions
+//   9. take_profit         — Default take-profit ladder configuration
 // ---------------------------------------------------------------------------
 struct RiskConfig
 {
-    double maxPositionNotional = 1'000.0; ///< Max open notional value (USDT).
-    int maxOpenPositions = 5;             ///< Max concurrent open positions.
+    double maxPositionNotional = 1'000.0; ///< Max open notional value (USDT), per market type.
+    int maxOpenPositions = 5;             ///< Max concurrent open positions (all markets).
     double maxDailyDrawdown = 0.02;       ///< Max daily loss as fraction of equity.
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
     double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
+    /// Per-market overrides for the position-notional cap. Each falls back to
+    /// maxPositionNotional when unset, so the cap is enforced per market type
+    /// (a futures position does not consume the CFD budget).
+    std::optional<double> maxPositionNotionalFutures; ///< Futures notional cap override.
+    std::optional<double> maxPositionNotionalCfd;     ///< CFD notional cap override.
+    std::optional<double> maxPositionNotionalSpot;    ///< Spot notional cap override.
+    /// Minimum free margin (USD) that must remain AFTER a stop-loss on the
+    /// new position is paid: available - margin - stop_loss_amount >= this.
+    /// Guards against a thin account where one stop exhausts trading
+    /// capacity entirely (M22, after the 2026-08-18 -5.53 spike-through-SL
+    /// stop that left the CFD account untradeable). Unset/0 = disabled.
+    std::optional<double> minAvailableAfterStopUsd;
+
     double max_leverage = 10.0;           ///< Maximum leverage allowed per position (futures).
     double max_margin_used = 0.5;         ///< Maximum fraction of equity used as margin (futures).
     StopLossConfig stop_loss;             ///< Default stop-loss configuration.
@@ -216,20 +234,65 @@ struct LogConfig
 };
 
 // ---------------------------------------------------------------------------
-// WebUiConfig — Optional WebUI server (requires -DPULSE_ENABLE_WEBUI=ON)
+// ControlConfig — JSON-RPC control socket (CLI/MCP control plane)
 //
 // Security model:
 //   1. Bind to localhost only by default (no external access)
-//   2. Require a bearer token for all endpoints
-//   3. Validate the Host header to prevent DNS rebinding attacks
+//   2. Newline-delimited JSON-RPC 2.0 over TCP
 // ---------------------------------------------------------------------------
-struct WebUiConfig
+struct ControlConfig
 {
-    bool enabled = false;
+    bool enabled = true;                   ///< Enable TCP control socket.
     std::string bindAddress = "127.0.0.1"; ///< Localhost only by default.
-    std::uint16_t port = 8080;             ///< HTTP/WebSocket listen port.
-    std::string authToken;                 ///< Bearer token for all endpoints.
-    std::uint32_t maxClients = 4;          ///< Max concurrent WebSocket clients.
+    std::uint16_t port = 8081;             ///< Control socket listen port.
+
+    /// Timezone for human-readable timestamps in control-plane output
+    /// (JSON-RPC *_str fields, REPL tables). One of:
+    ///   "local" — machine local time (default)
+    ///   "utc"   — UTC
+    ///   "±HH:MM" — fixed UTC offset, e.g. "-04:00" for US Eastern summer
+    /// time or "+08:00" for Beijing. Lets you align displayed times with a
+    /// phone app showing a different timezone.
+    std::string displayTimezone = "local";
+
+    // -----------------------------------------------------------------------
+    // Transport security (M-Q4).
+    //
+    // Defaults keep the historical behaviour: plaintext on loopback, no
+    // authentication. Both security features are opt-in, and each is
+    // independent — a tunnel (Tailscale/SSH) can replace TLS, but the token
+    // still protects against any local process that reaches the port.
+    // -----------------------------------------------------------------------
+
+    /// Wrap accepted sockets in TLS. Requires tlsCertPath and tlsKeyPath.
+    bool tlsEnabled = false;
+    /// PEM certificate chain presented to clients.
+    std::string tlsCertPath;
+    /// PEM private key matching the certificate.
+    std::string tlsKeyPath;
+    /// CA bundle used to verify client certificates (mTLS only).
+    std::string tlsCaPath;
+    /// Require and verify a client certificate. Off in v1.
+    bool tlsRequireClientCert = false;
+    /// Shared bearer secret. Empty disables authentication. Prefer
+    /// token = "from_env:PULSE_CONTROL_TOKEN" so the secret stays out of the
+    /// TOML file.
+    std::string token;
+};
+
+// ---------------------------------------------------------------------------
+// NewsWindow — one preset UTC news/event window (scheduled-news event gate)
+//
+// Major scheduled events (FOMC/CPI/NFP ...) close positions and block new
+// entries around the event instant. Judged ONLY on candle open_time ms UTC
+// (no wall clock) so live and backtest behave identically — see
+// strategy/NewsGate.hpp for the full gate semantics.
+// ---------------------------------------------------------------------------
+struct NewsWindow
+{
+    std::int64_t event_open_ms = 0;  ///< Event instant (UTC epoch ms).
+    double close_before_min = 15.0;  ///< X: flatten starts at T−X; entries block from T−X.
+    double resume_after_min = 15.0;  ///< Y: entries resume at first open_time ≥ T+Y.
 };
 
 // ---------------------------------------------------------------------------
@@ -242,6 +305,9 @@ struct WebUiConfig
 //   4. min_confidence    — minimum signal confidence to emit (0.0–1.0)
 //   5. enabled           — whether this strategy is active
 //   6. poll_interval_ms  — how often the strategy thread polls market data
+//   7. order_type        — "market" (default) | "post_only" | "maker_first"
+//   8. maker_timeout_ms  — maker_first: ms to wait for a maker fill before
+//                          falling back to a taker (market) order; 0 = never
 // ---------------------------------------------------------------------------
 struct StrategyInstanceConfig
 {
@@ -254,6 +320,22 @@ struct StrategyInstanceConfig
     MarketType market_type = MarketType::Spot; ///< Market type: Spot or Futures.
     double leverage = 1.0;                    ///< Leverage multiplier (1.0 = no leverage / spot).
     MarginMode margin_mode = MarginMode::Cross; ///< Margin mode for futures (Cross or Isolated).
+    OrderType order_type = OrderType::Market;  ///< Market, PostOnly (resting maker), or
+                                               ///< MakerFirst (post-only + taker fallback).
+    std::uint32_t maker_timeout_ms = 0;        ///< Maker fill wait before taker fallback (ms).
+
+    /// Coin-specific parameter channel: TOML instance-level inline table
+    /// `custom_params = { key = value }`. Static (no hot reload); consumed by
+    /// coin strategies via UnifiedScalper::customParam(key, fallback). Absent
+    /// in legacy configs → empty map.
+    std::map<std::string, double> custom_params;
+
+    /// Scheduled-news event gate windows: TOML instance-level
+    /// `news_windows = [{ time = "2026-09-16T18:00:00Z", ... }]` (array of
+    /// inline tables). Empty = gate off. PRESET-only (config edit + restart),
+    /// deliberately NOT a custom_params/--param key — the double map cannot
+    /// hold a time list. Times judged on candle open_time ms UTC (NewsGate).
+    std::vector<NewsWindow> news_windows;
 };
 
 // ---------------------------------------------------------------------------
@@ -269,6 +351,20 @@ struct StrategyConfig
     std::vector<StrategyInstanceConfig> strategies; ///< Active strategy instances.
     double signal_aggregator_threshold = 0.7;       ///< Minimum aggregated confidence to act.
     std::uint32_t signal_cooldown_sec = 30;         ///< Cooldown between signals per symbol.
+
+    /// Signal-only mode: strategies keep computing and publishing signals
+    /// (signal board), but the aggregator output never reaches the order
+    /// executor. Manual orders (REPL/CLI/MCP open_order) are unaffected —
+    /// they are the sub-agent's execution path. Default false = current
+    /// auto-trading behavior.
+    bool signal_only = false;
+
+    /// Startup kline preload (M30): fetch the last ~500 historical 1m candles
+    /// into each feed's KlineBuffer before the strategy threads start, so
+    /// warmup completes on the first poll instead of waiting for live WS
+    /// pushes to accumulate (e.g. EmaResonance needs 201 candles ≈ 3.4h).
+    /// Failure degrades gracefully to the traditional live warmup.
+    bool preloadKlines = true;
 };
 
 // ---------------------------------------------------------------------------
@@ -282,6 +378,109 @@ struct SqliteConfig
 {
     bool enabled = false;                ///< Disabled by default.
     std::string dbPath = "trades.db";    ///< SQLite database file path.
+    bool recordMarketData = false;       ///< Persist ticker/kline to SQLite (M18).
+
+    /// Persist every strategy signal to the `signals` table (M32 signal
+    /// journal) — the raw pre-aggregation stream + aggregator consensus rows,
+    /// replay source for the A/B weight trial. Append-only. Independent of
+    /// record_market; requires enabled=true. Default true: signal journaling
+    /// is cheap and is the strategy-behavior audit trail (set false to stop).
+    bool recordSignals = true;
+
+    /// Markets whose KLINE data is NOT persisted to kline_bars (M30).
+    /// Ticker recording (ticker_ticks) is never affected. Gate REST serves
+    /// live futures candles (~30s fresh), so futures self-recording is
+    /// redundant. Empty = record all markets.
+    std::vector<MarketType> skipKlineMarkets;
+
+    /// Daily kline archival sync (M31): once per day pull ~10000 1m candles
+    /// (Gate REST depth limit) for spot/futures + 500 gold candles (CFD) and
+    /// merge into kline_bars (INSERT OR IGNORE). Backfills local history
+    /// that M30 stopped self-recording. Default false (opt-in).
+    bool dailyKlineSync = false;
+
+    /// UTC day-boundary hour in Beijing time (UTC+8) for the daily sync.
+    /// Default 8 → boundary at UTC 00:00 == Beijing 08:00.
+    int dailySyncHour = 8;
+};
+
+// ---------------------------------------------------------------------------
+// GridConfig — [grid] section: engine-native grid execution service (M27)
+//
+// The GridManager runs a short-only futures grid (levels of reduce-only TP
+// buy orders) inside the engine, replacing the Python toolchain. Rules mirror
+// the ETH grid v2 strategy document (commit_my_life gate-trading/eth):
+// trend gate (EMA bearish only), spike freeze, protection lines A/B, daily
+// loss stop (Beijing-day reset), re-anchor with cooldown.
+// ---------------------------------------------------------------------------
+struct GridConfig
+{
+    bool enabled = false;            ///< Grid service active at startup (grid_start can override).
+    std::string symbol = "ETH_USDT"; ///< Futures contract the grid trades.
+    std::string market_type = "futures"; ///< "futures" only (validated).
+    int levels = 12;                 ///< Number of grid levels.
+    double qty_per_level = 0.02;     ///< Contracts per level (2 × 0.01 ETH).
+    std::string step_mode = "atr";   ///< "atr" (clamp(0.5×ATR15m)) | "fixed".
+    double step_fixed = 5.0;         ///< Fixed step when step_mode = "fixed".
+    double step_atr_mult = 0.5;      ///< ATR multiplier for adaptive step.
+    double step_min = 3.0;           ///< ATR-step lower clamp.
+    double step_max = 8.0;           ///< ATR-step upper clamp.
+    int atr_period = 40;             ///< ATR15m: mean of 1m TR over this many candles.
+    double tp_distance_steps = 2.0;  ///< TP limit = fill_price - n×step.
+    double anchor_offset_steps = 1.0; ///< Anchor = round(mid + n×step, step).
+    double lower_reanchor_steps = 3.0; ///< mid < anchor - n×step → follow down.
+    // (No upper_reanchor_steps: a breakout through the top never auto-re-anchors —
+    // v2 spec §3.1b routes it to protection line A, covered by protect_line_a_steps.)
+    double protect_line_a_steps = 2.0; ///< 15m/1m close > top + n×step → flatten grid share.
+    double protect_line_b_usd = -30.0; ///< Grid floating loss ≤ this → flatten.
+    double daily_loss_limit_usd = -10.0; ///< Realized ≤ this → freeze new levels.
+    int daily_reset_hour = 8;        ///< Local+8 day boundary (Beijing 08:00 == UTC 00:00).
+    int reanchor_cooldown_min = 30;  ///< Minutes between re-anchors.
+    int spike_freeze_min = 30;       ///< Minutes new levels stay frozen after a spike.
+    double spike_pct = 0.01;         ///< 1m gain > this fraction → spike freeze.
+    double spike_atr_mult = 3.0;     ///< 1m gain > n×ATR15m → spike freeze.
+    std::string state_file = "data/grid_state.json"; ///< Persistent state (tmp+rename).
+    bool force = false;              ///< grid_start proceeds even with non-grid positions on the symbol.
+};
+
+// ---------------------------------------------------------------------------
+// BacktestConfig — [backtest] backtest / kline-store tooling (M33)
+//
+// Optional section; absent values keep the tool defaults. Used by the
+// `kline-store` subcommand (trailing kline accumulation) and by the
+// `backtest` CLI as the contract-cache location default.
+// ---------------------------------------------------------------------------
+struct BacktestConfig
+{
+    /// kline-store target database (kline_bars table, same schema as the
+    /// engine's data/trades.db). Default data/trades.db.
+    std::string store_db = "data/trades.db";
+    /// Futures symbols kline-store accumulates daily. Empty (default) =
+    /// enabled futures strategy instances' symbols, mirroring symbols_for().
+    std::vector<std::string> store_symbols;
+    /// Contract-list cache shared with the backtest CLI (QuantoResolver).
+    std::string contract_cache_path = "data/contracts_cache.json";
+};
+
+// ---------------------------------------------------------------------------
+// FundingWatchConfig — [funding_watch] section: funding-rate window monitor
+// ---------------------------------------------------------------------------
+// Watches USDT-M perpetual funding rates (public endpoint, 8h cadence) and
+// raises a signal-board window when the "crowd-long premium tax" is high and
+// persistent — the harvest condition for a spot-long/perp-short funding
+// carry. 7-year full-history validation (2026-09-06): with a 0.5bp gate the
+// bull years 2020-21 paid +16~36%/yr net while flat years stay ≈0 — the
+// watch's job is to sit silent most of the time and light up only when a
+// harvest window actually opens. Pure observation: publishes to the signal
+// board and logs; never places orders and never feeds the aggregator.
+struct FundingWatchConfig
+{
+    bool enabled = false;                 ///< Service active at startup.
+    std::vector<std::string> symbols;     ///< Futures contracts to watch (e.g. BTC_USDT).
+    double threshold = 0.0005;            ///< Window = all of the last `consec_events`
+                                          ///< funding applies > this (5bp/8h default).
+    int consec_events = 6;                ///< Sustained high funding ≈ 6×8h = 48h.
+    int poll_sec = 1800;                  ///< REST poll cadence (funding moves every 8h).
 };
 
 // ---------------------------------------------------------------------------
@@ -296,10 +495,14 @@ struct PulseConfig
     RiskConfig risk;
     StrategyConfig strategy;
     LogConfig log;
-    WebUiConfig webui;
+    ControlConfig control;              ///< JSON-RPC control socket.
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
+    GridConfig grid;                    ///< [grid] engine-native grid service (M27).
+    FundingWatchConfig funding_watch;   ///< [funding_watch] funding-window monitor.
+    BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
+    MarketType active_market = MarketType::Futures; ///< Single active trading direction at startup; runtime switch is ephemeral (restart returns here).
 };
 
 } // namespace pulse

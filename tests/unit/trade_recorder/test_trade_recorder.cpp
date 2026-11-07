@@ -6,6 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <SQLiteCpp/Database.h>
+#include <SQLiteCpp/Statement.h>
+
 #include <chrono>
 #include <filesystem>
 
@@ -156,7 +159,9 @@ TEST(TradeRecorder, RecordTradeAllFieldsPreserved)
     report.slippage_bps = 2.38;
     report.latency = std::chrono::milliseconds(250);
 
-    EXPECT_TRUE(ok(recorder.recordTrade(report, 5.75, "orderbook_scalper")));
+    // M18: pass market metadata explicitly (futures, 10x, quanto 0.0001).
+    EXPECT_TRUE(ok(recorder.recordTrade(report, 5.75, "orderbook_scalper",
+                                        MarketType::Futures, 10.0, 0.0001)));
 
     auto query = recorder.getTrades();
     ASSERT_TRUE(ok(query));
@@ -179,6 +184,10 @@ TEST(TradeRecorder, RecordTradeAllFieldsPreserved)
     EXPECT_EQ(250, t.latency_ms);
     EXPECT_EQ("filled", t.final_status);
     EXPECT_EQ("orderbook_scalper", t.strategy_name);
+    // M18 columns.
+    EXPECT_EQ("futures", t.market_type);
+    EXPECT_DOUBLE_EQ(10.0, t.leverage);
+    EXPECT_DOUBLE_EQ(0.0001, t.quanto_multiplier);
 }
 
 TEST(TradeRecorder, RecordTradeZeroPnl)
@@ -270,4 +279,132 @@ TEST(TradeRecorder, RecordTradePartialFill)
     const auto &t = value(query)[0];
     EXPECT_DOUBLE_EQ(0.001, t.requested_qty);
     EXPECT_DOUBLE_EQ(0.0005, t.filled_qty);
+}
+
+// ---------------------------------------------------------------------------
+// 3. M18 columns — market metadata + schema migration
+// ---------------------------------------------------------------------------
+
+TEST(TradeRecorder, RecordTradeSpotDefaults)
+{
+    // 3-arg call → spot semantics (market_type=spot, leverage=1.0, quanto=1.0).
+    auto recorder = open_memory_db();
+    EXPECT_TRUE(ok(recorder.recordTrade(make_report("SPOT001"), 1.0, "s")));
+
+    auto query = recorder.getTrades();
+    ASSERT_TRUE(ok(query));
+    const auto &t = value(query)[0];
+    EXPECT_EQ("spot", t.market_type);
+    EXPECT_DOUBLE_EQ(1.0, t.leverage);
+    EXPECT_DOUBLE_EQ(1.0, t.quanto_multiplier);
+}
+
+TEST(TradeRecorder, FreshDatabaseSetsUserVersion)
+{
+    const std::string path = "/tmp/test_pulse_user_version.db";
+    std::filesystem::remove(path);
+
+    {
+        auto result = TradeRecorder::open(path);
+        ASSERT_TRUE(ok(result));
+        value(result).close();
+    }
+
+    SQLite::Database db(path, SQLite::OPEN_READONLY);
+    SQLite::Statement stmt(db, "PRAGMA user_version");
+    ASSERT_TRUE(stmt.executeStep());
+    EXPECT_EQ(1, stmt.getColumn(0).getInt64());
+}
+
+TEST(TradeRecorder, MigrationUpgradesOldSchema)
+{
+    // Build a database with the pre-M18 17-column schema + one old row,
+    // then open it with the current recorder: columns are added in place,
+    // the old row is preserved with spot defaults, new inserts still work.
+    const std::string path = "/tmp/test_pulse_old_schema.db";
+    std::filesystem::remove(path);
+
+    {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+        db.exec(R"(
+CREATE TABLE trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id        TEXT    NOT NULL UNIQUE,
+    client_order_id TEXT    DEFAULT '',
+    timestamp       INTEGER NOT NULL,
+    symbol          TEXT    NOT NULL,
+    side            TEXT    NOT NULL,
+    order_type      TEXT    NOT NULL,
+    requested_qty   REAL    NOT NULL,
+    filled_qty      REAL    NOT NULL,
+    avg_fill_price  REAL    NOT NULL,
+    submit_mid_price REAL   DEFAULT 0,
+    slippage_bps    REAL    DEFAULT 0,
+    fees            REAL    NOT NULL,
+    pnl             REAL    DEFAULT 0,
+    latency_ms      INTEGER NOT NULL,
+    final_status    TEXT    NOT NULL,
+    strategy_name   TEXT    DEFAULT ''
+);
+)");
+        db.exec(R"(
+INSERT INTO trades (order_id, client_order_id, timestamp, symbol, side,
+                    order_type, requested_qty, filled_qty, avg_fill_price,
+                    submit_mid_price, slippage_bps, fees, pnl, latency_ms,
+                    final_status, strategy_name)
+VALUES ('OLD001', '', 123, 'BTC_USDT', 'buy', 'market', 0.001, 0.001,
+        65000, 64990, 1.5, 0.26, 2.5, 120, 'filled', 'old_strat');
+)");
+    }
+
+    auto result = TradeRecorder::open(path);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    auto &rec = value(result);
+
+    // Old row preserved with spot defaults for the new columns.
+    auto query = rec.getTrades();
+    ASSERT_TRUE(ok(query));
+    ASSERT_EQ(1u, value(query).size());
+    const auto &t = value(query)[0];
+    EXPECT_EQ("OLD001", t.order_id);
+    EXPECT_EQ("spot", t.market_type);
+    EXPECT_DOUBLE_EQ(0.0, t.leverage);
+    EXPECT_DOUBLE_EQ(1.0, t.quanto_multiplier);
+
+    // New inserts work after migration.
+    EXPECT_TRUE(ok(rec.recordTrade(make_report("NEW001"), 1.0, "s")));
+    EXPECT_EQ(2, rec.tradeCount());
+
+    // Schema now has 20 columns (17 + market_type/leverage/quanto).
+    SQLite::Database db(path, SQLite::OPEN_READONLY);
+    SQLite::Statement col_stmt(db, "PRAGMA table_info(trades)");
+    int ncols = 0;
+    while (col_stmt.executeStep())
+    {
+        ++ncols;
+    }
+    EXPECT_EQ(20, ncols);
+}
+
+TEST(TradeRecorder, MigrationIdempotentReopen)
+{
+    const std::string path = "/tmp/test_pulse_migration_reopen.db";
+    std::filesystem::remove(path);
+
+    // First open creates + migrates the schema.
+    {
+        auto result = TradeRecorder::open(path);
+        ASSERT_TRUE(ok(result));
+        EXPECT_TRUE(ok(value(result).recordTrade(make_report("V1A"), 1.0, "s")));
+    }
+
+    // Second open must not re-run ALTER on already-migrated columns.
+    {
+        auto result = TradeRecorder::open(path);
+        ASSERT_TRUE(ok(result)) << error(result).message;
+        auto &rec = value(result);
+        EXPECT_EQ(1, rec.tradeCount());
+        EXPECT_TRUE(ok(rec.recordTrade(make_report("V1B"), 2.0, "s")));
+        EXPECT_EQ(2, rec.tradeCount());
+    }
 }

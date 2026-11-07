@@ -20,14 +20,16 @@ namespace pulse::heartbeat
 // ---------------------------------------------------------------------------
 HeartbeatScheduler::HeartbeatScheduler(const AiConfig &config,
                                        ai::AiPipeline &pipeline,
-                                       std::vector<strategy::StrategyParams *> allParams)
+                                       std::vector<strategy::StrategyHandle> strategies,
+                                       ai::SnapshotProvider snapshot_provider)
     : m_config{ config }
     , m_pipeline{ pipeline }
-    , m_allParams{ std::move(allParams) }
+    , m_strategies{ std::move(strategies) }
+    , m_snapshotProvider{ std::move(snapshot_provider) }
     , m_timer{ m_ioCtx }
 {
-    PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler created (interval={}s, {} strategy params)",
-                   m_config.heartbeatIntervalSec, m_allParams.size());
+    PULSE_LOG_INFO("heartbeat", "HeartbeatScheduler created (interval={}s, {} strategy handles)",
+                   m_config.heartbeatIntervalSec, m_strategies.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -206,13 +208,30 @@ void HeartbeatScheduler::runPipeline()
 {
     PULSE_LOG_INFO("heartbeat", "AI pipeline execution started");
 
-    // Create a minimal market snapshot for now
-    // In production, this would come from MarketFeed / TickerCache
-    ai::MarketSnapshot snapshot;
-    snapshot.ticker.symbol = "BTC_USDT";
+    // Collect the live context (real feeds + per-strategy performance).
+    // A missing or failing provider degrades the cycle to an empty context —
+    // the pipeline still runs with the primary symbol from the first handle.
+    ai::PipelineContext ctx;
+    try
+    {
+        if (m_snapshotProvider)
+        {
+            ctx = m_snapshotProvider();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        PULSE_LOG_WARN("heartbeat", "snapshot provider failed — degraded cycle: {}",
+                       e.what());
+        ctx = ai::PipelineContext{};
+    }
+    if (ctx.market.ticker.symbol.empty() && !m_strategies.empty())
+    {
+        ctx.market.ticker.symbol = m_strategies[0].symbol;
+    }
 
     // Run the pipeline — errors are logged internally
-    auto result = m_pipeline.run(snapshot, m_allParams);
+    auto result = m_pipeline.run(ctx, m_strategies);
 
     if (ok(result))
     {

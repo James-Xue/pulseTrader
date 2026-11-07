@@ -6,6 +6,8 @@
 #include "logging/Logger.hpp"
 
 #include <charconv>
+#include <cmath>
+#include <thread>
 
 namespace pulse::execution
 {
@@ -28,12 +30,20 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
         req.type == OrderType::Market   ? "market"
         : req.type == OrderType::Limit  ? "limit"
         : req.type == OrderType::PostOnly ? "post_only"
+        : req.type == OrderType::MakerFirst ? "maker_first"
                                           : "unknown",
         req.quantity,
         req.price);
 
+    // Anchor the CFD match window (Unix seconds) BEFORE the POST — the
+    // exchange's time_setup must not predate the request.
+    const std::int64_t placed_at_unix =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+
     // Build order body
-    const nlohmann::json body_json = buildOrderBody(req);
+    const nlohmann::json body_json = buildOrderBody(m_marketType, req);
     const std::string body = body_json.dump();
 
     // Submit order via REST (retry logic is in GateRestClient::request)
@@ -47,7 +57,70 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
 
     // Parse response
     const auto &resp_json = value(result);
-    const OrderResponse resp = parseOrderResponse(resp_json);
+    OrderResponse resp = parseOrderResponse(resp_json);
+
+    // TradFi CFD: the POST may carry a 2xx business error ({"label","message"}
+    // body) that the HTTP status check cannot see — surface it as a real
+    // failure so the caller releases its risk reservation.
+    if (MarketType::Cfd == m_marketType)
+    {
+        if (auto biz_err = cfdBusinessError(resp_json))
+        {
+            PULSE_LOG_ERROR("execution", "CFD order rejected by exchange: {}",
+                            biz_err->message);
+            return *biz_err;
+        }
+    }
+
+    // TradFi CFD: POST /tradfi/orders does not echo the exchange order id
+    // (data.id is an internal submission number) — resolve it from the
+    // open-orders list, matched by symbol/side/volume/price within the
+    // placed_at window (stale same-key leftovers are never matched).
+    if (MarketType::Cfd == m_marketType && resp.order_id.empty())
+    {
+        // The freshly POSTed order is NOT always visible in the open-orders
+        // list immediately — TradFi list reads lag the POST by ~1-2s
+        // (verified 2026-08-17: an immediate GET missed our own trigger
+        // order, so the engine tracked data.id and later mis-cancelled).
+        // Retry the list a few times before falling back to data.id.
+        std::string resolved_id;
+        for (int attempt = 0; attempt < 4 && resolved_id.empty(); ++attempt)
+        {
+            if (attempt > 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            auto list_result = m_restClient.request(
+                "GET", EndpointRouter::ordersPath(MarketType::Cfd));
+            if (!ok(list_result))
+            {
+                PULSE_LOG_WARN("execution",
+                    "CFD order placed but order-list query failed: {}",
+                    error(list_result).message);
+                break;
+            }
+            const auto &data =
+                value(list_result).value("data", nlohmann::json::object());
+            resolved_id = matchCfdOrderId(
+                data.value("list", nlohmann::json::array()), req, placed_at_unix);
+        }
+        resp.order_id = resolved_id;
+        if (!resp.order_id.empty())
+        {
+            resp.status = OrderStatus::Open;
+            PULSE_LOG_INFO("execution",
+                "Resolved CFD order id {} from the open-orders list",
+                resp.order_id);
+        }
+        else
+        {
+            PULSE_LOG_WARN("execution",
+                "CFD order placed but id not resolvable from the "
+                "open-orders list (matched symbol={} side={} volume={})",
+                req.symbol, req.side == Side::Buy ? "buy" : "sell",
+                req.quantity);
+        }
+    }
 
     PULSE_LOG_INFO("execution", "Order placed: id={}, status={}", resp.order_id, resp_json.value("status", "unknown"));
 
@@ -71,11 +144,43 @@ bool OrderExecutor::cancelOrder(const std::string &order_id)
     return true;
 }
 
-nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
+Result<nlohmann::json> OrderExecutor::setLeverage(const std::string &contract,
+                                                  double leverage)
+{
+    // Cache hit: this contract already runs at the requested leverage —
+    // skip the API call (orders fire every ~500ms per strategy).
+    {
+        std::lock_guard lock(m_leverageMutex);
+        const auto it = m_leverageCache.find(contract);
+        if (it != m_leverageCache.end() && it->second == leverage)
+        {
+            return nlohmann::json{ { "ok", true } };
+        }
+    }
+
+    auto result = m_restClient.setFuturesLeverage(contract, leverage);
+    if (!ok(result))
+    {
+        PULSE_LOG_ERROR("execution", "Failed to set {} leverage to {}x: {}",
+            contract, leverage, error(result).message);
+        return result;
+    }
+
+    {
+        std::lock_guard lock(m_leverageMutex);
+        m_leverageCache[contract] = leverage;
+    }
+    PULSE_LOG_INFO("execution", "Futures leverage set: {} {}x", contract, leverage);
+    return result;
+}
+
+nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &req)
 {
     nlohmann::json body;
 
-    if (MarketType::Futures == m_marketType)
+    switch (mt)
+    {
+    case MarketType::Futures:
     {
         // --- Futures order format ---
         body["contract"] = req.symbol;
@@ -98,12 +203,53 @@ nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
         else
         {
             body["price"] = std::to_string(req.price);
-            body["tif"] = (OrderType::PostOnly == req.type) ? "poc" : "gtc";
+            // Defensive: requests never carry MakerFirst (buildRequestFromSignal
+            // maps it to PostOnly), but a leaked value must not silently become
+            // a GTC limit order.
+            body["tif"] = (OrderType::PostOnly == req.type
+                           || OrderType::MakerFirst == req.type)
+                              ? "poc"
+                              : "gtc";
         }
 
         body["reduce_only"] = req.reduce_only;
+        break;
     }
-    else
+    case MarketType::Cfd:
+    {
+        // --- TradFi CFD order format (MT5 style) ---
+        // side: 2 = buy, 1 = sell; volume in lots (0.01 min for XAUUSD).
+        //
+        // CFD cost model (recorded, NOT enforced by the engine):
+        //   - Commission: 0.06 USDT per 0.01 lot, charged once on BUY only
+        //     (sell side is free); 6 USDT per full lot in the symbol detail.
+        //   - Gold storage/swap (interest-rate differential): charged per
+        //     overnight hold, surfaced
+        //     in the assets `storage` field. Long positions typically pay.
+        body["symbol"] = req.symbol;
+        body["side"] = (Side::Buy == req.side) ? 2 : 1;
+        body["volume"] = std::to_string(req.quantity);
+
+        // price_type: "market" for market orders, "trigger" for limit orders.
+        body["price_type"] = (OrderType::Market == req.type) ? "market" : "trigger";
+        if (OrderType::Market != req.type)
+        {
+            body["price"] = std::to_string(req.price);
+        }
+        // price_tp / price_sl — attached take-profit / stop-loss, the
+        // exchange-native protection for a CFD entry (fires even if the
+        // engine and every external consumer are down).
+        if (req.sl_price.has_value())
+        {
+            body["price_sl"] = std::to_string(*req.sl_price);
+        }
+        if (req.tp_price.has_value())
+        {
+            body["price_tp"] = std::to_string(*req.tp_price);
+        }
+        break;
+    }
+    default:
     {
         // --- Spot order format (unchanged) ---
         body["currency_pair"] = req.symbol;
@@ -120,6 +266,7 @@ nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
             body["time_in_force"] = "gtc";
             break;
         case OrderType::PostOnly:
+        case OrderType::MakerFirst:   // Defensive: never in flight (mapped to PostOnly).
             body["type"] = "limit";
             body["price"] = std::to_string(req.price);
             body["time_in_force"] = "poc";
@@ -127,10 +274,12 @@ nlohmann::json OrderExecutor::buildOrderBody(const OrderRequest &req) const
         }
 
         body["amount"] = std::to_string(req.quantity);
+        break;
+    }
     }
 
-    // Optional client order ID (same format for both markets).
-    if (!req.client_order_id.empty())
+    // Optional client order ID (spot/futures only — the MT5 CFD schema has no text field).
+    if (!req.client_order_id.empty() && MarketType::Cfd != mt)
     {
         body["text"] = "t-" + req.client_order_id; // Gate.io prefix: "t-"
     }
@@ -152,6 +301,22 @@ OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) cons
         else
         {
             result.order_id = resp["id"].get<std::string>();
+        }
+    }
+    // TradFi CFD wraps the payload in {"data": ...}; data.id is an internal
+    // submission reference (probe-verified 2026-08-17: string, e.g. "43713").
+    // Use it as the tracking key when the list-based resolution is empty.
+    if (result.order_id.empty() && resp.contains("data")
+        && resp["data"].is_object() && resp["data"].contains("id"))
+    {
+        const auto &inner_id = resp["data"]["id"];
+        if (inner_id.is_string())
+        {
+            result.order_id = inner_id.get<std::string>();
+        }
+        else if (inner_id.is_number())
+        {
+            result.order_id = std::to_string(inner_id.get<std::int64_t>());
         }
     }
 
@@ -218,6 +383,99 @@ OrderResponse OrderExecutor::parseOrderResponse(const nlohmann::json &resp) cons
     }
 
     return result;
+}
+
+std::string OrderExecutor::matchCfdOrderId(const nlohmann::json &list,
+                                           const OrderRequest &req,
+                                           std::int64_t placed_at_unix)
+{
+    // The TradFi orders list is newest-first; the first entry matching the
+    // placed request is ours. The list echoes volumes/prices as strings with
+    // the exchange's own precision (e.g. "0.01", "3000.00"), so compare
+    // numerically rather than string-wise.
+    const int side = (Side::Buy == req.side) ? 2 : 1;
+    constexpr std::int64_t kCfdMatchSlackSec = 5; // Covers clock skew.
+
+    for (const auto &o : list)
+    {
+        if (o.value("symbol", "") != req.symbol)
+        {
+            continue;
+        }
+        if (o.value("side", 0) != side)
+        {
+            continue;
+        }
+
+        const double volume =
+            safeParseDouble(o.value("volume", "0")).value_or(-1.0);
+        if (volume < 0.0 || std::abs(volume - req.quantity) > 1e-9)
+        {
+            continue;
+        }
+
+        // Only orders placed AFTER our POST can be ours — a filled market
+        // order leaves the list immediately, so without this window a stale
+        // same-key legacy trigger (e.g. an old buy@4295 for a new buy 0.01)
+        // would be matched and later cancelled by mistake (2026-08-17
+        // incident). time_setup=0 (missing) is always outside the window.
+        const std::int64_t time_setup = o.value("time_setup", 0LL);
+        if (time_setup < placed_at_unix - kCfdMatchSlackSec)
+        {
+            continue;
+        }
+
+        // Trigger orders must match the price too; market orders match on
+        // symbol/side/volume only.
+        if (OrderType::Market != req.type)
+        {
+            const double price =
+                safeParseDouble(o.value("price", "0")).value_or(-1.0);
+            if (price < 0.0 || std::abs(price - req.price) > 1e-6)
+            {
+                continue;
+            }
+        }
+
+        if (o.contains("order_id"))
+        {
+            if (o["order_id"].is_number())
+            {
+                return std::to_string(o["order_id"].get<std::int64_t>());
+            }
+            return o["order_id"].get<std::string>();
+        }
+        // order_id missing — try "id" as a fallback field name.
+        if (o.contains("id"))
+        {
+            if (o["id"].is_number())
+            {
+                return std::to_string(o["id"].get<std::int64_t>());
+            }
+            return o["id"].get<std::string>();
+        }
+    }
+
+    return {};
+}
+
+std::optional<PulseError> OrderExecutor::cfdBusinessError(const nlohmann::json &resp)
+{
+    // Success bodies are wrapped as {"data": {...}}; business errors come back
+    // as {"label": "...", "message": "...", "data": null} with a 2xx HTTP
+    // status (probe-verified 2026-08-17: data is present but null).
+    if (resp.is_object() && (resp.contains("label") || resp.contains("message")))
+    {
+        const bool has_data = resp.contains("data") && !resp["data"].is_null();
+        if (!has_data)
+        {
+            const std::string label = resp.value("label", "");
+            const std::string message = resp.value("message", "");
+            return PulseError{ ErrorCode::OrderRejected,
+                               "CFD order rejected by exchange: " + label + ": " + message };
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace pulse::execution

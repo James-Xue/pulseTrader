@@ -23,10 +23,13 @@
 #include "ai/AnalysisResult.hpp"
 #include "ai/NewsFeed.hpp"
 #include "ai/ParamAdvisor.hpp"
+#include "ai/PipelineContext.hpp"
 #include "ai/PromptBuilder.hpp"
 #include "ai/TwitterFeed.hpp"
 #include "core/config.hpp"
+#include "core/ParamChangeLog.hpp"
 #include "core/PulseError.hpp"
+#include "strategy/StrategyHandle.hpp"
 #include "strategy/StrategyParams.hpp"
 
 #include <memory>
@@ -49,32 +52,36 @@ class AiPipeline
     ///   2. twitter_config — Twitter feed settings (enabled, bearerToken)
     ///   3. news_config  — News feed settings (enabled, apiKey, provider)
     ///   4. transport    — Optional HTTP transport override (for testing)
+    ///   5. change_log   — Optional param-change audit log (nullable; the
+    ///                     pipeline records every applied delta here).
     AiPipeline(const AiConfig &ai_config,
                const TwitterConfig &twitter_config,
                const NewsConfig &news_config,
-               AIClient::HttpTransport transport = nullptr);
+               AIClient::HttpTransport transport = nullptr,
+               core::ParamChangeLog *change_log = nullptr);
 
     /// Run one full AI analysis cycle.
     ///
     /// Execution flow:
     ///   1. Poll Twitter feed (if enabled) — failure logged, not fatal
     ///   2. Poll news feed (if enabled) — failure logged, not fatal
-    ///   3. Build prompt from market data + social signals
+    ///   3. Build prompt from the pipeline context + social signals
     ///   4. Call LLM and parse response
     ///   5. Apply validated parameter deltas to ALL strategy params
     ///
     /// Parameters:
-    ///   1. snapshot    — current market data (ticker + recent klines)
-    ///   2. allParams  — pointers to each strategy's StrategyParams;
-    ///                    the first is used for prompt building (read),
-    ///                    all are updated by ParamAdvisor (write)
+    ///   1. ctx      — aggregated cycle input (market snapshot + per-strategy
+    ///                 performance); primary params come from handles[0]
+    ///   2. handles  — strategy identity + params handles; the first is used
+    ///                 for prompt building (read), all are updated by
+    ///                 ParamAdvisor (write). Empty → error, nothing runs.
     ///
     /// Returns:
     ///   - AnalysisResult on success (params may have been updated)
     ///   - PulseError on failure (params unchanged)
     [[nodiscard]] Result<AnalysisResult> run(
-        const MarketSnapshot &snapshot,
-        std::vector<strategy::StrategyParams *> &allParams);
+        const PipelineContext &ctx,
+        std::vector<strategy::StrategyHandle> &handles);
 
     /// Access the Twitter feed component (for testing / inspection).
     [[nodiscard]] TwitterFeed &twitterFeed();
@@ -84,6 +91,9 @@ class AiPipeline
 
     /// Access the parameter advisor (for bounds inspection / tuning).
     [[nodiscard]] ParamAdvisor &paramAdvisor();
+
+    /// The audit log this pipeline records to (nullable when not wired).
+    [[nodiscard]] core::ParamChangeLog *changeLog() const noexcept;
 
     /// Returns the most recent AnalysisResult, or nullptr if no cycle has completed.
     ///
@@ -97,6 +107,7 @@ class AiPipeline
     PromptBuilder m_promptBuilder; ///< Prompt assembly.
     AIClient m_aiClient;          ///< LLM HTTP client.
     ParamAdvisor m_paramAdvisor;  ///< Delta validation + atomic apply.
+    core::ParamChangeLog *m_changeLog{ nullptr }; ///< Audit log (nullable).
 
     /// Cached last analysis result for WebUI/dashboard retrieval.
     mutable std::shared_mutex m_resultMutex;

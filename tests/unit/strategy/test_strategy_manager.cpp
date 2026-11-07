@@ -239,3 +239,68 @@ TEST(StrategyManager, SnapshotRunningStateAfterStart)
     ASSERT_EQ(snaps_after.size(), 1u);
     EXPECT_FALSE(snaps_after[0].running);
 }
+
+// ---------------------------------------------------------------------------
+// Pause/resume (setPaused) — control plane runtime strategy control
+// ---------------------------------------------------------------------------
+
+TEST(StrategyManager, SetPausedUnknownIdReturnsFalse)
+{
+    StrategyManager manager;
+    EXPECT_FALSE(manager.setPaused("no_such_strategy", true));
+}
+
+TEST(StrategyManager, SetPausedReflectedInSnapshot)
+{
+    StrategyManager manager;
+
+    StrategyContext ctx;
+    ctx.config = make_config("BTC_USDT", true, 10);
+    manager.registerStrategy(std::make_unique<MockStrategy>(ctx));
+    manager.setSignalCallback([](const TradingSignal &) {});
+
+    const auto before = manager.snapshot();
+    ASSERT_EQ(1u, before.size());
+    EXPECT_FALSE(before[0].paused);
+
+    EXPECT_TRUE(manager.setPaused(before[0].id, true));
+
+    const auto paused = manager.snapshot();
+    ASSERT_EQ(1u, paused.size());
+    EXPECT_TRUE(paused[0].paused);
+
+    EXPECT_TRUE(manager.setPaused(before[0].id, false));
+    const auto resumed = manager.snapshot();
+    ASSERT_EQ(1u, resumed.size());
+    EXPECT_FALSE(resumed[0].paused);
+}
+
+TEST(StrategyManager, DoublePauseIsIdempotent)
+{
+    StrategyManager manager;
+    StrategyContext ctx;
+    ctx.config = make_config("BTC_USDT", true, 10);
+    manager.registerStrategy(std::make_unique<MockStrategy>(ctx));
+    manager.setSignalCallback([](const TradingSignal &) {});
+
+    const auto id = manager.snapshot()[0].id;
+    EXPECT_TRUE(manager.setPaused(id, true));
+    EXPECT_TRUE(manager.setPaused(id, true));
+    EXPECT_TRUE(manager.snapshot()[0].paused);
+}
+
+TEST(StrategyManager, ParamsByNameReturnsStrategyParams)
+{
+    StrategyManager manager;
+    StrategyContext ctx;
+    ctx.config = make_config("BTC_USDT", true, 10);
+    manager.registerStrategy(std::make_unique<MockStrategy>(ctx));
+    manager.setSignalCallback([](const TradingSignal &) {});
+
+    const auto id = manager.snapshot()[0].id;
+    auto *params = manager.paramsByName(id);
+    ASSERT_NE(nullptr, params);
+    EXPECT_DOUBLE_EQ(0.6, params->min_confidence.load());
+
+    EXPECT_EQ(nullptr, manager.paramsByName("no_such"));
+}

@@ -1,0 +1,2956 @@
+{
+  "candles_fed": 673,
+  "close_mode": "flip",
+  "data": {
+    "missing_ranges": 1,
+    "rows_api": 673,
+    "rows_sqlite": 0,
+    "rows_total": 673,
+    "warnings": []
+  },
+  "equity_curve": [
+    {
+      "candle_open_ms": 1788048000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788048900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788049800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788050700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788051600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788052500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788053400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788054300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788055200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788056100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788057000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788057900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788058800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788059700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788060600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788061500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788062400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788063300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788064200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788065100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788066000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788066900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788067800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788068700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788069600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788070500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788071400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788072300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788073200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788074100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788075000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788075900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788076800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788077700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788078600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788079500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788080400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788081300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788082200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788083100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788084000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788084900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788085800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788086700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788087600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788088500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788089400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788090300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788091200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788092100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788093000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788093900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788094800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788095700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788096600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788097500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788098400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788099300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788100200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788101100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788102000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788102900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788103800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788104700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788105600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788106500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788107400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788108300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788109200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788110100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788111000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788111900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788112800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788113700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788114600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788115500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788116400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788117300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788118200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788119100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788120000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788120900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788121800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788122700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788123600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788124500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788125400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788126300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788127200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788128100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788129000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788129900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788130800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788131700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788132600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788133500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788134400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788135300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788136200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788137100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788138000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788138900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788139800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788140700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788141600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788142500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788143400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788144300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788145200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788146100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788147000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788147900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788148800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788149700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788150600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788151500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788152400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788153300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788154200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788155100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788156000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788156900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788157800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788158700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788159600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788160500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788161400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788162300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788163200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788164100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788165000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788165900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788166800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788167700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788168600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788169500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788170400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788171300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788172200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788173100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788174000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788174900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788175800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788176700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788177600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788178500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788179400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788180300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788181200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788182100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788183000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788183900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788184800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788185700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788186600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788187500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788188400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788189300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788190200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788191100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788192000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788192900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788193800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788194700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788195600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788196500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788197400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788198300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788199200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788200100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788201000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788201900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788202800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788203700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788204600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788205500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788206400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788207300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788208200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788209100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788210000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788210900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788211800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788212700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788213600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788214500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788215400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788216300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788217200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788218100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788219000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788219900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788220800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788221700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788222600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788223500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788224400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788225300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788226200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788227100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788228000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788228900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788229800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788230700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788231600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788232500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788233400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788234300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788235200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788236100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788237000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788237900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788238800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788239700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788240600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788241500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788242400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788243300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788244200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788245100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788246000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788246900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788247800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788248700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788249600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788250500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788251400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788252300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788253200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788254100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788255000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788255900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788256800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788257700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788258600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788259500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788260400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788261300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788262200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788263100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788264000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788264900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788265800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788266700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788267600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788268500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788269400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788270300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788271200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788272100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788273000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788273900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788274800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788275700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788276600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788277500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788278400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788279300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788280200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788281100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788282000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788282900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788283800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788284700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788285600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788286500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788287400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788288300000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788289200000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788290100000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788291000000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788291900000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788292800000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788293700000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788294600000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788295500000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788296400000,
+      "equity": 0.0
+    },
+    {
+      "candle_open_ms": 1788297300000,
+      "equity": -0.15619999999998255
+    },
+    {
+      "candle_open_ms": 1788298200000,
+      "equity": -0.069
+    },
+    {
+      "candle_open_ms": 1788299100000,
+      "equity": -0.19860000000000583
+    },
+    {
+      "candle_open_ms": 1788300000000,
+      "equity": -0.3756000000000058
+    },
+    {
+      "candle_open_ms": 1788300900000,
+      "equity": 0.09639999999999418
+    },
+    {
+      "candle_open_ms": 1788301800000,
+      "equity": -0.08860000000000583
+    },
+    {
+      "candle_open_ms": 1788302700000,
+      "equity": -0.31119999999998255
+    },
+    {
+      "candle_open_ms": 1788303600000,
+      "equity": -0.29839999999999417
+    },
+    {
+      "candle_open_ms": 1788304500000,
+      "equity": -0.5671999999999826
+    },
+    {
+      "candle_open_ms": 1788305400000,
+      "equity": -0.8597999999999884
+    },
+    {
+      "candle_open_ms": 1788306300000,
+      "equity": -0.6453999999999942
+    },
+    {
+      "candle_open_ms": 1788307200000,
+      "equity": -0.5713999999999942
+    },
+    {
+      "candle_open_ms": 1788308100000,
+      "equity": -0.29179999999998835
+    },
+    {
+      "candle_open_ms": 1788309000000,
+      "equity": -0.254
+    },
+    {
+      "candle_open_ms": 1788309900000,
+      "equity": -0.194
+    },
+    {
+      "candle_open_ms": 1788310800000,
+      "equity": -0.45719999999998256
+    },
+    {
+      "candle_open_ms": 1788311700000,
+      "equity": -0.08439999999999419
+    },
+    {
+      "candle_open_ms": 1788312600000,
+      "equity": 0.448
+    },
+    {
+      "candle_open_ms": 1788313500000,
+      "equity": 0.20320000000001165
+    },
+    {
+      "candle_open_ms": 1788314400000,
+      "equity": 0.061600000000005824
+    },
+    {
+      "candle_open_ms": 1788315300000,
+      "equity": -0.4103999999999942
+    },
+    {
+      "candle_open_ms": 1788316200000,
+      "equity": -0.20819999999998254
+    },
+    {
+      "candle_open_ms": 1788317100000,
+      "equity": -0.4376000000000058
+    },
+    {
+      "candle_open_ms": 1788318000000,
+      "equity": -0.7901999999999826
+    },
+    {
+      "candle_open_ms": 1788318900000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788319800000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788320700000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788321600000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788322500000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788323400000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788324300000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788325200000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788326100000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788327000000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788327900000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788328800000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788329700000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788330600000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788331500000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788332400000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788333300000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788334200000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788335100000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788336000000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788336900000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788337800000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788338700000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788339600000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788340500000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788341400000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788342300000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788343200000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788344100000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788345000000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788345900000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788346800000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788347700000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788348600000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788349500000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788350400000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788351300000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788352200000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788353100000,
+      "equity": -1.2154849999999884
+    },
+    {
+      "candle_open_ms": 1788354000000,
+      "equity": -1.4734849999999884
+    },
+    {
+      "candle_open_ms": 1788354900000,
+      "equity": -1.746685
+    },
+    {
+      "candle_open_ms": 1788355800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788356700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788357600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788358500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788359400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788360300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788361200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788362100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788363000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788363900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788364800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788365700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788366600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788367500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788368400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788369300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788370200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788371100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788372000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788372900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788373800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788374700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788375600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788376500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788377400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788378300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788379200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788380100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788381000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788381900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788382800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788383700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788384600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788385500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788386400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788387300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788388200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788389100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788390000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788390900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788391800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788392700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788393600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788394500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788395400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788396300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788397200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788398100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788399000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788399900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788400800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788401700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788402600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788403500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788404400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788405300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788406200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788407100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788408000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788408900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788409800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788410700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788411600000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788412500000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788413400000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788414300000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788415200000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788416100000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788417000000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788417900000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788418800000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788419700000,
+      "equity": -2.910596
+    },
+    {
+      "candle_open_ms": 1788420600000,
+      "equity": -3.025196000000006
+    },
+    {
+      "candle_open_ms": 1788421500000,
+      "equity": -3.469996000000023
+    },
+    {
+      "candle_open_ms": 1788422400000,
+      "equity": -2.9447960000000117
+    },
+    {
+      "candle_open_ms": 1788423300000,
+      "equity": -2.8377960000000115
+    },
+    {
+      "candle_open_ms": 1788424200000,
+      "equity": -3.0367960000000114
+    },
+    {
+      "candle_open_ms": 1788425100000,
+      "equity": -3.132596
+    },
+    {
+      "candle_open_ms": 1788426000000,
+      "equity": -3.0757960000000115
+    },
+    {
+      "candle_open_ms": 1788426900000,
+      "equity": -3.3317960000000117
+    },
+    {
+      "candle_open_ms": 1788427800000,
+      "equity": -3.3487960000000117
+    },
+    {
+      "candle_open_ms": 1788428700000,
+      "equity": -3.5729960000000234
+    },
+    {
+      "candle_open_ms": 1788429600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788430500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788431400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788432300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788433200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788434100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788435000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788435900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788436800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788437700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788438600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788439500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788440400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788441300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788442200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788443100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788444000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788444900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788445800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788446700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788447600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788448500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788449400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788450300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788451200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788452100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788453000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788453900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788454800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788455700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788456600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788457500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788458400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788459300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788460200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788461100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788462000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788462900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788463800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788464700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788465600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788466500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788467400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788468300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788469200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788470100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788471000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788471900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788472800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788473700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788474600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788475500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788476400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788477300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788478200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788479100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788480000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788480900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788481800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788482700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788483600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788484500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788485400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788486300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788487200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788488100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788489000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788489900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788490800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788491700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788492600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788493500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788494400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788495300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788496200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788497100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788498000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788498900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788499800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788500700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788501600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788502500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788503400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788504300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788505200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788506100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788507000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788507900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788508800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788509700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788510600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788511500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788512400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788513300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788514200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788515100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788516000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788516900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788517800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788518700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788519600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788520500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788521400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788522300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788523200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788524100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788525000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788525900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788526800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788527700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788528600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788529500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788530400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788531300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788532200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788533100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788534000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788534900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788535800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788536700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788537600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788538500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788539400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788540300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788541200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788542100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788543000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788543900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788544800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788545700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788546600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788547500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788548400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788549300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788550200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788551100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788552000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788552900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788553800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788554700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788555600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788556500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788557400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788558300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788559200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788560100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788561000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788561900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788562800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788563700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788564600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788565500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788566400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788567300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788568200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788569100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788570000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788570900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788571800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788572700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788573600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788574500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788575400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788576300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788577200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788578100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788579000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788579900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788580800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788581700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788582600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788583500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788584400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788585300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788586200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788587100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788588000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788588900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788589800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788590700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788591600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788592500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788593400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788594300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788595200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788596100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788597000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788597900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788598800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788599700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788600600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788601500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788602400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788603300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788604200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788605100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788606000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788606900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788607800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788608700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788609600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788610500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788611400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788612300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788613200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788614100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788615000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788615900000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788616800000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788617700000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788618600000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788619500000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788620400000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788621300000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788622200000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788623100000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788624000000,
+      "equity": -3.8138443000000173
+    },
+    {
+      "candle_open_ms": 1788624900000,
+      "equity": -3.6002443000000115
+    },
+    {
+      "candle_open_ms": 1788625800000,
+      "equity": -3.5102443000000116
+    },
+    {
+      "candle_open_ms": 1788626700000,
+      "equity": -3.2858443000000173
+    },
+    {
+      "candle_open_ms": 1788627600000,
+      "equity": -3.0970443000000287
+    },
+    {
+      "candle_open_ms": 1788628500000,
+      "equity": -3.3016443000000057
+    },
+    {
+      "candle_open_ms": 1788629400000,
+      "equity": -3.2728443000000174
+    },
+    {
+      "candle_open_ms": 1788630300000,
+      "equity": -3.241844300000017
+    },
+    {
+      "candle_open_ms": 1788631200000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788632100000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788633000000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788633900000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788634800000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788635700000,
+      "equity": -3.5293384000000056
+    },
+    {
+      "candle_open_ms": 1788636600000,
+      "equity": -3.747138400000023
+    },
+    {
+      "candle_open_ms": 1788637500000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788638400000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788639300000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788640200000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788641100000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788642000000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788642900000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788643800000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788644700000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788645600000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788646500000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788647400000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788648300000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788649200000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788650100000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788651000000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788651900000,
+      "equity": -4.115169500000017
+    },
+    {
+      "candle_open_ms": 1788652800000,
+      "equity": -4.115169500000017
+    }
+  ],
+  "fee_rate": 0.0,
+  "leverage": 5.0,
+  "market_type": "futures",
+  "params": {
+    "atomic": {},
+    "custom": {}
+  },
+  "quantity": 20.0,
+  "quanto_multiplier": 0.0001,
+  "range": {
+    "from": "2026-08-30T00:00:00.000+00:00",
+    "from_ms": 1788048000000,
+    "to": "2026-09-06T00:00:00.000+00:00",
+    "to_ms": 1788652800000
+  },
+  "signals": [
+    {
+      "candle_open": "2026-09-01T21:00:00.000+00:00",
+      "candle_open_ms": 1788296400000,
+      "confidence": 1.0,
+      "indicators": {
+        "atr14": 296.835714285712,
+        "box_high": 77715.6,
+        "box_low": 76377.7,
+        "close": 77077.3,
+        "ema_fast": 77290.25614213049,
+        "ema_slow": 77430.60965677815,
+        "ema_trend": 78114.55776682496,
+        "med_tr20": 225.40000000000873,
+        "regime": "normal",
+        "rsi14": 41.165495096763024,
+        "sep": -0.4728323038398621,
+        "spike_flag": false,
+        "state": "short",
+        "tight_session": true,
+        "trigger": "pullback_resume"
+      },
+      "price": 77077.3,
+      "reason": "pullback_resume_sell | sep=-0.473 | regime=normal",
+      "type": "Sell"
+    },
+    {
+      "candle_open": "2026-09-02T12:45:00.000+00:00",
+      "candle_open_ms": 1788353100000,
+      "confidence": 1.0,
+      "indicators": {
+        "atr14": 261.249999999999,
+        "box_high": 77515.5,
+        "box_low": 76204.0,
+        "close": 76570.2,
+        "ema_fast": 76746.85053533944,
+        "ema_slow": 76893.93822072033,
+        "ema_trend": 77717.05041113624,
+        "med_tr20": 251.3000000000029,
+        "regime": "normal",
+        "rsi14": 42.339560496114615,
+        "sep": -0.5630150636589025,
+        "spike_flag": false,
+        "state": "short",
+        "tight_session": false,
+        "trigger": "pullback_resume"
+      },
+      "price": 76570.2,
+      "reason": "pullback_resume_sell | sep=-0.563 | regime=normal",
+      "type": "Sell"
+    },
+    {
+      "candle_open": "2026-09-03T07:15:00.000+00:00",
+      "candle_open_ms": 1788419700000,
+      "confidence": 1.0,
+      "indicators": {
+        "atr14": 231.73571428571242,
+        "box_high": 78142.6,
+        "box_low": 77068.2,
+        "close": 77911.1,
+        "ema_fast": 77736.95793529532,
+        "ema_slow": 77609.86160334453,
+        "ema_trend": 77655.11741367061,
+        "med_tr20": 176.89999999999418,
+        "regime": "normal",
+        "rsi14": 55.69943289224988,
+        "sep": 0.5484537950593422,
+        "spike_flag": false,
+        "state": "long",
+        "tight_session": false,
+        "trigger": "box_breakout"
+      },
+      "price": 77911.1,
+      "reason": "box_breakout_buy | sep=0.548 | regime=normal",
+      "type": "Buy"
+    },
+    {
+      "candle_open": "2026-09-05T16:00:00.000+00:00",
+      "candle_open_ms": 1788624000000,
+      "confidence": 0.8111067004754727,
+      "indicators": {
+        "atr14": 81.1428571428561,
+        "box_high": 79774.3,
+        "box_low": 79504.0,
+        "close": 79736.0,
+        "ema_fast": 79682.8440638198,
+        "ema_slow": 79653.85289731655,
+        "ema_trend": 79631.89676039634,
+        "med_tr20": 78.89999999999418,
+        "regime": "normal",
+        "rsi14": 55.99571734475374,
+        "sep": 0.3572855026807965,
+        "spike_flag": false,
+        "state": "long",
+        "tight_session": false,
+        "trigger": "box_breakout"
+      },
+      "price": 79736.0,
+      "reason": "box_breakout_buy | sep=0.357 | regime=normal",
+      "type": "Buy"
+    },
+    {
+      "candle_open": "2026-09-05T19:15:00.000+00:00",
+      "candle_open_ms": 1788635700000,
+      "confidence": 1.0,
+      "indicators": {
+        "atr14": 126.12857142856956,
+        "box_high": 80158.0,
+        "box_low": 79636.0,
+        "close": 79922.1,
+        "ema_fast": 79915.58385743704,
+        "ema_slow": 79842.25605621179,
+        "ema_trend": 79760.29478112973,
+        "med_tr20": 95.0,
+        "regime": "normal",
+        "rsi14": 61.244408296056385,
+        "sep": 0.5813734381886945,
+        "spike_flag": false,
+        "state": "long",
+        "tight_session": false,
+        "trigger": "pullback_resume"
+      },
+      "price": 79922.1,
+      "reason": "pullback_resume_buy | sep=0.581 | regime=normal",
+      "type": "Buy"
+    }
+  ],
+  "stats": {
+    "avg_loss": -1.0999188500000072,
+    "avg_win": 0.28450590000001164,
+    "entry_signal_count": 5,
+    "gross_loss": -4.399675400000029,
+    "gross_profit": 0.28450590000001164,
+    "ignored_signal_count": 0,
+    "largest_loss": -1.6951110000000116,
+    "largest_win": 0.28450590000001164,
+    "max_drawdown": 4.563169500000018,
+    "max_drawdown_pct": 1018.5646205357182,
+    "net_pnl": -4.115169500000017,
+    "open_at_end": 0,
+    "profit_factor": 0.06466520234652079,
+    "signal_count": 5,
+    "total_fees": 0.7833695000000002,
+    "trade_count": 5,
+    "win_rate": 0.2
+  },
+  "strategy": "iron_trader",
+  "symbol": "BTC_USDT",
+  "trades": [
+    {
+      "entry_fee": 0.07707730000000002,
+      "entry_open": "2026-09-01T21:00:00.000+00:00",
+      "entry_open_ms": 1788296400000,
+      "entry_price": 77077.3,
+      "exit_fee": 0.07760770000000002,
+      "exit_open": "2026-09-02T03:15:00.000+00:00",
+      "exit_open_ms": 1788318900000,
+      "exit_price": 77607.7,
+      "net_pnl": -1.2154849999999884,
+      "pnl": -1.0607999999999884,
+      "position_id": "bt_BTC_USDT_0",
+      "quantity": 20.0,
+      "quanto_multiplier": 0.0001,
+      "return_pct": -0.7884844175911638,
+      "side": "Sell"
+    },
+    {
+      "entry_fee": 0.0765702,
+      "entry_open": "2026-09-02T12:45:00.000+00:00",
+      "entry_open_ms": 1788353100000,
+      "entry_price": 76570.2,
+      "exit_fee": 0.0773408,
+      "exit_open": "2026-09-02T13:30:00.000+00:00",
+      "exit_open_ms": 1788355800000,
+      "exit_price": 77340.8,
+      "net_pnl": -1.6951110000000116,
+      "pnl": -1.5412000000000117,
+      "position_id": "bt_BTC_USDT_1",
+      "quantity": 20.0,
+      "quanto_multiplier": 0.0001,
+      "return_pct": -1.1068999427975972,
+      "side": "Sell"
+    },
+    {
+      "entry_fee": 0.07791110000000001,
+      "entry_open": "2026-09-03T07:15:00.000+00:00",
+      "entry_open_ms": 1788419700000,
+      "entry_price": 77911.1,
+      "exit_fee": 0.0775372,
+      "exit_open": "2026-09-03T10:00:00.000+00:00",
+      "exit_open_ms": 1788429600000,
+      "exit_price": 77537.2,
+      "net_pnl": -0.9032483000000174,
+      "pnl": -0.7478000000000175,
+      "position_id": "bt_BTC_USDT_2",
+      "quantity": 20.0,
+      "quanto_multiplier": 0.0001,
+      "return_pct": -0.5796659911103921,
+      "side": "Buy"
+    },
+    {
+      "entry_fee": 0.079736,
+      "entry_open": "2026-09-05T16:00:00.000+00:00",
+      "entry_open_ms": 1788624000000,
+      "entry_price": 79736.0,
+      "exit_fee": 0.0799581,
+      "exit_open": "2026-09-05T18:00:00.000+00:00",
+      "exit_open_ms": 1788631200000,
+      "exit_price": 79958.1,
+      "net_pnl": 0.28450590000001164,
+      "pnl": 0.44420000000001164,
+      "position_id": "bt_BTC_USDT_3",
+      "quantity": 20.0,
+      "quanto_multiplier": 0.0001,
+      "return_pct": 0.1784049237483769,
+      "side": "Buy"
+    },
+    {
+      "entry_fee": 0.0799221,
+      "entry_open": "2026-09-05T19:15:00.000+00:00",
+      "entry_open_ms": 1788635700000,
+      "entry_price": 79922.1,
+      "exit_fee": 0.079709,
+      "exit_open": "2026-09-05T19:45:00.000+00:00",
+      "exit_open_ms": 1788637500000,
+      "exit_price": 79709.0,
+      "net_pnl": -0.5858311000000117,
+      "pnl": -0.4262000000000117,
+      "position_id": "bt_BTC_USDT_4",
+      "quantity": 20.0,
+      "quanto_multiplier": 0.0001,
+      "return_pct": -0.36650131815856424,
+      "side": "Buy"
+    }
+  ],
+  "warmup_candles": 276
+}

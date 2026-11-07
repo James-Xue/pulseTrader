@@ -10,7 +10,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <mutex>
+#include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace pulse::execution
 {
@@ -32,6 +35,13 @@ struct OrderRequest
     double leverage;            ///< Leverage multiplier (futures only, default 1.0).
     bool reduce_only;           ///< Reduce-only flag (futures only, default false).
     int contract_size;          ///< Order size in contracts (futures only, 0 = use quantity).
+    double quanto_multiplier;   ///< Contract multiplier (e.g. 0.0001 = 1 contract = 0.0001 BTC).
+
+    /// Attached stop-loss / take-profit prices (CFD only — TradFi orders
+    /// accept per-order price_sl / price_tp, the exchange-native protection).
+    /// nullopt = no attached protection. Rejected on non-CFD paths.
+    std::optional<Price> sl_price;
+    std::optional<Price> tp_price;
 
     /// Default constructor.
     OrderRequest()
@@ -42,9 +52,10 @@ struct OrderRequest
         , price{ 0.0 }
         , client_order_id{}
         , market_type{ MarketType::Spot }
-        , leverage{ 1.0 }
+        , leverage{ 0.0 }   ///< 0 = do not manage leverage (no API call)
         , reduce_only{ false }
         , contract_size{ 0 }
+        , quanto_multiplier{ 1.0 }
     {
     }
 };
@@ -95,11 +106,21 @@ class OrderExecutor
     /// Returns true on success, false on failure (check logs for details).
     [[nodiscard]] bool cancelOrder(const std::string &order_id);
 
-  private:
-    exchange::GateRestClient &m_restClient;
-    MarketType m_marketType;
+    /// Set futures leverage for a contract before placing orders.
+    ///
+    /// Gate.io applies leverage at the position level, not per order — this
+    /// must be called explicitly or the account's current setting (which may
+    /// be 200x) silently applies. Cached per (contract, leverage) so repeated
+    /// orders only hit the API once.
+    ///
+    /// Parameters:
+    ///   1. contract — futures contract (e.g. "BTC_USDT")
+    ///   2. leverage — leverage multiple (e.g. 10 for 10x cross margin)
+    [[nodiscard]] Result<nlohmann::json> setLeverage(const std::string &contract,
+                                                     double leverage);
 
-    /// Build Gate.io order JSON body from OrderRequest.
+  public:
+    /// Build Gate.io order JSON body from OrderRequest (static, unit-testable).
     ///
     /// Spot format:
     /// {
@@ -119,12 +140,57 @@ class OrderExecutor
     ///   "tif": "gtc",
     ///   "reduce_only": false
     /// }
-    [[nodiscard]] nlohmann::json buildOrderBody(const OrderRequest &req) const;
+    ///
+    /// TradFi CFD format (MT5 style, volume in lots, side 2=buy / 1=sell):
+    /// {
+    ///   "symbol": "XAUUSD",
+    ///   "side": 2,
+    ///   "volume": "0.01",
+    ///   "price_type": "market" | "trigger",
+    ///   "price": "3000"            (trigger only)
+    /// }
+    [[nodiscard]] static nlohmann::json buildOrderBody(MarketType mt,
+                                                       const OrderRequest &req);
+
+    /// Resolve the exchange order id from the TradFi open-orders list
+    /// (`data.list` of GET /tradfi/orders). POST /tradfi/orders does NOT echo
+    /// the order id — its `data.id` is an internal submission number — so the
+    /// caller must match the placed order back against the list.
+    ///
+    /// The list is newest-first; the FIRST entry matching symbol + side +
+    /// volume (+ price for trigger orders) wins. placed_at_unix anchors a
+    /// 5-second match window: candidates whose time_setup predates the POST
+    /// are stale leftovers and must never be matched (a filled market order
+    /// leaves the list immediately, so a same-key legacy trigger — the
+    /// 2026-08-17 incident — is exactly the failure this window prevents).
+    /// Returns "" when nothing matches. Pure function (no network) — unit-tested.
+    [[nodiscard]] static std::string matchCfdOrderId(const nlohmann::json &list,
+                                                     const OrderRequest &req,
+                                                     std::int64_t placed_at_unix);
+
+    /// Detect a 2xx business error in a TradFi response body.
+    ///
+    /// Gate.io TradFi wraps success in {"data": ...} but reports business
+    /// errors (NOT_IN_TRADE, INVALID_ARGUMENT, ...) as {"label","message"}
+    /// with a 2xx HTTP status — the REST client's HTTP-status check alone
+    /// cannot see them. Returns nullopt for success-shaped bodies.
+    /// Pure function — unit-tested.
+    [[nodiscard]] static std::optional<PulseError>
+    cfdBusinessError(const nlohmann::json &resp);
+
+  private:
+    exchange::GateRestClient &m_restClient;
+    MarketType m_marketType;
+
+    /// Cache of the last successfully applied leverage per contract.
+    std::mutex m_leverageMutex;
+    std::unordered_map<std::string, double> m_leverageCache;
 
     /// Parse Gate.io order response JSON into OrderResponse.
     ///
     /// Spot:    "id" (string), "status" (open/closed/cancelled)
     /// Futures: "id" (integer), "status" (open/finished), "finish_as" (filled/cancelled)
+    /// Cfd:     "id" (number or string), "status" (open/finished/cancelled)
     [[nodiscard]] OrderResponse parseOrderResponse(const nlohmann::json &resp) const;
 };
 

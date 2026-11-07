@@ -97,7 +97,7 @@ class OrderTrackerSnapshotTest : public ::testing::Test
         ExchangeConfig config;
         m_wsClient = std::make_unique<GateWsClient>(config);
         m_restClient = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient);
     }
 
     std::unique_ptr<GateWsClient> m_wsClient;
@@ -184,6 +184,33 @@ TEST_F(OrderTrackerSnapshotTest, RecentReportsRespectsLimit)
     EXPECT_TRUE(reports.empty());
 }
 
+TEST_F(OrderTrackerSnapshotTest, RecordCompletedReportWithoutTracking)
+{
+    // CFD closes bypass trackOrder() (dedicated position-close endpoint);
+    // the engine synthesizes a terminal report and calls this instead, so
+    // the close side must still show up in recentReports() (2026-08-18 fix
+    // for the close-side zero-trace gap).
+    ExecutionReport report;
+    report.order_id        = "close_XAUUSD_Buy_1";
+    report.client_order_id = report.order_id;
+    report.symbol          = "XAUUSD";
+    report.side            = Side::Sell;
+    report.type            = OrderType::Market;
+    report.requested_qty   = 0.01;
+    report.filled_qty      = 0.01;
+    report.avg_fill_price  = 4426.16;
+    report.final_status    = OrderStatus::Filled;
+
+    tracker_->recordCompletedReport(report);
+
+    const auto reports = tracker_->recentReports();
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports[0].order_id, "close_XAUUSD_Buy_1");
+    EXPECT_EQ(reports[0].side, Side::Sell);
+    EXPECT_EQ(reports[0].final_status, OrderStatus::Filled);
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 0.01);
+}
+
 // ---------------------------------------------------------------------------
 // Callback safety tests — verifies the "invoke outside lock" fix
 //
@@ -199,7 +226,7 @@ class OrderTrackerCallbackTest : public ::testing::Test
         ExchangeConfig config;
         m_wsClient = std::make_unique<GateWsClient>(config);
         m_restClient = std::make_unique<GateRestClient>(config);
-        tracker_ = std::make_unique<OrderTracker>(*m_wsClient, *m_restClient);
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient);
     }
 
     std::unique_ptr<GateWsClient> m_wsClient;
@@ -323,4 +350,384 @@ TEST_F(OrderTrackerCallbackTest, ProcessOrderUpdateTerminalGeneratesReport)
     EXPECT_EQ(reports[0].side, Side::Sell);
     EXPECT_DOUBLE_EQ(reports[0].filled_qty, 2.0);
     EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 3002.0);
+}
+
+// ---------------------------------------------------------------------------
+// Futures order tracking — Gate.io futures format regression tests
+//
+// Futures WS events differ from spot in three ways that previously broke
+// tracking (bug: fills never surfaced, orders stayed Pending forever):
+//   1. "id" arrives as a NUMBER, not a string — get<std::string>() threw.
+//   2. status is "open"/"finished" with the outcome in finish_as.
+//   3. fills use size/left/fill_price instead of filled_total/avg_deal_price.
+// ---------------------------------------------------------------------------
+
+TEST(OrderTracker, ParseFuturesStatusDecidesOutcomeFromFinishAs)
+{
+    // Working states.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("open", "open"), OrderStatus::Open);
+
+    // Terminal states — finish_as decides the outcome.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "filled"), OrderStatus::Filled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "cancelled"), OrderStatus::Cancelled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "reduce_only"), OrderStatus::Cancelled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", "position_closed"), OrderStatus::Cancelled);
+
+    // Defensive: finished without finish_as still resolves terminal.
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("finished", ""), OrderStatus::Filled);
+    EXPECT_EQ(OrderTracker::parseFuturesStatus("", ""), OrderStatus::Pending);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesFillWithNumericIdGeneratesReport)
+{
+    // Regression: numeric futures order id + finished/filled status must
+    // produce a completion report (previously threw on id.get<string>()).
+    tracker_->trackOrder("36028834465653841", "BTC_USDT", Side::Buy, OrderType::Market,
+                          1.0, 0.0);
+
+    bool callback_called = false;
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&callback_called, &captured](const ExecutionReport &report)
+        {
+            callback_called = true;
+            captured = report;
+        });
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 36028834465653841; // numeric id (futures)
+    ws_event["status"] = "finished";
+    ws_event["finish_as"] = "filled";
+    ws_event["size"] = 1;
+    ws_event["left"] = 0;
+    ws_event["fill_price"] = "63072.2";
+    ws_event["fee"] = 0.00048;
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    EXPECT_TRUE(callback_called);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    EXPECT_EQ(captured.order_id, "36028834465653841");
+    EXPECT_EQ(captured.final_status, OrderStatus::Filled);
+
+    const auto reports = tracker_->recentReports(1);
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports[0].order_id, "36028834465653841");
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 1.0);
+    EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 63072.2);
+    EXPECT_DOUBLE_EQ(reports[0].fees, 0.00048);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesOpenEventWithNumericIdStaysOpen)
+{
+    // Regression: an open futures order (numeric id) must update the tracked
+    // order without throwing and remain in activeOrders().
+    tracker_->trackOrder("223191759398", "BTC_USDT", Side::Sell, OrderType::Limit,
+                          1.0, 50000.0);
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 223191759398; // numeric id (futures)
+    ws_event["status"] = "open";
+    ws_event["finish_as"] = "open";
+    ws_event["size"] = -1; // sell direction
+    ws_event["left"] = 1;  // nothing filled yet
+    ws_event["fill_price"] = "0";
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(orders.size(), 1u);
+    EXPECT_EQ(orders[0].status, OrderStatus::Open);
+    EXPECT_DOUBLE_EQ(orders[0].filled_qty, 0.0);
+}
+
+TEST_F(OrderTrackerCallbackTest, FuturesPartialFillComputesFilledFromSizeLeft)
+{
+    // size/left are signed contract counts: a sell of 3 with 2 left has
+    // filled 1 contract — filled_qty must be derived, not read from a
+    // spot-style field that futures never sends.
+    tracker_->trackOrder("777", "BTC_USDT", Side::Sell, OrderType::Limit, 3.0, 50000.0);
+
+    nlohmann::json ws_event;
+    ws_event["id"] = 777;
+    ws_event["status"] = "open";
+    ws_event["finish_as"] = "open";
+    ws_event["size"] = -3;
+    ws_event["left"] = -2;
+    ws_event["fill_price"] = "50010.0";
+
+    tracker_->testSimulateWsUpdate(ws_event);
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(orders.size(), 1u);
+    EXPECT_EQ(orders[0].status, OrderStatus::Open);
+    EXPECT_DOUBLE_EQ(orders[0].filled_qty, 1.0);
+
+    // Complete the fill: left -> 0, finish_as -> filled.
+    nlohmann::json filled_event;
+    filled_event["id"] = 777;
+    filled_event["status"] = "finished";
+    filled_event["finish_as"] = "filled";
+    filled_event["size"] = -3;
+    filled_event["left"] = 0;
+    filled_event["fill_price"] = "50010.0";
+
+    bool callback_called = false;
+    tracker_->setCompletionCallback([&callback_called](const ExecutionReport &)
+    {
+        callback_called = true;
+    });
+
+    tracker_->testSimulateWsUpdate(filled_event);
+
+    EXPECT_TRUE(callback_called);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    const auto reports = tracker_->recentReports(1);
+    ASSERT_EQ(reports.size(), 1u);
+    EXPECT_DOUBLE_EQ(reports[0].filled_qty, 3.0);
+    EXPECT_DOUBLE_EQ(reports[0].avg_fill_price, 50010.0);
+}
+
+// ---------------------------------------------------------------------------
+// M19: TradFi CFD order parsing + list-poll state machine
+//
+// CFD order objects use state/finished (ints) instead of the spot/futures
+// status string; the single-order GET endpoint does not exist, so status
+// comes from the open-orders list (findCfdOrderInList) + the fill-fields
+// synthesized from the positions fallback.
+// ---------------------------------------------------------------------------
+
+TEST(OrderTracker, ParseCfdStatus_OpenAndPending)
+{
+    EXPECT_EQ(OrderStatus::Open, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 1 }, { "finished", 0 } }));
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 0 }, { "finished", 0 } }));
+    // Missing fields default to Pending.
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(nlohmann::json::object()));
+    // Non-object input (null) degrades to Pending without throwing.
+    EXPECT_EQ(OrderStatus::Pending, OrderTracker::parseCfdOrderStatus(nlohmann::json{}));
+}
+
+TEST(OrderTracker, ParseCfdStatus_Terminal)
+{
+    // state=1 + finished=1 → deleted (cancelled); any other terminal → filled.
+    EXPECT_EQ(OrderStatus::Cancelled, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 1 }, { "finished", 1 } }));
+    EXPECT_EQ(OrderStatus::Filled, OrderTracker::parseCfdOrderStatus(
+        nlohmann::json{ { "state", 2 }, { "finished", 1 } }));
+}
+
+TEST(OrderTracker, FindCfdOrderInList_ById)
+{
+    const nlohmann::json list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" } },
+        nlohmann::json{ { "order_id", "17511143" }, { "symbol", "XAUUSD" } }, // string form
+    });
+
+    // int id, string id.
+    EXPECT_EQ(17618607, OrderTracker::findCfdOrderInList(list, "17618607")["order_id"]);
+    EXPECT_EQ("17511143", OrderTracker::findCfdOrderInList(list, "17511143")["order_id"]);
+
+    // Not found / null list / missing order_id entries.
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(list, "999").is_null());
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(nlohmann::json{}, "17618607").is_null());
+    EXPECT_TRUE(OrderTracker::findCfdOrderInList(
+        nlohmann::json::array({ nlohmann::json{ { "symbol", "XAUUSD" } } }), "1").is_null());
+}
+
+// ---------------------------------------------------------------------------
+// CFD state machine via testSimulateCfdPoll (no network).
+// ---------------------------------------------------------------------------
+
+class OrderTrackerCfdTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        ExchangeConfig config;
+        m_wsClient = std::make_unique<GateWsClient>(config);
+        m_restClient = std::make_unique<GateRestClient>(config);
+        // CFD: REST-poll-only (enable_ws=false), like main.cpp's cfd_tracker.
+        tracker_ = std::make_unique<OrderTracker>(m_wsClient.get(), *m_restClient,
+                                                  MarketType::Cfd, /*enable_ws=*/false);
+    }
+
+    std::unique_ptr<GateWsClient> m_wsClient;
+    std::unique_ptr<GateRestClient> m_restClient;
+    std::unique_ptr<OrderTracker> tracker_;
+};
+
+TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_OpenThenFilled)
+{
+    tracker_->trackOrder("17633250", "XAUUSD", Side::Buy, OrderType::Market,
+                         0.01, 4406.5, "cfd_client_1");
+
+    // 1. Open state (state=1, finished=0) — stays tracked, no callback.
+    bool callback_invoked = false;
+    tracker_->setCompletionCallback(
+        [&callback_invoked](const ExecutionReport &) { callback_invoked = true; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17633250 }, { "state", 1 }, { "finished", 0 } });
+
+    EXPECT_FALSE(callback_invoked);
+    auto active = tracker_->activeOrders();
+    ASSERT_EQ(1u, active.size());
+    EXPECT_EQ(OrderStatus::Open, active[0].status);
+
+    // 2. Terminal fill (state=2, finished=1, fill fields synthesized from
+    //    the positions fallback) — callback fires, report carries the fill.
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&captured](const ExecutionReport &report) { captured = report; });
+
+    tracker_->testSimulateCfdPoll(nlohmann::json{
+        { "order_id", 17633250 }, { "state", 2 }, { "finished", 1 },
+        { "filled_volume", "0.01" }, { "fill_price", "4406.68" }, { "fee", "-0.06" },
+        { "exchange_position_id", 17653462 } });
+
+    EXPECT_EQ(OrderStatus::Filled, captured.final_status);
+    EXPECT_DOUBLE_EQ(0.01, captured.filled_qty);
+    EXPECT_DOUBLE_EQ(4406.68, captured.avg_fill_price);
+    EXPECT_DOUBLE_EQ(-0.06, captured.fees);
+    EXPECT_EQ("cfd_client_1", captured.client_order_id);
+    // Exchange position id (number in the API payload) reaches the report as
+    // a string so close_position can call the real close endpoint.
+    EXPECT_EQ("17653462", captured.exchange_position_id);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+    ASSERT_EQ(1u, tracker_->recentReports().size());
+}
+
+TEST_F(OrderTrackerCfdTest, CfdPollStateMachine_FinishedState1IsCancelled)
+{
+    // A deleted order (state=1, finished=1) — e.g. after a successful cancel
+    // removed it from the list — completes as Cancelled with filled_qty 0
+    // (no phantom position can be opened by onOrderComplete).
+    tracker_->trackOrder("17511143", "XAUUSD", Side::Buy, OrderType::Market,
+                         0.01, 4400.0, "cfd_client_2");
+
+    ExecutionReport captured;
+    tracker_->setCompletionCallback(
+        [&captured](const ExecutionReport &report) { captured = report; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17511143 }, { "state", 1 }, { "finished", 1 } });
+
+    EXPECT_EQ(OrderStatus::Cancelled, captured.final_status);
+    EXPECT_DOUBLE_EQ(0.0, captured.filled_qty);
+    EXPECT_TRUE(tracker_->activeOrders().empty());
+}
+
+TEST_F(OrderTrackerCfdTest, FindCfdOrderByKey_MatchesByKeyNotId)
+{
+    // The engine may track the POST's data.id ("47777") while the list
+    // carries the real exchange id ("17654490") — the key match must find
+    // the order anyway (2026-08-17: id-only matching mis-cancelled the
+    // order while it was still open on the exchange).
+    const nlohmann::json list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17618607 }, { "symbol", "XAUUSD" },
+                        { "side", 1 }, { "volume", "0.01" },
+                        { "price", "4418.00" }, { "price_type", "trigger" },
+                        { "time_setup", 1786931527 } },
+        nlohmann::json{ { "order_id", 17654490 }, { "symbol", "XAUUSD" },
+                        { "side", 2 }, { "volume", "0.01" },
+                        { "price", "4300.00" }, { "price_type", "trigger" },
+                        { "time_setup", 1786955344 } },
+    });
+
+    // Trigger buy 0.01 @4300 submitted at 1786955344.
+    const auto hit = OrderTracker::findCfdOrderByKey(
+        list, "XAUUSD", Side::Buy, 0.01, OrderType::Limit, 4300.0, 1786955344);
+    ASSERT_FALSE(hit.is_null());
+    EXPECT_EQ(17654490, hit["order_id"].get<std::int64_t>());
+    // The same order is also findable by id (number → string normalization).
+    const auto by_id = OrderTracker::findCfdOrderInList(
+        nlohmann::json::array({ hit }), "17654490");
+    ASSERT_FALSE(by_id.is_null());
+    EXPECT_EQ(17654490, by_id["order_id"].get<std::int64_t>());
+
+    // A legacy same-key trigger (old buy @4295) outside the time window must
+    // NOT match a fresh order (the 2026-08-17 incident).
+    const auto stale = OrderTracker::findCfdOrderByKey(
+        list, "XAUUSD", Side::Buy, 0.01, OrderType::Limit, 4300.0, 1786955344);
+    EXPECT_FALSE(stale.is_null());
+
+    // Market orders match on symbol/side/volume only — price is ignored.
+    const nlohmann::json market_list = nlohmann::json::array({
+        nlohmann::json{ { "order_id", 17653462 }, { "symbol", "XAUUSD" },
+                        { "side", 2 }, { "volume", "0.01" },
+                        { "price", "0.00" }, { "price_type", "market" },
+                        { "time_setup", 1786954249 } },
+    });
+    const auto mkt = OrderTracker::findCfdOrderByKey(
+        market_list, "XAUUSD", Side::Buy, 0.01, OrderType::Market, 0.0,
+        1786954249);
+    ASSERT_FALSE(mkt.is_null());
+    EXPECT_EQ(17653462, mkt["order_id"]);
+}
+
+TEST_F(OrderTrackerCfdTest, ResolveExchangeId_ReturnsAliasOrInput)
+{
+    // No alias yet → input unchanged.
+    tracker_->trackOrder("47777", "XAUUSD", Side::Buy, OrderType::Limit,
+                         0.01, 4300.0, "cfd_client_3");
+    EXPECT_EQ("47777", tracker_->resolveExchangeId("47777"));
+
+    // Open → re-anchor poll: 47777 not in the list by id, but the key match
+    // finds the real 17654804 and records the alias.
+    bool callback_invoked = false;
+    tracker_->setCompletionCallback(
+        [&callback_invoked](const ExecutionReport &) { callback_invoked = true; });
+
+    tracker_->testSimulateCfdPoll(
+        nlohmann::json{ { "order_id", 17654804 }, { "state", 1 }, { "finished", 0 } });
+
+    // testSimulateCfdPoll is the by-id path (no re-anchor) — verify the
+    // alias resolver still maps a manually-recorded alias to the real id.
+    // (The re-anchor itself runs in pollCfdOrderStatus, the network path.)
+    EXPECT_EQ("47777", tracker_->resolveExchangeId("47777"));
+    EXPECT_FALSE(callback_invoked);
+}
+
+// ---------------------------------------------------------------------------
+// M27 — client_order_id prefix query (grid service)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderTrackerSnapshotTest, FindByClientIdPrefixMatchesOnlyPrefix)
+{
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                         0.001, 50000.0, "eth-grid-2100");
+    tracker_->trackOrder("order_2", "ETH_USDT", Side::Sell, OrderType::Limit,
+                         2.0, 3000.0, "eth-grid-tp-2100");
+    tracker_->trackOrder("order_3", "ETH_USDT", Side::Sell, OrderType::Limit,
+                         2.0, 3000.0, "app-manual-1");
+
+    const auto grid = tracker_->findByClientIdPrefix("eth-grid-");
+    ASSERT_EQ(2u, grid.size());
+    for (const auto &o : grid)
+    {
+        EXPECT_EQ(0u, o.client_order_id.rfind("eth-grid-", 0));
+    }
+
+    const auto tps = tracker_->findByClientIdPrefix("eth-grid-tp-");
+    ASSERT_EQ(1u, tps.size());
+    EXPECT_EQ("eth-grid-tp-2100", tps.front().client_order_id);
+
+    const auto none = tracker_->findByClientIdPrefix("no-such-prefix-");
+    EXPECT_TRUE(none.empty());
+
+    // Empty prefix matches everything (documented behavior).
+    const auto all = tracker_->findByClientIdPrefix("");
+    EXPECT_EQ(3u, all.size());
+}
+
+TEST_F(OrderTrackerSnapshotTest, ActiveOrdersSnapshotCarriesClientOrderId)
+{
+    tracker_->trackOrder("order_1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                         0.001, 50000.0, "eth-grid-2100");
+
+    const auto orders = tracker_->activeOrders();
+    ASSERT_EQ(1u, orders.size());
+    EXPECT_EQ("eth-grid-2100", orders.front().client_order_id);
 }

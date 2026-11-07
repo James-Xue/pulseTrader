@@ -23,6 +23,7 @@
 //   - setBound() should only be called from the configuration thread (not concurrent with apply)
 
 #include "ai/AnalysisResult.hpp"
+#include "ai/ParamBounds.hpp"
 #include "heartbeat/heartbeat_events.hpp"
 #include "strategy/StrategyParams.hpp"
 
@@ -33,25 +34,8 @@
 
 namespace pulse::ai
 {
-
-// ---------------------------------------------------------------------------
-// ParamBound — safety constraints for a single tunable parameter
-//
-// Fields:
-//   1. max_delta — maximum change per AI cycle (±); the LLM delta is clamped to this
-//   2. hard_min  — absolute minimum value the parameter can reach (floor)
-//   3. hard_max  — absolute maximum value the parameter can reach (ceiling)
-//
-// Example: order_quantity has max_delta=0.0005, hard_min=0.0001, hard_max=0.1
-//   → The LLM can request ±0.0005 per cycle, but the final value can never
-//     go below 0.0001 BTC or above 0.1 BTC.
-// ---------------------------------------------------------------------------
-struct ParamBound
-{
-    double max_delta;  ///< Max change per cycle (±).
-    double hard_min;   ///< Absolute minimum value.
-    double hard_max;   ///< Absolute maximum value.
-};
+// (ParamBound + defaultParamBounds() live in ParamBounds.hpp — shared with
+// the manual control-plane channel.)
 
 // ---------------------------------------------------------------------------
 // ParamAdvisor — validates and applies AI-recommended parameter deltas

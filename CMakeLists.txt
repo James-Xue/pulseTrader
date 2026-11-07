@@ -26,7 +26,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(PULSE_BUILD_TESTS   "Build unit and integration tests" ON)
 option(PULSE_BUILD_DEMOS   "Build demo programs"              OFF)
 option(PULSE_ENABLE_SQLITE "Enable SQLite trade recorder"     OFF)
-option(PULSE_ENABLE_WEBUI  "Enable WebUI dashboard server"    OFF)
+# The Qt client is a standalone CMake project under client/qt. It is off by
+# default so the engine configure path stays byte-identical.
+option(PULSE_BUILD_QT_CLIENT "Build the Qt 6 client under client/qt" OFF)
 
 # ---------------------------------------------------------------------------
 # Compiler flags
@@ -45,8 +47,14 @@ find_package(toml11        CONFIG REQUIRED)
 
 # asio and websocketpp ship headers only; CONFIG mode may not be available
 # on all vcpkg triples — fall back to finding the include path manually.
+# asio include dir is hoisted so exchange and control targets share it.
 find_package(asio        CONFIG QUIET)
 find_package(websocketpp CONFIG QUIET)
+
+find_path(PULSE_ASIO_INCLUDE_DIR asio.hpp)
+if(NOT PULSE_ASIO_INCLUDE_DIR)
+    message(FATAL_ERROR "asio.hpp not found. Install via vcpkg or apt (libasio-dev).")
+endif()
 
 if(PULSE_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -72,3 +80,7 @@ endif()
 
 add_subdirectory(tools)
 add_subdirectory(apps)
+
+if(PULSE_BUILD_QT_CLIENT)
+    add_subdirectory(client/qt)
+endif()
