@@ -259,6 +259,12 @@ Rectangle {
                         id: keyField
                         Layout.fillWidth: true
                         enabled: !root.busy
+                        // The key identifies the account rather than
+                        // authorising it, but it is still masked by default so
+                        // a screenshot or a passer-by cannot read it. The
+                        // reveal switch below covers both fields.
+                        echoMode: revealBox.checked ? TextInput.Normal
+                                                    : TextInput.Password
                         placeholderText: qsTr("Gate.io API key")
                     }
                 }
@@ -277,10 +283,17 @@ Rectangle {
                         id: secretField
                         Layout.fillWidth: true
                         enabled: !root.busy
-                        echoMode: TextInput.Password
+                        echoMode: revealBox.checked ? TextInput.Normal
+                                                    : TextInput.Password
                         placeholderText: qsTr("Gate.io API secret")
                         onAccepted: root.connectNow()
                     }
+                }
+
+                MacCheckBox {
+                    id: revealBox
+                    enabled: !root.busy
+                    text: qsTr("Show API key and secret")
                 }
 
                 ColumnLayout {
