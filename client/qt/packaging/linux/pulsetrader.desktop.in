@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=pulseTrader
+GenericName=Trading Console
+Comment=Read-only control console for the pulseTrader engine
+Exec=@EXEC@
+Icon=pulsetrader
+Terminal=false
+Categories=Office;Finance;
+Keywords=trading;exchange;gate;monitor;
+StartupNotify=true
+StartupWMClass=pulsetrader

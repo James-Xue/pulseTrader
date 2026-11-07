@@ -54,7 +54,7 @@ Flickable {
 
         Text {
             text: qsTr("Account")
-            color: Style.muted
+            color: Style.secondaryText
             font.pixelSize: 12
             Layout.topMargin: Style.gap
         }
@@ -88,10 +88,10 @@ Flickable {
                        ? root.controller.accountModel.futuresUnrealised.toFixed(2) : "—"
                 valueColor: {
                     if (!root.controller || !root.controller.accountModel.futuresPresent) {
-                        return Style.muted
+                        return Style.secondaryText
                     }
                     return root.controller.accountModel.futuresUnrealised >= 0
-                           ? Style.good : Style.bad
+                           ? Style.success : Style.danger
                 }
             }
         }

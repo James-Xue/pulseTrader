@@ -45,7 +45,7 @@ ColumnLayout {
                 width: activeList.width
                 height: 42
                 radius: Style.radius
-                color: Style.surface
+                color: Style.contentBackground
 
                 RowLayout {
                     anchors.fill: parent
@@ -61,13 +61,13 @@ ColumnLayout {
                     }
                     Text {
                         text: model.side === undefined ? "" : model.side
-                        color: model.side === "Buy" ? Style.good : Style.bad
+                        color: model.side === "Buy" ? Style.success : Style.danger
                         font.pixelSize: 12
                         Layout.preferredWidth: 60
                     }
                     Text {
                         text: model.order_type === undefined ? "" : model.order_type
-                        color: Style.muted
+                        color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.preferredWidth: 80
                     }
@@ -79,7 +79,7 @@ ColumnLayout {
                     }
                     Text {
                         text: model.status === undefined ? "" : model.status
-                        color: Style.muted
+                        color: Style.secondaryText
                         font.pixelSize: 11
                         Layout.fillWidth: true
                     }
@@ -105,7 +105,7 @@ ColumnLayout {
                 width: reportList.width
                 height: 42
                 radius: Style.radius
-                color: Style.surface
+                color: Style.contentBackground
 
                 RowLayout {
                     anchors.fill: parent
@@ -121,7 +121,7 @@ ColumnLayout {
                     }
                     Text {
                         text: model.status === undefined ? "" : model.status
-                        color: Style.muted
+                        color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.preferredWidth: 90
                     }
@@ -134,7 +134,7 @@ ColumnLayout {
                     Text {
                         text: model.fill_time_str === undefined ? ""
                               : model.fill_time_str
-                        color: Style.muted
+                        color: Style.secondaryText
                         font.pixelSize: 11
                         Layout.fillWidth: true
                     }

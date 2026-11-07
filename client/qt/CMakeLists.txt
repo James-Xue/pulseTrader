@@ -44,6 +44,10 @@ qt_add_qml_module(pulseTraderQt
         qml/components/SignalCard.qml
         qml/components/ConnectionDialog.qml
         qml/components/EmptyState.qml
+        qml/components/TrafficLights.qml
+        qml/components/Sidebar.qml
+        qml/components/WindowResizer.qml
+        qml/components/ThemeToggle.qml
     SOURCES
         src/rpc/RpcClient.cpp          src/rpc/RpcClient.hpp
         src/rpc/RpcError.cpp           src/rpc/RpcError.hpp

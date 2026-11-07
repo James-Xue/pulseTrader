@@ -14,8 +14,8 @@ Rectangle {
     implicitWidth: 180
     implicitHeight: 84
     radius: Style.radius
-    color: Style.surface
-    border.color: Style.border
+    color: Style.contentBackground
+    border.color: Style.separator
 
     Column {
         anchors.fill: parent
@@ -24,13 +24,13 @@ Rectangle {
 
         Text {
             text: root.label
-            color: Style.muted
+            color: Style.secondaryText
             font.pixelSize: 11
         }
 
         Text {
             text: root.present ? root.value : qsTr("unknown")
-            color: root.present ? root.valueColor : Style.muted
+            color: root.present ? root.valueColor : Style.secondaryText
             font.pixelSize: 20
             font.bold: true
             elide: Text.ElideRight

@@ -18,10 +18,10 @@ ColumnLayout {
         columnSpacing: Style.gap
         rowSpacing: Style.gap
 
-        Text { text: qsTr("Host"); color: Style.muted; font.pixelSize: 12 }
+        Text { text: qsTr("Host"); color: Style.secondaryText; font.pixelSize: 12 }
         TextField { id: hostField; Layout.fillWidth: true; text: "127.0.0.1" }
 
-        Text { text: qsTr("Port"); color: Style.muted; font.pixelSize: 12 }
+        Text { text: qsTr("Port"); color: Style.secondaryText; font.pixelSize: 12 }
         TextField {
             id: portField
             Layout.fillWidth: true
@@ -29,10 +29,10 @@ ColumnLayout {
             inputMethodHints: Qt.ImhDigitsOnly
         }
 
-        Text { text: qsTr("TLS"); color: Style.muted; font.pixelSize: 12 }
+        Text { text: qsTr("TLS"); color: Style.secondaryText; font.pixelSize: 12 }
         CheckBox { id: tlsBox; text: qsTr("encrypt the control socket") }
 
-        Text { text: qsTr("Token"); color: Style.muted; font.pixelSize: 12 }
+        Text { text: qsTr("Token"); color: Style.secondaryText; font.pixelSize: 12 }
         TextField {
             id: tokenField
             Layout.fillWidth: true
@@ -80,7 +80,7 @@ ColumnLayout {
               ? (root.controller.connectionState === EngineController.Ready
                  ? qsTr("ready") : qsTr("not ready"))
               : qsTr("no controller"))
-        color: Style.muted
+        color: Style.secondaryText
         font.pixelSize: 11
     }
 

@@ -1,4 +1,6 @@
 #include <QGuiApplication>
+#include <QFont>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 
@@ -12,9 +14,30 @@ int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
 
-    // Material adapts best across desktop and touch; the QML layer still owns
-    // every colour, so the style only supplies control metrics.
-    QQuickStyle::setStyle(QStringLiteral("Material"));
+    // 1. Identity. The desktop file name is what links the Wayland window to
+    //    its .desktop entry; GNOME resolves the dock icon from that file, not
+    //    from setWindowIcon(). It must match packaging/linux/pulsetrader.desktop.
+    QGuiApplication::setApplicationName(QStringLiteral("pulseTrader"));
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("pulseTrader"));
+    QGuiApplication::setOrganizationName(QStringLiteral("pulseTrader"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("pulsetrader"));
+
+    // 2. Window icon for X11 and for the compositor's fallback path. The path
+    //    is the QML module resource prefix plus the RESOURCES entry, not the
+    //    bare "qrc:/resources/..." form.
+    QGuiApplication::setWindowIcon(
+        QIcon(QStringLiteral(":/qt/qml/Pulse/Client/resources/icons/app.svg")));
+
+    // 3. Basic is the neutral base style: it draws almost nothing, so the QML
+    //    layer owns the entire macOS-like look. Material/Fusion would fight
+    //    the custom palette on every control.
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
+
+    // One application font so controls and text share the same metrics. Noto
+    // Sans is the closest neutral grotesque installed here; Qt falls back to
+    // Noto Sans CJK for Chinese glyphs.
+    QFont font(QStringLiteral("Noto Sans"), 13);
+    QGuiApplication::setFont(font);
 
     QQmlApplicationEngine engine;
 

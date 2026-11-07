@@ -50,7 +50,7 @@ ColumnLayout {
             width: list.width
             height: 44
             radius: Style.radius
-            color: Style.surface
+            color: Style.contentBackground
 
             RowLayout {
                 anchors.fill: parent
@@ -66,7 +66,7 @@ ColumnLayout {
                 }
                 Text {
                     text: model.side === undefined ? "" : model.side
-                    color: model.side === "Buy" ? Style.good : Style.bad
+                    color: model.side === "Buy" ? Style.success : Style.danger
                     font.pixelSize: 12
                     Layout.preferredWidth: 60
                 }
@@ -85,13 +85,13 @@ ColumnLayout {
                 Text {
                     text: model.unrealized_pnl === undefined ? ""
                           : Number(model.unrealized_pnl).toFixed(2)
-                    color: Number(model.unrealized_pnl) >= 0 ? Style.good : Style.bad
+                    color: Number(model.unrealized_pnl) >= 0 ? Style.success : Style.danger
                     font.pixelSize: 12
                     Layout.preferredWidth: 100
                 }
                 Text {
                     text: model.market_type === undefined ? "" : model.market_type
-                    color: Style.muted
+                    color: Style.secondaryText
                     font.pixelSize: 11
                     Layout.fillWidth: true
                 }
@@ -107,11 +107,11 @@ ColumnLayout {
     component HeaderRow: RowLayout {
         spacing: Style.gap
 
-        Text { text: qsTr("Symbol"); color: Style.muted; font.pixelSize: 11; Layout.preferredWidth: 140 }
-        Text { text: qsTr("Side"); color: Style.muted; font.pixelSize: 11; Layout.preferredWidth: 60 }
-        Text { text: qsTr("Qty"); color: Style.muted; font.pixelSize: 11; Layout.preferredWidth: 90 }
-        Text { text: qsTr("Entry"); color: Style.muted; font.pixelSize: 11; Layout.preferredWidth: 110 }
-        Text { text: qsTr("uPnL"); color: Style.muted; font.pixelSize: 11; Layout.preferredWidth: 100 }
-        Text { text: qsTr("Market"); color: Style.muted; font.pixelSize: 11; Layout.fillWidth: true }
+        Text { text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 140 }
+        Text { text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 60 }
+        Text { text: qsTr("Qty"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 90 }
+        Text { text: qsTr("Entry"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 110 }
+        Text { text: qsTr("uPnL"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 100 }
+        Text { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 11; Layout.fillWidth: true }
     }
 }

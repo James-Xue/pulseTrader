@@ -14,8 +14,8 @@ Rectangle {
 
     implicitHeight: 76
     radius: Style.radius
-    color: Style.surface
-    border.color: Style.border
+    color: Style.contentBackground
+    border.color: Style.separator
 
     Column {
         anchors.fill: parent
@@ -38,12 +38,12 @@ Rectangle {
                 radius: 4
                 color: {
                     if (root.signalType === "Buy") {
-                        return Style.good
+                        return Style.success
                     }
                     if (root.signalType === "Sell") {
-                        return Style.bad
+                        return Style.danger
                     }
-                    return Style.surfaceAlt
+                    return Style.controlBackgroundPressed
                 }
 
                 Text {
@@ -57,7 +57,7 @@ Rectangle {
 
             Text {
                 text: qsTr("conf %1").arg(root.confidence.toFixed(2))
-                color: Style.muted
+                color: Style.secondaryText
                 font.pixelSize: 11
             }
         }
@@ -65,14 +65,14 @@ Rectangle {
         Text {
             width: parent.width
             text: root.reason
-            color: Style.muted
+            color: Style.secondaryText
             font.pixelSize: 11
             elide: Text.ElideRight
         }
 
         Text {
             text: root.publishedAt
-            color: Style.muted
+            color: Style.secondaryText
             font.pixelSize: 10
         }
     }

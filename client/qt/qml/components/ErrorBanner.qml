@@ -17,7 +17,7 @@ Rectangle {
         anchors.rightMargin: Style.pad
         verticalAlignment: Text.AlignVCenter
         text: root.message
-        color: Style.bad
+        color: Style.danger
         font.pixelSize: 12
         elide: Text.ElideRight
     }
