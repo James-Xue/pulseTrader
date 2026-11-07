@@ -48,6 +48,11 @@ qt_add_qml_module(pulseTraderQt
         qml/components/Sidebar.qml
         qml/components/WindowResizer.qml
         qml/components/ThemeToggle.qml
+        qml/components/MacTextField.qml
+        qml/components/MacButton.qml
+        qml/components/MacCheckBox.qml
+        qml/components/MacSwitch.qml
+        qml/components/MacComboBox.qml
     SOURCES
         src/rpc/RpcClient.cpp          src/rpc/RpcClient.hpp
         src/rpc/RpcError.cpp           src/rpc/RpcError.hpp
