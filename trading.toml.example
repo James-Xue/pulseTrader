@@ -232,14 +232,27 @@ keywords        = ["bitcoin", "crypto regulation"]
 maxArticles     = 20
 pollIntervalSec = 300
 
-# ── WebUI 仪表盘 ─────────────────────────────────────────────────────
-# 需要编译时启用 -DPULSE_ENABLE_WEBUI=ON
-[webui]
-enabled     = true
-bindAddress = "127.0.0.1"          # 仅本机访问，不要暴露到网络
-port        = 8080
-authToken   = "from_env:PULSE_WEBUI_TOKEN"
-maxClients  = 4                    # 最大 WebSocket 连接数
+# ── Control plane (L9 JSON-RPC control socket) ───────────────────────
+# The Qt client, the remote `cli` and the `mcp` bridge connect here.
+# Keep the socket on loopback unless TLS is configured.
+[control]
+enabled          = true
+bindAddress      = "127.0.0.1"     # loopback only; do not expose without TLS
+port             = 8081
+display_timezone = "local"         # "local" | "utc" | "±HH:MM"
+
+# Optional TLS (off by default). Enabling it requires both paths.
+tls_enabled             = false
+# tls_cert_path         = "certs/control.crt"
+# tls_key_path          = "certs/control.key"
+# tls_ca_path           = "certs/ca.crt"   # used only for mTLS
+tls_require_client_cert = false
+
+# Shared bearer secret checked by the `auth` handshake. Empty disables
+# authentication, which is the default for a loopback-only socket. Prefer
+# from_env so the secret never lands in the TOML file:
+#   export PULSE_CONTROL_TOKEN="$(openssl rand -base64 32)"
+token = "from_env:PULSE_CONTROL_TOKEN"
 
 # ── SQLite 交易记录 ──────────────────────────────────────────────────
 # 需要编译时启用 -DPULSE_ENABLE_SQLITE=ON

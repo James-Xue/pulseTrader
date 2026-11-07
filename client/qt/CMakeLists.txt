@@ -31,6 +31,7 @@ qt_add_qml_module(pulseTraderQt
     QML_FILES
         qml/Main.qml
         qml/Style.qml
+        qml/pages/LoginPage.qml
         qml/pages/DashboardPage.qml
         qml/pages/PositionsPage.qml
         qml/pages/OrdersPage.qml
@@ -42,7 +43,6 @@ qt_add_qml_module(pulseTraderQt
         qml/components/StaleBadge.qml
         qml/components/ErrorBanner.qml
         qml/components/SignalCard.qml
-        qml/components/ConnectionDialog.qml
         qml/components/EmptyState.qml
         qml/components/TrafficLights.qml
         qml/components/Sidebar.qml

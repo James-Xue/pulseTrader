@@ -11,6 +11,10 @@ import Pulse.Client
 /// title bar used to provide is reimplemented here: dragging
 /// (startSystemMove), double-click to maximize, edge and corner resizing
 /// (WindowResizer), and the three window buttons.
+///
+/// Two content states share the chrome: the login view until the control
+/// socket is Ready, and the dashboard shell after that. The login view is
+/// skipped entirely when PULSE_CLIENT_HOST started the auto-connect path.
 ApplicationWindow {
     id: root
 
@@ -25,8 +29,8 @@ ApplicationWindow {
     color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    // Controls inherit this palette, so TextField/CheckBox/Switch follow the
-    // colour scheme instead of staying light in dark mode.
+    /// Controls inherit this palette, so TextField/CheckBox/Switch follow the
+    /// colour scheme instead of staying light in dark mode.
     palette.window: Style.windowBackground
     palette.windowText: Style.text
     palette.base: Style.controlBackground
@@ -39,6 +43,13 @@ ApplicationWindow {
     palette.placeholderText: Style.tertiaryText
     palette.toolTipBase: Style.controlBackground
     palette.toolTipText: Style.text
+
+    /// Show the shell once the aggregate connection state is Ready. The
+    /// auto-connect path (PULSE_CLIENT_HOST) keeps the shell visible from the
+    /// first frame so headless captures and scripts never record the login
+    /// form; the login view is only for interactive launches.
+    readonly property bool showShell: engine.autoConnect
+                                      || engine.connectionState === EngineController.Ready
 
     EngineController {
         id: engine
@@ -144,64 +155,62 @@ ApplicationWindow {
         ErrorBanner {
             Layout.fillWidth: true
             message: engine.lastError
-            visible: engine.lastError.length > 0
+            visible: root.showShell && engine.lastError.length > 0
         }
 
-        // -- Sidebar + pages ------------------------------------------------
-        RowLayout {
+        // -- Login or shell -------------------------------------------------
+        StackLayout {
+            id: content
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            currentIndex: root.showShell ? 1 : 0
 
-            Sidebar {
-                Layout.preferredWidth: Style.sidebarWidth
-                Layout.fillHeight: true
-                // Owns the lower-left corner.
-                bottomLeftRadius: Style.windowRadius
-                currentIndex: pages.currentIndex
-                onSelected: function (index) { pages.currentIndex = index }
+            LoginPage {
+                id: login
+                controller: engine
             }
 
-            Rectangle {
-                Layout.preferredWidth: 1
-                Layout.fillHeight: true
-                color: Style.separator
-            }
-
-            // Owns the lower-right corner. The pages draw on the window
-            // background so the white card surfaces stay distinguishable.
-            Rectangle {
+            // -- Sidebar + pages --------------------------------------------
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: Style.windowBackground
-                bottomRightRadius: Style.windowRadius
+                spacing: 0
 
-                StackLayout {
-                    id: pages
-                    anchors.fill: parent
-
-                    DashboardPage { controller: engine }
-                    PositionsPage { controller: engine }
-                    OrdersPage { controller: engine }
-                    SignalsPage { controller: engine }
-                    MarketPage { controller: engine }
-                    SettingsPage { controller: engine }
+                Sidebar {
+                    Layout.preferredWidth: Style.sidebarWidth
+                    Layout.fillHeight: true
+                    // Owns the lower-left corner.
+                    bottomLeftRadius: Style.windowRadius
+                    currentIndex: pages.currentIndex
+                    onSelected: function (index) { pages.currentIndex = index }
                 }
-            }
-        }
-    }
 
-    ConnectionDialog {
-        id: connectionDialog
-        controller: engine
-    }
+                Rectangle {
+                    Layout.preferredWidth: 1
+                    Layout.fillHeight: true
+                    color: Style.separator
+                }
 
-    Connections {
-        target: engine
+                // Owns the lower-right corner. The pages draw on the window
+                // background so the white card surfaces stay distinguishable.
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: Style.windowBackground
+                    bottomRightRadius: Style.windowRadius
 
-        function onConnectionStateChanged() {
-            if (engine.connectionState === EngineController.Disconnected && !engine.autoConnect) {
-                connectionDialog.open()
+                    StackLayout {
+                        id: pages
+                        anchors.fill: parent
+
+                        DashboardPage { controller: engine }
+                        PositionsPage { controller: engine }
+                        OrdersPage { controller: engine }
+                        SignalsPage { controller: engine }
+                        MarketPage { controller: engine }
+                        SettingsPage { controller: engine }
+                    }
+                }
             }
         }
     }
@@ -210,11 +219,5 @@ ApplicationWindow {
         // Restore the saved scheme before the first frame so the window does
         // not flash light before switching to dark.
         Style.dark = appearance.dark
-
-        // PULSE_CLIENT_HOST auto-connects from C++; only prompt when the
-        // controller did not already take that path.
-        if (!engine.autoConnect) {
-            connectionDialog.open()
-        }
     }
 }

@@ -428,11 +428,12 @@ client/qt/
     Main.qml
     Style.qml                     pragma Singleton theme tokens
     pages/
-      DashboardPage.qml  PositionsPage.qml  OrdersPage.qml
-      SignalsPage.qml    MarketPage.qml     SettingsPage.qml
+      LoginPage.qml      DashboardPage.qml  PositionsPage.qml
+      OrdersPage.qml     SignalsPage.qml    MarketPage.qml
+      SettingsPage.qml
     components/
       StatusBar.qml  MetricTile.qml  StaleBadge.qml  ErrorBanner.qml
-      SignalCard.qml  ConnectionDialog.qml  EmptyState.qml
+      SignalCard.qml  EmptyState.qml
   resources/
     icons/app.svg
     qtquickcontrols2.conf         only if placed at the resource root (:/qtquickcontrols2.conf)
@@ -486,6 +487,7 @@ qt_add_qml_module(pulseTraderQt
     QML_FILES
         qml/Main.qml
         qml/Style.qml
+        qml/pages/LoginPage.qml
         qml/pages/DashboardPage.qml
         qml/pages/PositionsPage.qml
         qml/pages/OrdersPage.qml
@@ -497,7 +499,6 @@ qt_add_qml_module(pulseTraderQt
         qml/components/StaleBadge.qml
         qml/components/ErrorBanner.qml
         qml/components/SignalCard.qml
-        qml/components/ConnectionDialog.qml
         qml/components/EmptyState.qml
     SOURCES
         src/rpc/RpcClient.cpp        src/rpc/RpcClient.hpp

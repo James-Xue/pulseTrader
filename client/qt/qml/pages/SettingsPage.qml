@@ -37,7 +37,7 @@ ColumnLayout {
             id: tokenField
             Layout.fillWidth: true
             echoMode: TextInput.Password
-            placeholderText: qsTr("reserved for M-Q4")
+            placeholderText: qsTr("blank if the engine has no token")
         }
     }
 
