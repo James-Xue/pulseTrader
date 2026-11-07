@@ -529,7 +529,7 @@ GridAction GridManager::decideAction(std::int64_t now_ms) const
     }
 
     // Daily loss stop (v2 §4): realized ≤ -10 → no new levels AND no
-    // re-anchoring (the spec freezes 重挂 too). Existing TP/protection still
+    // re-anchoring (the spec freezes re-placing orders too). Existing TP/protection still
     // run — manageTp executes before decideAction in the slow pass.
     if (dailyLossFrozen(now_ms))
     {
@@ -890,8 +890,9 @@ void GridManager::flattenGridShare(std::int64_t now_ms, const char *line)
     recordFlattenLoss(loss);
 
     // Zero the share ledger and rebuild levels per the rules. The re-hang
-    // after a protection flatten is itself gated by §3.1 (v2 spec: "按 §3.1
-    // 含趋势闸门/暴拉冻结决定是否重新锚定挂格") — daily stop, spike freeze and a
+    // after a protection flatten is itself gated by §3.1 (v2 spec: "decide
+    // whether to re-anchor and re-place levels per §3.1, including the trend
+    // gate and the spike freeze") — daily stop, spike freeze and a
     // bullish trend all hold the re-hang; the next decideAction pass resumes
     // it once the gate clears.
     for (auto &lv : m_levels)

@@ -159,7 +159,7 @@ class UnifiedScalper : public StrategyBase
     /// "Waiting for kline data" log, throttled to 30 s.
     void logNoDataThrottled();
 
-    /// 重大消息事件闸: true when `open_ms` falls inside any configured news
+    /// Major-news event gate: true when `open_ms` falls inside any configured news
     /// blackout window (StrategyInstanceConfig::news_windows — empty = off).
     /// Semantics: strategy/NewsGate.hpp; rules: docs/strategies/iron-trader.md
     /// §4.6. Judged on candle open_time only (live == backtest).

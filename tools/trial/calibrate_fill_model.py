@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""calibrate_fill_model.py — 用 trades.db 真实成交标定纸面填充参数
+"""calibrate_fill_model.py — calibrate paper fill parameters against real fills in trades.db
 
-从真实执行记录统计(按 symbol×market_type 分组,样本 <30 自动并入
-同 market_type 池):
-  - post_only(maker-first)成交率 与 撤单率 → 校验 tick 驱动填充行为
-  - slippage_bps 分位数(P50/P90)按 order_type → 纸面模型误差带
-  - taker/market 兜底占比 → maker_timeout 合理窗口
-  - 出场侧 order_type 分布 → 平仓费模型核对
+Statistics computed from real execution records (grouped by symbol×market_type;
+groups with fewer than 30 samples are automatically pooled into the same market_type):
+  - post_only (maker-first) fill rate and cancel rate → validate the tick-driven fill behaviour
+  - slippage_bps percentiles (P50/P90) by order_type → the paper model's error band
+  - taker/market fallback share → a reasonable maker_timeout window
+  - order_type distribution on the exit side → cross-check the closing-fee model
 
-用法:
+Usage:
   python3 tools/trial/calibrate_fill_model.py [--db data/trades.db]
       [--out data/trial/fill_model.json] [--since-ns 0] [--top 15]
---out 缺省只打印不写文件。trades 表只含"最终成交/撤单"行,
-数据库无独立撤单事件时按 final_status 统计。
+With no --out it only prints and writes no file. The trades table holds only
+"final fill / cancel" rows, so when the database has no separate cancel events the
+statistics are derived from final_status.
 """
 
 from __future__ import annotations
@@ -46,17 +47,17 @@ def percentile(sorted_vals, p):
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--db", default="data/trades.db")
-    p.add_argument("--out", help="写 JSON 标定文件(缺省只打印)")
+    p.add_argument("--out", help="write the calibration JSON file (default: print only)")
     p.add_argument("--since-ns", type=int, default=0)
     p.add_argument("--top", type=int, default=15)
     args = p.parse_args()
 
     if not os.path.exists(args.db):
-        print(f"DB 不存在: {args.db}", file=sys.stderr)
+        print(f"DB does not exist: {args.db}", file=sys.stderr)
         return 2
 
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    # 按 (symbol, market_type) 分组统计
+    # Group the statistics by (symbol, market_type)
     groups: dict = defaultdict(lambda: {
         "maker": {"filled": 0, "cancelled": 0},
         "market": {"filled": 0, "cancelled": 0},
@@ -72,8 +73,9 @@ def main() -> int:
         n_rows += 1
         key = (symbol, mtype)
         g = groups[key]
-        # 引擎把 maker-first 单落库为 order_type='limit'(M16);post_only
-        # 与 limit 同入 maker 桶;market 独立;其余入 other
+        # The engine persists maker-first orders as order_type='limit' (M16);
+        # post_only and limit both go into the maker bucket; market is separate;
+        # the rest go into other
         bucket = "maker" if otype in ("post_only", "limit") \
             else ("market" if otype == "market" else "other")
         g[bucket]["filled" if status == "filled" else "cancelled"] += 1
@@ -86,11 +88,12 @@ def main() -> int:
     con.close()
 
     if n_rows == 0:
-        print("0 行(该时间窗无成交)。")
+        print("0 rows (no fills in this time window).")
         return 1
 
-    # 单 symbol 组样本太少 → 标记 pooled(统计并入同 market_type 池,
-    # 供横向参考),但仍在表内列出实际数字
+    # Too few samples in a single-symbol group → mark it pooled (the statistics
+    # are merged into the same market_type pool for cross-reference), but the
+    # actual numbers are still listed in the table
     pool: dict = defaultdict(list)
     for key in groups:
         pool[key[1]].append(key)
@@ -125,9 +128,9 @@ def main() -> int:
             }
         rows.append(row)
 
-    print(f"共 {n_rows} 行成交/撤单记录\n")
-    hdr = ("symbol       mtype     mk单  mk成交率  mk市价兜底   "
-           "滑点bps maker(p50/p90/n)    market(p50/p90/n)")
+    print(f"{n_rows} fill/cancel records in total\n")
+    hdr = ("symbol       mtype    mkord  fillrate   fallback  "
+           "maker bps(p50/p90/n)        market bps(p50/p90/n)")
     print(hdr)
     for r in rows:
         po = r["slippage_bps_maker"]
@@ -143,7 +146,7 @@ def main() -> int:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w") as f:
             json.dump({"n_rows": n_rows, "groups": rows}, f, indent=2)
-        print(f"\n标定写入 {args.out}")
+        print(f"\nCalibration written to {args.out}")
     return 0
 
 

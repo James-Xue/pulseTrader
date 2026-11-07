@@ -703,7 +703,7 @@ PulseError parseStrategyInstance(const toml::value &tbl,
         }
     }
 
-    // 重大消息事件闸 windows: `news_windows = [{ time = "...", ... }]`
+    // Major-news event gate windows: `news_windows = [{ time = "...", ... }]`
     // array of inline tables (one per scheduled event). Parsed strictly like
     // custom_params — a typo'd event time silently disabling the gate would
     // be dangerous. PRESET-only, no hot reload. Empty/absent = gate off.

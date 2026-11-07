@@ -157,10 +157,10 @@ void FundingWatch::publish(const std::string &symbol, bool window_open,
         { "window_8h_events", static_cast<int>(rates.size()) },
     };
     sig.reason = window_open
-        ? "funding window OPEN: 做空收租窗口(连续 "
-            + std::to_string(m_cfg.consec_events) + " 次结算 > "
+        ? "funding window OPEN: short-side carry-harvest window ("
+            + std::to_string(m_cfg.consec_events) + " consecutive settlements > "
             + std::to_string(m_cfg.threshold) + ")"
-        : "funding window CLOSED: 费率回落至闸下(latest="
+        : "funding window CLOSED: rate fell back below the gate (latest="
             + std::to_string(latest) + ")";
 
     m_board.publish(sig);
@@ -171,7 +171,7 @@ void FundingWatch::publish(const std::string &symbol, bool window_open,
     {
         PULSE_LOG_WARN("funding_watch", "{} funding window {} "
                        "(latest={:.6f} avg24h={:.6f}, threshold={:.6f})",
-                       symbol, window_open ? "OPEN — 做空收租窗口"
+                       symbol, window_open ? "OPEN — short-side carry window"
                                            : "CLOSED",
                        latest, avg24h, m_cfg.threshold);
     }

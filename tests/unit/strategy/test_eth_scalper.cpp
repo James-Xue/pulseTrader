@@ -244,7 +244,7 @@ TEST(EthScalper, BullishCrossPublishesStateOnly)
 TEST(EthScalper, SpikeFilterBlocksEntry)
 {
     // Last candle high=130 → range 126 > default filter 120 (and 2520% of
-    // close) → 暴拉: no Sell, but the state entry carries spike=1 so the
+    // close) → violent pump: no Sell, but the state entry carries spike=1 so the
     // grid gate can freeze new levels.
     FeedHarness harness{ MarketType::Futures };
     auto scalper = std::make_unique<EthScalper>(make_ctx(harness));

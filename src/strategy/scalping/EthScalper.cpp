@@ -80,7 +80,7 @@ std::optional<EntryContext> EthScalper::evaluateEntry(
     const double atr = computeAtr(candles, 14);
 
     // 6. Spike filter (v2): ANY of the three thresholds tripping = spike
-    //    (暴拉/插针, do NOT chase it short). The USD-only filter missed the
+    //    (a violent pump / long wick; do NOT chase it short). The USD-only filter missed the
     //    04:50 1m +4.4% pump in the grid review — a percent or ATR-relative
     //    threshold catches fast pumps on any price scale. Set one to 0 to
     //    disable it (a threshold of 0 means "no filter", not "any range").

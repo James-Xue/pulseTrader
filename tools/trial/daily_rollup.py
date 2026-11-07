@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""daily_rollup.py — A/B 试验每日汇总(VPS cron 侧,纯 stdlib)
+"""daily_rollup.py — daily A/B experiment rollup (VPS cron side, stdlib only)
 
-在信号日志所在机器(引擎 VPS)每日运行:
-  1. 统计 signals 表:按日/策略信号数、聚合发射数(与重放对照)、
-     signals 表增速(试点周信号率摸底)
-  2. 重放 equal 臂(等权)+ ai 臂(读 data/trial/weights_ai.json,
-     缺失则等同 equal 并标注)
-  3. 写 data/trial/<day>/report.md + 追加 trial.log
+Runs daily on the machine that holds the signal log (the engine VPS):
+  1. Summarise the signals table: signals per day/strategy, aggregator emissions
+     (cross-checked against the replay), and the growth rate of the signals table
+     (a baseline reading of the signal rate during the pilot week)
+  2. Replay the equal arm (equal weights) + the ai arm (reads
+     data/trial/weights_ai.json; if missing, falls back to equal and marks it)
+  3. Write data/trial/<day>/report.md + append to trial.log
 
-用法(VPS crontab;UTC 16:35 = 北京 00:35):
+Usage (VPS crontab; UTC 16:35 = Beijing 00:35):
   cd ~/pulseTrader && python3 tools/trial/daily_rollup.py \
       --db data/trades.db --symbol BTC_USDT \
       --day-offset 1 2>>data/trial/trial.log >>data/trial/trial.log
-日界 = UTC 日历日(== 北京 08:00,引擎日亏重置边界)。--day-offset 1 =
-汇总"昨天"(整日);缺省 0 = 今天至今(部分日,标注 partial)。
+Day boundary = UTC calendar day (== Beijing 08:00, the engine's daily-loss reset
+boundary). --day-offset 1 = summarise "yesterday" (the whole day); the default 0 =
+today so far (a partial day, marked partial).
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-# 复用重放器(同目录)
+# Reuse the replayer (same directory)
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from run_replay import run_arm  # noqa: E402
@@ -35,8 +37,9 @@ DAY_NS = 86_400 * 1_000_000_000
 
 
 def bj_day_bounds(offset_days: int):
-    """UTC 日历日界(== 北京 08:00 日界,与引擎日亏重置/daily_sync 一致;
-    亦与 run_replay 的 day_of 对齐)。返回 (start_ns, end_ns) 含当天。"""
+    """UTC calendar-day boundaries (== the Beijing 08:00 boundary, consistent with
+    the engine's daily-loss reset / daily_sync; also aligned with run_replay's
+    day_of). Returns (start_ns, end_ns) covering the whole day."""
     now = datetime.now(timezone.utc)
     day = now.date() - timedelta(days=offset_days)
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
@@ -79,7 +82,7 @@ def main() -> int:
     p.add_argument("--db", default="data/trades.db")
     p.add_argument("--symbol", default="BTC_USDT")
     p.add_argument("--day-offset", type=int, default=0,
-                   help="0=当天至今(部分日,标注);1+=昨日(整日)")
+                   help="0=today so far (partial day, marked); 1+=yesterday (full day)")
     p.add_argument("--notional", type=float, default=160_000.0)
     args = p.parse_args()
 
@@ -89,29 +92,32 @@ def main() -> int:
     partial = args.day_offset == 0
 
     if not os.path.exists(args.db):
-        print(f"DB 不存在: {args.db}", file=sys.stderr)
+        print(f"DB does not exist: {args.db}", file=sys.stderr)
         return 2
 
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    # 表存在性(部署前/早期运行直接退出并提示)
+    # Table existence (exit early with a message before deployment / on an early run)
     tbl = con.execute(
         "SELECT name FROM sqlite_master WHERE name='signals'").fetchone()
     if not tbl:
-        print("signals 表不存在(引擎未部署 M32)——本次无数据", file=sys.stderr)
+        print("signals table does not exist (engine not deployed with M32) — no data this run",
+              file=sys.stderr)
         con.close()
         return 1
     sig_stats = count_signals(con, args.symbol, start_ns, end_ns)
     con.close()
 
-    # equal 臂(等权 1.0)+ ai 臂(weights 文件,缺省 equal 标注)
+    # equal arm (weight 1.0 for all) + ai arm (weights file; falls back to equal
+    # and is marked when missing)
     weights_path = os.path.join(out_root, "weights_ai.json")
     ai_weights = None
     if os.path.exists(weights_path):
         with open(weights_path, encoding="utf-8") as f:
             ai_weights = json.load(f)
 
-    # 重放(时间窗限定;tick 覆盖该日整段);阈值/cooldown/退出参数与
-    # paper_engine 默认一致(trading.toml [strategy]/[risk])
+    # Replay (limited to the time window; ticks cover that whole day); the
+    # threshold / cooldown / exit parameters match the paper_engine defaults
+    # (trading.toml [strategy]/[risk])
     cfg = {"threshold": 0.6, "cooldown_s": 30,
            "sl_trailing_pct": 0.005, "max_hold_s": 300,
            "tp_targets": [0.005, 0.01, 0.02],
@@ -139,20 +145,20 @@ def main() -> int:
     with open(report_path, "w") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
 
-    # 控制台摘要(cron 捕获进 trial.log)
+    # Console summary (captured into trial.log by cron)
     print(f"[rollup] {day_str}" + ("(partial)" if partial else "")
-          + f" 信号 {out['signals']['total_signals']} 条 | "
-          + f"发射 replay equal {out['emissions_replayed_equal']} / "
-          + f"ai {out['emissions_replayed_ai']} | 实盘聚合 "
-          + f"{out['signals']['aggregate_emissions_live']} | AI 权重使用: "
+          + f" signals {out['signals']['total_signals']} | "
+          + f"emitted replay equal {out['emissions_replayed_equal']} / "
+          + f"ai {out['emissions_replayed_ai']} | live aggregate "
+          + f"{out['signals']['aggregate_emissions_live']} | AI weights used: "
           + str(out['ai_weights_used']))
     for arm in out["arms"]:
         if arm["round_trips"]:
-            print(f"  {arm['arm']}: {arm['round_trips']} 回合 | "
-                  f"净 {arm['net_pnl']:+.2f} | 费 {arm['fees']:.2f} | "
-                  f"胜率 {arm['win_rate']:.1%} | 期望 {arm['expectancy']:+.4f}")
+            print(f"  {arm['arm']}: {arm['round_trips']} round trips | "
+                  f"net {arm['net_pnl']:+.2f} | fees {arm['fees']:.2f} | "
+                  f"win rate {arm['win_rate']:.1%} | expectancy {arm['expectancy']:+.4f}")
         else:
-            print(f"  {arm['arm']}: 无回合")
+            print(f"  {arm['arm']}: no round trips")
     print(f"  → {report_path}")
     return 0
 

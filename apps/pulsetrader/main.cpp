@@ -1332,7 +1332,7 @@ static int runTrade(int argc, char* argv[])
     // 12b. Direction gate — activate the configured default direction.
     // ------------------------------------------------------------------
     // The active direction comes from `active_market` (default "futures" —
-    // "暂时只做合约方向"). Every other direction's strategies pause so they
+    // "futures only for now"). Every other direction's strategies pause so they
     // cannot trade until switch_direction activates them; the order-flow
     // gate in OrderFlowExecutor is the second, independent guarantee.
     order_flow.setActiveMarket(cfg.active_market);

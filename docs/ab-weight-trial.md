@@ -1,135 +1,134 @@
-# BTC 策略权重 A/B 纸面验证实验(M32)
+# BTC Strategy-Weight A/B Paper-Trading Validation Experiment (M32)
 
-> 状态:**试点未开始**(等待 VPS 部署 M32 信号日志后积累数据)
-> 开始日期:引擎 `signals` 表首条记录落库之日
-> 本文档 = 实验契约。§7 决策规则先行写死,实验结束只许执行、不许事后改。
+> Status: **pilot not started** (waiting for M32 signal logging to be deployed on the VPS and accumulate data)
+> Start date: the day the first record lands in the engine's `signals` table
+> This document = the experiment contract. §7 decision rules are fixed up front; once the experiment ends they may only be executed, not changed after the fact.
 
-## 0. 目标与假设
+## 0. Goal and hypotheses
 
-要回答的问题:**AI 每日调权(arm B)在含费净收益上是否显著优于等权基线(arm A)?**
+The question to answer: **is AI daily weight tuning (arm B) significantly better than the equal-weight baseline (arm A) in net-of-fee returns?**
 
-- H0:AI 加权组合 ≤ 等权组合(净 PnL 无差异或更差)
-- H1:AI 加权组合 > 等权组合
+- H0: the AI-weighted portfolio ≤ the equal-weight portfolio (no difference or worse net PnL)
+- H1: the AI-weighted portfolio > the equal-weight portfolio
 
-对照臂:
+Comparison arms:
 
-| 臂 | 权重策略 | 目的 |
+| Arm | Weighting strategy | Purpose |
 |---|---|---|
-| A 等权 | 全部 1.0(现引擎缺省) | 基线 |
-| B AI 调权 | 每日 00:30(Asia/Shanghai)AI 提案 | 被测对象 |
-| C AI 风控 | 等权 + AI 5 分钟巡检只记录 advisory(不执行) | 下轮实验备胎,本轮不启用 |
+| A equal-weight | all 1.0 (current engine default) | baseline |
+| B AI-tuned | AI proposal daily at 00:30 (Asia/Shanghai) | the subject under test |
+| C AI risk control | equal-weight + AI 5-minute patrol records advisory only (not executed) | reserve for the next experiment round, not enabled this round |
 
-**配对结构是核心**:A/B 在同一份信号日志、同一 tape(ticker_ticks)、同一填充
-模型上重放 → 日内差分剔除市场片段差异,小样本即有分辨力。
+**The paired structure is the core**: A/B replay on the same signal log, the same tape (ticker_ticks) and the same fill model → the daily difference cancels out market-segment differences, so even a small sample has resolving power.
 
-## 1. 数据基础
+## 1. Data foundation
 
-- `signals` 表(M32 引擎侧新表,append-only):每条策略原始信号
-  (ts_ns/strategy_id/symbol/type/confidence/price/reason/indicators)+
-  聚合共识行(strategy_id = `signal_aggregator`,重放时排除,留作日后
-  实盘保真度核对)。**所有策略信号在 auto_trade 闸门之前落库** → 日志与
-  权重策略无关,反事实重放的前提。
-- 价格路径:`ticker_ticks`(record_market=true 时逐 tick 落库,futures
-  kline 因 M30 不录,tape 足够)。
-- 真实成交标定:`trades` 表(trades.db)。初值(2026-09-06 本机 409 行):
-  SNDK futures maker 单 144 笔 / 成交率 72.9% / maker 腿滑点 0bps /
-  market 腿 0.02–0.27bps。
+- `signals` table (new engine-side table in M32, append-only): every raw strategy signal
+  (ts_ns/strategy_id/symbol/type/confidence/price/reason/indicators) +
+  the aggregator consensus row (strategy_id = `signal_aggregator`, excluded on replay and kept for later
+  live-fidelity checks). **All strategy signals are persisted before the auto_trade gate** → the log is
+  independent of the weighting strategy, which is the precondition for counterfactual replay.
+- Price path: `ticker_ticks` (persisted tick by tick when record_market=true; futures
+  klines are not recorded as of M30, and the tape is sufficient).
+- Real-fill calibration: `trades` table (trades.db). Initial values (2026-09-06, 409 rows on this machine):
+  SNDK futures maker orders 144 / fill rate 72.9% / maker-leg slippage 0bps /
+  market leg 0.02–0.27bps.
 
-## 2. 重放语义(tools/trial/paper_engine.py,镜像引擎)
+## 2. Replay semantics (tools/trial/paper_engine.py, mirrors the engine)
 
-- **聚合器**(SignalAggregator.cpp 逐行复刻):flat 忽略;per-symbol 累积
-  buy/sell 加权置信与 weight_sum;normalized = dominant/ws < threshold(0.6)
-  → 不发射;**cooldown(30s)闸先于发射,被闸时累积不清零继续增长**;
-  发射后清零;缺省权重 1.0。注意引擎真实属性:**反向残留堆叠会长期闸死
-  发射**(混合流归一化 < 0.6),方向反转需新方向 ≥ ~1.5× 旧残留 — 这是
-  引擎语义,不是 bug。
-- **账本**(PaperTrader 状态机):入场 maker-first 限价挂信号价,tape 回触
-  (买:last ≤ P)即 maker 成交;超时(5s)→ taker 按当时 last 兜底;挂单期
-  反向共识 → 撤单弃单;持仓期逐 tick 评估:TP 阶梯 0.5%/1%/2% × 1/3
-  (taker)、Trailing SL(0.5% from best, taker)、max_hold 300s(taker)、
-  反向共识平仓(taker);同向共识不 scale-in;入场费按平仓量比例分摊到各腿。
-- 费用默认:maker 0.02% / taker 0.05%(Gate 合约档,2026-08 实测记忆;
-  CLI 可覆写)。
-- 单仓位、无 scale-in、退出价 = tape last(taker 腿)。**纸面 ≠ 实盘绝对
-  收益**:填充模型有误差,但 A/B 同规则同 tape,误差权重无关,配对差分
-  一阶消掉。
+- **Aggregator** (a line-by-line replica of SignalAggregator.cpp): flat ignored; per-symbol accumulate
+  buy/sell weighted confidence and weight_sum; normalized = dominant/ws < threshold (0.6)
+  → no emission; **the cooldown (30s) gate comes before emission, and when gated the accumulation is not reset but keeps growing**;
+  cleared after emission; default weight 1.0. Note the real engine property: **residual opposite-side stacking can gate emission shut for a long time**
+  (mixed-flow normalization < 0.6); a direction reversal needs the new direction to be ≥ ~1.5× the old residual — that is
+  engine semantics, not a bug.
+- **Ledger** (PaperTrader state machine): entry is a maker-first limit order placed at the signal price, filled by the tape
+  re-touching it (buy: last ≤ P); timeout (5s) → taker at the prevailing last as fallback; during the resting period an
+  opposite consensus → cancel and abandon; during the holding period evaluate tick by tick: TP ladder 0.5%/1%/2% × 1/3
+  (taker), Trailing SL (0.5% from best, taker), max_hold 300s (taker),
+  opposite-consensus close (taker); same-direction consensus does not scale in; the entry fee is allocated to each leg in proportion to the closing volume.
+- Fee defaults: maker 0.02% / taker 0.05% (Gate perpetual tier, measured 2026-08;
+  the CLI can override).
+- Single position, no scale-in, exit price = tape last (taker leg). **Paper ≠ live absolute
+  return**: the fill model has error, but A/B uses the same rules on the same tape, so the error weighting is irrelevant and the paired
+  difference cancels it to first order.
 
-## 3. 试点周(第 1 周,信号率摸底)
+## 3. Pilot week (week 1, signal-rate reconnaissance)
 
-- 记录:每策略每日信号数、聚合发射数、A/B 各自回合数、signals 表增速
-- 功效:每臂 ≥ 300 回合(胜率标准误 ≈ 2.9%,可辨 ~5–6% 胜率差)
-- 若发射率 ~20–60/天 → 主实验 14 个交易日,第 7 天中间检查点
-- **若发射率过低(< 5/天)**:停下来重新评估(信号稀疏时先扩大策略集
-  或调 threshold 才有统计意义 —— 此判定在试点周内做出,不算中途改规则)
+- Record: daily signal count per strategy, aggregator emissions, A/B round-trip counts, signals-table growth
+- Power: ≥ 300 round trips per arm (win-rate standard error ≈ 2.9%, resolving a ~5–6% win-rate difference)
+- If the emission rate is ~20–60/day → the main experiment runs 14 trading days with an interim checkpoint on day 7
+- **If the emission rate is too low (< 5/day)**: stop and re-evaluate (with sparse signals, first enlarge the strategy set
+  or adjust the threshold to get statistical meaning — this decision is made within the pilot week, so it does not count as changing the rules mid-course)
 
-## 4. AI Oracle 规格(每日一次)
+## 4. AI Oracle specification (once per day)
 
-- 触发 00:30 Asia/Shanghai;仅看前一日 23:59 前**已平仓**回合
-- 输入(数值行):每策略 24h/72h 回合数/净 PnL/胜率/费用占比/均滑点 +
-  regime 特征(1h/24h 已实现波动、EMA 快慢比、ATR%、价差 bps、资金费率)
-  + 当前权重 + 最近 5 次自身调权记录
-- 动作空间(harness 强制,AI 不可越界):输出
+- Trigger at 00:30 Asia/Shanghai; only look at rounds **already closed** before 23:59 the previous day
+- Input (numeric rows): per-strategy 24h/72h round-trip count/net PnL/win rate/fee share/mean slippage +
+  regime features (1h/24h realized volatility, EMA fast/slow ratio, ATR%, spread bps, funding rate)
+  + current weights + the last 5 self-tuning records
+- Action space (enforced by the harness, the AI cannot exceed it): output
   `{"weights": {strategy_id: w, ...}, "rationale": "..."}`;
-  约束 **w ∈ [0.05, 0.5]、单次变动 ≤ ±0.1、组内求和 = 1**
-- 审计:每次决策落 `decisions` 表(旧→新权重、输入摘要 hash、模型、
-  prompt 版本、原始响应),temperature 0、模型与 prompt 版本固定
+  constraints **w ∈ [0.05, 0.5], single change ≤ ±0.1, sum within the group = 1**
+- Audit: every decision is written to the `decisions` table (old→new weights, input summary hash, model,
+  prompt version, raw response), temperature 0, model and prompt versions fixed
 
-**5 分钟巡检**:仅记录 advisory,不执行、不参与本实验统计。
+**5-minute patrol**: records advisory only; does not execute and does not enter this experiment's statistics.
 
-## 5. 实验纪律(防混淆,先写死)
+## 5. Experimental discipline (anti-confounding, fixed up front)
 
-1. 参数冻结:实验期禁止 set_strategy_param(AI 调参是另一个变量)
-2. 名单冻结:BTC 策略不增不减(新策略想法先在日志上回测,不进场)
-3. 停机处理:引擎重启/断录日(>10% 1m 窗口 tick 缺失)从配对统计剔除,
-   保留在报告中;systemd kill-9 自愈测试避开实验窗口
-4. 永不丢失策略:日志在聚合之前记录,权重压到 0.05 地板不影响继续
-   发信号 → 任何策略全程可复盘,防过拟合的结构性逃逸舱
+1. Parameter freeze: set_strategy_param is forbidden during the experiment (AI parameter tuning is a separate variable)
+2. Roster freeze: BTC strategies are neither added nor removed (new strategy ideas are backtested on the log first and not admitted)
+3. Downtime handling: engine restarts/days with recording gaps (>10% of 1m windows missing ticks) are excluded from the paired statistics
+   but kept in the report; schedule the systemd kill-9 self-heal test outside the experiment window
+4. Never lose a strategy: the log records before aggregation, and pressing a weight down to the 0.05 floor does not stop it from
+   emitting signals → every strategy can be reviewed end to end, a structural escape hatch against overfitting
 
-## 6. 指标
+## 6. Metrics
 
-| 维度 | 指标 |
+| Dimension | Metric |
 |---|---|
-| 主判据 | A/B 逐日**配对净 PnL 差**的均值与符号(配对 t + 符号检验) |
-| 次判据 | 每回合期望(净)、各臂最大回撤、回合数、费用/净利比 |
-| 稳定性 | 权重日间振荡量(天天大改 = 扣分,实盘同样会抖) |
-| 敏感性 | 费用上下限(全 maker vs maker+taker)双跑,结论须一致 |
+| Primary criterion | mean and sign of the A/B daily **paired net PnL difference** (paired t + sign test) |
+| Secondary criteria | expectation per round trip (net), max drawdown per arm, round-trip count, fee/net-profit ratio |
+| Stability | day-to-day weight oscillation (large daily changes = penalty; live trading would be equally jittery) |
+| Sensitivity | fee upper/lower bounds (all-maker vs maker+taker) run twice; conclusions must agree |
 
-## 7. 决策规则(实验前写死)
+## 7. Decision rules (fixed before the experiment)
 
-主实验 14 交易日后:
-- **GO(AI 权重接管实盘)**:配对日差均值 > 0 **且** 14 天中 ≥ 10 天为正
-  **且** AI 臂总净利 > 0 — 三条件缺一不可
-- **暂缓**:不满足 GO 但 AI 臂未明显更差 → 延长 14 天(仅一次),仍不达标
+After the 14 trading days of the main experiment:
+- **GO (AI weights take over live trading)**: paired daily difference mean > 0 **and** ≥ 10 of the 14 days positive
+  **and** the AI arm's total net profit > 0 — all three conditions required
+- **Defer**: GO not met but the AI arm is not clearly worse → extend by 14 days (once only); still not met
   → NO-GO
-- **NO-GO**:AI 臂更差或打平 → 实盘保持等权,A 臂继续;AI 降级为纯风控
-  咨询(即 C 臂角色)
-- 无论结果:三臂净值曲线 + 权重轨迹 + 全部 AI 决策记录存档
-  (data/trial/,git 不入库,由人工决策存档)
+- **NO-GO**: the AI arm is worse or break-even → live trading stays equal-weight and arm A continues; AI is downgraded to pure risk-control
+  advice (i.e. the arm C role)
+- Regardless of the result: the three arms' equity curves + weight trajectories + all AI decision records are archived
+  (data/trial/, not committed to git, archived by a human decision)
 
-## 8. 工具与数据位置
+## 8. Tools and data locations
 
-| 物 | 位置 |
+| Item | Location |
 |---|---|
-| 引擎信号日志 | VPS `~/pulseTrader/data/trades.db` `signals` 表(M32) |
-| 重放核心 | `tools/trial/paper_engine.py`(+ `tests/test_paper_engine.py`,24 用例) |
-| 重放 CLI | `tools/trial/run_replay.py` — equal/ai 两臂 |
-| 标定 | `tools/trial/calibrate_fill_model.py` |
-| 产物 | `data/trial/<symbol>/<arm>/{round_trips.csv, daily_summary.json}` |
-| 引擎实现 | `src/trade_recorder/SignalRecorder.{hpp,cpp}`(config: `sqlite.record_signals`) |
+| Engine signal log | VPS `~/pulseTrader/data/trades.db` `signals` table (M32) |
+| Replay core | `tools/trial/paper_engine.py` (+ `tests/test_paper_engine.py`, 24 cases) |
+| Replay CLI | `tools/trial/run_replay.py` — equal/ai arms |
+| Calibration | `tools/trial/calibrate_fill_model.py` |
+| Artifacts | `data/trial/<symbol>/<arm>/{round_trips.csv, daily_summary.json}` |
+| Engine implementation | `src/trade_recorder/SignalRecorder.{hpp,cpp}` (config: `sqlite.record_signals`) |
 
-运行示例:
+Run examples:
 ```bash
-# equal 臂(等权 1.0)
+# equal arm (equal weight 1.0)
 python3 tools/trial/run_replay.py --db data/trades.db --symbol BTC_USDT --arm equal
-# AI 臂(权重文件归一化)
+# AI arm (weight file normalized)
 python3 tools/trial/run_replay.py --db data/trades.db --arm ai --weights-file w.json
-# 标定
+# calibration
 python3 tools/trial/calibrate_fill_model.py --db data/trades.db
 ```
 
-## 9. 实施状态
+## 9. Implementation status
 
-- [x] M32 信号日志引擎实现 + 单测(5 用例),提交 1b4028d
-- [x] 重放工具链 + 24 用例 + 标定初值,提交 a1dd5ac
-- [ ] VPS 部署 M32(信号录制开始计时)— 进行中
-- [ ] 试点周 → 主实验 → §7 裁决
+- [x] M32 signal-log engine implementation + unit tests (5 cases), commit 1b4028d
+- [x] Replay toolchain + 24 cases + initial calibration values, commit a1dd5ac
+- [ ] Deploy M32 on the VPS (signal recording starts the clock) — in progress
+- [ ] Pilot week → main experiment → §7 ruling

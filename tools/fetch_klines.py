@@ -106,7 +106,7 @@ PULLERS = {"futures": pull_futures, "spot": pull_spot, "cfd": pull_cfd}
 
 
 def fmt(ts):
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts + 8 * 3600))  # 北京
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts + 8 * 3600))  # Beijing time (UTC+8)
 
 
 outdir = Path(__file__).resolve().parent.parent / "data" / "klines"
@@ -119,6 +119,6 @@ for name, (kind, symbol) in TARGETS.items():
     with open(outdir / f"{name}_1m.csv", "w") as f:
         f.write("ts,open,high,low,close,volume\n")
         f.writelines(f"{t},{o},{h},{l},{c},{v}\n" for t, o, h, l, c, v in rows)
-    print(f"{name}: {len(rows):5d} bars  {fmt(rows[0][0])} ~ {fmt(rows[-1][0])} (北京)  ->  {outdir / (name + '_1m.csv')}")
+    print(f"{name}: {len(rows):5d} bars  {fmt(rows[0][0])} ~ {fmt(rows[-1][0])} (Beijing)  ->  {outdir / (name + '_1m.csv')}")
 
-print("\n注:最后一根可能为未收盘(forming)K线;合约/现货 ~10000 根≈6.9 天,黄金/白银 REST 上限仅 500 根(≈8.3h)")
+print("\nNote: the last bar may still be forming (unclosed); futures/spot cover ~10000 bars ≈ 6.9 days, while gold/silver are capped at only 500 bars by REST (≈8.3h)")

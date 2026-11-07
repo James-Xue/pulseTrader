@@ -152,7 +152,7 @@ class StrategyManager
     /// Pause or resume every strategy instance whose market type matches.
     ///
     /// Used by the direction switch: on switching to CFD, all futures
-    /// instances pause ("策略停跑") and all CFD instances resume. Thread-safe
+    /// instances pause ("strategies stopped") and all CFD instances resume. Thread-safe
     /// (atomic stores per strategy); strategy threads keep ticking but skip.
     ///
     /// Returns the number of strategies affected.

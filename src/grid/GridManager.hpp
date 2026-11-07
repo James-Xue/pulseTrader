@@ -2,7 +2,7 @@
 // grid_manager.hpp — engine-native grid execution service (M27)
 //
 // Runs a short-only futures grid (the ETH grid v2 rules from
-// commit_my_life gate交易/以太坊 策略文档 v2) inside the engine, replacing
+// commit_my_life gate-trading/eth strategy doc v2) inside the engine, replacing
 // the Python toolchain:
 //   - levels of limit sell orders above the anchor, 2 contracts each
 //   - per-level reduce-only limit TP buy at fill - 2×step (never trigger
@@ -65,7 +65,7 @@ enum class GridAction : int
     Reanchor,    ///< Follow-down re-anchor (cooldown + bearish gate).
     ProtectA,    ///< 15m/1m close above top + 2×step → flatten grid share.
     ProtectB,    ///< Grid floating loss ≤ -30 USD → flatten grid share.
-    FreezeNew,   ///< Frozen (spike / daily loss / bullish trend) — manage存量 only.
+    FreezeNew,   ///< Frozen (spike / daily loss / bullish trend) — manage existing inventory only.
     DailyStop,   ///< Daily realized ≤ -10 → freeze new levels.
 };
 

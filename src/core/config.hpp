@@ -281,7 +281,7 @@ struct ControlConfig
 };
 
 // ---------------------------------------------------------------------------
-// NewsWindow — one preset UTC news/event window (重大消息事件闸)
+// NewsWindow — one preset UTC news/event window (scheduled-news event gate)
 //
 // Major scheduled events (FOMC/CPI/NFP ...) close positions and block new
 // entries around the event instant. Judged ONLY on candle open_time ms UTC
@@ -330,7 +330,7 @@ struct StrategyInstanceConfig
     /// in legacy configs → empty map.
     std::map<std::string, double> custom_params;
 
-    /// 重大消息事件闸 windows: TOML instance-level
+    /// Scheduled-news event gate windows: TOML instance-level
     /// `news_windows = [{ time = "2026-09-16T18:00:00Z", ... }]` (array of
     /// inline tables). Empty = gate off. PRESET-only (config edit + restart),
     /// deliberately NOT a custom_params/--param key — the double map cannot
@@ -409,7 +409,7 @@ struct SqliteConfig
 //
 // The GridManager runs a short-only futures grid (levels of reduce-only TP
 // buy orders) inside the engine, replacing the Python toolchain. Rules mirror
-// the ETH grid v2 strategy document (commit_my_life gate交易/以太坊):
+// the ETH grid v2 strategy document (commit_my_life gate-trading/eth):
 // trend gate (EMA bearish only), spike freeze, protection lines A/B, daily
 // loss stop (Beijing-day reset), re-anchor with cooldown.
 // ---------------------------------------------------------------------------

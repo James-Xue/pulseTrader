@@ -1,9 +1,9 @@
-// test_iron_trader.cpp — Unit tests for IronTrader 铁律交易员
+// test_iron_trader.cpp — Unit tests for IronTrader (the iron-rule trader)
 // (full kline pipeline; same harness pattern as test_ema_resonance_scalper).
 //
 // The rule baseline is docs/strategies/iron-trader.md; these tests pin the
 // acceptance checklist §8 at the behaviour level: gate stack (G1–G3),
-// triggers (T-A 拉回 / T-B 突破确认), the close-only Flat exit channel,
+// triggers (T-A pullback / T-B breakout confirmation), the close-only Flat exit channel,
 // R7 breakeven/trail, and the R0/R1/R6 paper ledger.
 
 #include "strategy/scalping/IronTrader.hpp"
@@ -138,7 +138,7 @@ struct Trader
 };
 
 /// Push a bull trend (ramp) then a SHALLOW multi-bar dip below EMA_fast, then
-/// rising bars until an entry fires (T-A 拉回) or `max_bars` pass.
+/// rising bars until an entry fires (T-A pullback) or `max_bars` pass.
 ///
 /// Note: a deep single-bar dip would push sep under the gate on the reclaim
 /// bar and dead-lock T-A (the reclaim bar is precisely when sep is weakest) —
@@ -150,7 +150,7 @@ void driveBullPullbackToEntry(Trader &tr, std::size_t max_bars = 12)
     tr.harness.ramp(*tr.strategy, 0.02, 45);        // bull trend (sep ≫ gate)
     tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
     tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
-    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);  // 浅拉回
+    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);  // shallow pullback
     for (std::size_t i = 0; i < max_bars; ++i)
     {
         tr.harness.candle(*tr.strategy, tr.harness.last_close + 0.03);
@@ -204,7 +204,7 @@ TEST(IronTrader, NoSignalDuringWarmupAndFlatMarket)
 }
 
 // ---------------------------------------------------------------------------
-// T-A 顺势拉回 entry + Flat close-only exit channel
+// T-A trend-following pullback entry + Flat close-only exit channel
 // ---------------------------------------------------------------------------
 
 TEST(IronTrader, BullPullbackEntersLongThenHardStopExitsFlat)
@@ -237,7 +237,8 @@ TEST(IronTrader, PositionManagedOnlyNoSecondEntryWhileHolding)
     driveBullPullbackToEntry(tr);
     ASSERT_EQ(1u, buyCount(tr.received));
 
-    // More bullish bars while holding → still exactly one Buy (R2: 有仓只做管理).
+    // More bullish bars while holding → still exactly one Buy (R2: with a
+    // position, only manage it).
     tr.harness.ramp(*tr.strategy, 0.02, 10);
     EXPECT_EQ(1u, buyCount(tr.received));
 }
@@ -298,7 +299,7 @@ TEST(IronTrader, BreakevenThenTrailingStopLocksProfit)
 }
 
 // ---------------------------------------------------------------------------
-// T-B 突破确认制
+// T-B breakout confirmation rule
 // ---------------------------------------------------------------------------
 
 TEST(IronTrader, BoxBreakoutRequiresConfirmationAndFiresOnSecondClose)
@@ -333,7 +334,7 @@ TEST(IronTrader, FakeBreakoutInsideBarCancelsNoEntry)
     const double box_top = tr.harness.last_close;
 
     tr.harness.candle(*tr.strategy, box_top + 0.20);  // break — armed
-    tr.harness.candle(*tr.strategy, box_top - 0.10);  // back inside → 假破位
+    tr.harness.candle(*tr.strategy, box_top - 0.10);  // back inside → false breakout
     tr.harness.ramp(*tr.strategy, 0.001, 6);          // range continues
     EXPECT_EQ(0u, buyCount(tr.received));
 }
@@ -347,7 +348,7 @@ TEST(IronTrader, RsiChaseFilterBlocksOverboughtBreakout)
     tr.harness.candle(*tr.strategy, box_top + 0.20);   // break
     tr.harness.candle(*tr.strategy, box_top + 0.25);   // would confirm
     tr.harness.ramp(*tr.strategy, 0.02, 4);
-    EXPECT_EQ(0u, buyCount(tr.received));     // 超买不追多破位 (M22)
+    EXPECT_EQ(0u, buyCount(tr.received));     // overbought: do not chase a long breakout (M22)
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +397,8 @@ TEST(IronTrader, DailyStopAfterThreeConsecutiveLosses)
         tr.harness.ramp(*tr.strategy, 0.02, 10);   // rebuild the bull trend
     }
 
-    // Fourth setup attempt → R6 日亏红线压过一切: nothing more today.
+    // Fourth setup attempt → the R6 daily-loss red line overrides everything:
+    // nothing more today.
     const auto buys = buyCount(tr.received);
     driveBullPullbackToEntry(tr, 20);
     EXPECT_EQ(buys, buyCount(tr.received));
@@ -411,7 +413,7 @@ TEST(IronTrader, DailyStopAfterThreeConsecutiveLosses)
 }
 
 // ---------------------------------------------------------------------------
-// 重大消息事件闸 (§4.6)
+// Major news event gate (§4.6)
 //
 // Fixture geometry: entry candles land at kMainOpen + 148m.. (+warmup 100 +
 // ramp 45 + dip 3). All news-gate windows below are placed relative to that
@@ -445,7 +447,7 @@ TEST(IronTrader, NewsGateSuppressesEntriesDuringBlackout)
     tr.harness.ramp(*tr.strategy, 0.02, 45);      // bull trend
     tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
     tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);
-    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);  // 浅拉回
+    tr.harness.candle(*tr.strategy, tr.harness.last_close - 0.02);  // shallow pullback
     for (std::size_t i = 0; i < 12; ++i)          // reclaim attempts, all blocked
     {
         tr.harness.candle(*tr.strategy, tr.harness.last_close + 0.03);
@@ -544,7 +546,7 @@ TEST(IronTrader, NewsGateStandsDownBreakoutMachineAcrossEvent)
     tr.harness.candle(*tr.strategy, box_top + 0.25);  // +151m → re-armed
     EXPECT_EQ(0u, buyCount(tr.received));
 
-    // ... the SECOND consecutive close beyond confirms (§4.2 确认制).
+    // ... the SECOND consecutive close beyond confirms (§4.2 confirmation rule).
     tr.harness.candle(*tr.strategy, box_top + 0.25);  // +152m → run=2
     ASSERT_EQ(1u, buyCount(tr.received));
     EXPECT_NE(std::string::npos,

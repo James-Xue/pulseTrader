@@ -1,4 +1,4 @@
-// NewsGate.cpp — 重大消息事件闸 pure gate logic (Layer 6)
+// NewsGate.cpp — major-news event gate, pure gate logic (Layer 6)
 //
 // Two stateless queries over preset UTC news windows (spec: NewsGate.hpp).
 // Nothing here is strategy-specific: position state lives in the adopting

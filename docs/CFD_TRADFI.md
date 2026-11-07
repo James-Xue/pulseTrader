@@ -188,7 +188,7 @@ Verification run with `tools/test_gate_rest --tradfi` (signed requests, mainnet 
 
 - **Commission**: **0.06 USDT per 0.01 lot, charged once on the BUY side only**
   (sell side is free). Matches the contract detail `commission: "6"` (6 USDT/lot).
-- **Gold storage/swap (利差)**: charged per overnight hold, surfaced in the
+- **Gold storage/swap (interest differential)**: charged per overnight hold, surfaced in the
   assets/positions payloads' `storage` field (currently `0.00` — no position
   held overnight yet). Long positions typically pay swap; the rate is a
   broker-side charge per instrument, visible only after holding across

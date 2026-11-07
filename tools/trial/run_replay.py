@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""run_replay.py — A/B 权重纸面重放 CLI
+"""run_replay.py — A/B weight paper-replay CLI
 
-在信号日志(signals 表)上对指定 symbol 以指定权重策略重放引擎
-聚合语义(AgregatorReplica)+ 纸面成交(PaperTrader),输出账本与日报。
+Replays the engine's aggregation semantics (AggregatorReplica) plus paper fills
+(PaperTrader) over the signal log (signals table) for a given symbol under a
+given weighting scheme, and emits the ledger and a daily report.
 
-用法:
+Usage:
   python3 tools/trial/run_replay.py --arm equal [--symbol BTC_USDT]
   python3 tools/trial/run_replay.py --arm ai --weights-file weights.json
   python3 tools/trial/run_replay.py --arm equal --since-ns 1752000000000000000
 
-默认参数与 trading.toml 一致(threshold 0.6 / cooldown 30s / trailing
-SL 0.5% / TP 阶梯 0.5-1-2% ×1/3 / max_hold 300s / maker 0.02% / taker
-0.05%);--config 指定 trading.toml 则从中读取(尚未实现时用默认+CLI)。
+Defaults match trading.toml (threshold 0.6 / cooldown 30s / trailing SL 0.5% /
+TP ladder 0.5-1-2% ×1/3 / max_hold 300s / maker 0.02% / taker 0.05%); passing
+--config trading.toml reads them from that file (until that is implemented, the
+built-in defaults plus the CLI flags are used).
 
-输出(data/trial/<symbol>/<arm>/):
-  round_trips.csv   — 每回合:入场/出场/方向/价格/腿/原因/PnL/费用
-  daily_summary.json — 逐日:回合数/毛/净/胜率/费用占比
-  open_at_cutoff.json — 结束时仍持仓(不计入统计,单独列出)
-stdout 打印日报表 + 汇总结论行。
+Outputs (data/trial/<symbol>/<arm>/):
+  round_trips.csv   — per round trip: entry/exit/direction/price/leg/reason/PnL/fees
+  daily_summary.json — per day: round trips/gross/net/win rate/fee share
+  open_at_cutoff.json — still holding at the end (excluded from the stats, listed separately)
+Prints the daily report table and a summary line to stdout.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from paper_engine import AggregatorReplica, Consensus, PaperTrader, Signal
 
-# 默认与 trading.toml 一致
+# Defaults match trading.toml.
 DEF_THRESHOLD = 0.6
 DEF_COOLDOWN_S = 30
 DEF_MAKER_FEE = 0.0002
@@ -45,12 +47,12 @@ DEF_TP_TARGETS = [0.005, 0.01, 0.02]
 DEF_TP_FRACS = [1 / 3, 1 / 3, 1 / 3]
 DEF_SL_TRAIL = 0.005
 DEF_MAX_HOLD_S = 300
-DEF_MAKER_TIMEOUT_S = 5.0      # M16 maker-first 超时市价兜底
-DEF_NOTIONAL = 160_000.0       # ≈ 2 张 BTC 永续 @80k
+DEF_MAKER_TIMEOUT_S = 5.0      # M16 maker-first timeout, market-order fallback
+DEF_NOTIONAL = 160_000.0       # ≈ 2 BTC perpetual contracts at 80k
 
 
 def load_config(path: Optional[str]) -> dict:
-    """从 trading.toml 读 [strategy] / [risk] 相关默认(缺失时用代码默认)。"""
+    """Read the [strategy] / [risk] defaults from trading.toml (fall back to the code defaults when absent)."""
     out = {}
     if not path or not os.path.exists(path):
         return out
@@ -75,10 +77,12 @@ def load_config(path: Optional[str]) -> dict:
 def load_weights(path: str) -> Dict[str, float]:
     with open(path, encoding="utf-8") as f:
         w = json.load(f)
-    assert isinstance(w, dict) and w, "weights 必须是 {strategy_id: float} 非空对象"
+    assert isinstance(w, dict) and w, \
+        "weights must be a non-empty {strategy_id: float} object"
     total = sum(w.values())
     assert total > 0
-    # 归一化(设计约束:组内求和 = 1,replay 归一化不影响方向)
+    # Normalise (design constraint: the weights sum to 1 within a group;
+    # normalising in the replay does not change the direction).
     return {k: v / total for k, v in w.items()}
 
 
@@ -136,7 +140,8 @@ def run_arm(db_path: str, symbol: str, weights: Dict[str, float],
 
     for sig in signals:
         n_signals += 1
-        # 先把信号时刻之前的 tick 喂给账本(持仓退出需要价格路径)
+        # Feed the ticks preceding the signal instant to the ledger first
+        # (exiting an open position needs the price path).
         while next_tick is not None and next_tick[0] * 1_000_000 <= sig.ts_ns:
             trader.on_tick(next_tick[0], next_tick[1])
             next_tick = next(ticks, None)
@@ -144,7 +149,8 @@ def run_arm(db_path: str, symbol: str, weights: Dict[str, float],
         if c is not None:
             trader.on_consensus(c)
 
-    # 尾部剩余 tick(信号流结束后价格路径走完,让 open 仓正常退出到 cutoff)
+    # Remaining tail ticks (once the signal stream ends, walk the rest of the
+    # price path so open positions can exit normally up to the cutoff).
     while next_tick is not None:
         trader.on_tick(next_tick[0], next_tick[1])
         next_tick = next(ticks, None)
@@ -163,7 +169,7 @@ def summarize(trader: PaperTrader, agg: AggregatorReplica, symbol: str,
     out_dir = os.path.join("data", "trial", symbol, arm)
     os.makedirs(out_dir, exist_ok=True)
 
-    # CSV 账本
+    # CSV ledger
     with open(os.path.join(out_dir, "round_trips.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["entry_ts_ns", "exit_ts_ns", "direction", "entry_px",
@@ -175,7 +181,7 @@ def summarize(trader: PaperTrader, agg: AggregatorReplica, symbol: str,
                         rt.qty, rt.gross_pnl, rt.fees, rt.net_pnl,
                         rt.notional, rt.conf_at_entry, rt.held_ms])
 
-    # 逐日汇总
+    # Per-day summary
     by_day: dict = defaultdict(lambda: {"n": 0, "gross": 0.0, "fees": 0.0,
                                         "net": 0.0, "wins": 0})
     for rt in rts:
@@ -197,63 +203,70 @@ def summarize(trader: PaperTrader, agg: AggregatorReplica, symbol: str,
     with open(os.path.join(out_dir, "daily_summary.json"), "w") as f:
         json.dump(rows, f, indent=2)
 
-    # stdout 报告
+    # stdout report
     print(f"\n=== {arm} @ {symbol} (threshold={cfg['threshold']}, "
           f"cooldown={cfg['cooldown_s']}s) ===")
     if not rts:
-        print("  无回合(信号不足或权重策略未产生共识)")
+        print("  no round trips (insufficient signals, or the weighting "
+              "scheme never produced consensus)")
         return
     tot_gross = sum(r.gross_pnl for r in rts)
     tot_fees = sum(r.fees for r in rts)
     tot_net = sum(r.net_pnl for r in rts)
     wins = sum(1 for r in rts if r.net_pnl > 0)
-    print(f"  回合 {len(rts)} | 毛 {tot_gross:+.2f} | 费 {tot_fees:.2f} | "
-          f"净 {tot_net:+.2f} USDT | 胜率 {wins/len(rts):.1%}")
-    print(f"  每回合期望(净): {tot_net/len(rts):+.4f} USDT | "
-          f"费用占比: {tot_fees/(abs(tot_gross)+1e-9):.1%}")
+    print(f"  round trips {len(rts)} | gross {tot_gross:+.2f} | "
+          f"fees {tot_fees:.2f} | net {tot_net:+.2f} USDT | "
+          f"win rate {wins/len(rts):.1%}")
+    print(f"  expectancy per round trip (net): {tot_net/len(rts):+.4f} USDT | "
+          f"fee share: {tot_fees/(abs(tot_gross)+1e-9):.1%}")
     exit_reasons: dict = defaultdict(int)
     for r in rts:
         exit_reasons[r.exit_reason] += 1
-    print(f"  退出路径分布: {dict(exit_reasons)}")
-    print(f"  日报 → {out_dir}/daily_summary.json | 账本 → {out_dir}/round_trips.csv")
+    print(f"  exit path distribution: {dict(exit_reasons)}")
+    print(f"  daily report → {out_dir}/daily_summary.json | "
+          f"ledger → {out_dir}/round_trips.csv")
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="A/B 权重纸面重放")
+    p = argparse.ArgumentParser(description="A/B weight paper replay")
     p.add_argument("--db", default="data/trades.db")
     p.add_argument("--symbol", default="BTC_USDT")
     p.add_argument("--arm", default="equal", choices=["equal", "ai"])
     p.add_argument("--weights-file",
-                   help="AI 臂权重 JSON {strategy_id: w}(自动归一化)")
+                   help="AI-arm weights JSON {strategy_id: w} "
+                        "(normalised automatically)")
     p.add_argument("--config", default="trading.toml",
-                   help="读取 [strategy]/[risk] 默认;不存在则用内置默认")
+                   help="read the [strategy]/[risk] defaults; fall back to "
+                        "the built-in defaults if the file is absent")
     p.add_argument("--since-ns", type=int, default=0)
-    p.add_argument("--until-ns", type=int, default=0, help="0 = 至今")
+    p.add_argument("--until-ns", type=int, default=0, help="0 = up to now")
     p.add_argument("--notional", type=float, default=DEF_NOTIONAL)
     p.add_argument("--maker-fee", type=float, default=DEF_MAKER_FEE)
     p.add_argument("--taker-fee", type=float, default=DEF_TAKER_FEE)
     args = p.parse_args()
 
     if args.arm == "ai" and not args.weights_file:
-        print("--arm ai 需要 --weights-file", file=sys.stderr)
+        print("--arm ai requires --weights-file", file=sys.stderr)
         return 2
 
     cfg = load_config(args.config)
-    cfg["maker_timeout_s"] = DEF_MAKER_TIMEOUT_S  # 无 toml 项,固定默认
+    cfg["maker_timeout_s"] = DEF_MAKER_TIMEOUT_S  # No TOML key; fixed default
 
     if not os.path.exists(args.db):
-        print(f"DB 不存在: {args.db} (信号日志尚未开始,先部署 M32)",
+        print(f"DB does not exist: {args.db} (signal journaling has not "
+              f"started — deploy M32 first)",
               file=sys.stderr)
         return 2
 
     weights = (load_weights(args.weights_file) if args.arm == "ai"
-               else {})  # equal: 全缺省 → 聚合器默认权重 1.0
+               else {})  # equal: nothing given → the aggregator default of 1.0
     agg, trader, n_signals = run_arm(
         args.db, args.symbol, weights, cfg,
         since_ns=args.since_ns, until_ns=args.until_ns,
         notional_usdt=args.notional, maker_fee=args.maker_fee,
         taker_fee=args.taker_fee)
-    print(f"  信号流: {n_signals} 条 → 聚合发射 {agg.emissions} 次")
+    print(f"  signal stream: {n_signals} signals → "
+          f"{agg.emissions} aggregator emissions")
     summarize(trader, agg, args.symbol, args.arm, cfg, args)
     return 0
 

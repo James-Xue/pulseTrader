@@ -1,105 +1,105 @@
-# Backtest — 通配回测框架 (M33)
+# Backtest — wildcard backtest framework (M33)
 
-在本地对 **任意 Gate USDT-M 期货币种** 做 1m K 线回测,复用与实盘完全相同的
-C++ 策略代码路径。三个工具:
+Run 1m-kline backtests on **any Gate USDT-M perpetual symbol** locally, reusing the exact same
+C++ strategy code path as live trading. Three tools:
 
-| 工具 | 作用 |
+| Tool | Purpose |
 |---|---|
-| `./run.sh backtest` | 单次回测:任意币种 × 任意注册策略 × 任意参数 |
-| `./run.sh kline-store` | 数据积累:每日把任意币种的尾窗 K 线并入本地 sqlite |
-| `./run.sh sweep` | 参数扫描:一次跑遍参数组合,CSV 汇总 |
+| `./run.sh backtest` | Single backtest: any symbol × any registered strategy × any parameters |
+| `./run.sh kline-store` | Data accumulation: merge the trailing-window klines of any symbol into the local sqlite every day |
+| `./run.sh sweep` | Parameter sweep: run through parameter combinations in one go, summarized to CSV |
 
-## 数据模型(先读这段)
+## Data model (read this first)
 
-Gate REST futures 1m 端点**只保留最近 ~10000 根 ≈ 6.9 天**(实测;更早的
-请求一律 400 "too long ago")。因此:
+The Gate REST futures 1m endpoint **only keeps the most recent ~10000 bars ≈ 6.9 days** (measured; earlier
+requests all return 400 "too long ago"). Therefore:
 
-- **任意币种开测即用**:REST 现拉最近 ~7 天,无需任何配置。
-- **~1 个月窗口的唯一来源是积累**:`kline-store` 每天拉一次尾窗落
-  `kline_bars`(幂等 `INSERT OR IGNORE`),存储向后累积。**新币种约 30 天后
-  才满 1 个月**;期间回测 = 已积累 + REST 尾部。
-- 停机自愈:某次没跑没关系,下次拉尾窗自动补上(**中断 ≤ ~6.9 天无缝**);
-  超 7 天的旧洞永远补不上(交易所不留),只能等未来数据。
-- 引擎长期盯过的币种(BTC/ETH/SNDK/UNITREE 等)在 `data/trades.db` 已有
-  数月积累,`kline-store --import` 一次导入即可跳启动(见下)。
+- **Any symbol is testable immediately**: REST pulls the most recent ~7 days, no configuration needed.
+- **The only source of a ~1-month window is accumulation**: `kline-store` pulls the trailing window once a day into
+  `kline_bars` (idempotent `INSERT OR IGNORE`), and storage accumulates backwards. **A new symbol needs about 30 days
+  to reach one month**; during that time a backtest = accumulated data + the REST tail.
+- Downtime self-healing: missing a run does not matter; the next trailing-window pull fills it in automatically (**gaps ≤ ~6.9 days are seamless**);
+  holes older than 7 days can never be filled (the exchange does not keep them) — you can only wait for future data.
+- Symbols the engine has watched long-term (BTC/ETH/SNDK/UNITREE etc.) already have
+  months of accumulation in `data/trades.db`; a single `kline-store --import` bootstraps them (see below).
 
-## backtest — 单次回测
+## backtest — single run
 
 ```
 ./run.sh backtest --strategy momentum_scalper --symbol DOGE_USDT \
     --from 2026-09-01 --to 2026-09-06 --quantity 20 [--json run.json]
 ```
 
-注册策略:7 个,`--strategy` 任选。除 `orderbook_scalper` 外都吃 K 线
-(orderbook_scalper 只吃实时盘口,回放下预期零信号,引擎会告警)。
+Registered strategies: 7, pick any with `--strategy`. All except `orderbook_scalper` consume klines
+(orderbook_scalper only consumes the live order book, so it is expected to produce zero signals on replay; the engine warns).
 
-`iron_trader`(2026-09-06 新增)= 铁律交易员:低频纪律型趋势跟随,规则文档
-`docs/strategies/iron-trader.md`。注意其**退出 = Flat 信号(只平仓不反手)**:
-BacktestAccount 自 2026-09-06 起把 Flat 当只平通道(原语义:状态信号非交易);
-旧策略不发 Flat,行为不变,1003→1016 测试全绿。
+`iron_trader` (added 2026-09-06) = the iron-rule trader: low-frequency, disciplined trend following; rule document
+`docs/strategies/iron-trader.md`. Note that its **exit = Flat signal (close only, no reversal)**:
+since 2026-09-06 BacktestAccount treats Flat as a close-only channel (the original semantics: a state signal, not a trade);
+old strategies do not emit Flat and their behavior is unchanged; 1003→1016 tests all green.
 
-### 关键 flag
+### Key flags
 
-| flag | 说明 |
+| flag | Description |
 |---|---|
-| `--strategy NAME` | 注册键:`momentum_scalper` / `mean_reversion_scalper` / `supertrend_scalper` / `eth_scalper` / `ema_resonance_scalper` / `orderbook_scalper` |
-| `--symbol PAIR` | 任意 USDT-M 合约,如 `DOGE_USDT`、`PEPE_USDT`;未知符号报 did-you-mean 错误(9306) |
-| `--quanto Q` | 合约乘数(1 张 = Q 基础币)。**缺省自动解析**:公开合约表 → 缓存 12h。改缓存路径 `--contracts-cache P`,禁用 `--no-contract-cache`(离线且无缓存时明确报错要 `--quanto`,绝不静默按错误乘数算 PnL) |
-| `--param KEY=VALUE` | **策略参数注入**(可重复,CLI 胜出 `--config`)。原子热参键:`order_quantity, min_confidence, ema_fast_period, ema_slow_period, bb_period, bb_std_dev, supertrend_period, supertrend_multiplier, cooldown_seconds, stop_loss_pct, take_profit_pct, auto_trade`;任何其它键走 custom_params 通道(`eth_atr_step`, `eth_spike_filter_*`, `res_ema_p1..p5`, ...)。JSON 报告的 `params.atomic / params.custom` 记录实际跑了什么 |
-| `--quantity Q` | 开仓量(只做 PnL 缩放)。`--param order_quantity=` 只热更策略侧原子值,不改成交尺寸 |
-| `--config PATH` | trading.toml 实例播种:quantity/min_confidence(仅当 CLI 未显式改过)+ **custom_params**(M33 起)+ **news_windows**(M33.1 起,仅当 CLI 未显式给过 `--news`)。CLI 显式值胜出 |
-| `--news TIME[/X[/Y]]` | **重大消息事件闸窗口**(M33.1,可重复,一次一个)。T = 事件 UTC 时刻(ISO 或 epoch);X = `close_before_min`(缺省 15)、Y = `resume_after_min`(缺省 15):禁开 [T−X, T+Y)、持仓跨 T−X 强制 Flat(`exit_reason = news_blackout`)。实例级 TOML 同款键 `news_windows`;规则见 docs/strategies/iron-trader.md §4.6。例:`--news "2026-09-16T18:00:00Z/15/15"`(sweep 透传) |
-| `--from/--to TIME` | 秒/毫秒 epoch 或 ISO UTC;缺省按本地覆盖自动解析 |
-| `--no-api` / `--no-cache` | 只用本地存量 / 不写回 sqlite |
-| `--db PATH` | kline_bars 库(默认 `data/trades.db`) |
-| `--json PATH` | 全量 JSON 报告(数据来源、信号、交易、权益曲线、params) |
-| `--fee-rate R` | <0 免手续费;0 市场默认(futures 0.0005 = 0.05% taker);>0 显式 |
-| `--close-mode` | `flip`(默认,对向信号平旧开新)/ `independent`(多仓并存) |
+| `--strategy NAME` | registration key: `momentum_scalper` / `mean_reversion_scalper` / `supertrend_scalper` / `eth_scalper` / `ema_resonance_scalper` / `orderbook_scalper` |
+| `--symbol PAIR` | any USDT-M perpetual, e.g. `DOGE_USDT`, `PEPE_USDT`; unknown symbols produce a did-you-mean error (9306) |
+| `--quanto Q` | contract multiplier (1 contract = Q base coins). **Resolved automatically by default**: public contract table → cached for 12h. Change the cache path with `--contracts-cache P`, disable with `--no-contract-cache` (when offline with no cache it explicitly errors and asks for `--quanto`; it never silently computes PnL with a wrong multiplier) |
+| `--param KEY=VALUE` | **strategy parameter injection** (repeatable; CLI beats `--config`). Atomic hot-param keys: `order_quantity, min_confidence, ema_fast_period, ema_slow_period, bb_period, bb_std_dev, supertrend_period, supertrend_multiplier, cooldown_seconds, stop_loss_pct, take_profit_pct, auto_trade`; any other key goes through the custom_params channel (`eth_atr_step`, `eth_spike_filter_*`, `res_ema_p1..p5`, ...). The JSON report's `params.atomic / params.custom` record what actually ran |
+| `--quantity Q` | position size (only scales PnL). `--param order_quantity=` only hot-updates the strategy-side atomic value and does not change the fill size |
+| `--config PATH` | seed from a trading.toml instance: quantity/min_confidence (only when the CLI did not explicitly override) + **custom_params** (since M33) + **news_windows** (since M33.1, only when the CLI did not explicitly pass `--news`). Explicit CLI values win |
+| `--news TIME[/X[/Y]]` | **major news-event gate window** (M33.1, repeatable, one per occurrence). T = event UTC time (ISO or epoch); X = `close_before_min` (default 15), Y = `resume_after_min` (default 15): no entries in [T−X, T+Y); a position crossing T−X is forced Flat (`exit_reason = news_blackout`). The same key `news_windows` exists at instance level in TOML; rules in docs/strategies/iron-trader.md §4.6. Example: `--news "2026-09-16T18:00:00Z/15/15"` (passed through by sweep) |
+| `--from/--to TIME` | epoch seconds/milliseconds or ISO UTC; defaults resolve automatically from the local coverage |
+| `--no-api` / `--no-cache` | use only local stock / do not write back to sqlite |
+| `--db PATH` | kline_bars database (default `data/trades.db`) |
+| `--json PATH` | full JSON report (data sources, signals, trades, equity curve, params) |
+| `--fee-rate R` | <0 no fees; 0 market default (futures 0.0005 = 0.05% taker); >0 explicit |
+| `--close-mode` | `flip` (default, an opposite signal closes the old and opens the new) / `independent` (positions coexist) |
 
-### 惰性参数(注入了但 M33 成交模型不消费)
+### Inert parameters (injected but not consumed by the M33 fill model)
 
-- `stop_loss_pct` / `take_profit_pct`:实盘风控用,M33 回测按 K 线收盘价即时
-  成交,无 SL/TP 路径(intra-bar 保真模式是规划中的后续里程碑)。
-- `ob_imbalance_threshold` / `ob_depth`:只被 orderbook_scalper 消费,kline
-  回放下天然无效。
+- `stop_loss_pct` / `take_profit_pct`: used by live risk control; the M33 backtest fills instantly at the kline close
+  and has no SL/TP path (an intra-bar fidelity mode is a planned follow-up milestone).
+- `ob_imbalance_threshold` / `ob_depth`: only consumed by orderbook_scalper and are inherently ineffective under kline
+  replay.
 
-### 语义与限制(诚实的回测边界)
+### Semantics and limitations (an honest backtest boundary)
 
-- 成交 = 信号 K 线**收盘价**即时成交;无滑点、无盘口、无保证金/强平/资金费率。
-- 杠杆仅展示,不影响 PnL;收益公式与实盘 `PositionManager` 同源。
-- 数据质量:sqlite 脏蜡烛(>25% 跳变等)自动净化,报告带警告。
-- 本地库在旧 schema 下首次打开自动迁移 v2(PK 含 market_type),一次性几分钟。
+- Fill = instant fill at the signal kline's **close**; no slippage, no order book, no margin/liquidation/funding.
+- Leverage is display-only and does not affect PnL; the return formula comes from the same source as the live `PositionManager`.
+- Data quality: dirty candles in sqlite (>25% jumps etc.) are cleaned automatically; the report carries warnings.
+- The local database auto-migrates to v2 on first open under an old schema (PK includes market_type), one-time, a few minutes.
 
-## kline-store — 数据积累
+## kline-store — data accumulation
 
 ```
-./run.sh kline-store --symbols DOGE_USDT,PEPE_USDT          # 拉尾窗落库
-./run.sh kline-store --config trading.toml                  # [backtest] 配置
-./run.sh kline-store --import data/trades.db --symbols BTC_USDT,SNDK_USDT  # 导入存量
+./run.sh kline-store --symbols DOGE_USDT,PEPE_USDT          # pull the trailing window into storage
+./run.sh kline-store --config trading.toml                  # [backtest] configuration
+./run.sh kline-store --import data/trades.db --symbols BTC_USDT,SNDK_USDT  # import existing stock
 ```
 
-- 每日两次 cron(睡眠容错,幂等):
+- Cron twice a day (sleep-tolerant, idempotent):
 
 ```
 0 7,23 * * * cd /home/joey/1_Code/09_pulseTrader && ./run.sh kline-store --config trading.toml >> logs/kline_store.log 2>&1
 ```
 
-  (systemd user timer 备选见 OPERATIONAL_GUIDE;公开 REST 无需 API key。)
-- `[backtest]` TOML 段(可选):
+  (A systemd user timer alternative is in OPERATIONAL_GUIDE; public REST needs no API key.)
+- `[backtest]` TOML section (optional):
 
 ```toml
 [backtest]
 store_db = "data/trades.db"
-store_symbols = ["DOGE_USDT", "PEPE_USDT"]   # 缺省 = 配置里启用的 futures 策略实例符号
+store_symbols = ["DOGE_USDT", "PEPE_USDT"]   # default = symbols of the enabled futures strategy instances in the config
 contract_cache_path = "data/contracts_cache.json"
 ```
 
-- futures 符号先经合约表校验(typo 秒拒,不白拉 ~30 请求);spot 也可存
-  (`--market spot`);CFD 不支持(REST 无时间窗端点,引擎自录是唯一来源)。
-- `--import` 从任意 schema 版本的 kline_bars 库拷贝 futures 行(可带
-  `--symbols` 过滤),为老盯盘币种一次补齐 ~1 个月。
+- Futures symbols are validated against the contract table first (typos are rejected instantly instead of wasting ~30 requests); spot can also be stored
+  (`--market spot`); CFD is not supported (REST has no time-window endpoint; engine self-recording is the only source).
+- `--import` copies futures rows from a kline_bars database of any schema version (optionally with
+  `--symbols` filtering), filling in ~1 month for long-watched symbols in one go.
 
-## sweep — 参数扫描
+## sweep — parameter sweep
 
 ```
 ./run.sh sweep --strategy momentum_scalper --symbol DOGE_USDT \
@@ -108,33 +108,33 @@ contract_cache_path = "data/contracts_cache.json"
     --quantity 20 --workers 4 --out results/sweep_doge.csv
 ```
 
-- 值语法:`5|9|21` 离散 / `34..100:11` 范围 / `2` 固定值,笛卡尔积组合;
-  键经 `--param` 透传,atomic/custom 通道由引擎分类,与单跑语义一致。
-- 其余 flag 原样透传给 backtest(见上表);`--max-combos` 默认 500 防爆。
-- 首次 run 串行预热落库,并行 run 全走本地(CSV 的 `rows_api` 列应≈0)。
-- 崩溃安全:每完成一行即重写 CSV;重跑同命令按签名跳过已完成组合
-  (`--force` 全重跑)。失败行记 `exit_code` + stderr 尾部。
-- **Sweep 参数集是实验产物,不是注册策略 → 不触发策略文档规则**;验证有效
-  后若要实盘,请以配置/新 C++ 策略固化并补 `docs/strategies/` 文档。
+- Value syntax: `5|9|21` discrete / `34..100:11` range / `2` fixed value, combined as a Cartesian product;
+  keys are passed through via `--param` and classified by the engine into the atomic/custom channel, consistent with a single run.
+- The remaining flags are passed through to backtest as-is (see the table above); `--max-combos` defaults to 500 to prevent blowups.
+- The first run warms up serially and persists data; parallel runs all use the local data (the CSV `rows_api` column should be ≈0).
+- Crash-safe: the CSV is rewritten after each completed row; rerunning the same command skips completed combinations by signature
+  (`--force` reruns everything). Failed rows record `exit_code` + the stderr tail.
+- **A sweep parameter set is an experiment artifact, not a registered strategy → it does not trigger the strategy-document rule**; if it proves useful
+  and you want to trade it live, fix it as configuration/a new C++ strategy and add `docs/strategies/` documentation.
 
-## 快速上手(新币种第一天)
+## Quick start (day one for a new symbol)
 
 ```bash
-# 1. 积累从今天开始(cron 常驻后免手跑)
+# 1. Accumulation starts today (no manual runs once cron is in place)
 ./run.sh kline-store --symbols DOGE_USDT
 
-# 2. 立刻能测最近 ~7 天
+# 2. Test the most recent ~7 days immediately
 ./run.sh backtest --strategy momentum_scalper --symbol DOGE_USDT --quantity 20
 
-# 3. 参数实验(本地数据预热后并行扫)
+# 3. Parameter experiment (parallel sweep after warming up local data)
 ./run.sh sweep --strategy momentum_scalper --symbol DOGE_USDT \
     --from 2026-09-01 --to 2026-09-06 --no-api \
     '--param' 'ema_fast_period=5|9|21' '--param' 'ema_slow_period=34..50:8'
 ```
 
-## 里程碑背景
+## Milestone background
 
-M29 单策略 MVP(2026-08-23)→ M33 通配化:A1 合约元数据自动解析
-(QuantoResolver)+ A2 全参数注入 → A3 kline-store 数据积累 → B sweep。
-kline_bars schema v2(M0):PK 含 market_type,修复 spot/futures 同分钟行
-互撞被静默丢弃的 bug(VPS daily sync futures 行曾长期被 spot 行挤掉)。
+M29 single-strategy MVP (2026-08-23) → M33 wildcardization: A1 contract metadata auto-resolution
+(QuantoResolver) + A2 full parameter injection → A3 kline-store data accumulation → B sweep.
+kline_bars schema v2 (M0): the PK includes market_type, fixing the bug where spot/futures rows in the same minute
+collided and were silently dropped (the VPS daily sync's futures rows had long been squeezed out by spot rows).

@@ -223,7 +223,8 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
         // CFD cost model (recorded, NOT enforced by the engine):
         //   - Commission: 0.06 USDT per 0.01 lot, charged once on BUY only
         //     (sell side is free); 6 USDT per full lot in the symbol detail.
-        //   - Gold storage/swap (利差): charged per overnight hold, surfaced
+        //   - Gold storage/swap (interest-rate differential): charged per
+        //     overnight hold, surfaced
         //     in the assets `storage` field. Long positions typically pay.
         body["symbol"] = req.symbol;
         body["side"] = (Side::Buy == req.side) ? 2 : 1;

@@ -1,218 +1,212 @@
-# BTC 无人值守自动交易 — 就绪度差距分析
+# BTC Unattended Auto-Trading — Readiness Gap Analysis
 
-> 日期: 2026-10-04 · 分支: `headless` · 基准: 仓库 HEAD `7f0d072` + VPS 只读实况核查
-> 方法: 12 个分析代理编队交叉验证 —— 5 个领域读者(策略 / 风控执行 / 行情连接 / 控制面运维 / 研究证据)
-> → 3 个差距分析师(工程就绪度 / 策略边际 / 无人值守安全)→ 3 个对抗性验证者(逐条回代码求证)
-> → 1 个完备性批评者。结论: 安全维度 19/19 条主张证实; 工程 17 确认 / 1 纠正; 边际 11 确认 / 1 存疑。
-> VPS 侧仅做只读核查(引擎状态 / 磁盘 / 文件清单), 未做任何变更。
+> Date: 2026-10-04 · Branch: `headless` · Baseline: repository HEAD `7f0d072` + read-only live inspection of the VPS
+> Method: a formation of 12 analysis agents cross-validating each other — 5 domain readers (strategy / risk and execution / market data connectivity / control-plane operations / research evidence)
+> → 3 gap analysts (engineering readiness / strategy edge / unattended safety) → 3 adversarial verifiers (checking every claim back against the code)
+> → 1 completeness critic. Conclusion: 19/19 safety-dimension claims confirmed; engineering 17 confirmed / 1 corrected; edge 11 confirmed / 1 uncertain.
+> On the VPS side only read-only inspection was done (engine status / disk / file inventory); no changes were made.
 
-## 标尺(本报告的"完成"定义)
+## Yardstick (the definition of "done" used in this report)
 
-**无人值守 · 真钱 · BTC_USDT 期货 · Gate 主网 · VPS 部署**: 信号 → 自动下单 → 风控 →
-持仓管理 → 监控告警全链路无需人工盯盘。"能跑起来"与"有正期望边际"分开评估。
+**Unattended · real money · BTC_USDT futures · Gate mainnet · VPS deployment**: the whole chain from signal → automatic order → risk control → position management → monitoring and alerting must run without a human watching the screen. "It runs" and "it has a positive expected edge" are assessed separately.
 
-## 结论
+## Conclusion
 
-**离"能自动下单"只差一个配置开关; 离"敢让它无人值守用真钱跑"差 8 个 blocker 级工程缺口
-(约 1–2 周密集修复 + 2–4 周演练/试跑); 离"值得跑"差一整轮研究 —— 目前 0/6 个在跑策略
-有含费验证工件, 唯一做过全周期检验的策略已被证伪。**
+**"It can place orders automatically" is one config switch away; "we would dare let it run unattended with real money" is 8 blocker-level engineering gaps away (roughly 1–2 weeks of intensive fixes + 2–4 weeks of drills and pilot runs); "it is worth running" is an entire research cycle away — today 0 of the 6 running strategies has a fee-inclusive validation artifact, and the only strategy that was ever tested over a full cycle has been falsified.**
 
-| 维度 | 就绪度 | 一句话 |
+| Dimension | Readiness | In one sentence |
 |---|---|---|
-| 链路能跑 | 高(只差部署 + 开关) | 信号→聚合→风控→下单→跟踪→对账全链路闭合, 1045 测试绿 |
-| 无人值守安全 | 低 | 止损/熔断/告警/看门狗/kill switch 五条保险丝全未接线或带缺陷 |
-| 策略边际 | 零证据 | 在跑策略没有一份含费回测工件; 唯一全周期验证的 IronTrader 已证伪 |
+| Pipeline works | High (only deployment + the switch are missing) | The full chain signal→aggregation→risk→order→tracking→reconciliation is closed; 1045 tests green |
+| Unattended safety | Low | All five fuses — stop-loss / circuit breaker / alerting / watchdog / kill switch — are either unwired or defective |
+| Strategy edge | Zero evidence | Not one of the running strategies has a fee-inclusive backtest artifact; IronTrader, the only one validated over a full cycle, has been falsified |
 
-⚠️ **关键口径: 现行 VPS 部署的实盘里程 = 0。** trades.db 里 409 笔成交全部早于本次部署
-(2026-08-14 ~ 09-02 旧时代); 本次部署全程 `signal_only=true`, 只验证过"信号计算"分支 ——
-下单、私有 WS 成交回报、对账、halt 对平仓的影响等分支, 在真实订单流下从未被触发过。
+⚠️ **Key caveat: the current VPS deployment has zero live mileage.** All 409 fills in trades.db predate this deployment (the old era, 2026-08-14 to 09-02); this deployment ran with `signal_only=true` the whole time, so only the "signal computation" branch was ever exercised — order placement, private-WS fill reports, reconciliation and the effect of halt on closing positions have never been triggered under a real order flow.
 
-## 一、现状盘点(底座是扎实的)
+## 1. Current state (the foundation is solid)
 
-- 9 层架构完整; 7 个内置策略 + Registry 兜底; BTC_USDT 已配置 6 个启用实例
-  (momentum / orderbook / mean_reversion / supertrend / eth_scalper / ema_resonance)+ 1 个禁用(iron_trader)
-- 信号→订单链路闭合: 聚合器(阈值 0.6 / 冷却 30s)→ auto_trade 闸 → 方向闸 → 风控 → OrderFlowExecutor
-- 控制面 32 方法(MCP / JSON-RPC / REPL 同名同步); 单实例 flock; 启动 + 每 ~10s 持仓对账
-- M33 回测引擎 + 信号日志 + 纸面重放工具链; 币安 7 年全史镜像数据; 每策略文本规则文档
-- 近期 WS 重连修复 `c37364b`(公共频道按 (channel,payload) 全量重订)已提交但**未部署**
+- The 9-layer architecture is complete; 7 built-in strategies plus a Registry fallback; BTC_USDT has 6 enabled instances configured
+  (momentum / orderbook / mean_reversion / supertrend / eth_scalper / ema_resonance) + 1 disabled (iron_trader)
+- The signal→order path is closed: aggregator (threshold 0.6 / cooldown 30s) → auto_trade gate → direction gate → risk control → OrderFlowExecutor
+- 32 control-plane methods (MCP / JSON-RPC / REPL share the same names and stay in sync); single-instance flock; position reconciliation at startup and every ~10s
+- The M33 backtest engine + signal log + paper-replay toolchain; a mirrored Binance 7-year full-history dataset; a text rule document per strategy
+- The recent WS reconnect fix `c37364b` (public channels fully re-subscribed by (channel, payload)) is committed but **not deployed**
 
-问题不在"缺功能", 而在**最后一公里接线**与**无人兜底**。
+The problem is not missing features; it is **last-mile wiring** and **the absence of a safety net**.
 
-## 二、8 个 blocker(翻 `signal_only=false` 之前必须全修)
+## 2. The 8 blockers (all must be fixed before flipping `signal_only=false`)
 
-### B1. 实盘没有自动退出/止损链路(最致命)
+### B1. Live trading has no automatic exit / stop-loss path (the most lethal)
 
-- 期货入场成交后**不挂任何交易所侧止损**: `src/execution/OrderExecutor.cpp:183-215`(futures body 无 price_sl/price_tp,
-  仅 CFD 有 `:238-248`)
-- 策略的 Flat 退场信号被直接丢弃: `src/control/OrderFlowExecutor.cpp:216-219`
-- `StopLossEngine` / `TakeProfitEngine` 是死代码(全库仅 `tests/unit/risk/` 引用);
-  `[risk.stop_loss]` `[risk.take_profit]` 配置被解析但无执行侧消费者
-- Gate `price_orders` trigger 仅手动 MCP 工具(`EngineServices.cpp:957-1024`), 且只支持全仓 close(size 必须 0)
+- After a futures entry fills, **no exchange-side stop-loss is placed at all**: `src/execution/OrderExecutor.cpp:183-215` (the futures body carries no price_sl/price_tp;
+  only CFD has them, at `:238-248`)
+- The strategy's Flat exit signal is dropped outright: `src/control/OrderFlowExecutor.cpp:216-219`
+- `StopLossEngine` / `TakeProfitEngine` are dead code (the only references in the whole repository are in `tests/unit/risk/`);
+  the `[risk.stop_loss]` and `[risk.take_profit]` configs are parsed but have no consumer on the execution side
+- The Gate `price_orders` trigger exists only as a manual MCP tool (`EngineServices.cpp:957-1024`), and only supports closing the whole position (size must be 0)
 
-→ 持仓后唯一的自动退出路径是"反向开仓信号"。**引擎一死/断流, 仓位裸奔, 强平是唯一兜底。**
+→ Once a position is open, the only automatic exit is an "opposite entry signal". **If the engine dies or the feed stops, the position runs naked, and liquidation is the only backstop.**
 
-修复(days): 先探针验证 BTC_USDT 的 `price_orders` 全仓语义与多空合并仓误伤 → 成交后自动挂
-reduce-only trigger SL(引擎死亡仍生效); 再把 StopLoss/TakeProfitEngine(含 trailing/max_hold)接线为引擎内第二层。
+Fix (days): first probe-verify the whole-position semantics of `price_orders` on BTC_USDT and whether it can wrongly hit a merged long/short position → after an entry fills,
+automatically place a reduce-only trigger SL (still effective if the engine dies); then wire StopLoss/TakeProfitEngine (including trailing/max_hold) as the second layer inside the engine.
 
-### B2. 日亏/回撤熔断完全空转
+### B2. The daily-loss / drawdown circuit breaker is completely inert
 
-- `DrawdownGuard.updateEquity / resetDaily` 无任何生产调用者(`src/risk/DrawdownGuard.cpp:47-104,150-166`,
-  全库 grep 仅命中 tests)→ 配置的**日亏 2% / 峰值回撤 5% 永远不可能触发**(`trading.toml:384-385`)
-- `OrderFlowExecutor.cpp:704` recordPnl 只累计不判定; halt 实际只有手动入口
-- 数据源已具备: `main.cpp` 60s 心跳已在取 futures balance.total, 只差接线
+- `DrawdownGuard.updateEquity / resetDaily` has no production caller (`src/risk/DrawdownGuard.cpp:47-104,150-166`;
+  a repository-wide grep only hits tests) → the configured **daily loss of 2% / peak drawdown of 5% can never fire** (`trading.toml:384-385`)
+- `OrderFlowExecutor.cpp:704` recordPnl only accumulates and never decides; in practice halt has a manual entry point only
+- The data source already exists: the 60s heartbeat in `main.cpp` already reads futures balance.total; only the wiring is missing
 
-修复(hours): 心跳里喂 `updateEquity` + UTC 日切 `resetDaily`; 明确触发动作(停新单 + 撤开仓挂单, 可选减仓)。
+Fix (hours): feed `updateEquity` from the heartbeat and call `resetDaily` on the UTC day rollover; define the trigger action explicitly (stop new orders + cancel working entry orders, optionally reduce exposure).
 
-### B3. 零告警 + 零看门狗
+### B3. Zero alerting + zero watchdog
 
-- 全库无任何出站通知实现(Telegram/webhook/邮件均无); `docs/OPERATIONAL_GUIDE.md:104` 列为 P2 待办;
-  `docs/architecture.md:147` 的 AlertManager 是文档虚构
-- 心跳只写本地日志(`apps/pulsetrader/main.cpp:1612-1628`); systemd 单元 `WatchdogUSec=infinity`、`OnFailure=` 空
-  (VPS 实测), `Restart=always/5s` 只对"进程退出"生效 —— **进程"假活"(活着但卡死/僵死)无人能发现**
-- 磁盘硬期限: engine.out 实测 **178MB/天**, VPS 余量 5.8G ≈ **32 天写满**(写满即静默停机)
-- 先例已发生: A/B 实验 13 天断流空转无人察觉
+- The repository contains no outbound notification implementation whatsoever (no Telegram / webhook / email); `docs/OPERATIONAL_GUIDE.md:104` lists it as a P2 TODO;
+  the AlertManager in `docs/architecture.md:147` is a documentation fiction
+- The heartbeat only writes local logs (`apps/pulsetrader/main.cpp:1612-1628`); the systemd unit has `WatchdogUSec=infinity` and an empty `OnFailure=`
+  (measured on the VPS), and `Restart=always/5s` only reacts to "process exit" — **a process that is "falsely alive" (running but stuck or zombied) cannot be detected by anyone**
+- Hard disk deadline: engine.out measures **178MB/day**, and the VPS has 5.8G free ≈ **32 days to full** (a full disk means a silent shutdown)
+- Precedent already exists: the A/B experiment idled on a dead feed for 13 days without anyone noticing
 
-修复(days): 一条出站通道覆盖事件清单(进程退出/重启、halt、WS 断流、拒单风暴、日亏水位、强平距离);
-systemd `OnFailure=` 钩子; 外部 dead-man's-switch(healthchecks.io 或自建)。
+Fix (days): one outbound channel covering the event list (process exit/restart, halt, WS feed loss, order-rejection storms, daily-loss watermarks, distance to liquidation);
+a systemd `OnFailure=` hook; an external dead-man's-switch (healthchecks.io or self-hosted).
 
-### B4. kill switch 有硬伤
+### B4. The kill switch has serious flaws
 
-- halt 检查在 reduce_only 豁免**之前**(`src/risk/RiskManager.cpp:50-61` vs `PositionManager.cpp:707-750`)
-  → **halt 后连平仓单都会被拒**(futures `close_position` 走同一闸门, `EngineServices.cpp:866-877`)
-- halt 不撤挂单(停牌期间挂单照常成交)、状态不落盘、无 `cancel_all` / `panic` 方法
-  (`cancelAllOpenOrders` 仅被 switch_direction 调用)
+- The halt check runs **before** the reduce_only exemption (`src/risk/RiskManager.cpp:50-61` vs `PositionManager.cpp:707-750`)
+  → **after a halt even closing orders are rejected** (futures `close_position` passes through the same gate, `EngineServices.cpp:866-877`)
+- halt does not cancel working orders (orders keep filling while trading is halted), its state is not persisted, and there is no `cancel_all` / `panic` method
+  (`cancelAllOpenOrders` is only called by switch_direction)
 
-修复(days): halt 对 reduce_only/平仓豁免; 新增幂等 cancel_all_orders 与 panic(flatten+halt);
-halt/原因落盘 + 启动恢复语义(非正常退出 → 默认停牌 + 告警)。
+Fix (days): exempt reduce_only / closing orders from halt; add an idempotent cancel_all_orders and panic (flatten + halt);
+persist halt state and its reason + define startup recovery semantics (abnormal exit → halted by default + alert).
 
-### B5. 私有 WS 重连丢鉴权 + 订单无周期对账
+### B5. Private WS reconnect loses authentication + orders have no periodic reconciliation
 
-- `c37364b` 只修了公共频道: 重连 replay 走 `buildResubscribeMsgs` **不带 auth**
-  (`src/exchange/GateWsClient.cpp:486-498` vs `:160-175`); `ChannelEntry` 无 private 标记(`GateWsChannels.hpp:147-151`)
-- `OrderTracker.m_wsSubscribed` 一次性置位(`OrderTracker.cpp:83-91`); `reconcileAll` 仅在控制面查询 /
-  方向切换时触发, 无主循环周期对账
+- `c37364b` only fixed public channels: the reconnect replay goes through `buildResubscribeMsgs` **without auth**
+  (`src/exchange/GateWsClient.cpp:486-498` vs `:160-175`); `ChannelEntry` has no private flag (`GateWsChannels.hpp:147-151`)
+- `OrderTracker.m_wsSubscribed` is set once and never reset (`OrderTracker.cpp:83-91`); `reconcileAll` only fires on control-plane queries /
+  direction switches, never periodically from the main loop
 
-→ **成交回报可静默丢失**, 持仓/在途订单视图长期漂移而无人察觉。
+→ **Fill reports can be silently lost**, and the position / in-flight order view drifts for a long time with nobody noticing.
 
-修复(days): 重连补 auth block + 重连成功后强制全量对账 + 主循环 10-30s 低频订单对账 + 回归测试。
+Fix (days): add the auth block on reconnect + force a full reconciliation after every successful reconnect + low-frequency order reconciliation every 10-30s in the main loop + regression tests.
 
-### B6. 行情僵死不可检测 + `kline.closed` 恒 true
+### B6. A frozen market feed cannot be detected + `kline.closed` is always true
 
-- WS 不记录最后收包时间、无读超时、从不主动 ping → **半开 TCP 死连接永不触发重连**(`GateWsClient.cpp:528-630`)
-- 策略/聚合器不检查数据时间戳(`SignalAggregator.cpp:30-63,96-154` 完全不看 signal.timestamp;
-  OrderBookScalper 每 500ms 轮询同一快照不查 `OrderBook.timestamp`)
-- `MarketFeed.cpp:517` 把每条推送**硬编码 `closed=true`**(交易所实际推形成中 K 线, 抓帧样例含 `"w":false`)
-  → 策略可能拿未收盘数据当终值自动下单, 且与回测(完整收盘 K)系统性偏离
+- The WS client does not record the last receive time, has no read timeout and never pings → **a half-open dead TCP connection never triggers a reconnect** (`GateWsClient.cpp:528-630`)
+- The strategies / aggregator never check data timestamps (`SignalAggregator.cpp:30-63,96-154` ignores signal.timestamp entirely;
+  OrderBookScalper polls the same snapshot every 500ms without checking `OrderBook.timestamp`)
+- `MarketFeed.cpp:517` **hardcodes `closed=true`** on every push (the exchange actually pushes forming candles; a captured frame sample contains `"w":false`)
+  → a strategy may auto-trade on an unclosed candle treated as final, and systematically diverges from the backtest (which uses complete closed candles)
 
-修复(days): 每频道 last_msg_ts + watchdog(N 秒无消息强制重连); 行情 staleness 闸进策略/风控;
-解析 `w` 字段修 closed 语义; KlineBuffer 同 open_time 替换而非堆积。
+Fix (days): per-channel last_msg_ts + a watchdog (force a reconnect after N seconds of silence); feed-staleness gates in the strategies / risk layer;
+parse the `w` field to fix the closed semantics; have KlineBuffer replace by open_time instead of accumulating.
 
-### B7. 下单无幂等
+### B7. Order placement is not idempotent
 
-- REST 层对 POST 超时/5xx **自动重试**(`src/exchange/GateRestClient.cpp:284-318`), 而自动信号路径
-  **不生成 client_order_id**(`OrderFlowExecutor.cpp:129-208`; 手动/网格路径有, `OrderExecutor.cpp:280-284`)
-- → POST 已被交易所接受但响应超时时, 重试 = **重复建仓**(双倍敞口), 且两笔都占用风险预算
+- The REST layer **automatically retries** POST timeouts / 5xx (`src/exchange/GateRestClient.cpp:284-318`), while the automatic signal path
+  **does not generate a client_order_id** (`OrderFlowExecutor.cpp:129-208`; the manual / grid paths do, `OrderExecutor.cpp:280-284`)
+- → When a POST was already accepted by the exchange but the response timed out, the retry means **a duplicate position** (double exposure), and both orders consume risk budget
 
-修复(hours): 自动路径生成唯一 client_order_id → 重发前按该键查单去重; 或下单类 POST 关闭自动重试。
+Fix (hours): generate a unique client_order_id on the automatic path → look the order up by that key before resending to deduplicate; or disable automatic retries for order-placement POSTs.
 
-### B8. 信号→成交→绩效归因断链
+### B8. The signal → fill → performance attribution chain is broken
 
-- `buildRequestFromSignal` 不写 client_order_id → `recordCompletedTrade` 用空 strategy_id 回退到
-  **"该 symbol 第一个 enabled 实例"**(BTC 即 momentum_scalper), `OrderFlowExecutor.cpp:794-799,821-840`
-- 影响: `get_strategy_performance`、AI 调参输入、未来单策略熔断全部建立在脏数据上
+- `buildRequestFromSignal` does not write a client_order_id → `recordCompletedTrade` gets an empty strategy_id and falls back to
+  **"the first enabled instance for that symbol"** (momentum_scalper for BTC), `OrderFlowExecutor.cpp:794-799,821-840`
+- Impact: `get_strategy_performance`, the AI tuning input and any future per-strategy circuit breaker all rest on dirty data
 
-修复(days): 归因字段贯通 + 补单测钉住多策略同 symbol 场景。
+Fix (days): plumb the attribution fields through end to end + add unit tests that pin down the multi-strategy-same-symbol scenario.
 
-## 三、运维/部署/卫生缺口(非 blocker, 上线前必清)
+## 3. Operations / deployment / hygiene gaps (not blockers, but must be cleared before going live)
 
-| # | 事项 | 现状(2026-10-04 实测) |
+| # | Item | Current state (measured 2026-10-04) |
 |---|---|---|
-| O1 | VPS 二进制落后 28 天 | 停在 09-06 构建, **缺 `c37364b` 及 09-06 10:05 之后全部提交**; 引擎 inactive+disabled, 恢复需 sudo |
-| O2 | 上线配置未裁剪 | VPS 配置 4 品种 17 个 enabled 实例; 名义预算 12000/6500 按旧网格峰值标定 → 须裁到 BTC 单品种 + 按试点资金重定 |
-| O3 | 密钥/权限卫生 | 两处 `.env` 均 664(others 可读, 含 OPENAI_API_KEY); key 权限/白名单从未现场核验; 控制口 127.0.0.1:8081 **零鉴权**(本机任意进程可下单) |
-| O4 | 数据无灾备 | trades.db VPS 971MB / 本机 487MB, 无备份/归档/quick_check; signals/ticker_ticks 无保留策略 |
-| O5 | 双引擎无 leader | 本机与 VPS 各持主网 key; sync 导入交易所全部 futures 持仓无过滤 → 两引擎同跑会互写"外部平仓"污染账本 |
-| O6 | 运行期状态不落盘 | halt/peak/日亏/auto_trade/active_market 全为内存态; set_strategy_param 改参与 ParamChangeLog 均为内存 → 重启静默回退 |
-| O7 | 对账盲区 | 期货**部分减仓不可见**(`PositionManager.cpp:70-92` 只下修 _sync 不下修 fill-tracked)→ 引擎敞口高估、幻影仓位占预算; 外部平仓 PnL 用最后 mark 估价且 fees=0 |
-| O8 | 风控前置校验未接实盘 | 杠杆/保证金校验(`RiskManager.cpp:97-140`)仅被单测调用, leverage 直传交易所; 强平距离只存不判(`risk_types.hpp:100`); 资金费不进 PnL/风控 |
-| O9 | 参数口径错位 | 参数边界表按"基础币"标定 vs 合约张数口径; per-strategy stop_loss_pct/take_profit_pct 无执行消费者(操作者/AI 以为已设止损, 实际无行为) |
-| O10 | 主循环阻塞面 | 单线程 + 全局 rest_mutex(下单/持仓同步/心跳/网格共用), REST 超时 10s×3 重试 → 最坏锁内阻塞 ~40s |
-| O11 | 聚合器残差锁死 | 加权和只在发射后清零、无时间衰减 → 混合流下反向残差可长期"闸死"共识发射, 且无"零共识时长"健康指标(`docs/ab-weight-trial.md` §2 自述) |
-| O12 | trades 表脏数据 | 存在量级不可能记录(如 BTC 一笔 pnl=+44,920, 为物理上限 ~28 倍)待审计 |
-| — | 升级链 | deploy 脚本以 `kill -9` 触发自愈升级, 按"零仓信号模式"设计; 带仓升级/回滚/演练流程缺失; root unit 与 runbook 不在仓库 |
+| O1 | VPS binary is 28 days stale | Stuck at the 09-06 build, **missing `c37364b` and every commit after 09-06 10:05**; the engine is inactive+disabled, and recovery needs sudo |
+| O2 | Go-live config has not been trimmed | The VPS config has 4 symbols and 17 enabled instances; the notional budgets 12000/6500 were calibrated against the old grid peaks → trim to BTC only + re-scale to the pilot capital |
+| O3 | Secret / permission hygiene | Both `.env` files are 664 (world-readable, and contain OPENAI_API_KEY); the key permissions / IP whitelists were never verified on site; the control port 127.0.0.1:8081 has **zero authentication** (any local process can place orders) |
+| O4 | No disaster recovery for data | trades.db is 971MB on the VPS / 487MB locally, with no backup / archive / quick_check; signals and ticker_ticks have no retention policy |
+| O5 | Two engines with no leader | The local machine and the VPS each hold mainnet keys; sync imports every futures position from the exchange with no filter → if both engines run, they write "external close" records into each other's ledger and corrupt it |
+| O6 | Runtime state is not persisted | halt / peak / daily loss / auto_trade / active_market are all in-memory; set_strategy_param changes and ParamChangeLog are also in-memory → a restart silently reverts them |
+| O7 | Reconciliation blind spots | A **partial reduction of a futures position is invisible** (`PositionManager.cpp:70-92` lowers only _sync, not the fill-tracked quantity) → the engine overstates exposure and phantom positions consume budget; external closes are valued at the last mark price with fees=0 |
+| O8 | Pre-trade risk checks are not wired to live trading | The leverage / margin checks (`RiskManager.cpp:97-140`) are only called from unit tests, and leverage is passed straight to the exchange; liquidation distance is stored but never evaluated (`risk_types.hpp:100`); funding fees never enter PnL or risk control |
+| O9 | Parameter units are mismatched | The parameter boundary table is calibrated in "base currency" while contracts are counted in number of contracts; the per-strategy stop_loss_pct/take_profit_pct have no consumer on the execution side (the operator and the AI believe a stop-loss is set, while nothing actually happens) |
+| O10 | Main-loop blocking surface | Single-threaded with a global rest_mutex (shared by order placement / position sync / heartbeat / grid), and REST timeouts of 10s × 3 retries → worst case ~40s blocked while holding the lock |
+| O11 | Aggregator residual lock-up | The weighted sum is only cleared after an emission and never decays with time → under mixed flows an opposite residual can keep the consensus emission "gated shut" for a long time, and there is no "time-since-last-consensus" health metric (`docs/ab-weight-trial.md` §2 says so itself) |
+| O12 | Dirty data in the trades table | Records of impossible magnitude exist (e.g. a single BTC trade with pnl=+44,920, about 28× the physical upper bound) pending audit |
+| — | Upgrade chain | The deploy script triggers a self-healing upgrade with `kill -9`, designed for "zero-position signal mode"; there is no procedure for upgrading with open positions / rollback / drills; the root unit and runbook are not in the repository |
 
-**一条纠正**: 初稿曾称"VPS 的 AI 心跳在按伪绩效调参" —— 被对抗验证**证伪**: 实际变量名是
-`OPENAI_API_KEY` 且 `[ai].apiKey=from_env:AI_API_KEY` 解析为空, engine.out 从 09-04 起每次启动都打
-`AI pipeline disabled (no API key or interval=0)` —— **AI 从未通电**。归因断链属实, 但影响限于统计/审计。
+**One correction**: the first draft claimed "the VPS AI heartbeat is tuning parameters on fake performance" — adversarial verification **refuted** this: the actual variable name is
+`OPENAI_API_KEY` while `[ai].apiKey=from_env:AI_API_KEY` resolves to empty, and engine.out has printed
+`AI pipeline disabled (no API key or interval=0)` on every start since 09-04 — **the AI was never powered on**. The broken attribution chain is real, but its impact is limited to statistics / auditing.
 
-## 四、策略边际: 真正的深水区("值不值得"由它决定)
+## 4. Strategy edge: the real deep water (this is what decides "is it worth it")
 
-- **0/6 个在跑 BTC 策略有含费回测工件**; `results/` 只有 iron_* 产物
-- 唯一全周期检验过的 IronTrader 已证伪并保持 disabled:
-  - 480 组合 sweep: futures 240/240 全负、spot 240/240 全负
-  - 15m topcombo 3 周 +12.93, 其中 **79% 来自单笔**(largest_win 10.18)→ 拉长 3 个月 **−15.22**
-  - 1h tuned 3 月 +21.28 = 8 笔交易、top1 单笔 +27.28(>100% 净利), 不可信
-  - 5m 最差(3 周 −20.06): 止损变宽 + 费双杀
-- **回测引擎不可认证"真钱生存力"**: 无资金费/保证金/强平/滑点, 成交 = 信号 K 收盘价即时
-  (`docs/backtest.md:66-71` 自述边界); 且语义与实盘不一致(回测同向忽略+flip vs 实盘叠仓;
-  实盘 `closed` 恒 true)→ **即便跑出好数字也不能外推**, 须先保真升级
-- **存活候选只剩两个, 且都不够格**:
-  1. **资金费率收割**: 7 年币安全史数据方向真实(独立复算 sign/0.5bp 模型 7 年 +68%/+56%,
-     与记录 +61% 同量级; 5bp 事件闸仅 +24.8%; 费用 0.02%→0.04% 使 +68%→+48%; 2026 已约一年无窗口),
-     但仓库口径三处不一、无复现脚本、**执行要件全缺**(FundingWatch 纯观察未部署; 无双腿配对执行、
-     无现货↔合约划转、无空腿保证金/强平监控; 证据来自 Binance 而执行在 Gate)
-  2. **网格**: 唯一有实盘 PnL 的自动策略, 但证据薄且为负(ETH v1 实盘 ≈ −33.6 USD; SNDK 全程 1 次成交);
-     M27 引擎化版已实现却零含费统计
-- **AI 调权**: 试点从未开跑(`docs/ab-weight-trial.md` §7 一票未投), 且归因断链污染输入 —— 归因修复前
-  开 AI 心跳是负资产
-- 工程 vs 研究: **工程缺口 100% 是"确定性修复"(周级); "能否赚钱"100% 由研究决定,
-  最快也要周-月级日历时间, 且最坏结论是 NO-GO**
+- **0 of the 6 running BTC strategies has a fee-inclusive backtest artifact**; `results/` contains only iron_* outputs
+- IronTrader, the only strategy ever tested over a full cycle, has been falsified and stays disabled:
+  - 480-combination sweep: futures 240/240 all negative, spot 240/240 all negative
+  - 15m top combo over 3 weeks +12.93, of which **79% came from a single trade** (largest_win 10.18) → extended to 3 months **−15.22**
+  - 1h tuned over 3 months +21.28 = 8 trades, with the top single trade +27.28 (>100% of net profit), not credible
+  - 5m was the worst (3 weeks −20.06): wider stops plus double fees
+- **The backtest engine cannot certify "survivability with real money"**: no funding fees / margin / liquidation / slippage, and fills happen instantly at the signal candle's close
+  (`docs/backtest.md:66-71` states these limits); its semantics also diverge from live trading (the backtest ignores same-direction entries and flips, live stacks positions;
+  live `closed` is always true) → **even a good number cannot be extrapolated**, fidelity must be upgraded first
+- **Only two survivable candidates remain, and neither qualifies**:
+  1. **Funding-rate harvesting**: the direction is real on 7 years of Binance full-history data (an independent recomputation of the sign model at 0.5bp gives +68%/+56% over 7 years,
+     the same order of magnitude as the recorded +61%; a 5bp event gate yields only +24.8%; raising fees from 0.02% to 0.04% turns +68% into +48%; 2026 has gone roughly a year without a window),
+     but the repository states three inconsistent versions of the methodology, there is no reproduction script, and **every execution prerequisite is missing** (FundingWatch is observation-only and undeployed; there is no paired two-leg execution,
+     no spot↔futures transfer, no margin/liquidation monitoring for the short leg; the evidence comes from Binance while execution happens on Gate)
+  2. **Grid**: the only automated strategy with live PnL, but the evidence is thin and negative (ETH v1 live ≈ −33.6 USD; SNDK had exactly one fill the whole time);
+     the M27 engine-native version is implemented but has zero fee-inclusive statistics
+- **AI weight tuning**: the pilot never started (`docs/ab-weight-trial.md` §7: not a single vote was ever cast), and the broken attribution chain pollutes its input — starting the AI heartbeat
+  before attribution is fixed is a net negative
+- Engineering vs research: **100% of the engineering gaps are "deterministic fixes" (week-level); "can it make money" is 100% decided by research,
+  which needs weeks-to-months of calendar time at the fastest, and the worst-case conclusion is NO-GO**
 
-## 五、无人盯盘时最可能的结局
+## 5. The most likely outcome when nobody is watching
 
-持仓裸奔(B1)→ 亏损静默累积(B2 熔断不存在、强平距离无监控)→ **强平是唯一兜底**, 事前事后都无告警(B3)。
-重启时 halt/日亏状态清零(**fail-open**: 熔断被复位后自动恢复交易), 或 signal_only 下静默停摆
-(**fail-silent**)—— 两个方向都是无声的。另: 手动 App 平仓习惯会叠加对账盲区(O7), 引擎敞口被高估、
-幻影仓位占用预算, 后续"平仓"可能反手开新仓。
+A naked position (B1) → losses accumulate silently (B2: no circuit breaker exists, and liquidation distance is not monitored) → **liquidation is the only backstop**, with no alert before or after (B3).
+On restart the halt / daily-loss state is reset (**fail-open**: trading resumes automatically once the breaker has been cleared), or under signal_only the engine silently idles
+(**fail-silent**) — both directions are silent. Also: the habit of closing positions manually in the App compounds the reconciliation blind spots (O7): engine exposure is overstated,
+phantom positions consume budget, and a subsequent "close" may actually open a new position in the opposite direction.
 
-## 六、建议路径(按依赖排序)
+## 6. Recommended path (ordered by dependency)
 
-### Phase 0 —— 今天, 零代码、零风险(30 分钟)
+### Phase 0 — today, no code, no risk (30 minutes)
 
-1. 上 Gate App/网页核对主网**余额/持仓/挂单** —— 若 09-27 停机时留有裸仓, 先人工了结
-   (无兜底 SL, 这是当前第一风险)
-2. 两处 `.env` → `chmod 600`; 核 key 权限(无关提现、配 IP 白名单, 必要时重建)
-3. VPS 保持 inactive+disabled, 直到演练通过
+1. Check the mainnet **balance / positions / open orders** in the Gate App or web UI — if a naked position was left when trading stopped on 09-27, close it manually first
+   (there is no backstop SL; this is the number-one risk today)
+2. `chmod 600` both `.env` files; verify the key permissions (withdrawal disabled, IP whitelist set, re-create the keys if necessary)
+3. Keep the VPS inactive+disabled until the drills pass
 
-### Phase 1 —— 修 8 个 blocker(约 1–2 周)
+### Phase 1 — fix the 8 blockers (about 1–2 weeks)
 
-先摘低垂果实: B2 熔断接线(hours)、B7 幂等(hours); 再按天排 B1 止损双轨、B4 kill switch、
-B5 私有 WS、B6 staleness/closed、B8 归因、B3 告警/看门狗。同时: 上线配置裁到 BTC 单品种、
-per-instance auto_trade 持久化种子。
+Pick the low-hanging fruit first: B2 breaker wiring (hours), B7 idempotency (hours); then schedule the day-sized items: B1 dual-track stop-loss, B4 kill switch,
+B5 private WS, B6 staleness/closed, B8 attribution, B3 alerting/watchdog. In parallel: trim the go-live config to BTC only, and persist a per-instance auto_trade seed.
 
-### Phase 2 —— 部署 + 演练(约 1 周)
+### Phase 2 — deploy + drills (about 1 week)
 
-重建 bundle(`c37364b` + 全部修复)→ 部署(仍 signal_only)→ **先落 logrotate 再长跑**(32 天写满的
-倒计时是真的)→ systemd 看门狗 + 一条告警通道 → 三场演练: 断线重连(4 品种 + 私有回报)、
-`kill -9` 崩溃恢复(halt 保持 / 孤儿挂单清扫 / 状态恢复)、告警逐事件注入。
-**端到端演练(testnet 或主网 1 张最小单跑通"信号→下单→回报→对账")作为 go-live 闸门。**
+Rebuild the bundle (`c37364b` + all fixes) → deploy (still signal_only) → **set up logrotate before the long run** (the 32-day countdown to a full disk
+is real) → systemd watchdog + one alert channel → three drills: reconnect (4 symbols + private fill reports),
+`kill -9` crash recovery (halt preserved / orphan orders swept / state restored), and per-event alert injection.
+**An end-to-end drill (one minimum-size order on testnet or mainnet driving "signal→order→fill report→reconciliation") is the go-live gate.**
 
-### Phase 3 —— 验证(2–4 周, 双轨并行)
+### Phase 3 — validation (2–4 weeks, two tracks in parallel)
 
-- **工程轨**: signal_only 纸面运行积累 → 单策略微资金 1–2 周(验收: 告警零漏报、零孤儿单、
-  归因正确、止损/熔断实测触发)→ 再谈放大
-- **研究轨**: 6 个 kline 策略含费样本外回测(门槛先写死: OOS 净为正 + 单笔盈利 <15% 净利 +
-  参数高原稳定)→ 回测保真升级(funding/保证金/滑点/closed 语义)→ 纸面 ≥300 回合冻结契约裁决
-- **平行轨**: 资金费率收割先落复现脚本、paper 捕获真实窗口, 再谈双腿 executor
+- **Engineering track**: accumulate paper running under signal_only → 1–2 weeks of one strategy with minimal capital (acceptance: zero missed alerts, zero orphan orders,
+  correct attribution, stop-loss / circuit breaker actually observed firing) → only then discuss scaling up
+- **Research track**: fee-inclusive out-of-sample backtests of the 6 kline strategies (thresholds fixed up front: net OOS positive + largest single win < 15% of net profit +
+  a stable parameter plateau) → backtest fidelity upgrade (funding / margin / slippage / closed semantics) → paper run of ≥300 rounds, then freeze the contract and adjudicate
+- **Parallel track**: for funding-rate harvesting, first land a reproduction script and paper-capture real windows, then discuss the two-leg executor
 
-**红线: 研究侧 GO 之前保持 `signal_only=true`。"能跑"与"有边际"是两个独立门槛, 禁止互相掩盖。**
+**Red line: keep `signal_only=true` until the research side says GO. "It runs" and "it has an edge" are two independent gates; neither may mask the other.**
 
-## 附录: 验证记录(对抗性检查摘录)
+## Appendix: verification record (excerpts from the adversarial review)
 
-- **safety 维度 19/19 条全部 confirmed**, 0 反驳
-- **eng-ops 17 confirmed / 1 refuted**(AI_API_KEY 条, 见上文纠正)
-- **edge 11 confirmed / 1 uncertain**("工程 60% / 研究 40%"的工作量占比属主观估计, 未纳入结论;
-  "工程侧所有缺口都有确定修法"在其他维度复核后成立)
-- 验证者补充的重要遗漏(已并入上文): 自动 CFD 入场同样无止损; 运行期调参不落盘; 聚合器残差锁死;
-  trades.db 无灾备; 双引擎无 leader; 控制面零鉴权; 主循环 rest_mutex 阻塞面; 组合相关性共享预算;
-  磁盘 32 天期限; 本地 1m 库实为 ~80% 覆盖(含整段空洞), 不可称"全量"
+- **All 19/19 safety-dimension claims confirmed**, 0 refuted
+- **eng-ops: 17 confirmed / 1 refuted** (the AI_API_KEY claim; see the correction above)
+- **edge: 11 confirmed / 1 uncertain** (the "60% engineering / 40% research" effort split is a subjective estimate and was not included in the conclusions;
+  "every engineering gap has a deterministic fix" holds after cross-checking the other dimensions)
+- Important omissions added by the verifiers (already merged above): automatic CFD entries also have no stop-loss; runtime parameter changes are not persisted; the aggregator residual locks up;
+  trades.db has no disaster recovery; two engines have no leader; the control plane has zero authentication; the main loop's rest_mutex blocking surface; portfolio correlation shares one budget;
+  the 32-day disk deadline; the local 1m database is actually ~80% coverage (including whole gaps) and cannot be called "full history"

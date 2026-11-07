@@ -1,34 +1,44 @@
 #!/usr/bin/env python3
-"""paper_engine.py — A/B 权重纸面实验核心(纯逻辑,无 DB 依赖)
+"""paper_engine.py — core of the A/B weight paper-trading experiment (pure logic, no DB dependency)
 
-镜像 pulseTrader 引擎语义,用于在信号日志上离线重放任意权重策略:
+Mirrors pulseTrader engine semantics so that any weighting strategy can be replayed
+offline over a signal log:
 
-  1. AggregatorReplica — SignalAggregator.cpp 逐行复刻:
-     - Flat 信号不参与累积
-     - 每 symbol 累积 buy/sell 加权置信度与 weight_sum
-     - normalized = dominant/weight_sum < threshold → 不发射
-     - 距上次发射 < cooldown → 不发射(C++ 顺序:先 threshold 后
-       cooldown;被闸时累积不清零、继续增长)
-     - 发射后清零并记 last_signal;时钟 = 信号流时间(重放时钟)
-     - 未注册策略权重 = 1.0(C++ getWeight 缺省)
+  1. AggregatorReplica — a line-by-line replica of SignalAggregator.cpp:
+     - Flat signals never contribute to accumulation
+     - Per symbol, accumulate the weighted buy/sell confidence and weight_sum
+     - normalized = dominant/weight_sum < threshold → do not emit
+     - less than cooldown since the last emission → do not emit (C++ order:
+       threshold first, then cooldown; while gated the accumulation is not reset
+       and keeps growing)
+     - after emitting, reset to zero and record last_signal; clock = signal-stream
+       time (replay clock)
+     - unregistered strategy weight = 1.0 (C++ getWeight default)
 
-  2. PaperTrader — symbol 级单仓位纸面成交状态机:
-     phase: None → maker(挂单等触价)→ active(持仓监控)→ None
-     - 入场 maker-first:限价 P=共识价挂着;tape 回触(买:last ≤ P;
-       卖:last ≥ P)即 maker 成交;超 maker_timeout_s 未触 → taker
-       市价按当时 last 兜底(引擎 M16 maker-first 语义)
-     - maker 挂单期遇反向共识 → 撤单弃单(无成交不记账)
-     - active 期逐 tick 镜像 StopLossEngine/TakeProfitEngine:
-       * TP 阶梯:last 达 targets_pct[i] → 平 fractions[i]×原始量(taker)
-       * Trailing SL:best 跟踪;买:last ≤ best×(1−trailing_pct) →
-         平剩余(taker)
-       * max_hold_s 超时 → 平剩余(taker)
-       * 反向共识 → 平剩余(taker);该信号不再反向开新仓
-     - 同向共识在持仓/挂单期忽略(单仓位,不 scale-in)
-     - 费用:maker 腿 maker_fee、其余 taker_fee;入场费按平仓量比例
-       分摊到各 RoundTrip(阶梯每腿 + 剩余清仓)
+  2. PaperTrader — symbol-level single-position paper fill state machine:
+     phase: None → maker (order resting until the price is touched) → active
+     (position under monitoring) → None
+     - maker-first entry: a limit order rests at P = consensus price; a tape
+       revisit (buy: last ≤ P; sell: last ≥ P) fills it as maker; if it is not
+       touched within maker_timeout_s → taker market fallback at the then-current
+       last (engine M16 maker-first semantics)
+     - an opposing consensus while the maker order rests → cancel and discard the
+       order (nothing is booked without a fill)
+     - during active, mirror StopLossEngine/TakeProfitEngine tick by tick:
+       * TP ladder: last reaches targets_pct[i] → close fractions[i]×original
+         quantity (taker)
+       * Trailing SL: best is tracked; buy: last ≤ best×(1−trailing_pct) →
+         close the remainder (taker)
+       * max_hold_s exceeded → close the remainder (taker)
+       * opposing consensus → close the remainder (taker); that signal does not
+         open a new position in the opposite direction
+     - a same-direction consensus is ignored while a position or order is open
+       (single position, no scale-in)
+     - fees: the maker leg pays maker_fee, every other leg pays taker_fee; the
+       entry fee is apportioned across the RoundTrips by closed quantity (each
+       ladder leg plus the final remainder close)
 
-时间戳统一 ns(与 signals.ts_ns 一致);tick 输入 (ts_ms, last)。
+Timestamps are uniformly ns (consistent with signals.ts_ns); tick input is (ts_ms, last).
 """
 
 from __future__ import annotations
@@ -38,7 +48,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
-# 信号与聚合器复刻
+# Signals and the aggregator replica
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -55,17 +65,18 @@ class Signal:
 
 @dataclass
 class Consensus:
-    """聚合器发射的共识信号(镜像 TradingSignal)。"""
+    """Consensus signal emitted by the aggregator (mirrors TradingSignal)."""
     symbol: str
-    type: str                 # "buy" / "sell"(永不 flat)
+    type: str                 # "buy" / "sell" (never flat)
     confidence: float
     price: float
     ts_ns: int
 
 
 class AggregatorReplica:
-    """SignalAggregator.cpp 纯函数复刻。按 symbol 分状态;add 返回
-    发射的 Consensus(至多一条)或 None。重放时钟 = 信号自身时间。"""
+    """Pure-function replica of SignalAggregator.cpp. State is kept per symbol;
+    add returns the emitted Consensus (at most one) or None. The replay clock is
+    the signal's own timestamp."""
 
     def __init__(self, threshold: float, cooldown_s: float,
                  weights: Dict[str, float]):
@@ -101,18 +112,20 @@ class AggregatorReplica:
         ws = self._weight_sum.get(sym, 0.0)
         normalized = dominant if ws <= 0.0 else dominant / ws
 
-        # 1. threshold 闸门(与 C++ 顺序一致)
+        # 1. threshold gate (same order as the C++ code)
         if normalized < self.threshold:
             return None
-        # 2. cooldown 闸门 — 被闸时累积不清零,继续增长(C++ 语义)。
-        #    缺省 last_emit=None 表示从未发射(重放时钟可能从 0 起,
-        #    不能用 0 作哨兵 — C++ 用墙钟 nowMs() 所以无此问题)。
+        # 2. cooldown gate — while gated the accumulation is not reset and keeps
+        #    growing (C++ semantics). A missing last_emit=None means it has never
+        #    emitted (the replay clock may start at 0, so 0 cannot be used as the
+        #    sentinel — the C++ code uses the wall clock nowMs(), so it has no
+        #    such issue).
         last_emit = self._last_emit_ns.get(sym)
         if last_emit is not None \
                 and now_ns - last_emit < self.cooldown_ns:
             return None
 
-        # 3. 发射 + 清零
+        # 3. Emit and reset
         self._buy_sum[sym] = 0.0
         self._sell_sum[sym] = 0.0
         self._weight_sum[sym] = 0.0
@@ -128,21 +141,21 @@ class AggregatorReplica:
 
 
 # ---------------------------------------------------------------------------
-# 纸面账本
+# Paper ledger
 # ---------------------------------------------------------------------------
 
 @dataclass
 class RoundTrip:
     entry_ts_ns: int
     exit_ts_ns: int
-    direction: str              # "buy"(long) / "sell"(short)
+    direction: str              # "buy" (long) / "sell" (short)
     entry_px: float
     entry_leg: str              # "maker" / "taker"
     exit_px: float
     exit_reason: str            # "tp_ladder" / "trailing_sl" / "max_hold" / "flip"
     qty: float
     gross_pnl: float
-    fees: float                 # 入场费分摊 + 出场费
+    fees: float                 # apportioned entry fee + exit fee
     net_pnl: float
     notional: float
     conf_at_entry: float
@@ -150,7 +163,7 @@ class RoundTrip:
 
 
 class PaperTrader:
-    """symbol 级纸面成交状态机。事件接口:on_consensus / on_tick。"""
+    """Symbol-level paper fill state machine. Event interface: on_consensus / on_tick."""
 
     def __init__(self, symbol: str,
                  maker_fee: float, taker_fee: float,
@@ -175,7 +188,7 @@ class PaperTrader:
         # position state (phase: None | "maker" | "active")
         self._phase: Optional[str] = None
         self._dir: Optional[str] = None
-        self._qty: float = 0.0           # 剩余数量
+        self._qty: float = 0.0           # remaining quantity
         self._orig_qty: float = 0.0
         self._entry_ts: int = 0
         self._entry_px: float = 0.0
@@ -205,7 +218,8 @@ class PaperTrader:
             self._conf = c.confidence
             self._maker_deadline_ns = c.ts_ns + self.maker_timeout_ns
         elif self._phase == "maker":
-            # 挂单期反向共识 → 撤单弃单(未成交不记账)
+            # Opposing consensus while the order rests → cancel and discard it
+            # (nothing is booked without a fill)
             if c.type != self._dir:
                 self._clear_position()
         else:  # active
@@ -213,7 +227,7 @@ class PaperTrader:
                 self._book_close(c.price, "flip", c.ts_ns)
 
     def on_tick(self, ts_ms: int, last: float):
-        """逐 tick 评估:maker 触价、taker 兜底、TP 阶梯、trailing、max_hold。"""
+        """Evaluate tick by tick: maker touch, taker fallback, TP ladder, trailing, max_hold."""
         ts_ns = ts_ms * 1_000_000
         if self._phase == "maker":
             if self._dir == "buy" and last <= self._entry_px:
@@ -221,7 +235,7 @@ class PaperTrader:
             elif self._dir == "sell" and last >= self._entry_px:
                 self._establish(ts_ns, self._entry_px, "maker")
             elif ts_ns >= self._maker_deadline_ns:
-                # 超时 → taker 市价兜底(引擎 M16:超时后市价补单)
+                # Timeout → taker market fallback (engine M16: market fill after the timeout)
                 self._establish(ts_ns, last, "taker")
         elif self._phase == "active":
             self._evaluate_exits(ts_ns, last)
@@ -229,7 +243,7 @@ class PaperTrader:
     # ---- internal ---------------------------------------------------------
 
     def _establish(self, ts_ns: int, fill_px: float, leg: str):
-        """挂单成交/兜底 → active。入场价锚定实际成交价。"""
+        """Order filled or fallback executed → active. The entry price anchors to the actual fill price."""
         self._entry_px = fill_px
         self._best_px = fill_px
         self._entry_leg = leg
@@ -248,7 +262,7 @@ class PaperTrader:
         if self._dir == "buy":
             if last > self._best_px:
                 self._best_px = last
-            # TP 阶梯(按目标价递增逐级触发)
+            # TP ladder (each level triggers as its target price is reached, in ascending order)
             while (self._next_tp < len(self.tp_targets)
                    and self._qty > 0):
                 target_px = self._entry_px * (1.0 + self.tp_targets[self._next_tp])
@@ -288,7 +302,7 @@ class PaperTrader:
                 self._book_close(last, "max_hold", ts_ns)
 
     def _book_leg(self, qty: float, px: float, reason: str, ts_ns: int):
-        """记一条平仓腿(阶梯或最终清仓共用),按 qty 比例分摊入场费。"""
+        """Book one closing leg (shared by the ladder and the final close) and apportion the entry fee by qty."""
         if qty <= 0:
             return
         exit_fee = qty * px * self.taker_fee
@@ -306,8 +320,9 @@ class PaperTrader:
             held_ms=(ts_ns - self._entry_ts) // 1_000_000,
         ))
         self._qty -= qty
-        # 阶梯份额总和 = 1.0 时最后一腿平完即清仓;1/3×3 浮点残差
-        # ~1e-9 相对量级,用相对 epsilon 判定
+        # When the ladder fractions sum to 1.0 the final leg flattens the position;
+        # the 1/3×3 floating-point residue is ~1e-9 in relative terms, so compare
+        # against a relative epsilon.
         if self._qty <= 1e-9 * self._orig_qty:
             self._qty = 0.0
             self._clear_position()

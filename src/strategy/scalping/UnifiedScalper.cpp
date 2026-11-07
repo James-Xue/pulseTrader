@@ -82,7 +82,7 @@ void UnifiedScalper::onKline(const market::Kline & /*kline*/)
         return;
     }
 
-    // 4.5 News gate (重大消息事件闸): entry signals inside a configured
+    // 4.5 News gate (major-news event gate): entry signals inside a configured
     //     blackout are dropped here; Flat (the close-only/exit channel)
     //     always passes so gate flattening and exits flow. Note this drop
     //     happens AFTER the state commit — subclasses that own a position

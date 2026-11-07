@@ -1247,7 +1247,7 @@ level = "info"
 }
 
 // ---------------------------------------------------------------------------
-// news_windows (重大消息事件闸)
+// news_windows (major-news event gate)
 // ---------------------------------------------------------------------------
 
 TEST(ConfigLoader, ParseStrategyInstance_NewsWindows)

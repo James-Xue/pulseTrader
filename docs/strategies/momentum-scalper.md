@@ -1,68 +1,68 @@
-# MomentumScalper — EMA 交叉动量策略
+# MomentumScalper — EMA crossover momentum strategy
 
-> 经典的双均线交叉趋势跟踪策略，通过快慢 EMA 的相对位置判断趋势方向。
+> A classic dual moving-average crossover trend-following strategy that determines the trend direction from the relative position of a fast and a slow EMA.
 
-## 核心原理
+## Core Principle
 
-### 指标定义
+### Indicator definition
 
-**EMA (Exponential Moving Average)** 是加权移动平均线，近期价格权重更大：
+**EMA (Exponential Moving Average)** is a weighted moving average that gives more weight to recent prices:
 
 ```
 EMA = price × k + prev_ema × (1 - k)
 k = 2 / (period + 1)
 ```
 
-- **Fast EMA**（默认 9 周期）：对价格变化更敏感
-- **Slow EMA**（默认 21 周期）：对价格变化更平滑
+- **Fast EMA** (9 periods by default): more sensitive to price changes
+- **Slow EMA** (21 periods by default): smoother with respect to price changes
 
-### 信号逻辑
+### Signal logic
 
-| 事件 | 条件 | 信号 |
+| Event | Condition | Signal |
 |------|------|------|
-| 金叉（Bullish Crossover） | Fast EMA 从下穿上 Slow EMA | Buy |
-| 死叉（Bearish Crossover） | Fast EMA 从上穿下 Slow EMA | Sell |
+| Bullish crossover | Fast EMA crosses above the slow EMA | Buy |
+| Bearish crossover | Fast EMA crosses below the slow EMA | Sell |
 
-### 置信度计算
+### Confidence calculation
 
 ```
 confidence = clamp(|fast_ema - slow_ema| / slow_ema, 0.0, 1.0)
 ```
 
-- 两条 EMA 距离越远，说明趋势越强
-- 置信度高表示趋势明确，低表示趋势不明
+- The further apart the two EMAs are, the stronger the trend
+- High confidence means a clear trend; low confidence means an unclear one
 
 ---
 
-## 实现细节
+## Implementation Details
 
-### 数据需求
+### Data requirements
 
-- **数据源**：K 线收盘价（`onKline()` 回调）
-- **最少 K 线数**：`ema_slow_period + 1`（默认 22 根）
-- **轮询间隔**：200ms（在 `trading.toml` 中配置）
+- **Data source**: kline close price (`onKline()` callback)
+- **Minimum kline count**: `ema_slow_period + 1` (22 bars by default)
+- **Polling interval**: 200ms (configured in `trading.toml`)
 
-### 预热机制
+### Warm-up mechanism
 
-首次启动时需要积累足够的 K 线数据：
+On first startup, enough kline data must be accumulated:
 
 ```
 if (candles.size() < slow_period) {
-    // 每 30 秒打印一次预热进度
+    // Print warm-up progress once every 30 seconds
     PULSE_LOG_INFO("Warming up: {}/{} candles accumulated", 
         candles.size(), slow_period);
     return;
 }
 ```
 
-预热时间取决于 K 线周期：
-- 1 分钟 K 线：需要 ~21 分钟
-- 5 分钟 K 线：需要 ~105 分钟
+Warm-up time depends on the kline period:
+- 1-minute klines: ~21 minutes
+- 5-minute klines: ~105 minutes
 
-### EMA 计算
+### EMA calculation
 
-1. **首次计算**：用前 `period` 根 K 线的 SMA 作为种子值
-2. **后续计算**：用递推公式更新
+1. **First calculation**: use the SMA of the first `period` klines as the seed value
+2. **Subsequent calculations**: update with the recurrence formula
 
 ```cpp
 // SMA seed
@@ -73,9 +73,9 @@ for each new close:
     ema = close * k + ema * (1 - k);
 ```
 
-### 交叉检测
+### Crossover detection
 
-需要保存上一轮的 EMA 值：
+The previous EMA values must be retained:
 
 ```cpp
 bool bullish_cross = (prev_fast <= prev_slow) && (curr_fast > curr_slow);
@@ -84,17 +84,17 @@ bool bearish_cross = (prev_fast >= prev_slow) && (curr_fast < curr_slow);
 
 ---
 
-## 参数配置
+## Parameter Configuration
 
-### 策略参数（StrategyParams）
+### Strategy parameters (StrategyParams)
 
-| 参数 | 类型 | 默认值 | 说明 |
+| Parameter | Type | Default | Description |
 |------|------|--------|------|
-| `ema_fast_period` | int | 9 | 快线周期 |
-| `ema_slow_period` | int | 21 | 慢线周期 |
-| `cooldown_seconds` | double | 30.0 | 信号冷却时间 |
+| `ema_fast_period` | int | 9 | Fast line period |
+| `ema_slow_period` | int | 21 | Slow line period |
+| `cooldown_seconds` | double | 30.0 | Signal cooldown time |
 
-### trading.toml 示例
+### trading.toml example
 
 ```toml
 [[strategy.instances]]
@@ -111,110 +111,110 @@ poll_interval_ms = 200
 
 ---
 
-## 优缺点分析
+## Pros and Cons Analysis
 
-### 优点
+### Pros
 
-1. **逻辑清晰**：交叉点是明确的趋势转折信号
-2. **抗噪声**：EMA 本身有平滑效果，不会被单根异常 K 线干扰
-3. **趋势捕捉能力强**：一旦趋势形成，会持续跟随直到反转
-4. **参数简单**：只有 2 个周期参数，容易理解和调优
+1. **Clear logic**: a crossover is an unambiguous trend-turning signal
+2. **Noise resistant**: the EMA itself is smooth, so a single abnormal kline does not disturb it
+3. **Strong trend capture**: once a trend forms, it keeps following it until the reversal
+4. **Simple parameters**: only 2 period parameters, easy to understand and tune
 
-### 缺点
+### Cons
 
-1. **滞后性**：EMA 是滞后指标，交叉发生时趋势已经走了一段
-   - 入场时可能已经错过最佳位置
-   - 出场时可能已经回吐部分利润
-2. **震荡市表现差**：横盘时频繁假交叉，导致"锯齿亏损"
-   - 解决方案：配合 ADX 等趋势强度指标过滤
-3. **信号频率低**：需要等待完整交叉，可能长时间无信号
-4. **无法捕捉急速反转**：V 型反转时交叉信号来得太晚
-
----
-
-## 适用场景
-
-### 最佳市场条件
-
-- **单边趋势市场**：BTC/ETH 日线级别的上涨或下跌趋势
-- **中低波动率**：避免极端波动导致的频繁假信号
-- **足够流动性**：确保 K 线数据连续，没有大量跳空
-
-### 不适合的市场
-
-- **横盘震荡**：EMA 反复交叉，产生大量假信号
-- **高波动率跳空**：跳空会导致 EMA 计算失真
-- **低流动性**：K 线数据不连续，信号质量下降
+1. **Lag**: EMA is a lagging indicator, so the trend has already moved by the time the crossover occurs
+   - The best entry point may already have passed when entering
+   - Part of the profit may already have been given back when exiting
+2. **Poor performance in ranging markets**: frequent false crossovers when sideways, causing "sawtooth losses"
+   - Remedy: filter with a trend-strength indicator such as ADX
+3. **Low signal frequency**: must wait for a complete crossover; there may be no signal for a long time
+4. **Cannot catch sharp reversals**: on a V-shaped reversal the crossover signal comes too late
 
 ---
 
-## 调优建议
+## Applicable Scenarios
 
-### 提高灵敏度（更多信号）
+### Best market conditions
+
+- **One-directional trending market**: daily-scale uptrends or downtrends in BTC/ETH
+- **Medium-low volatility**: avoids frequent false signals caused by extreme moves
+- **Sufficient liquidity**: ensures continuous kline data with no large gaps
+
+### Unsuitable markets
+
+- **Sideways range**: EMAs cross repeatedly, producing many false signals
+- **High-volatility gaps**: gaps distort the EMA calculation
+- **Low liquidity**: kline data is discontinuous and signal quality degrades
+
+---
+
+## Tuning Recommendations
+
+### Increase sensitivity (more signals)
 
 ```
-ema_fast_period = 5   # 缩短快线
-ema_slow_period = 13  # 缩短慢线
+ema_fast_period = 5   # shorten the fast line
+ema_slow_period = 13  # shorten the slow line
 ```
 
-- 信号更频繁
-- 入场更早但假信号更多
-- 适合短线交易
+- More frequent signals
+- Earlier entries but more false signals
+- Suited to short-term trading
 
-### 提高稳定性（更少信号）
+### Increase stability (fewer signals)
 
 ```
-ema_fast_period = 12  # 延长快线
-ema_slow_period = 26  # 延长慢线
+ema_fast_period = 12  # lengthen the fast line
+ema_slow_period = 26  # lengthen the slow line
 ```
 
-- 信号更少但更可靠
-- 滞后更明显
-- 适合中长线趋势
+- Fewer but more reliable signals
+- More noticeable lag
+- Suited to medium-to-long-term trends
 
-### 自适应参数
+### Adaptive parameters
 
-根据市场波动率动态调整：
+Adjust dynamically according to market volatility:
 
 ```cpp
-// 高波动率时拉长周期，低波动率时缩短
+// Lengthen the periods in high volatility, shorten them in low volatility
 int adjusted_fast = base_fast * (1 + volatility_factor);
 int adjusted_slow = base_slow * (1 + volatility_factor);
 ```
 
 ---
 
-## 与其他策略的配合
+## Combining with Other Strategies
 
-### 与 OrderBookScalper 配合
+### Combining with OrderBookScalper
 
-- MomentumScalper 判断大方向
-- OrderBookScalper 在趋势方向上寻找微观入场点
-- 效果：趋势确认后精确入场
+- MomentumScalper determines the overall direction
+- OrderBookScalper looks for micro entry points in the direction of the trend
+- Effect: precise entry after the trend is confirmed
 
-### 与 MeanReversionScalper 配合
+### Combining with MeanReversionScalper
 
-- 趋势市时 MomentumScalper 主导
-- 震荡市时 MeanReversionScalper 主导
-- 需要市场状态判断逻辑切换
+- In trending markets MomentumScalper leads
+- In ranging markets MeanReversionScalper leads
+- Requires market-state detection logic to switch between them
 
-### 与 SuperTrendScalper 配合
+### Combining with SuperTrendScalper
 
-- 两者都是趋势跟踪，可以交叉验证
-- SuperTrend 的 ATR 自适应特性可以补充 EMA 的固定周期
-- 同时发出信号时置信度更高
-
----
-
-## 源码位置
-
-- **头文件**：`src/strategy/scalping/MomentumScalper.hpp`
-- **实现文件**：`src/strategy/scalping/MomentumScalper.cpp`
-- **参数定义**：`src/strategy/StrategyParams.hpp`
+- Both are trend following, so they can cross-validate each other
+- SuperTrend's ATR adaptivity complements the EMA's fixed periods
+- Confidence is higher when they emit signals at the same time
 
 ---
 
-## 日志示例
+## Source Locations
+
+- **Header**: `src/strategy/scalping/MomentumScalper.hpp`
+- **Implementation**: `src/strategy/scalping/MomentumScalper.cpp`
+- **Parameter definitions**: `src/strategy/StrategyParams.hpp`
+
+---
+
+## Log Examples
 
 ```
 [INFO] [strategy] [momentum_scalper_ETH_USDT] EMA bullish crossover (fast > slow) signal: 

@@ -930,10 +930,10 @@ nlohmann::json EngineServices::switchDirection(const std::string &direction)
 
     // 1. Close the gate for the new direction (atomic — rejects everything else).
     m_orderFlow.setActiveMarket(target);
-    // 2. Strategies: pause the old direction ("策略停跑"), resume the new one.
+    // 2. Strategies: pause the old direction ("strategies stopped"), resume the new one.
     const int paused = m_strategyMgr.setPausedByMarket(old, true);
     const int resumed = m_strategyMgr.setPausedByMarket(target, false);
-    // 3. Cancel the old direction's open orders ("挂单全撤").
+    // 3. Cancel the old direction's open orders ("all resting orders cancelled").
     const int cancelled = m_orderFlow.cancelAllOpenOrders(old);
 
     auto s = status();

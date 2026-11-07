@@ -1,4 +1,4 @@
-// test_news_gate.cpp — Unit tests for the 重大消息事件闸 pure gate logic
+// test_news_gate.cpp — Unit tests for the major-news event gate pure gate logic
 // (NewsGate.hpp). Pins the boundary semantics locked in the docs
 // (docs/strategies/iron-trader.md §4.6):
 //   blackout(t)   = ∃w: (T−X) ≤ t < (T+Y)          → entries blocked

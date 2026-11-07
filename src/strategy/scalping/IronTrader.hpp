@@ -1,5 +1,5 @@
 #pragma once
-// iron_trader.hpp — IronTrader 铁律交易员 (Layer 6; rule baseline:
+// iron_trader.hpp — IronTrader, the iron-rule trader (Layer 6; rule baseline:
 // docs/strategies/iron-trader.md — the doc is the SINGLE source of truth,
 // this file mirrors it; any behavioural change starts in the doc).
 //
@@ -10,13 +10,13 @@
 // alone cannot express "exit without re-entering"):
 //   Flat ──(T-A pullback | T-B confirmed breakout, all gates green)──▶ Long/Short
 //   Long/Short ──(hard stop / structure flip / momentum flip / time stop /
-//                  news_blackout 事件闸强平)──▶ Flat
+//                  news_blackout event-gate force-flatten)──▶ Flat
 // Every exit emits a *Flat* signal — a close-only channel: BacktestAccount
 // closes without opening the opposite side; the signal board / aggregator
 // treat Flat as a status event as usual. Live OrderFlowExecutor semantics for
 // this strategy are future work (strategy runs signal-only today).
 //
-// 重大消息事件闸 (§4.6, NewsGate.hpp): preset UTC news windows
+// Major-news event gate (§4.6, NewsGate.hpp): preset UTC news windows
 // (StrategyInstanceConfig::news_windows) — entries are suppressed from T−X
 // to T+Y around each event, and a position opened before the event is
 // force-flattened (Flat, exit_reason = news_blackout) from the first candle
@@ -28,29 +28,31 @@
 //   G2 momentum   — sep = (ema_fast − ema_slow)/ATR14 beyond the gate
 //                   (×it_tight_gate_mult in the tight session 20:00–06:00Z,
 //                    ×it_streak_gate_mult while the R6 redemption quota is
-//                    active — 连亏 2 后"最强信号")
+//                    active — "strongest signal only" after 2 consecutive
+//                    losses)
 //   G3 volatility — regime != hot; spike roots (TR > 3×medTR20) force
 //                   re-confirmation; maxTR20 > it_spike_skip_mult × stop
 //                   distance skips the entry (R5)
-// Trigger: T-A 拉回 (previous close under EMA_fast, current close reclaims it)
-//          T-B 突破 (close breaks the N-bar box + ≥2 consecutive closes
+// Trigger: T-A pullback (previous close under EMA_fast, current close
+//          reclaims it)
+//          T-B breakout (close breaks the N-bar box + ≥2 consecutive closes
 //          outside; a spike root inside the window demands one extra NORMAL
-//          bar outside — 回合 446 复证). RSI overbought/oversold blocks T-B
-//          chases only (§4.2).
+//          bar outside — re-confirmed in round 446). RSI overbought/oversold
+//          blocks T-B chases only (§4.2).
 //
 // Iron rules R0–R7 (§3): one position at a time (R2); stop cost ≤ it_risk_pct
 // of day-start equity or NO signal (R1); realized daily loss ≥ it_day_loss_pct
 // stops the day together with the consecutive-loss and per-day trade caps
 // (R6); breakeven then trailing stop, never back (R7).
 //
-// Paper ledger [近似] — the strategy has no fill-feedback channel, so equity
-// and realized PnL are ESTIMATES: quantity = atomic order_quantity, contract
-// multiplier and taker fee approximated by it_quanto_est / it_fee_est.
+// Paper ledger [approximation] — the strategy has no fill-feedback channel, so
+// equity and realized PnL are ESTIMATES: quantity = atomic order_quantity,
+// contract multiplier and taker fee approximated by it_quanto_est / it_fee_est.
 // BacktestAccount's net PnL in the report is authoritative (§9).
 //
-// Exit model [近似]: M33 fills at candle close, so the hard stop / breakeven /
-// trailing levels are evaluated against CLOSE prices, not intra-bar extremes
-// (intra-bar fidelity is a documented future milestone).
+// Exit model [approximation]: M33 fills at candle close, so the hard stop /
+// breakeven / trailing levels are evaluated against CLOSE prices, not intra-bar
+// extremes (intra-bar fidelity is a documented future milestone).
 //
 // Warmup: klineNeeded = it_trend_ema + 60 (slope needs 20 bars past the SMA
 // seed; +60 settles ATR/RSI). Deterministic full-series recompute every
@@ -71,7 +73,7 @@ namespace pulse::strategy
 {
 
 // ---------------------------------------------------------------------------
-// IronTrader — 铁律交易员
+// IronTrader — the iron-rule trader
 // ---------------------------------------------------------------------------
 class IronTrader : public UnifiedScalper
 {
@@ -145,7 +147,7 @@ class IronTrader : public UnifiedScalper
     std::optional<EntryContext> managePosition(
         const market::Kline &cur, const Indicators &ind);
 
-    /// 事件闸强平 (§4.6): commit a Flat exit when a news window's pre-close
+    /// News-gate force-flatten (§4.6): commit a Flat exit when a news window's pre-close
     /// phase is due for the held position (exit_reason = "news_blackout").
     std::optional<EntryContext> flattenForNews(const market::Kline &cur);
 
@@ -166,7 +168,7 @@ class IronTrader : public UnifiedScalper
         const std::string &trigger, double sep_for_conf,
         std::int64_t entry_open_ms);
 
-    /// R0/R1/R6 pre-trade checklist (30 秒检查表, §3). Logs the refusal.
+    /// R0/R1/R6 pre-trade checklist (the 30-second checklist, §3). Logs the refusal.
     [[nodiscard]] bool riskChecklistPasses(const Indicators &ind);
 
     // --- Paper ledger (R0/R1/R6; USD estimates, see header note) ---
@@ -208,7 +210,7 @@ class IronTrader : public UnifiedScalper
     DayCounters m_day;
     bool m_equity_initialised = false;
     double m_paper_equity_usd = 0.0;  ///< Running estimated equity (R0).
-    bool m_after_streak_quota = false;///< R6: 连亏 2 → one redemption trade.
+    bool m_after_streak_quota = false;///< R6: 2 consecutive losses → one redemption trade.
     bool m_quota_used = false;        ///< R6: redemption trade consumed.
 };
 

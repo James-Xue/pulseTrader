@@ -1,5 +1,5 @@
 #pragma once
-// NewsGate.hpp — 重大消息事件闸 (major-news event gate) — pure gate logic (Layer 6)
+// NewsGate.hpp — major-news event gate — pure gate logic (Layer 6)
 //
 // Major scheduled events (FOMC/CPI/NFP ...) must not be traded through:
 // entries are blocked around the event instant and positions opened before

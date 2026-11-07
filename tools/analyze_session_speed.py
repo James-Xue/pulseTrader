@@ -120,7 +120,7 @@ def main():
     med = lambda v: sorted(v)[len(v) // 2] if v else float("nan")  # noqa: E731
 
     print("=" * 108)
-    print("按天 —— 时间都去哪了   dur=整轮模型往返(首token→末chunk的总跨度, 即你等待时间)")
+    print("By day — where did the time go   dur = whole-round model round-trip (total span from first token to last chunk, i.e. your waiting time)")
     print("=" * 108)
     print(f"{'day':12s} {'calls':>6s} {'med_prompt':>11s} {'med_out':>8s} "
           f"{'p50 dur':>8s} {'p50 tool':>9s} {'tools':>6s} {'model_min':>10s} {'tool_min':>9s} {'tool%':>6s}")
@@ -137,7 +137,7 @@ def main():
 
     print()
     print("=" * 108)
-    print("每会话分解(active = 模型在跑 + 工具在跑,不含你离开的间隙)")
+    print("Per-session breakdown (active = model running + tools running, excluding gaps while you were away)")
     print("=" * 108)
     print(f"{'start':13s} {'sess':9s} {'calls':>6s} {'model_min':>10s} "
           f"{'tool_min':>9s} {'active_min':>11s} {'tool%':>6s}")

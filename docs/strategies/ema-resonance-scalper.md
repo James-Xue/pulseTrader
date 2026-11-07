@@ -1,93 +1,93 @@
-# EmaResonanceScalper — 五周期 EMA 共振策略
+# EmaResonanceScalper — Five-Period EMA Resonance Strategy
 
-> 五条 EMA(默认 7/14/30/60/200)严格全排列对齐才出信号的趋势共振策略。
-> 只在"共振状态迁移"瞬间入场,不追不重发。
+> A trend-resonance strategy that emits a signal only when five EMAs (default 7/14/30/60/200) are strictly fully ordered.
+> It enters only at the instant the resonance state transitions; it never chases and never re-emits.
 
-## 核心原理
+## Core Principle
 
-### 指标定义
+### Indicator definition
 
-五条指数移动平均线(EMA),周期默认 `7 / 14 / 30 / 60 / 200`:
+Five exponential moving averages (EMA), with default periods `7 / 14 / 30 / 60 / 200`:
 
-| 周期 | 角色 | 敏感度 |
-|------|------|--------|
-| 7  | 最快线 | 对价格变化最敏感 |
-| 14 | 次快线 | 短线节奏 |
-| 30 | 中线   | 中期趋势 |
-| 60 | 次慢线 | 中期趋势确认 |
-| 200 | 最慢线 | 长期趋势基准 |
+| Period | Role | Sensitivity |
+|--------|------|-------------|
+| 7  | Fastest line | Most sensitive to price changes |
+| 14 | Second-fastest line | Short-term rhythm |
+| 30 | Middle line | Medium-term trend |
+| 60 | Second-slowest line | Medium-term trend confirmation |
+| 200 | Slowest line | Long-term trend baseline |
 
-EMA 递推公式(`computeEma`,k = 2/(period+1)):每根新 K 线用快照内前 `period` 根收盘价的 SMA 播种后全量递推 —— **确定性计算,无滚动状态漂移**。
+EMA recurrence (`computeEma`, k = 2/(period+1)): every new candle seeds with the SMA of the previous `period` closes in the snapshot and then recurses over the full series — **deterministic computation, no rolling-state drift**.
 
-### 共振定义(全排列对齐)
+### Resonance definition (full ordering alignment)
 
-| 状态 | 条件 | 意义 |
-|------|------|------|
-| **bull_aligned** | `EMA7 > EMA14 > EMA30 > EMA60 > EMA200`(严格递减排列) | 全周期多头共振 |
-| **bear_aligned** | `EMA7 < EMA14 < EMA30 < EMA60 < EMA200`(严格递增排列) | 全周期空头共振 |
-| **mixed** | 其余任何情况 | 无共振,不出信号 |
+| State | Condition | Meaning |
+|-------|-----------|---------|
+| **bull_aligned** | `EMA7 > EMA14 > EMA30 > EMA60 > EMA200` (strictly descending order) | Bullish resonance across all periods |
+| **bear_aligned** | `EMA7 < EMA14 < EMA30 < EMA60 < EMA200` (strictly ascending order) | Bearish resonance across all periods |
+| **mixed** | Anything else | No resonance, no signal |
 
-五条线同向叠放 = 趋势在所有时间尺度上达成共识,是**最强但最稀缺**的信号。
+All five lines stacked in the same direction means the trend has reached consensus on every timescale — the **strongest but rarest** signal.
 
-### 信号逻辑(状态迁移触发)
+### Signal logic (state-transition triggered)
 
-信号只在**共振状态发生变化**的瞬间发出,不是每根 K 线重发:
+Signals fire only at the instant the **resonance state changes**, not on every candle:
 
-| 状态迁移 | 信号 | 方向 |
-|----------|------|------|
-| mixed → bull_aligned | Buy | 做多 |
-| bear_aligned → bull_aligned(直接翻转) | Buy | 做多 |
-| mixed → bear_aligned | Sell | 做空 |
-| bull_aligned → bear_aligned(直接翻转) | Sell | 做空 |
-| 保持同一种对齐不变 | 无信号 | —— |
+| State transition | Signal | Direction |
+|------------------|--------|-----------|
+| mixed → bull_aligned | Buy | Long |
+| bear_aligned → bull_aligned (direct flip) | Buy | Long |
+| mixed → bear_aligned | Sell | Short |
+| bull_aligned → bear_aligned (direct flip) | Sell | Short |
+| Same alignment persists | No signal | — |
 
-- **不强追**:对齐状态持续期间不重复发信号(模板 cooldown 是第二道独立闸门)
-- **不抢跑**:预热期(默认 201 根 K 线)内不评估
-- 每次评估都无条件提交当前共振状态(趋势已变就是已变)
+- **No chasing**: no repeated signal while the alignment persists (the template cooldown is a second, independent gate)
+- **No front-running**: no evaluation during warmup (default 201 candles)
+- Every evaluation unconditionally submits the current resonance state (if the trend has changed, it has changed)
 
-### 置信度计算
+### Confidence calculation
 
 ```
 confidence = clamp( |EMA7 − EMA200| / ATR14 × res_conf_scale, 0, 1 )
 ```
 
-- 分子 = 共振堆的**总跨度**(最快线到最慢线),堆越宽趋势共识越强
-- 分母 = ATR14 波动率归一化:同样的跨度在平静市场得高分,在剧烈震荡市得低分
-- `res_conf_scale` 默认 1.0,可整体缩放。主网实例已用 2.0:首条真信号实测
-  |ema7-ema200|/ATR=0.5459,乘 1.0 不过 min_confidence=0.6 闸被 emitSignal
-  静默丢弃(2026-08-23 实盘验证发现,与 eth_scalper scale 20 同族)
+- Numerator = the **total span** of the resonance stack (fastest line to slowest line); the wider the stack, the stronger the trend consensus
+- Denominator = ATR14 volatility normalisation: the same span scores high in a calm market and low in a violently choppy one
+- `res_conf_scale` defaults to 1.0 and scales the whole value. The mainnet instance already uses 2.0: the first real signal measured
+  |ema7-ema200|/ATR=0.5459, which multiplied by 1.0 failed the min_confidence=0.6 gate and was
+  silently dropped by emitSignal (found in live verification on 2026-08-23; same family as eth_scalper's scale 20)
 
 ---
 
-## 实现细节
+## Implementation Details
 
-### 数据需求
+### Data requirements
 
-- **数据源**:K 线收盘价(`onKline()` 回调)
-- **最少 K 线数**:`klineNeeded = 最慢周期 + 1`(默认 201)
-- **预热**:`warmupThreshold = 201` —— 最慢 EMA 的 SMA 播种需要 200 根 + 当前 1 根;引擎启动时 KlineBuffer 回填 500 根,实际预热只需几秒
+- **Data source**: kline close prices (`onKline()` callback)
+- **Minimum candles**: `klineNeeded = slowest period + 1` (default 201)
+- **Warmup**: `warmupThreshold = 201` — SMA seeding for the slowest EMA needs 200 bars + the current one; KlineBuffer backfills 500 bars at engine startup, so real warmup takes only a few seconds
 
-### EMA 全量重算
+### Full EMA recomputation
 
-每次评估对快照内全部收盘价调用 `computeEma(closes, period, 0.0)`:
-- `prev = 0.0` 触发 SMA 播种(快照内前 `period` 根均值)→ 全量递推
-- 五条线独立、无状态 → 结果只取决于 K 线序列,确定性强
-- 201 根 × 5 条,1 分钟 K 线频率下开销可忽略
+Each evaluation calls `computeEma(closes, period, 0.0)` over every close in the snapshot:
+- `prev = 0.0` triggers SMA seeding (mean of the first `period` closes in the snapshot) → full recursion
+- Five independent, stateless lines → the result depends only on the kline series, with strong determinism
+- 201 bars × 5 lines at 1-minute kline frequency is negligible overhead
 
-### 共振状态机
+### Resonance state machine
 
 ```
 evaluateEntry:
-  1. 读 5 个周期参数(custom_params, 静态)
-  2. 提取 closes → 5×computeEma 全量重算
-  3. 严格全序判定 → Bull / Bear / None
-  4. 迁移检测: m_hasPrev && res != prev && res != None
-  5. 无条件提交 m_prevResonance(先提交,再判断信号——cooldown 不撤销已提交状态)
-  6. 有迁移 + ATR>0 → 组装 Buy/Sell + 置信度 + indicators
-  7. 无迁移 → nullopt(状态已提交)
+  1. Read the five period params (custom_params, static)
+  2. Extract closes → 5× computeEma full recomputation
+  3. Strict full-ordering test → Bull / Bear / None
+  4. Transition detection: m_hasPrev && res != prev && res != None
+  5. Unconditionally commit m_prevResonance (commit first, then decide the signal — cooldown does not revoke an already committed state)
+  6. Transition + ATR>0 → assemble Buy/Sell + confidence + indicators
+  7. No transition → nullopt (state already committed)
 ```
 
-### indicators 快照(随真实信号发布)
+### indicators snapshot (published with real signals)
 
 ```json
 { "ema7": 100.625, "ema14": 100.333, "ema30": 100.161,
@@ -95,26 +95,26 @@ evaluateEntry:
   "resonance": "bull_aligned", "atr": 1.143 }
 ```
 
-> 键名 `ema7/14/30/60/200` 按默认周期命名;若通过 custom_params 改周期,值跟随 `res_ema_p1..p5` 的配置,键名不变。
+> The key names `ema7/14/30/60/200` follow the default periods; if periods are changed via custom_params, the values follow the `res_ema_p1..p5` configuration while the key names stay the same.
 
 ---
 
-## 参数配置
+## Parameter Configuration
 
-### custom_params(静态,TOML 实例级,无热更新)
+### custom_params (static, TOML instance-level, no hot reload)
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `res_ema_p1` | 7 | 最快 EMA 周期 |
-| `res_ema_p2` | 14 | 次快 EMA 周期 |
-| `res_ema_p3` | 30 | 中线 EMA 周期 |
-| `res_ema_p4` | 60 | 次慢 EMA 周期 |
-| `res_ema_p5` | 200 | 最慢 EMA 周期 |
-| `res_conf_scale` | 1.0 | 置信度缩放系数 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `res_ema_p1` | 7 | Fastest EMA period |
+| `res_ema_p2` | 14 | Second-fastest EMA period |
+| `res_ema_p3` | 30 | Middle EMA period |
+| `res_ema_p4` | 60 | Second-slowest EMA period |
+| `res_ema_p5` | 200 | Slowest EMA period |
+| `res_conf_scale` | 1.0 | Confidence scaling factor |
 
-> 与 eth_scalper 的币种参数同一渠道:静态、构造时读取。若要 MCP/AI 热调,需迁移到 StrategyParams + paramSetters/paramGetters 白名单(见 README 架构说明)。
+> Same channel as eth_scalper's per-coin parameters: static, read at construction. To hot-tune from MCP/AI, they must migrate to StrategyParams + the paramSetters/paramGetters whitelist (see the README architecture notes).
 
-### trading.toml 实例
+### trading.toml instance
 
 ```toml
 [[strategy.instances]]
@@ -130,9 +130,9 @@ poll_interval_ms = 500
 custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 ```
 
-> **BTC_USDT 同名实例(2026-09-04)**:类为 symbol-agnostic(实例 id 自动为
-> `ema_resonance_scalper_BTC_USDT`),参数全部无量纲(EMA 周期 + 置信度缩放),
-> 无需按币种重标,直接照抄即可:
+> **BTC_USDT instance of the same name (2026-09-04)**: the class is symbol-agnostic (the instance id
+> becomes `ema_resonance_scalper_BTC_USDT` automatically), and every parameter is dimensionless (EMA periods +
+> confidence scaling), so no per-coin rescaling is needed — just copy it as is:
 
 ```toml
 [[strategy.instances]]
@@ -141,85 +141,85 @@ symbol          = "BTC_USDT"
 market_type     = "futures"
 leverage        = 10
 margin_mode     = "cross"
-order_quantity  = 1              # 1 张 = 0.0001 BTC(信息性,signal_only)
+order_quantity  = 1              # 1 contract = 0.0001 BTC (informational; signal_only)
 min_confidence  = 0.6
 enabled         = true
 poll_interval_ms = 500
 custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 ```
 
-### 下单模式(先信号后激活)
+### Order mode (signal first, activate later)
 
-策略代码具备完整直接下单能力(Buy/Sell 信号经正常聚合器路径 → 风控闸门)。但引擎全局开关决定是否真的下单:
+The strategy code has full direct-order capability (Buy/Sell signals go through the normal aggregator path → risk gates). But a global engine switch decides whether orders are actually placed:
 
-- 当前引擎 `signal_only = true` + `active_market = "cfd"` → 本策略**只发信号到信号板**,不下单
-- 以后要激活自动交易:翻转 `signal_only = false` 且 `active_market = "futures"`(注意:这会同时激活 BTC/SNDK/UNITREE 等所有 enabled 策略的自动下单)
-
----
-
-## 优缺点分析
-
-### 优点
-
-1. **信号质量极高**:五条 EMA 全排列对齐是趋势的强共识,天然过滤震荡市假信号
-2. **状态机清晰**:迁移触发 + 不重发 + cooldown 双闸门,行为可预期
-3. **置信度可解释**:堆跨度 / 波动率,直观反映"共识强度"
-4. **实现确定性强**:全量重算无滚动状态,便于测试与回放
-5. **参数与代码分离**:规则文本(本文档)↔ C++ 实现(源码)一一对应
-
-### 缺点
-
-1. **信号极其稀少**:全排列对齐要求苛刻,单边大趋势才触发;震荡市可能长期无信号
-2. **滞后性**:EMA 是滞后指标,200 周期最慢线决定入场偏晚,趋势末段进场风险高
-3. **无止损止盈联动**:策略只负责信号,风控(仓位上限于风险闸门)与出场需要外部配合
-4. **跳空敏感**:大幅跳空会让快慢线瞬时拉开,可能触发对齐(置信度公式已用 ATR 归一化对冲一部分)
+- With the current engine `signal_only = true` + `active_market = "cfd"` → this strategy **only publishes signals to the signal board**, and places no orders
+- To activate auto-trading later: flip `signal_only = false` and `active_market = "futures"` (note: this simultaneously activates auto-ordering for all enabled strategies such as BTC/SNDK/UNITREE)
 
 ---
 
-## 适用场景
+## Pros and Cons
 
-### 最佳市场条件
+### Pros
 
-- **单边大趋势**:日线/4h 级别趋势确认后的顺势入场
-- **趋势中继**:深度回调后重新全排列对齐 = 趋势延续信号
-- **低波动上升**:跨周期共识明确、ATR 收敛时置信度高
+1. **Very high signal quality**: full five-EMA ordering is a strong trend consensus and naturally filters out false signals in choppy markets
+2. **Clear state machine**: transition-triggered + no re-emit + cooldown as a second gate; behaviour is predictable
+3. **Explainable confidence**: stack span / volatility directly reflects "consensus strength"
+4. **Strong implementation determinism**: full recomputation with no rolling state, easy to test and replay
+5. **Rules kept separate from code**: rule text (this document) ↔ C++ implementation (source) map one to one
 
-### 不适合的市场
+### Cons
 
-- **宽幅震荡**:五线反复交叉纠缠,几乎无法全排列对齐(但也因此几乎没有假信号)
-- **急拉急砸**:暴拉/插针瞬间快慢线可能瞬时对齐,需配合 spike 过滤(见扩展点)
-
----
-
-## 与现有策略的配合
-
-| 组合 | 用法 |
-|------|------|
-| 与 MomentumScalper(9/21) | 共振策略做**趋势确认**,动量策略做**快线时机**,两者同向信号置信度更高 |
-| 与 eth_scalper(追空) | 空头共振对齐可为追空网格提供更严格的趋势闸门(需扩展 GridManager 的 readTrendGate 消费源) |
-| 与 SuperTrendScalper | 同为趋势跟踪,可交叉验证;共振对齐 + SuperTrend 翻转同向 = 强信号 |
+1. **Extremely rare signals**: full ordering is a demanding condition, triggered only by strong one-sided trends; a choppy market may go a long time without a signal
+2. **Lag**: EMA is a lagging indicator, and the slowest 200-period line makes entries late, so entering near the end of a trend is risky
+3. **No stop-loss/take-profit linkage**: the strategy only produces signals; risk management (position limits via the risk gates) and exits need external cooperation
+4. **Sensitive to gaps**: a large gap opens the fast and slow lines instantly and may trigger alignment (the ATR normalisation in the confidence formula hedges part of this)
 
 ---
 
-## 扩展点(v1 未实现)
+## Applicable Scenarios
 
-1. **per-candle 状态发布**:eth_scalper v2 式每根 K 线发布 Flat 状态供网格作趋势闸门 —— 注意生产配置下 `emitSignal` 的 min_confidence 门会丢弃 conf=0 的 Flat 信号,需 min_confidence=0 或改 emitSignal 加 Flat 豁免
-2. **spike 过滤**:暴拉/插针过滤(可复用 eth_scalper 的三口径 filter 模式)
-3. **热调周期参数**:迁入 StrategyParams + MCP/AI 通道后可在线调参
+### Best market conditions
 
----
+- **Strong one-sided trends**: trend-following entries after a daily/4h-level trend is confirmed
+- **Trend continuation**: full re-alignment after a deep pullback = a trend-continuation signal
+- **Low-volatility advances**: confidence is high when cross-timescale consensus is clear and ATR is contracting
 
-## 源码位置
+### Unsuitable markets
 
-- **头文件**:`src/strategy/scalping/EmaResonanceScalper.hpp`
-- **实现文件**:`src/strategy/scalping/EmaResonanceScalper.cpp`
-- **基类**:`src/strategy/scalping/UnifiedScalper.hpp`(模板方法 + computeEma/computeAtr)
-- **注册**:`src/strategy/StrategyRegistry.cpp`(`ema_resonance_scalper`)
-- **单测**:`tests/unit/strategy/test_ema_resonance_scalper.cpp`
+- **Wide ranges**: the five lines cross and tangle repeatedly, so full ordering is almost impossible (which is also why there are almost no false signals)
+- **Violent spikes**: a sudden pump or pin bar can align the fast and slow lines momentarily; pair with spike filtering (see extension points)
 
 ---
 
-## 日志示例
+## Working with Existing Strategies
+
+| Combination | Usage |
+|-------------|-------|
+| With MomentumScalper (9/21) | The resonance strategy provides **trend confirmation** and the momentum strategy provides **fast-line timing**; same-direction signals from both carry higher confidence |
+| With eth_scalper (short chasing) | Bearish resonance alignment can give the short-chasing grid a stricter trend gate (requires extending GridManager's readTrendGate input source) |
+| With SuperTrendScalper | Both are trend-following and can cross-validate; resonance alignment + a same-direction SuperTrend flip = a strong signal |
+
+---
+
+## Extension Points (not implemented in v1)
+
+1. **Per-candle state publishing**: eth_scalper v2 style, publishing a Flat state on every candle so the grid can use it as a trend gate — note that under production settings `emitSignal`'s min_confidence gate drops Flat signals with conf=0, so either set min_confidence=0 or add a Flat exemption to emitSignal
+2. **Spike filtering**: pump/pin-bar filtering (can reuse eth_scalper's three-criteria filter pattern)
+3. **Hot-tunable period parameters**: migrate into StrategyParams + the MCP/AI channel for online tuning
+
+---
+
+## Source Locations
+
+- **Header**: `src/strategy/scalping/EmaResonanceScalper.hpp`
+- **Implementation**: `src/strategy/scalping/EmaResonanceScalper.cpp`
+- **Base class**: `src/strategy/scalping/UnifiedScalper.hpp` (template methods + computeEma/computeAtr)
+- **Registration**: `src/strategy/StrategyRegistry.cpp` (`ema_resonance_scalper`)
+- **Unit tests**: `tests/unit/strategy/test_ema_resonance_scalper.cpp`
+
+---
+
+## Log Examples
 
 ```
 [INFO] [strategy] [ema_resonance_scalper_ETH_USDT] EMA resonance bullish alignment (all 5 EMAs ordered) signal: confidence=0.5251, price=102.50

@@ -673,7 +673,7 @@ TEST_F(GridManagerTest, SpikeFreezeBlocksReanchor)
     EXPECT_TRUE(m_manager->status().spike_frozen);
 
     // Price falls below the re-anchor line — the spike freeze blocks the
-    // follow-down re-anchor too (v2 §3.1d covers 重锚).
+    // follow-down re-anchor too (v2 §3.1d covers re-anchoring).
     setMid(1980.0);
     driveTicks(250, baseMs() + 120000);
     EXPECT_EQ(0, m_gateway.cancel_count);
@@ -736,7 +736,7 @@ TEST_F(GridManagerTest, DailyStopFreezesAndBlocksReanchor)
     EXPECT_EQ(6u, m_gateway.placed.size()); // 4 sells + 1 TP + 1 flatten
 
     // Price falls below the re-anchor line — the daily stop blocks the
-    // follow-down re-anchor (no new positions/重挂 while frozen).
+    // follow-down re-anchor (no new positions / no re-hanging while frozen).
     setMid(1980.0);
     {
         auto &buf = m_harness->feed.getKlineBuffer("ETH_USDT");

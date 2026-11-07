@@ -17,7 +17,7 @@
 7. [Profitability Analysis](#7-profitability-analysis)
 8. [Risk Warnings](#8-risk-warnings)
 9. [FAQ](#9-faq)
-10. [CFD (TradFi) — 黄金 CFD 实盘](#10-cfd-tradfi--黄金-cfd-实盘)
+10. [CFD (TradFi) — Gold CFD Live Trading](#10-cfd-tradfi--gold-cfd-live-trading)
 
 ---
 
@@ -860,62 +860,63 @@ Check the following checklist item by item:
 
 ---
 
-## 10. CFD (TradFi) — 黄金 CFD 实盘
+## 10. CFD (TradFi) — Gold CFD Live Trading
 
-> 自 2026-08-14 起，实盘方向从 BTC_USDT 永续合约转向 Gate.io 传统金融 CFD（黄金 `XAUUSD`）。
-> API 调研与账户验证已完成（见 [CFD_TRADFI.md](CFD_TRADFI.md)），引擎扩展已实施（M15）：`MarketType::Cfd`、REST 轮询行情、CFD 风控、方向切换（`switch_direction` / REPL `switch`）。**默认不实盘**——`trading.toml` 的 `active_market = "futures"` 下 CFD 策略保持暂停，`switch cfd` 后才激活。
+> Since 2026-08-14 the live-trading direction has moved from BTC_USDT perpetual futures to Gate.io traditional-finance CFDs (gold `XAUUSD`).
+> API research and account verification are complete (see [CFD_TRADFI.md](CFD_TRADFI.md)), and the engine extensions are implemented (M15): `MarketType::Cfd`, REST-polled market data, CFD risk control and direction switching (`switch_direction` / REPL `switch`). **Live trading is off by default** — with `active_market = "futures"` in `trading.toml` the CFD strategies stay paused and only activate after `switch cfd`.
 
-### 10.1 当前账户状态（主账户，2026-08-14 实测）
+### 10.1 Current Account State (main account, measured 2026-08-14)
 
-| 项目 | 值 |
+| Item | Value |
 |---|---|
-| CFD 账户 | 已注册，`mt5_uid = 2017864` |
-| 余额 / 净值 | **81.86 USD**（无持仓） |
-| XAUUSD | 现货报价 ~4348 USD/oz，1 手 = 100 oz，最小 0.01 手 |
-| 杠杆 | 可选 20 / 50 / 100 / 200 / 500 |
-| API key 权限 | **CFD** 已勾选（futures 权限与 CFD 无关——两者是独立产品） |
+| CFD account | Registered, `mt5_uid = 2017864` |
+| Balance / equity | **81.86 USD** (no positions) |
+| XAUUSD | Spot quote ~4348 USD/oz, 1 lot = 100 oz, minimum 0.01 lot |
+| Leverage | 20 / 50 / 100 / 200 / 500 selectable |
+| API key permissions | **CFD** is checked (futures permission is unrelated to CFD — the two are independent products) |
 
-### 10.2 操作要点
+### 10.2 Operating Notes
 
-1. **资金划转**：USDT → CFD 账户走 `POST /api/v4/tradfi/transactions`
-   （`asset=USDT`、`type=deposit`）；CFD 账户以 **USD** 结算
-2. **行情**：CFD 无 WebSocket，靠 REST 轮询 ticker（~1s）+ 1m klines（~60s，首次立即回填 500 根）；`get_market XAUUSD` 可查
-3. **策略兼容**：momentum / mean_reversion / supertrend（K 线驱动）可用；
-   orderbook_scalper 无盘口数据，不可用
-4. **下单语义**：volume 按「手」（0.01 步进），side `1=卖 / 2=买`，
-   市价 `price_type=market`，限价 `price_type=trigger`
-5. **风控**：名义价值 = volume × 100 × 价格；保证金 = 名义价值 / 杠杆；
-   0.01 手 ≈ 4348 USD 名义 ≈ 8.7 USD 保证金（500× 下）
-6. **未实施前手动验证**：可用任意 REST 客户端（签名方式同 `gate_auth.hpp`）
-   调 `/tradfi/orders` 小额测试；实施后走 CLI/MCP `open` 命令
+1. **Funds transfer**: USDT → CFD account goes through `POST /api/v4/tradfi/transactions`
+   (`asset=USDT`, `type=deposit`); the CFD account settles in **USD**
+2. **Market data**: CFDs have no WebSocket, so the ticker is polled over REST (~1s) together with 1m klines (~60s; 500 bars are backfilled immediately on the first call); query it with `get_market XAUUSD`
+3. **Strategy compatibility**: momentum / mean_reversion / supertrend (kline-driven) work;
+   orderbook_scalper has no order-book data and cannot be used
+4. **Order semantics**: volume is in lots (0.01 step), side `1=sell / 2=buy`,
+   market `price_type=market`, limit `price_type=trigger`
+5. **Risk control**: notional = volume × 100 × price; margin = notional / leverage;
+   0.01 lot ≈ 4348 USD notional ≈ 8.7 USD margin (at 500×)
+6. **Manual verification before implementation**: any REST client (same signing scheme as `gate_auth.hpp`)
+   can call `/tradfi/orders` with a small size to test; once implemented, use the CLI/MCP `open` command
 
 ---
 
-## 11. 本地回测数据积累 (M33)
+## 11. Local Backtest Data Accumulation (M33)
 
-> 全量用法见 [backtest.md](backtest.md)。核心事实:Gate REST futures 1m 只留
-> 最近 ~10000 根 ≈ 6.9 天;要回测 ~1 个月窗口,**任何新盯的币种都要靠每日
-> 积累**(30 天后才有 30 天数据)。公开 REST、无需 API key、幂等(中断
-> ≤ ~6.9 天自愈,超 7 天旧洞永久缺)。
+> Full usage is in [backtest.md](backtest.md). The core fact: Gate REST futures 1m data only
+> keeps the most recent ~10000 bars ≈ 6.9 days; to backtest a ~1-month window **every newly
+> watched symbol has to be accumulated daily** (30 days of data only exist after 30 days).
+> Public REST, no API key needed, idempotent (an interruption of ≤ ~6.9 days heals itself;
+> gaps older than 7 days stay missing permanently).
 
-### 11.1 cron(本机,一日两次,睡眠容错)
+### 11.1 cron (local machine, twice a day, sleep-tolerant)
 
 ```
 0 7,23 * * * ./run.sh kline-store --config trading.toml >> logs/kline_store.log 2>&1
 ```
 
-(systemd user timer 备选:`OnCalendar=*-*-* 07,23:00`,ExecStart 同上;
-引擎若在本地跑也无冲突——WAL + busy_timeout 双写安全。)
+(systemd user timer alternative: `OnCalendar=*-*-* 07,23:00`, ExecStart as above;
+running the engine locally does not conflict either — WAL + busy_timeout makes dual writes safe.)
 
-### 11.2 老盯盘币种跳启动
+### 11.2 One-off import for long-watched symbols
 
-本地/历史 `data/trades.db` 对 BTC/ETH/SNDK/UNITREE 已有数周积累,
-一次性导入:
+The local/historical `data/trades.db` already holds weeks of data for BTC/ETH/SNDK/UNITREE;
+import it once:
 
 ```
 ./run.sh kline-store --import data/trades.db --symbols BTC_USDT,SNDK_USDT
 ```
 
-### 11.3 待办
+### 11.3 TODO
 
-- [ ] 若本地机不可靠(VPS 才 24/7),把 kline-store 也挂 VPS cron + 定期 rsync 回本地
+- [ ] If the local machine is not reliable enough (only the VPS runs 24/7), also put kline-store on the VPS cron + rsync back to the local machine periodically.

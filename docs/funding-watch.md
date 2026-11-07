@@ -1,69 +1,69 @@
-# FundingWatch — 资金费率窗口监视器(引擎服务,2026-09-06)
+# FundingWatch — funding-rate window monitor (engine service, 2026-09-06)
 
-> 纯观察服务:**只发信号板 + 日志,永不下单,不接聚合器**(旁路 auto_trade
-> 与订单通道)。代码 `src/funding/FundingWatch.{hpp,cpp}`,注册段 `[funding_watch]`。
+> Pure observation service: **publishes to the signal board and logs only, never places an order, never connects to the aggregator** (it bypasses
+> auto_trade and the order channel). Code `src/funding/FundingWatch.{hpp,cpp}`, registration section `[funding_watch]`.
 
-## 它解决什么问题
+## What Problem It Solves
 
-资金费率收割(现货多 + 合约空,收多头付空头的"情绪税")的正确形态不是
-"天天收租",而是 **等费率窗口**(2021 牛市 BTC 持续 5-10bp/8h,平淡市
-0.1-1bp)。7 年全史验证(`data/funding/`,2026-09-06):
+The correct shape of funding-rate harvesting (spot long + futures short, collecting the "sentiment tax" paid by longs to shorts) is not
+"collect rent every day", but **waiting for the rate window** (in the 2021 bull market BTC sustained 5-10bp/8h, while a calm market runs at
+0.1-1bp). Verified over 7 years of full history (`data/funding/`, 2026-09-06):
 
-| 年份 | BTC 净收(0.5bp 闸) | ETH 净收 | 市况 |
+| Year | BTC net return (0.5bp gate) | ETH net return | Market |
 |---|---|---|---|
-| 2020 | +16.3%/年 | +26.1% | 牛市 |
-| 2021 | +29.1% | +36.4% | 大牛市 |
-| 2022 | −1.6% | −4.3% | 熊市(闸后仍负) |
-| 2024 | +9.9% | +12.0% | 牛市 |
-| 2026 | ≈0 | ≈0 | 平淡(现价费率 0.1-1bp = 无窗口) |
+| 2020 | +16.3%/yr | +26.1% | Bull market |
+| 2021 | +29.1% | +36.4% | Major bull market |
+| 2022 | −1.6% | −4.3% | Bear market (still negative after the gate) |
+| 2024 | +9.9% | +12.0% | Bull market |
+| 2026 | ≈0 | ≈0 | Calm (current rate 0.1-1bp = no window) |
 
-→ 本服务的价值 = **把"等窗口"自动化**:窗口开启前引擎静默,开启瞬间
-亮灯。将来接自动收割时,消费信号板 `funding_watch_<SYMBOL>` 行即可。
+→ The value of this service = **automating "wait for the window"**: the engine stays silent before the window opens and lights up the instant
+it opens. When auto-harvesting is wired up in the future, it only needs to consume the `funding_watch_<SYMBOL>` row on the signal board.
 
-## 规则(语义故意做"笨")
+## Rules (the semantics are deliberately "dumb")
 
-1. **窗口 OPEN** = 最近 `consec_events`(默认 6 ≈ 48h)次结算的费率
-   **全部严格大于** `threshold`(默认 0.0005 = 5bp/8h)。阈值不是 ≥:正好
-   等于 = 噪声界,不开。
-2. **窗口 CLOSED** = 任一次结算 ≤ threshold。无迟滞 —— 费率 8h 才结算
-   一次,窗口不可能日内抖动。
-3. 每次轮询(默认 30 分钟,费率 8h 动一次,足够)发布当前状态到信号板:
+1. **Window OPEN** = the rates of the most recent `consec_events` settlements (default 6 ≈ 48h) are
+   **all strictly greater than** `threshold` (default 0.0005 = 5bp/8h). The threshold is not ≥: exactly
+   equal = the noise boundary, so it does not open.
+2. **Window CLOSED** = any single settlement ≤ threshold. There is no hysteresis — the rate only settles
+   once every 8h, so the window cannot flicker intraday.
+3. Every poll (default 30 minutes; the rate moves once per 8h, which is enough) publishes the current state to the signal board:
    - `strategy_id = funding_watch_<SYMBOL>`
-   - type **Sell** = 窗口开启(语义:做空侧收租资格)、**Flat** = 关闭
-   - indicators:`funding_latest` / `funding_avg_24h` / `window_threshold` /
-     `window_events`;reason 带中文说明
-4. 引擎日志:**仅窗口翻转时 WARN**(OPEN 一次 + CLOSED 一次),轮询静默
-   —— 窗口开着就开着,不刷屏。
+   - type **Sell** = window open (semantics: eligibility to harvest carry on the short side), **Flat** = closed
+   - indicators: `funding_latest` / `funding_avg_24h` / `window_threshold` /
+     `window_events`; the reason field carries a human-readable explanation
+4. Engine log: **WARN only when the window flips** (once for OPEN plus once for CLOSED); polling is silent
+   — if the window is open, it stays open; no log spam.
 
-## 数据源与失败语义
+## Data Source and Failure Semantics
 
-- Gate 公开端点 `/futures/usdt/funding_rate`(8h 结算、保留 ~180 天),
-  复用主 futures REST 客户端,持共享 `rest_mutex` 串行(引擎纪律)。
-- 拉取失败/空响应 → 静默跳过本轮,错误日志节流(≥5 分钟一次);**绝不
-  因网络抖动误报窗口**。窗口判定只看成功轮询的连续事件。
-- 无自有线程:主循环 tick 槽(~200ms),内部慢闸限 poll_sec。
+- Gate public endpoint `/futures/usdt/funding_rate` (8h settlement, retains ~180 days),
+  reusing the main futures REST client and holding the shared `rest_mutex` for serialization (engine discipline).
+- Fetch failure / empty response → silently skip this cycle, with the error log throttled (at most once every 5 minutes); **never
+  report a window based on a network glitch**. Window determination looks only at consecutive events from successful polls.
+- No dedicated thread: a main-loop tick slot (~200ms), with an internal slow gate limiting it to poll_sec.
 
-## 配置(`trading.toml.example` 同款)
+## Configuration (same as `trading.toml.example`)
 
 ```toml
 [funding_watch]
 enabled = true
-symbols = ["BTC_USDT", "ETH_USDT"]   # futures 合约
-threshold = 0.0005                    # 5bp/8h(牛市典型 5-10bp)
-consec_events = 6                     # ≈48h 持续
-poll_sec = 1800                       # 轮询间隔秒
+symbols = ["BTC_USDT", "ETH_USDT"]   # futures contracts
+threshold = 0.0005                    # 5bp/8h (5-10bp is typical in a bull market)
+consec_events = 6                     # ≈48h sustained
+poll_sec = 1800                       # polling interval in seconds
 ```
 
-校验(启用时):symbols 非空、threshold ∈ (0, 0.01]、consec ∈ [1,24]、
-poll_sec ∈ [60, 86400]。
+Validation (when enabled): symbols non-empty, threshold ∈ (0, 0.01], consec ∈ [1,24],
+poll_sec ∈ [60, 86400].
 
-## 验收与测试
+## Acceptance and Tests
 
-- [x] 单测(10,纯函数无网络):窗口判定(空/历史不足/持续高位开/单点缺口
-      破坏/窗口外缺口无视/阈值严格大于/负费率)、Gate JSON 解析(顺序/
-      截断/畸形跳过)—— 全绿(1042 全量,2026-09-06)
-- [x] REST 形状实测(2026-09-06):`funding_rate?contract=BTC_USDT&limit=12`
-      → `[{r: "0.000026", t: 1788681602}]` 倒序,与解析器一致
-- [ ] 实盘验收(待 VPS 部署):开启后 `get_signals` 可见
-      `funding_watch_BTC_USDT` 行 + 首次轮询日志;平淡市应常驻 Flat
-- [ ] 窗口实拍(待牛市):连续 48h >5bp 时 WARN OPEN;回落 WARN CLOSED
+- [x] Unit tests (10, pure functions, no network): window determination (empty / insufficient history / sustained high opens / a single gap
+      breaks it / gaps outside the window ignored / strictly greater than the threshold / negative rates), Gate JSON parsing (ordering /
+      truncation / malformed entries skipped) — all green (1042 total, 2026-09-06)
+- [x] REST shape verified live (2026-09-06): `funding_rate?contract=BTC_USDT&limit=12`
+      → `[{r: "0.000026", t: 1788681602}]` in reverse order, consistent with the parser
+- [ ] Live acceptance (pending VPS deployment): after enabling, `get_signals` should show
+      the `funding_watch_BTC_USDT` row plus the first poll log; in a calm market it should stay Flat
+- [ ] Window captured live (pending a bull market): WARN OPEN when the rate stays >5bp for 48h consecutively; WARN CLOSED when it falls back

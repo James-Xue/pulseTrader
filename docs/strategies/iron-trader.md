@@ -1,296 +1,296 @@
-# IronTrader — 铁律交易员(BTC USDT-M futures · 1m)
+# IronTrader — the iron-discipline trader (BTC USDT-M futures · 1m)
 
-> 模拟一个**真实交易员**的纪律型趋势跟随策略:把人类交易员"铁律 — 检查表 — 复盘"的自律体系,固化成可执行、可回测、可审计的规则栈。
-> 人设定位:高频剥头皮的反义词——**宁可错过,不可做错**。信号不是"算出来就发",而是"层层闸门过滤后的自然低频"。
-> 本文档是**唯一规则基线**;C++ 实现(src/strategy/)必须与本文档逐条对应,并回填映射表(§9)。
-> **实现映射(2026-09-06)**:`src/strategy/scalping/IronTrader.{hpp,cpp}`(类 `IronTrader` · 注册键 `iron_trader`);单元测试 `tests/unit/strategy/test_iron_trader.cpp`(+`BacktestAccountTest.FlatClosesPositionWithoutReopening`);全量 1016 绿。
+> A disciplined trend-following strategy that simulates a **real trader**: the human trader's "iron rules — checklist — review" self-discipline system, frozen into an executable, backtestable, auditable rule stack.
+> Persona: the antithesis of high-frequency scalping — **better to miss a trade than to take a wrong one**. Signals are not "emitted because they were computed"; they are "the natural low frequency that survives stacked gates".
+> This document is the **single rule baseline**; the C++ implementation (src/strategy/) must map to it clause by clause, with the mapping table (§9) backfilled.
+> **Implementation mapping (2026-09-06)**: `src/strategy/scalping/IronTrader.{hpp,cpp}` (class `IronTrader` · registration key `iron_trader`); unit tests `tests/unit/strategy/test_iron_trader.cpp` (+ `BacktestAccountTest.FlatClosesPositionWithoutReopening`); all 1016 tests green.
 
 ---
 
-## 0. 为什么需要"交易员"策略(实证依据)
+## 0. Why a "trader" strategy is needed (empirical basis)
 
-| # | 实证 | 结论 | 出处 |
+| # | Evidence | Conclusion | Source |
 |---|---|---|---|
-| E1 | M33 momentum × BTC 1m 近周回测(2026-09-06):0.6 高置信闸 = 7 天仅 1 笔 **+0.61**;0.05 低闸 + 300s 冷却 = 254 笔 **−50.25**(胜率 20.9%,手续费磨死) | 无纪律的频繁交易 = 稳定亏损;纪律 = 收益本身 | 本仓库回测 |
-| E2 | M32 信号日志重放:噪声行情"上追涨"必亏;快层机器风控 + 慢层 AI 调权才是正确形态 | 1m 噪声里追价没有 alpha | 项目记忆 |
-| E3 | BTC 1m EMA 交叉置信天然仅 ~0.1–0.4(ATR 归一化口径) | 单一"置信度"高闸在 BTC 上形同禁用 → 必须用**结构闸**(ATR 归一分离度等)而非玄学阈值 | 项目记忆 |
-| E4 | 高杠杆防爆仓铁律 v2(2026-08-30):全部纪律收敛为"开仓前必算强平距离、止损先于强平且交易所原生存活" | 风控红线 = 不可谈判条款 | 见 §9 溯源 |
-| E5 | XAUUSD 子代理实盘(08-17~20):破位确认制累计 **13 次破位 6 真 7 假、100% 区分**(真突破均未被 3 根内收复);RSI 对冲过滤多头侧 3 窗口 6 次、空头侧 2 次验证,每次挡下后价格即回撤;尖刺预检(maxTR>2×SL 跳过;回合 446:尖刺根一击收复假破位);资金闸(薄账户一笔止损即耗尽:10.68 账户止损后 5.09 直接停手) | 具体规则形态均经实盘证伪/证实 | 见 §9 溯源 |
+| E1 | M33 momentum × BTC 1m backtest over the recent week (2026-09-06): a 0.6 high-confidence gate = only 1 trade in 7 days, **+0.61**; a 0.05 low gate + 300s cooldown = 254 trades, **−50.25** (win rate 20.9%, ground down by fees) | Undisciplined frequent trading = steady losses; discipline = the edge itself | Backtest in this repository |
+| E2 | M32 signal-log replay: chasing rallies in noisy conditions always loses; fast-layer mechanical risk control + slow-layer AI weight tuning is the correct shape | Price-chasing inside 1m noise has no alpha | Project memory |
+| E3 | BTC 1m EMA-cross confidence is naturally only ~0.1–0.4 (ATR-normalised scale) | A single high "confidence" gate effectively disables trading on BTC → use **structural gates** (ATR-normalised separation, etc.) instead of mystical thresholds | Project memory |
+| E4 | High-leverage liquidation-protection iron rules v2 (2026-08-30): all discipline converges to "compute the liquidation distance before entry; the stop-loss precedes liquidation and survives natively on the exchange" | Risk red lines = non-negotiable clauses | See §9 provenance |
+| E5 | XAUUSD sub-agent live trading (08-17~20): the breakout confirmation rule accumulated **13 breakouts — 6 real, 7 false, a 100% separation** (no real breakout was reclaimed within 3 bars); the RSI hedge filter was validated 6 times over 3 windows on the long side and 2 times on the short side, with the price pulling back every time it blocked an entry; spike pre-check (skip when maxTR > 2×SL; round 446: a spike bar reclaimed the false breakout in one hit); capital gate (a thin account is exhausted by a single stop: a 10.68 account stopped out, went to 5.09 and stopped trading on the spot) | Each concrete rule form was falsified/confirmed in live trading | See §9 provenance |
 
-**设计推论**:高闸低频之所以盈利,不是"阈值数字"起效,而是**多层结构过滤**在起作用。IronTrader 把这几层结构显式写成闸门。
-
----
-
-## 1. 人设(为什么它像一个交易员)
-
-- **岗位**:BTC 永续合约(USDT 本位)交易员,盯 1m 级别执行,但**每一笔的"大势判断"来自更长尺度的结构**,不因为 1m 噪声动心。
-- **性格**:保守、机械、厌恶不确定性。每天开工先过检查表;每笔单子回答三个问题:**方向看得懂吗?止损放得下吗?最坏情形扛得住吗?** 答不上来就不做。
-- **每日作息**(UTC 日界,北京 08:00 切日):
-  1. **开盘自检**:确认无残留持仓异常、日计数归零、参数未被改;
-  2. **盘中循环**:每根 1m K 收盘评估一次(见 §6 状态机);
-  3. **收盘复盘**:每笔平仓写入日志(开/平价、方向、R、理由、违例项);当日红线触发 → 只写日志不再开仓;
-  4. **周复盘**:期望值 ≤ 0 或连红天数异常 → 参数冻结评审(与 A/B 实验纪律同构,见 docs/ab-weight-trial.md)。
+**Design corollary**: a high gate with low frequency is profitable not because "the threshold number" works, but because **multi-layer structural filtering** does. IronTrader writes these layers out explicitly as gates.
 
 ---
 
-## 2. 行情与执行边界(先说清楚"能做什么")
+## 1. Persona (why it behaves like a trader)
 
-| 项 | 现状 | 影响 |
+- **Role**: a BTC perpetual (USDT-margined) futures trader who executes on the 1m timeframe, but **forms the "big-picture read" for every trade from a longer-horizon structure**, and is not moved by 1m noise.
+- **Character**: conservative, mechanical, averse to uncertainty. The day starts by passing a checklist; every order answers three questions: **Do I understand the direction? Is the stop-loss placeable? Can I survive the worst case?** If any answer is no, do not trade.
+- **Daily routine** (UTC day boundary; the day rolls over at 08:00 Beijing):
+  1. **Opening self-check**: confirm there are no abnormal leftover positions, that the daily counters are zeroed, and that the parameters were not changed;
+  2. **Intraday loop**: evaluate once per 1m candle close (see the §6 state machine);
+  3. **Post-close review**: log every close (entry/exit price, direction, R, reason, rule violations); when a red line triggers that day → log only and open no further positions;
+  4. **Weekly review**: expectancy ≤ 0 or an abnormal run of losing days → a parameter-freeze review (isomorphic to the A/B experiment discipline, see docs/ab-weight-trial.md).
+
+---
+
+## 2. Market data and execution boundaries (state up front "what it can do")
+
+| Item | Current state | Impact |
 |---|---|---|
-| 行情 | 本策略只消费**实例 symbol 的 1m 收盘 K 线**(引擎策略回调统一口径);多周期真实 K 线订阅不在本期范围 | 用长周期 EMA / 箱体在同一序列上"模拟"大势,不假装有 15m/1h 数据 |
-| 回测成交模型 | M33:信号在 K 线收盘触发,按**下一根收盘价**(或信号收盘价——以实际加载器为准)即时成交;`stop_loss_pct/take_profit_pct` 等 intra-bar 路径**未实现** | SL/TP 条款在回测中 = "收盘价确认止损",intra-bar 保真 → 待里程碑(§9 标记 ⚠️) |
-| 手续费 | 回测默认 futures taker 0.05%/腿(往返 0.10%) | 高频必死,E2/E1 已证;IronTrader 低频,但费率敏感时考虑 maker 变体 |
-| 资金模型 | 回测账户**无初始资金/无强平/无资金费**(增量净盈亏) | 铁律中的"强平距离/权益百分比"条款在回测语义 N/A,保留为实盘条款并标 [实盘] |
-| 时间事件 | 定档重大消息以**预置 UTC 事件窗**(§4.6,实例级 `news_windows`,回测 `--news` 注入,同表同行为)硬闸处理;未列入事件的冲击仍以波动率闸近似(§4.5) | **策略侧红字门闸已实现**(回测+信号侧,见 §4.6);实盘强平执行(OrderFlowExecutor 吃 Flat)仍 [实盘增强] |
+| Market data | This strategy only consumes **the instance symbol's 1m closed candles** (the engine's strategy callback normalises this); subscribing to real multi-timeframe candles is out of scope for this phase | Long-period EMAs / boxes are used to "simulate" the big picture on the same series — no pretending to have 15m/1h data |
+| Backtest fill model | M33: signals trigger on a candle close and fill immediately at **the next close** (or the signal close — whichever the actual loader uses); intra-bar paths such as `stop_loss_pct/take_profit_pct` are **not implemented** | In backtests the SL/TP clauses reduce to "close-price-confirmed stop"; intra-bar fidelity → pending milestone (marked ⚠️ in §9) |
+| Fees | Backtest default is futures taker 0.05%/leg (0.10% round trip) | High frequency is doomed; E2/E1 already prove it. IronTrader is low-frequency, but consider a maker variant when fee-sensitive |
+| Capital model | The backtest account has **no initial capital / no liquidation / no funding fee** (incremental net PnL) | The "liquidation distance / equity percentage" clauses are semantically N/A in backtests; they remain live-trading clauses and are tagged [live] |
+| Time events | Scheduled major news is handled by a hard gate on **preset UTC event windows** (§4.6, instance-level `news_windows`; injected in backtests via `--news`; same table, same behaviour); shocks not on the event list are still approximated by the volatility gate (§4.5) | **The strategy-side red-flag gate is implemented** (backtest + signal side, see §4.6); live flatten execution (OrderFlowExecutor consuming Flat) remains [live enhancement] |
 
 ---
 
-## 3. 风控铁律(红线 · 任何模式/任何参数版本不可动)
+## 3. Risk iron rules (red lines · immutable in any mode / any parameter version)
 
-> 源:高杠杆防爆仓铁律 v2 + XAU 任务书红线。改动任何一条必须先过用户评审并记入修订记录。
+> Source: high-leverage liquidation-protection iron rules v2 + the XAU taskbook red lines. Changing any single one requires user review first and an entry in the revision log.
 
-| # | 铁律 | 引擎/回测中的执行形态 |
+| # | Iron rule | Enforcement form in the engine/backtest |
 |---|---|---|
-| **R0** | **权益口径**:日初权益 = UTC 00:00Z 时刻的账户权益快照,当日所有 % 以此为分母。[回测/纸面] 纸面权益 = `it_equity_ref_usd`(默认 100.0,与 VPS 实盘账户同量级)+ 累计已实现盈亏,日初快照;[实盘] 账户权益(可用+持仓权益),入金/出金后以最近快照重锚 | 回测内置纸面记账;实盘接入引擎权益口径([实盘] 注) |
-| **R1** | **单笔止损成本 ≤ 2% × 日初权益**(先定止损距离,再反推开仓量:开仓量 = 权益×2% ÷ 止损距离):止损成本 = `it_sl_atr × ATR14 × quantity × quanto`,超过 2% → **不发信号**(发信号前检查) | [实盘] 引擎风险闸下单量校验兜底;[回测] 纸面权益口径见 R0,超限即拒发并在报告标注 |
-| **R2** | **同时最多 1 个持仓**;名义敞口硬上限 | 策略状态机"有仓 → 只做出场管理";引擎 maxOpenPositions 同口径兜底 |
-| **R3** | **止损先于强平**;止损 = 交易所原生(期货 price_orders),绝不依赖引擎内存 | [实盘] 开仓立即挂交易所侧触发单;[回测] ⚠️ 收盘确认止损近似 |
-| **R4** | **禁止摊平亏损仓**:浮亏方向不人工/自动加仓;只允许保本推损,不允许"越跌越买" | 策略恒 1 仓 + 冷却期,结构上不可能摊平;引擎 reduce-only 语义兜底 |
-| **R5** | **波动率纪律**:`volatility_regime = hot` 禁开新仓;近 3 根存在尖刺根(TR > 3×medTR20)时触发须**正常根复证**;近 20 根 maxTR > 2×SL 距离 → 跳过入场(尖刺打穿止损的滑点风险不可接受) | 完全可回测(§4 波动闸) |
-| **R6** | **每日熔断 = 当日已实现亏损 ≥ 5% × 日初权益 → 当日停手**(日亏红线**压过一切**——破线后当日只监控,任何豁免/最强信号也不开);连亏 **3** 笔 → 当日停手;单日开仓 ≤ **6** 笔;**连亏 2 后当日剩余额度仅 1 笔,且必须"最强信号"**(sep ≥ `it_streak_gate_mult` × gate,源:XAU"连亏 2 后下笔必须最强信号级",FOMC 后 16 轮 0 开 0 平) | 回测/实盘同口径,UTC 日界重置;计数进报告 |
-| **R7** | **盈利保护**:浮盈 ≥ 1 个止损距离 → 止损移到成本(保本);此后只推不平,按 ATR 移动止损,**永远不让浮盈变浮亏** | §4 出场规则;M33 ⚠️ 收盘近似 |
+| **R0** | **Equity basis**: the day-start equity is the account-equity snapshot at 00:00Z UTC, and every percentage that day uses it as the denominator. [backtest/paper] Paper equity = `it_equity_ref_usd` (default 100.0, the same order of magnitude as the VPS live account) + cumulative realised PnL, snapshotted at day start; [live] account equity (available + position equity), re-anchored to the latest snapshot after a deposit/withdrawal | Paper ledger built into the backtest; live trading uses the engine's equity basis ([live] note) |
+| **R1** | **Per-trade stop cost ≤ 2% × day-start equity** (fix the stop distance first, then invert for size: size = equity×2% ÷ stop distance): stop cost = `it_sl_atr × ATR14 × quantity × quanto`; above 2% → **emit no signal** (checked before emission) | [live] the engine's risk gate backstops the order-size check; [backtest] paper-equity basis per R0 — over the limit the signal is rejected and flagged in the report |
+| **R2** | **At most 1 position at a time**; hard notional-exposure cap | The strategy state machine "position open → exit management only"; the engine's maxOpenPositions backstops it with the same semantics |
+| **R3** | **The stop-loss precedes liquidation**; the stop is exchange-native (futures price_orders) and never relies on engine memory | [live] place the exchange-side trigger order immediately on entry; [backtest] ⚠️ approximated by a close-confirmed stop |
+| **R4** | **Averaging down into a losing position is forbidden**: no manual or automatic adding in the direction of a floating loss; only break-even and stop-trailing are allowed — never "buy more as it falls" | The strategy holds exactly 1 position + a cooldown, so averaging down is structurally impossible; the engine's reduce-only semantics backstop it |
+| **R5** | **Volatility discipline**: `volatility_regime = hot` blocks new positions; when a spike bar (TR > 3×medTR20) occurred within the last 3 bars, a trigger must be **re-confirmed by a normal bar**; maxTR over the last 20 bars > 2× the SL distance → skip the entry (the slippage risk of a spike punching through the stop is unacceptable) | Fully backtestable (§4 volatility gate) |
+| **R6** | **Daily circuit breaker = realised loss that day ≥ 5% × day-start equity → stop for the day** (the daily-loss red line **overrides everything** — after it is breached, that day is monitoring only; no exemption and no "strongest signal" reopens it); **3** consecutive losing trades → stop for the day; ≤ **6** entries per day; **after 2 consecutive losses the remaining daily allowance is 1 trade, and it must be the "strongest signal"** (sep ≥ `it_streak_gate_mult` × gate; source: the XAU rule "the next trade after 2 consecutive losses must be strongest-signal grade"; 16 rounds after FOMC with 0 opens and 0 closes) | Same semantics in backtest and live, reset on the UTC day boundary; counters go into the report |
+| **R7** | **Profit protection**: floating profit ≥ 1 stop distance → move the stop to cost (break-even); thereafter only tighten, never loosen, trailing by ATR — **never let a floating profit turn into a floating loss** | §4 exit rules; M33 ⚠️ close-price approximation |
 
-**下单前 30 秒检查表**(每次发信号前机械执行):
-1. R2:当前无持仓?有 → 出场管理,不开新仓
-2. R5:波动闸全过?(regime 非 hot / 无未复证尖刺 / maxTR 可接受)
-3. R6:日计数没过线?(已开 < 6 笔 / 连亏 < 3 / 当日已实现未达 −5% 日初权益)
-4. 方向与结构闸方向一致?(§4 第一层)
-5. 若为突破触发:确认制成立(两根收盘站界外)?RSI 对冲过滤未拦截?
-6. 止损价位记下了吗?最坏 8 小时(不盯盘)亏多少?能接受吗?
+**Pre-order 30-second checklist** (executed mechanically before every signal emission):
+1. R2: is there no open position? If there is one → exit management, no new entry
+2. R5: do all volatility gates pass? (regime not hot / no unconfirmed spike / maxTR acceptable)
+3. R6: are the daily counters within limits? (opened < 6 / consecutive losses < 3 / the day's realised loss has not reached −5% of day-start equity)
+4. Does the direction agree with the structure gate? (§4, first layer)
+5. If this is a breakout trigger: does the confirmation rule hold (two closes outside the boundary)? Did the RSI hedge filter not block it?
+6. Is the stop level written down? How much is lost in the worst 8 hours (away from the screen)? Is that acceptable?
 
-> 6 条全过 → 发信号;任何一条不过 → 本轮不发,等待下一个收盘。
+> All 6 pass → emit the signal; any single one fails → emit nothing this round and wait for the next close.
 
 ---
 
-## 4. 交易规则
+## 4. Trading rules
 
-### 4.1 三层闸门(全部满足才允许评估入场)
+### 4.1 Three gate layers (entry evaluation is allowed only when all pass)
 
-**G1 · 结构闸(大势,不可逆势)**:价格与长 EMA 的关系决定当日立场。
-- **多方结构** = `close > EMA(it_trend_ema)` **且** EMA 较 20 根前抬升(趋势向上);
-- **空方结构** = `close < EMA(it_trend_ema)` **且** EMA 较 20 根前下行;
-- 其余(价格贴 EMA 纠缠 / EMA 走平)= **无结构 → 全天只监控**,这是趋势交易员的"横盘不做"纪律。
+**G1 · Structure gate (the big picture — never trade against it)**: the relationship between price and the long EMA sets the stance for the day.
+- **Bullish structure** = `close > EMA(it_trend_ema)` **and** the EMA is higher than 20 bars ago (trend up);
+- **Bearish structure** = `close < EMA(it_trend_ema)` **and** the EMA is lower than 20 bars ago;
+- Everything else (price tangled at the EMA / EMA flat) = **no structure → monitor only for the whole day**; this is the trend trader's "no trading in a range" discipline.
 
-**G2 · 方向闸(动能在同侧且够强)**:
+**G2 · Direction gate (momentum on the same side and strong enough)**:
 ```
-sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR 归一化,修复 BTC 1m 置信失真(E3)
-多方动能: sep ≥ +it_sep_gate      空方动能: sep ≤ −it_sep_gate
+sep = (EMA(fast) − EMA(slow)) / ATR14        // ATR normalisation, fixing the BTC 1m confidence distortion (E3)
+bull momentum: sep ≥ +it_sep_gate      bear momentum: sep ≤ −it_sep_gate
 ```
-- |sep| 介于 0 与 gate 之间 = **粘合期**,是 XAU 实证里假交叉的重灾区 → 不做。
-- **时段分层**(BTC 24/7 无维护窗,主/收紧只是门槛分层、不是交易开关):主时段 **06:00Z–20:00Z**(欧美活跃)用 `it_sep_gate`;收紧时段 **20:00Z–06:00Z**(亚盘+凌晨薄流动性)门槛 × `it_tight_gate_mult` 且冷却 + `it_tight_cooldown_add` 根(源:XAU 任务书 v3.1 时段感知权重)。时刻一律以 K 线 **open_time** 的 UTC 判定(与实现一致;早期行文写 close_time,见修订记录 v1.5 口径修正),不信本地日历跨日(日界实证教训)。
+- |sep| between 0 and the gate = a **convergence zone** (glued EMAs), the worst area for false crosses in the XAU evidence → no trade.
+- **Session tiering** (BTC trades 24/7 with no maintenance window, so main/tight is only threshold tiering, not a trading switch): the main session **06:00Z–20:00Z** (European/US active hours) uses `it_sep_gate`; the tight session **20:00Z–06:00Z** (Asian session + thin overnight liquidity) multiplies the threshold by `it_tight_gate_mult` and adds `it_tight_cooldown_add` bars of cooldown (source: XAU taskbook v3.1 session-aware weights). Times are always judged on the UTC of the candle's **open_time** (consistent with the implementation; earlier drafts said close_time, see the v1.5 basis correction in the revision log) — never trust the local calendar for the day rollover (an empirical day-boundary lesson).
 
-**G3 · 波动闸(R5)**:
-- `regime ≠ hot`:ATR14 ≤ it_regime_cap × median(TR, 20);超限 = hot → 禁开;
-- 近 3 根内存在尖刺根(单根 TR > 3×median(TR,20))→ 入场触发需要**追加一根正常根复证**(防"一击收复"假破位/假收复,回合 446 实证);
-- maxTR(近 20 根) > it_spike_skip_mult × SL 距离 → 跳过本入场;
-- **尖刺根标注**(复盘 #9 口径):单根 TR > 3×medTR20 = 尖刺根,进 `indicators.spike_flag` ⚠️ 标注;递推 EMA/ATR 无法无痕剔除该根 → **诚实近似 = 不剔除计算、只做触发复证与禁入**(完整剔除待指标层重构,见 §9)。
+**G3 · Volatility gate (R5)**:
+- `regime ≠ hot`: ATR14 ≤ it_regime_cap × median(TR, 20); over the limit = hot → no entries;
+- If a spike bar (single-bar TR > 3×median(TR,20)) occurred within the last 3 bars → the entry trigger needs **one extra normal bar of re-confirmation** (guards against "one-hit reclaim" false breakouts/false reclaims; round 446 evidence);
+- maxTR (last 20 bars) > it_spike_skip_mult × SL distance → skip this entry;
+- **Spike-bar flagging** (review #9 convention): a single-bar TR > 3×medTR20 = a spike bar, flagged ⚠️ into `indicators.spike_flag`; recursive EMA/ATR cannot remove that bar cleanly → **honest approximation = do not exclude it from the computation, only require trigger re-confirmation and block entries** (full exclusion awaits an indicator-layer rewrite, see §9).
 
-### 4.2 触发(二层门通过后,二选一)
+### 4.2 Triggers (after the two gate layers pass, choose one of two)
 
-**T-A · 顺势拉回(默认形态,首选)**
-- 多方:结构多;上一根收盘 < EMA(fast)(拉回),**本根收盘收复 EMA(fast) 之上** → 拉回结束、动能恢复,入场做多;空方镜像。
-- 语义:顺大势、等小回撤、确认重拾才进场——不追不猜。
+**T-A · Trend pullback (default pattern, preferred)**
+- Long: bullish structure; the previous close < EMA(fast) (a pullback), **and this close reclaims above EMA(fast)** → the pullback is over and momentum has resumed: enter long; mirror for shorts.
+- Semantics: follow the big picture, wait for a small retracement, and enter only once the resumption is confirmed — no chasing, no guessing.
 
-**T-B · 突破确认(次选,须 G2 同向 + 确认制)**
-- 多方:1m 收盘突破近 `it_breakout_n` 根箱体高点,**下一根收盘仍站上**(破位确认制:滤假突破,4 假 1 真实证);空方镜像。
-- **RSI 对冲过滤**(M22 教训,回合 130→132):RSI(it_rsi_len) > it_rsi_ob(默认 70)时**不追多破位**;RSI < it_rsi_os(默认 30)时**不追空破位**;此过滤仅作用于 T-B,拉回 T-A 不受限。
-- **尖刺复证**:若近 3 根存在尖刺根,确认制需在两根确认收盘之外追加一根正常根仍站界外(回合 446)。
-- **入场前最后复检**(回合 178 教训:决策后 3 秒信号翻转,净 −0.12):T-A/T-B 成立后、发信号前,查近 `it_cooldown_bars` 根内是否刚发生**反向** sep 翻转或结构翻转 → 有则本轮作废。回测无撮合延迟,此检查防的是同一根噪声双向触发。
+**T-B · Breakout confirmation (secondary; requires G2 on the same side + the confirmation rule)**
+- Long: the 1m close breaks the high of the last `it_breakout_n`-bar box **and the next close still holds above it** (breakout confirmation rule: filters false breakouts, evidenced by 4 false vs 1 real); mirror for shorts.
+- **RSI hedge filter** (M22 lesson, rounds 130→132): when RSI(it_rsi_len) > it_rsi_ob (default 70), **do not chase a long breakout**; when RSI < it_rsi_os (default 30), **do not chase a short breakout**; this filter applies to T-B only — pullback T-A is unaffected.
+- **Spike re-confirmation**: if a spike bar occurred within the last 3 bars, the confirmation rule needs, beyond the two confirming closes, one extra normal bar that is still outside the boundary (round 446).
+- **Final pre-entry re-check** (round 178 lesson: the signal flipped 3 seconds after the decision, net −0.12): after T-A/T-B hold and before emitting the signal, check whether an **opposite** sep flip or structure flip just happened within the last `it_cooldown_bars` bars → if so, void this round. Backtests have no matching delay, so this check guards against the same noisy bar triggering in both directions.
 
-### 4.3 出场(持仓期间每根收盘只评估出场)
+### 4.3 Exits (while a position is open, each close evaluates exits only)
 
-| 规则 | 触发 | 动作 |
+| Rule | Trigger | Action |
 |---|---|---|
-| **硬止损** | 收盘价(回测近似)/ 原生触发单(实盘)触及 `entry ∓ it_sl_atr × ATR14` | 无条件离场(R3) |
-| **保本** | 浮盈 ≥ `it_be_x_sl` × 止损距离(默认 1.0,即价格反向走回整个止损距) | 止损上移至成本价(R7) |
-| **移动止损** | 保本后,止损 = 最高收盘 − `it_trail_atr` × ATR14(多),只推不平 | 锁住浮盈(R7) |
-| **结构反转** | 结构闸翻向对侧(收盘跌破趋势 EMA 且 EMA 转平/下) | 提前离场,不等止损 |
-| **动能反转** | EMA(fast) 与 EMA(slow) 死叉(多单) | 提前离场(因子反向,任务书第 4 步同款) |
-| **时间止损** | 持仓 > `it_timeout_bars` 根且浮盈 < `it_timeout_x_sl` × 止损距离 | 平价/小亏出,不"套住研究"过久 |
+| **Hard stop** | The close (backtest approximation) / the native trigger order (live) reaches `entry ∓ it_sl_atr × ATR14` | Unconditional exit (R3) |
+| **Break-even** | Floating profit ≥ `it_be_x_sl` × stop distance (default 1.0, i.e. the price retracing the whole stop distance) | Move the stop up to the entry price (R7) |
+| **Trailing stop** | After break-even, stop = highest close − `it_trail_atr` × ATR14 (long); tighten only, never loosen | Locks in the floating profit (R7) |
+| **Structure reversal** | The structure gate flips to the other side (the close breaks below the trend EMA and the EMA flattens/turns down) | Exit early instead of waiting for the stop |
+| **Momentum reversal** | EMA(fast) crosses below EMA(slow) (for a long) | Exit early (the factor reversed; same as step 4 of the taskbook) |
+| **Time stop** | Held > `it_timeout_bars` bars and floating profit < `it_timeout_x_sl` × stop distance | Leave at break-even/a small loss — do not "hold it hostage for research" too long |
 
-> **止损距离**(本表盈亏的度量单位)= `it_sl_atr × ATR14`,即价格波动多少等于"一个止损距"。复盘口径:浮盈/浮亏都用"止损距离倍数"记(1.0 = 价格走了整整一个止损距),与资金 % 无关,只度量交易本身的对错。
+> **Stop distance** (the unit in which this table measures PnL) = `it_sl_atr × ATR14`, i.e. how far the price must move to equal "one stop distance". Review convention: floating profits/losses are recorded as multiples of the stop distance (1.0 = the price travelled exactly one full stop distance); this is independent of the capital percentage and measures only whether the trade itself was right or wrong.
 
-### 4.4 冷却与计数
+### 4.4 Cooldown and counters
 
-- 平仓后冷却 `it_cooldown_bars`(默认 3)根 K 内不开新仓;
-- 连续止损 2 笔 → 当日只允许再开 **1** 次;再止损 → 触发 R6 连亏 3 停手(与 XAU"连亏 3 停手"红线同构);
-- 所有计数以 UTC 日界(00:00Z)归零;本地跨日不算(任务书日界教训)。
+- After a close, no new position for `it_cooldown_bars` (default 3) candles;
+- 2 consecutive stop-outs → only **1** more entry is allowed that day; another stop → R6's 3-consecutive-loss stop triggers (isomorphic to the XAU "stop after 3 consecutive losses" red line);
+- All counters reset on the UTC day boundary (00:00Z); a local-calendar rollover does not count (the taskbook's day-boundary lesson).
 
-### 4.5 明确不交易清单(观望也是持仓)
+### 4.5 Explicit no-trade list (waiting is also a position)
 
-- 无结构(横盘纠缠)/ 粘合(sep 不足)/ hot 波动 / 尖刺区未复证;
-- 反向触发刚发生过 1 根(等冷却);
-- **勿追急拉/急跌第一波**(用户原话纪律 + 复盘 #13/#15 实证:追第二腿顶 → 见顶回撤 ~6 点;高位压顶 0.75×ATR 不追 → 价格钉住横盘未续涨);
-- 任何一条 30 秒检查表不过;
-- ⚠️ **不猜**:数据/事件冲击后的第一波急拉急跌不追(**列入 §4.6 事件窗的走硬闸**;未列入的临时冲击以"maxTR 骤升 + sep 骤扩"波动近似兜底)。
+- No structure (range-bound tangle) / convergence (insufficient sep) / hot volatility / spike zone without re-confirmation;
+- The opposite trigger just happened 1 bar ago (wait out the cooldown);
+- **Do not chase the first leg of a fast rally/sell-off** (the user's own discipline + review #13/#15 evidence: chasing the second-leg top → a ~6-point pullback from the peak; not chasing a high-level cap at 0.75×ATR → the price pinned into a range instead of continuing up);
+- Any single item of the 30-second checklist fails;
+- ⚠️ **No guessing**: do not chase the first fast rally/sell-off after a data/event shock (**listed ones go through the §4.6 hard event gate**; unlisted temporary shocks are approximated by the volatility "maxTR jump + sep expansion" backstop).
 
-### 4.6 重大消息事件闸(红字日历门闸;g7/RED_WINDOW 同构)
+### 4.6 Major-news event gate (red-flag calendar gate; isomorphic to g7/RED_WINDOW)
 
-> 源:XAU 任务书 g7(事件日历门闸)+ RED_WINDOW 17:45Z–18:05Z 不开新仓 + 事件前持仓评估先例(docs/gate交易/黄金/joey-Z170I-PRO-GAMING/任务书/xauusd-agent-taskbook.md:18,58)。引擎无新闻日历 feed —— 本闸以**预置 UTC 事件窗**把"数据前纪律"从波动率近似升级为确定性硬闸。
+> Source: XAU taskbook g7 (event-calendar gate) + RED_WINDOW 17:45Z–18:05Z (no new positions) + the precedent of evaluating open positions before an event (docs/gate-trading/gold/joey-Z170I-PRO-GAMING/taskbook/xauusd-agent-taskbook.md:18,58). The engine has no news-calendar feed — this gate uses **preset UTC event windows** to upgrade "discipline around data releases" from a volatility approximation to a deterministic hard gate.
 
-- **配置**(实例级 TOML 键 `news_windows`,**非** `custom_params`/`--param` 键;回测用 `--news` 注入,见 docs/backtest.md):
+- **Configuration** (instance-level TOML key `news_windows`, **not** a `custom_params`/`--param` key; backtests inject it with `--news`, see docs/backtest.md):
 
   ```toml
   [[strategy.instances]]
   name = "iron_trader"
   symbol = "BTC_USDT"
   news_windows = [
-      { time = "2026-09-16T18:00:00Z" },                              # X/Y 缺省 15/15
+      { time = "2026-09-16T18:00:00Z" },                              # X/Y default to 15/15
       { time = "2026-10-01T12:30:00Z", close_before_min = 30, resume_after_min = 30 },
   ]
-  # time = ISO UTC 串 或 裸 epoch(< 1e12 视为秒,否则 ms);空/缺省 = 闸关
+  # time = an ISO UTC string or a bare epoch (< 1e12 is treated as seconds, otherwise ms); empty/absent = gate off
   ```
 
-- **语义**(事件时刻 T、提前平仓 X 分、延后恢复 Y 分;判定一律 K 线 **open_time** ms UTC,与时段分层/日界同口径):
-  - **禁开窗 = [T−X, T+Y)**:该区间内任意开仓信号不发(破位确认机 m_break_active 同步作废 —— 事件尖刺根不得充当恢复后的确认根);首根可开仓 K:`open_time ≥ T+Y`。
-  - **强平 = 持仓且 入场 K open_time < T,当前 open_time ≥ T−X**:首根到达即合成 Flat 出场(`exit_reason = news_blackout`,与其它出场同结算口径),平后保持禁开直到窗口结束。
-  - 多窗口取并集(重叠/乱序幂等);窗口过期自然失效(事件后开的仓永不触发该窗);X=0 表示事件当根收盘才平 —— 留余量请 X ≥ 1(1m 粒度动作延迟 ≤ 1 根)。
-  - **无运行期开关**:改配置 + 重启;事件清单预置(fail-safe:写错/漏配 = 闸关,解析期严格报错 5xxx)。
-- **范围 = 框架级通用**:任何 UnifiedScalper 族策略实例可配同款窗(基类 onKline 对 entry 信号统一兜底拦截、Flat 只平通道永远放行,见 NewsGate.hpp/UnifiedScalper.hpp);iron_trader 为本闸首个接线者(强平语义依赖其策略内状态机)。
-- ⚠️ 实盘强平**执行**(OrderFlowExecutor 对 Flat 的真实下单平仓)仍属 [实盘增强] future work —— 本闸在回测与信号侧完整生效,当前引擎 posture = signal_only。
+- **Semantics** (event instant T, flatten X minutes early, resume Y minutes late; judging is always on the candle's **open_time** ms UTC, the same basis as session tiering / the day boundary):
+  - **No-entry window = [T−X, T+Y)**: no entry signal is emitted anywhere inside this interval (the breakout-confirmation state m_break_active is invalidated in step — an event spike bar must not serve as the post-resumption confirmation bar); the first tradable candle is the one with `open_time ≥ T+Y`.
+  - **Forced flatten = a position is open and its entry candle's open_time < T while the current open_time ≥ T−X**: on the first such bar, synthesise a Flat exit (`exit_reason = news_blackout`, settled on the same basis as the other exits), and keep the no-entry block until the window ends.
+  - Multiple windows are unioned (overlapping/out-of-order windows are idempotent); an expired window lapses naturally (a position opened after the event never triggers that window); X=0 means flatten at the close of the event bar itself — leave margin and use X ≥ 1 (at 1m granularity the action lags by ≤ 1 bar).
+  - **No runtime toggle**: change the config + restart; the event list is preset (fail-safe: a typo or omission = the gate stays closed; parse time raises strict 5xxx errors).
+- **Scope = framework-wide generic**: any UnifiedScalper-family strategy instance can configure the same windows (the base class onKline uniformly intercepts entry signals, while the Flat close-only channel is always allowed — see NewsGate.hpp/UnifiedScalper.hpp); iron_trader is the first wiring of this gate (the flatten semantics rely on its in-strategy state machine).
+- ⚠️ Live flatten **execution** (OrderFlowExecutor placing a real closing order for Flat) is still [live enhancement] future work — this gate is fully effective in backtests and on the signal side; the current engine posture = signal_only.
 
-- 满足全部闸门 + 任一触发 → 发 `Buy`/`Sell`,置信度(实现口径,与 C++ 一致):
+- All gates pass + any trigger → emit `Buy`/`Sell`, with confidence (implementation basis, identical to the C++):
   ```
   confidence = clamp(0.6 + (|sep| / sep_gate_effective − 1.0), 0.0, 1.0)
-  sep_gate_effective = it_sep_gate × (时段收紧) × (连亏 2 最强信号倍数)
+  sep_gate_effective = it_sep_gate × (session tightening) × (strongest-signal multiplier after 2 consecutive losses)
   ```
-  设计理由:`sep ≥ gate` 是入场最低门槛 ⇒ 任何合格入场置信 ≥ **0.6**(引擎默认 min_confidence,不再像 E3 那样把信号静默滤掉),2×gate 封顶 1.0。闸不过一律不发;退出是 **Flat**(只平仓通道,见 §9 映射),与翻转事件驱动策略的"不发 Flat"不同——本策略的 Flat 是交易动作。
-- 退出的 Flat 信号 `indicators`:`{ state, exit_reason, close }`;`exit_reason ∈ { hard_stop, structure_flip, momentum_flip, time_stop, news_blackout(§4.6 事件闸强平) }`。
-- `indicators` 快照(进信号板/报告,每根收盘更新):`{ close, ema_trend, ema_fast, ema_slow, atr14, med_tr20, sep, regime, spike_flag, rsi14, box_high, box_low, state }`;
-- **暖机纪律**(复盘 #10:25 根短窗暖机算出假空头交叉差点带偏方向):`klineNeeded = it_trend_ema + 60`(覆盖斜率判定的 20 根余量 + ATR/RSI 稳定窗);暖机完成前不发任何信号、不发布状态——禁止用短窗"伪指标"发信号。
-- `reason` 人类可读:如 `pullback_resume_buy | sep=0.34 | regime=calm`。
-- **auto_trade 语义**:`auto_trade=0` 只发信号(信号板/回测报告),`=1` 走聚合器与风控下单(实盘);信号与 A/B 实验互不干扰(日志点在 auto_trade 闸门之前,M32 契约)。
+  Design rationale: `sep ≥ gate` is the minimum entry threshold ⇒ any qualifying entry has confidence ≥ **0.6** (the engine's default min_confidence), so signals are no longer silently filtered out the way E3 described; 2×gate caps it at 1.0. If a gate fails, nothing is emitted; an exit is **Flat** (the close-only channel, see the §9 mapping), unlike event-driven flip strategies that "never emit Flat" — here Flat is a trading action.
+- The exit Flat signal's `indicators`: `{ state, exit_reason, close }`; `exit_reason ∈ { hard_stop, structure_flip, momentum_flip, time_stop, news_blackout (§4.6 event-gate forced flatten) }`.
+- `indicators` snapshot (goes to the signal board/report, updated on every close): `{ close, ema_trend, ema_fast, ema_slow, atr14, med_tr20, sep, regime, spike_flag, rsi14, box_high, box_low, state }`;
+- **Warm-up discipline** (review #10: a 25-bar short-window warm-up computed a false bearish cross that nearly skewed the direction): `klineNeeded = it_trend_ema + 60` (covering the 20-bar slack for the slope test + the ATR/RSI stabilisation window); before warm-up completes, emit no signal and publish no state — emitting signals from short-window "pseudo-indicators" is forbidden.
+- `reason` is human-readable: e.g. `pullback_resume_buy | sep=0.34 | regime=calm`.
+- **auto_trade semantics**: `auto_trade=0` only emits signals (signal board/backtest report); `=1` goes through the aggregator and risk-checked order placement (live); signals and the A/B experiment do not interfere (the logging point sits before the auto_trade gate — the M32 contract).
 
 ---
 
-## 6. 决策状态机(伪代码,C++ 直接可翻译)
+## 6. Decision state machine (pseudocode, directly translatable to C++)
 
 ```
-每根 1m K 收盘(暖机完成前直接 return,klineNeeded 见 §5):
-  1. 更新指标:EMA(fast/slow/trend)、ATR14、medTR20、RSI14、箱体(high/low of last N closed);标 spike_flag(尖刺根,4.1 G3)
-  2. 更新结构方向 struct_dir = bull|bear|none(4.1 G1);判定当前时段(主 06:00Z–20:00Z / 收紧,按 open_time UTC)
-  3. 更新日计数(R6:已开笔数/连亏/当日已实现);跨 UTC 00:00Z → 全部归零
-  4. 事件闸(§4.6):命中任一窗 → 持仓且入场在事件前 → 强平 Flat(news_blackout)+结算 → return;无仓 → 破位机作废,return(禁开)
-  5. 若 持仓 != 0:
-       执行 4.3 出场检查;若平仓 → 记盈亏(止损距离倍数)/理由 → 冷却 it_cooldown_bars(+收紧时段 it_tight_cooldown_add)
-       若有仓且未平 → return(有仓只做管理,R2)
-  6. 若 冷却中 → return
-  7. 30 秒检查表(R2/R5/R6):不过 → return(记 reason)
-  8. 方向闸 G2:sep 同向达标(收紧时段 ×it_tight_gate_mult;连亏 2 后 ×it_streak_gate_mult)?不过 → return
-  9. 触发评估(先最后复检 4.2:近 cooldown 根内反向事件 → return):
-       T-A 拉回:上根收 < EMA_fast(多向)且本根收 > EMA_fast → 入场多
-       T-B 突破:收盘破箱体 + 确认制(+尖刺复证) → 入场(RSI 对冲过滤拦截则 return)
-  10. 入场:R1 检查(止损成本 ≤ 2%×日初权益,超限 return)→ 记 entry、初始止损 = entry ∓ it_sl_atr×ATR14 → 发 Buy/Sell 信号(带 indicators/reason)
+Every 1m candle close (return immediately before warm-up completes; klineNeeded in §5):
+  1. Update indicators: EMA(fast/slow/trend), ATR14, medTR20, RSI14, box (high/low of the last N closed bars); flag spike_flag (spike bar, 4.1 G3)
+  2. Update the structural direction struct_dir = bull|bear|none (4.1 G1); determine the current session (main 06:00Z–20:00Z / tight, by open_time UTC)
+  3. Update the daily counters (R6: entries opened / consecutive losses / day realised); crossing UTC 00:00Z → reset everything to zero
+  4. Event gate (§4.6): any window hit → position open and entry before the event → forced Flat (news_blackout) + settle → return; no position → invalidate the breakout machine, return (no entries)
+  5. If position != 0:
+       run the 4.3 exit checks; if closed → record PnL (in stop-distance multiples)/reason → cooldown it_cooldown_bars (+ it_tight_cooldown_add in the tight session)
+       if still open → return (an open position means management only, R2)
+  6. If in cooldown → return
+  7. 30-second checklist (R2/R5/R6): any failure → return (record the reason)
+  8. Direction gate G2: sep on the same side and above the threshold (×it_tight_gate_mult in the tight session; ×it_streak_gate_mult after 2 consecutive losses)? fail → return
+  9. Trigger evaluation (do the 4.2 final re-check first: an opposite event within the last cooldown bars → return):
+       T-A pullback: previous close < EMA_fast (long side) and this close > EMA_fast → go long
+       T-B breakout: close breaks the box + confirmation rule (+ spike re-confirmation) → enter (return if the RSI hedge filter blocks it)
+  10. Entry: R1 check (stop cost ≤ 2%× day-start equity, else return) → record entry, initial stop = entry ∓ it_sl_atr×ATR14 → emit the Buy/Sell signal (with indicators/reason)
 ```
 
 ---
 
-## 7. 参数表(custom_params 通道;`--param` 与 TOML 均可)
+## 7. Parameter table (custom_params channel; both `--param` and TOML work)
 
-| key | 默认 | 界 | 含义 |
+| key | Default | Range | Meaning |
 |---|---|---|---|
-| `it_trend_ema` | 200 | 20–400 | 结构闸长 EMA(1m×200 ≈ 3.3h 尺度) |
-| `it_fast_ema` / `it_slow_ema` | 12 / 26 | 2–200 | 动能 EMA 对(MACD 经典对) |
-| `it_atr_len` | 14 | 7–60 | ATR / TR 统计窗 |
-| `it_sep_gate` | 0.25 | 0.05–1.0 | 方向闸分离度下限(ATR 归一) |
-| `it_regime_cap` | 3.0 | 1.5–6.0 | hot 判定:ATR14 > cap×medTR20 |
-| `it_breakout_n` | 20 | 5–100 | 突破箱体根数 |
-| `it_rsi_len` / `it_rsi_ob` / `it_rsi_os` | 14 / 70 / 30 | — | RSI 对冲过滤(仅 T-B) |
-| `it_sl_atr` | 1.5 | 0.5–5.0 | 初始止损距离(×ATR14)= R 的定义 |
-| `it_be_x_sl` | 1.0 | 0.5–3.0 | 浮盈达 N×止损距离 → 移保本 |
-| `it_trail_atr` | 1.0 | 0.3–3.0 | 保本后移动止损距离 |
-| `it_timeout_bars` | 60 | 10–300 | 时间止损上限 |
-| `it_timeout_x_sl` | 0.5 | 0.1–2.0 | 超时浮盈要求(×止损距离) |
-| `it_cooldown_bars` | 3 | 0–20 | 平仓后冷却 |
-| `it_tight_gate_mult` | 1.25 | 1.0–3.0 | 收紧时段(20:00Z–06:00Z)方向闸倍数(时段分层,G2) |
-| `it_tight_cooldown_add` | 1 | 0–5 | 收紧时段冷却加根 |
-| `it_streak_gate_mult` | 1.25 | 1.0–3.0 | 连亏 2 后"最强信号"倍数(当日余额度 1 笔) |
-| `it_max_trades_day` | 6 | 1–30 | R6 日开仓上限 |
-| `it_equity_ref_usd` | 100.0 | 1–1e6 | 纸面起始权益(回测/纸面;实盘忽略,读引擎权益) |
-| `it_risk_pct` | 2 | 0.5–10 | R1:单笔止损成本上限(% 日初权益) |
-| `it_day_loss_pct` | 5 | 1–20 | R6:日亏停手线(% 日初权益) |
-| `it_quanto_est` | 0.0001 | >0 | [近似] 纸面记账合约乘数(BTC;其它币种须按合约表配) |
-| `it_fee_est` | 0.0005 | ≥0 | [近似] 纸面记账 taker 费率;引擎回测报告净盈亏才是权威 |
-| `it_consec_loss` | 3 | 1–6 | R6 连亏停手 |
-| `it_spike_skip_mult` | 2.0 | 1.0–4.0 | maxTR > N×SL 距离 → 跳过 |
-| `order_quantity`(atomic) | 由配置 | — | 单笔开仓量(R 按此复算) |
+| `it_trend_ema` | 200 | 20–400 | Structure-gate long EMA (1m×200 ≈ a 3.3h horizon) |
+| `it_fast_ema` / `it_slow_ema` | 12 / 26 | 2–200 | Momentum EMA pair (the classic MACD pair) |
+| `it_atr_len` | 14 | 7–60 | ATR / TR statistics window |
+| `it_sep_gate` | 0.25 | 0.05–1.0 | Direction-gate separation floor (ATR-normalised) |
+| `it_regime_cap` | 3.0 | 1.5–6.0 | hot test: ATR14 > cap×medTR20 |
+| `it_breakout_n` | 20 | 5–100 | Breakout box length in bars |
+| `it_rsi_len` / `it_rsi_ob` / `it_rsi_os` | 14 / 70 / 30 | — | RSI hedge filter (T-B only) |
+| `it_sl_atr` | 1.5 | 0.5–5.0 | Initial stop distance (×ATR14) = the definition of R |
+| `it_be_x_sl` | 1.0 | 0.5–3.0 | Move to break-even when the floating profit reaches N× the stop distance |
+| `it_trail_atr` | 1.0 | 0.3–3.0 | Trailing-stop distance after break-even |
+| `it_timeout_bars` | 60 | 10–300 | Time-stop cap |
+| `it_timeout_x_sl` | 0.5 | 0.1–2.0 | Floating-profit requirement at timeout (× stop distance) |
+| `it_cooldown_bars` | 3 | 0–20 | Cooldown after a close |
+| `it_tight_gate_mult` | 1.25 | 1.0–3.0 | Direction-gate multiplier in the tight session (20:00Z–06:00Z) (session tiering, G2) |
+| `it_tight_cooldown_add` | 1 | 0–5 | Extra cooldown bars in the tight session |
+| `it_streak_gate_mult` | 1.25 | 1.0–3.0 | The "strongest signal" multiplier after 2 consecutive losses (1 trade of allowance left that day) |
+| `it_max_trades_day` | 6 | 1–30 | R6 daily entry cap |
+| `it_equity_ref_usd` | 100.0 | 1–1e6 | Paper starting equity (backtest/paper; ignored live, where the engine equity is read) |
+| `it_risk_pct` | 2 | 0.5–10 | R1: per-trade stop-cost cap (% of day-start equity) |
+| `it_day_loss_pct` | 5 | 1–20 | R6: daily-loss stop line (% of day-start equity) |
+| `it_quanto_est` | 0.0001 | >0 | [approximation] paper-ledger contract multiplier (BTC; other coins must be set from the contract table) |
+| `it_fee_est` | 0.0005 | ≥0 | [approximation] paper-ledger taker fee rate; the engine's backtest report net PnL is authoritative |
+| `it_consec_loss` | 3 | 1–6 | R6 consecutive-loss stop |
+| `it_spike_skip_mult` | 2.0 | 1.0–4.0 | maxTR > N× the SL distance → skip |
+| `order_quantity`(atomic) | from config | — | Per-trade order size (R is recomputed from this) |
 
-> 默认值 = 初值,待 `tools/backtest_sweep.py` 标定;**铁律语义随参数变化的是频率与 R 大小,不是纪律本身**——任何一组参数跑出"高频率 + 小止损"形态,都直接违反 R1/R6,评审一票否决。
+> The defaults are initial values awaiting calibration by `tools/backtest_sweep.py`; **what changes with the parameters is the frequency and the R size, not the discipline itself** — any parameter set that produces a "high frequency + tiny stop" shape directly violates R1/R6 and is vetoed in review.
 >
-> `news_windows`(§4.6)是**实例级 TOML 键**(结构化时间表,double 通道装不下),不在上表 / 不在 `--param` 语法内;回测以可重复 `--news TIME[/X[/Y]]` 注入(缺省 X/Y = 15/15)。
+> `news_windows` (§4.6) is an **instance-level TOML key** (a structured timetable that the double channel cannot hold); it is not in the table above and not part of the `--param` syntax. Backtests inject it with the repeatable `--news TIME[/X[/Y]]` (X/Y default to 15/15).
 
 ---
 
-## 8. 验收与测试清单
+## 8. Acceptance and test checklist
 
-- [ ] 单测:G1 三态(牛/熊/无结构)与 EMA 走平判定;G2 粘合不出信号;G3 hot/尖刺复证/暴 TR 跳过;
-- [ ] 单测:T-B 破位确认制(一突破、二确认、三复证)与 RSI 对冲拦截;T-A 拉回判定;
-- [ ] 单测:出场链 硬止损 → 保本 → 移动 → 结构反转 → 动能反转 → 时间止损 逐条状态迁移;
-- [ ] 单测:R6 计数(日界重置/连亏停手/日亏停手/日笔数上限);
-- [ ] 回测验收:BTC futures 近周(08-30→09-06)默认参数:信号数应为个位数(低频特征),若 > 30 笔/周 → 视为闸门失效,红;
-- [ ] 回测对比:E1 对照——同窗 IronTrader vs momentum 低闸 254 笔 −50.25,应显著优于(纪律溢价可量化);
-- [x] 单测:事件闸四用例(2026-09-06):① 黑名单禁开 ② 持仓跨 T−X 恰一根 Flat(news_blackout,exit_reason/indicators 校验)③ 窗口过后恢复开仓 ④ 破位机跨事件停摆(首根回来只 re-arm 不秒确认)—— 全绿(1032 全量);
-- [x] E2E(2026-09-06,BTC futures 08-30→09-06):`--news 2026-08-31T05:46:30Z/10/5` → 基线 37 分钟持仓(05:28→06:05)被强平为 05:28→**05:37**(首根 open_time ≥ T−X=05:36:30),其余 25 笔交易逐笔不变;事件窗盖住入场点时 → 入场信号被吞、禁闭窗内零开仓;
-- 初值实测(2026-09-06,BTC futures 08-30→09-06,9,839 根,qty=20):默认参数 **26 笔/周、净 −4.74(胜率 15%,手续费 4.10)**;`sep_gate/sl_atr/cooldown/动能周期` 单独收严均**不降频**(BTC 1m 的 |sep| 天然巨大,换手由结构窗内小回踩事件数决定)→ 频率杠杆在**冷却/持仓间隔与时间尺度**,参数标定走 `backtest_sweep.py`;maker 费率(0.02%)下手续费减半(−2.28),实盘优先 maker-first;
-- **sweep 标定(2026-09-06,480 组合 = 240×2 数据集,数据存 `results/sweep_iron_{futures,spot}.csv`)**:
-  - futures 6.9d:taker 口径 **240 组合 0 盈利**(最好 −1.18);maker(0.02%,费用线性换算+确认跑)最好 **+1.37**(cd40/sl5/trend400/box60/sep0.3),但**最大单笔 +1.05 = 净利 77%** → 单笔运气,不可提拔;
-  - spot 13.7d:taker 与 maker 口径 **240 组合全部亏损**(毛利顶天 +1.0/50 笔);
-  - 结论 ① **信号数对冷却/趋势周期不变**(≈26/6.9d):入场来自每天 3-4 个结构窗口,参数改的是质量不是频率;② sl_atr=5/trend=400 温和更优(止损出噪声区),方向一致但弱;③ **BTC 1m 拉回-突破毛利 ≈ 0**,盈利与否 = 手续费执行价差 → 结论是执行层的:**此策略在 1m 上无参数可救,边际杠杆在时间尺度(5m/15m/1h)与 maker-first**,默认参数保持"初值"不假装已标定;
-- **全周期实证 v1.6(2026-09-06,BTC futures qty=20;数据通道修复 7156f0f 后 `--interval` 真拉 5m/15m/1h,非 1m 直连 REST 不回写,深度 5m≈35d/15m≈104d/1h≈416d)**:
-  - 同周(08-30→09-06):1m 26 笔 **−4.74** / 5m 20 笔 −9.06 / 15m 5 笔 −4.12;
-  - 3 周(08-16→09-06):5m 72 笔 **−20.06(最差)** / 15m 默认 25 笔 **−3.57(毛 +0.30 = 首个除费前转正,均赢/均亏 1.30)** / 15m 标定(sl4·sep0.4·to40·ema100·be1.5)18 笔 **+12.93(费后首个为正,但 79% 来自单笔 +10.18)**;
-  - **样本外 3 个月(06-01→09-06,证伪关键)**:15m 默认 135 笔 −18.51 / 15m 标定 86 笔 −15.22(仍最不亏,频率 6.1/周 稳定) / 1h 默认 23 笔 −7.21(胜率 43.5%,−0.5/周) / 1h 标定 8 笔 +21.28(**1 笔巨赢 = 全部,样本不足不可信**);
-  - 48 组合 15m sweep(`results/sweep_iron_trader_BTC_USDT.csv`):sl=4·sep≥0.4·be=1.5 霸榜 —— "止损出噪声区 + 只做高质量 + 让赢单跑",与 1m 480 组合"方向一致但弱"同构;
-  - 赢单实录(sl4 组合唯一大赢):08-20 21:30Z Buy 72,705.9 → 08-21 09:00Z 平 77,873.0,46×15m = 11.5h,骑 08-21 **BTC +9% 暴涨**(QE-lite/CLARITY 催化);峰值浮盈 +13.14@79,567(08:45),09:00 反转棒(79,275→低 77,240)收盘确认退出回吐至 +10.33;22:00 一度 −0.3% 洗盘被宽 R(4×ATR)扛过 = 能吃主升的原因;出场后 12 根未再收复 78.5k,平在局部顶区;
-  - **结论 v1.6**:周期越长形态越成立(频率 26→1.6 笔/周,费拖累 4.1→~1 消失,赢亏比翻过 1),但 **BTC 上无任何周期/参数组合跑出样本外稳健正期望** —— 一切表面盈利 = 尾部单笔 + 时段行情,3 个月样本外即回归。**主周期推荐 15m**(证据最厚、86 笔可统计、参数规律跨周期一致);1h 仅观察窗(23 笔/3 月样本太薄);5m 最差勿用。默认参数保持"初值";若实盘试水 = 15m + 标定组 + maker-first + 小仓,预期定在"打平附近积累长样本",真实盈利须等 2-3 个月长样本 + 下一暴涨日复验尾部依赖;
-  - 回测口径:实例 news_windows 为前瞻表(09-11 起),窗内真实历史事件(如 09-04 NFP 12:30Z)不在表内 → **回测历史窗须显式 `--news` 补真实事件**;09-04 NFP 加窗实测逐位不变(策略活跃段 00–08Z 与美宏观 12:30Z 错峰,空仓),属巧合非闸效;闸活性见上 E2E;
-- [ ] 文档回填:§9 映射表在 C++ 落地后逐项核对 ⚠️/待保真 状态。
+- [ ] Unit test: the three G1 states (bull/bear/no structure) and the EMA-flat test; G2 emits nothing in convergence; G3 hot / spike re-confirmation / huge-TR skip;
+- [ ] Unit test: the T-B breakout confirmation rule (break, confirm, re-confirm) and the RSI hedge block; the T-A pullback test;
+- [ ] Unit test: the exit chain hard stop → break-even → trailing → structure reversal → momentum reversal → time stop, transition by transition;
+- [ ] Unit test: the R6 counters (day-boundary reset / consecutive-loss stop / daily-loss stop / daily trade cap);
+- [ ] Backtest acceptance: BTC futures over the recent week (08-30→09-06) with the default parameters — the signal count should be single-digit (a low-frequency feature); more than 30 trades/week → treat the gates as failed, red;
+- [ ] Backtest comparison: the E1 control — IronTrader over the same window vs momentum's low gate with 254 trades and −50.25; it should be clearly better (the discipline premium is quantifiable);
+- [x] Unit test: the four event-gate cases (2026-09-06): ① the blackout blocks entries ② a position crossing T−X flattens on exactly one bar (news_blackout, with exit_reason/indicators asserted) ③ entries resume after the window ④ the breakout machine idles across the event (on the first bar back it only re-arms, it does not confirm instantly) — all green (1032 total);
+- [x] E2E (2026-09-06, BTC futures 08-30→09-06): `--news 2026-08-31T05:46:30Z/10/5` → the baseline 37-minute position (05:28→06:05) was flattened to 05:28→**05:37** (the first bar with open_time ≥ T−X = 05:36:30), while the other 25 trades stayed identical trade by trade; when the event window covers the entry moment → the entry signal is swallowed and there are zero entries inside the blackout window;
+- Initial-value measurement (2026-09-06, BTC futures 08-30→09-06, 9,839 bars, qty=20): default parameters **26 trades/week, net −4.74 (win rate 15%, fees 4.10)**; tightening `sep_gate/sl_atr/cooldown/momentum period` individually does **not reduce the frequency** (BTC 1m |sep| is naturally huge, and turnover is set by the number of small pullback events inside the structure window) → the frequency lever is **cooldown/holding gap and time scale**; calibrate parameters via `backtest_sweep.py`; at the maker fee (0.02%) fees halve (−2.28), so favour maker-first live;
+- **Sweep calibration (2026-09-06, 480 combinations = 240×2 datasets, data in `results/sweep_iron_{futures,spot}.csv`)**:
+  - futures 6.9d: under the taker basis **0 of 240 combinations were profitable** (best −1.18); under maker (0.02%, fees converted linearly + a confirming run) the best was **+1.37** (cd40/sl5/trend400/box60/sep0.3), but **the largest single trade +1.05 = 77% of the net profit** → one lucky trade, not promotable;
+  - spot 13.7d: **all 240 combinations lost** under both the taker and the maker basis (gross at best +1.0 over 50 trades);
+  - Conclusions: ① **the signal count does not change with cooldown/trend period** (≈26/6.9d): entries come from 3-4 structure windows per day, so the parameters change quality, not frequency; ② sl_atr=5/trend=400 is mildly better (the stop leaves the noise band); the direction is consistent but weak; ③ **BTC 1m pullback-breakout gross is ≈ 0**, so profitability is purely the fee/execution spread → the conclusion is at the execution layer: **this strategy cannot be rescued by parameters on 1m; the marginal lever is the time scale (5m/15m/1h) and maker-first**; the defaults stay at their "initial values" and do not pretend to be calibrated;
+- **Full-cycle evidence v1.6 (2026-09-06, BTC futures qty=20; after the data-channel fix 7156f0f, `--interval` really fetches 5m/15m/1h — a non-1m direct REST call does not write back; depth 5m≈35d/15m≈104d/1h≈416d)**:
+  - Same week (08-30→09-06): 1m 26 trades **−4.74** / 5m 20 trades −9.06 / 15m 5 trades −4.12;
+  - 3 weeks (08-16→09-06): 5m 72 trades **−20.06 (worst)** / 15m defaults 25 trades **−3.57 (gross +0.30 = the first gross-positive result; average win/average loss 1.30)** / 15m calibrated (sl4·sep0.4·to40·ema100·be1.5) 18 trades **+12.93 (the first net-positive result, but 79% comes from a single trade of +10.18)**;
+  - **3 months out of sample (06-01→09-06, the key falsification)**: 15m defaults 135 trades −18.51 / 15m calibrated 86 trades −15.22 (still the least bad, with a stable 6.1/week frequency) / 1h defaults 23 trades −7.21 (win rate 43.5%, −0.5/week) / 1h calibrated 8 trades +21.28 (**one huge winner = everything; too few samples to trust**);
+  - 48-combination 15m sweep (`results/sweep_iron_trader_BTC_USDT.csv`): sl=4·sep≥0.4·be=1.5 dominates the leaderboard — "stop out of the noise band + only high-quality trades + let winners run", isomorphic to the 1m 480-combination "same direction but weak" result;
+  - Winning-trade record (the only big winner in the sl4 set): 08-20 21:30Z Buy 72,705.9 → 08-21 09:00Z close 77,873.0, 46×15m = 11.5h, riding the 08-21 **BTC +9% surge** (QE-lite/CLARITY catalysts); peak floating profit +13.14@79,567 (08:45); the 09:00 reversal bar (79,275→low 77,240) confirmed the exit on its close, giving back to +10.33; a shakeout to −0.3% at 22:00 was survived by the wide R (4×ATR) — that is why it could ride the main upleg; 12 bars after the exit the price never reclaimed 78.5k, so the exit landed in the local top zone;
+  - **Conclusion v1.6**: the longer the timeframe, the better the pattern holds (frequency 26→1.6 trades/week, the fee drag disappears from 4.1 to ~1, and the win/loss ratio crosses 1), but **no timeframe/parameter combination on BTC produced a robust out-of-sample positive expectancy** — every apparent profit is a tail trade plus a period-specific move, and it reverts over a 3-month out-of-sample window. **The recommended primary timeframe is 15m** (thickest evidence, 86 statistically treatable trades, parameter regularities consistent across timeframes); 1h is an observation window only (23 trades over 3 months is too thin a sample); 5m is the worst — do not use it. The defaults stay at their "initial values"; a live trial = 15m + the calibrated set + maker-first + small size, with the expectation set at "accumulate a long sample around break-even" — real profitability must wait for a 2-3 month long sample plus a re-test of the tail dependency on the next surge day;
+  - Backtest basis: the instance's news_windows is a forward-looking table (from 09-11), so real historical events inside the tested window (e.g. 09-04 NFP 12:30Z) are not in it → **historical backtest windows must add the real events explicitly with `--news`**; adding the 09-04 NFP window produced an identical result bar by bar (the strategy's active period 00–08Z is out of phase with the US macro 12:30Z and it was flat), which is coincidence, not the gate working; gate liveness is shown in the E2E above;
+- [ ] Doc backfill: check the ⚠️/pending-fidelity status of each row of the §9 mapping table once the C++ lands.
 
 ---
 
-## 9. 素材溯源与引擎能力映射(文档 ↔ 代码 ↔ 出处)
+## 9. Material provenance and engine-capability mapping (doc ↔ code ↔ source)
 
-| 条款 | 素材出处 | 引擎现状 |
+| Clause | Material source | Engine status |
 |---|---|---|
-| R1 单笔 2% / R6 日亏 5% 权益 | 铁律 v2 §1/§2/§6(日内亏 5% 停机、单笔 2% 复盘) | 回测:纸面权益记账(R0);实盘:风险闸 + maxDailyDrawdown ✅ |
-| R3 原生止损 | 铁律 v2 §3(期货 price_orders);M21 附件 SL/TP | [实盘] ✅;回测 ⚠️ 收盘近似,M33 intra-bar 未实现 |
-| R4 禁摊平 | 铁律 v2 §4;SNDK 下跌中阶梯加多被套(接刀反例,浮亏最深超 1.956) | 结构保证 + reduce-only ✅ |
-| R5 波动纪律 / regime / 尖刺 | 任务书 Gate2;复盘 #9/#13;回合 446;SNDK 暴拉冻结 | 可回测 ✅(指标在 C++ 期实现);尖刺剔除 = 近似(标注+复证) |
-| 时段分层(主/收紧) | XAU 任务书 v3.1 时段感知权重(BTC 24/7 → 门槛分层非开关) | 可回测 ✅ |
-| R6 连亏 2 后最强信号 | XAU"连亏 2 后下笔必须最强信号级"(FOMC 后 16 轮 0 开 0 平,无 FOMO) | 可回测 ✅ |
-| 入场前最后复检 | 回合 178(决策-执行缝隙事故,净 −0.12) | 状态机近似 ✅ |
-| 勿追第一波 / 第二腿顶 | 用户原话 + 复盘 #13/#15 | 4.5 清单 ✅ |
-| 暖机禁短窗假信号 | 复盘 #10(25 根暖机假交叉实例) | warmup 参数 ✅ |
-| 无保护仓即时处置 | 任务书第 1 步(裸仓 = 最高优先级风险项,modify 锁 → close 兜底) | [实盘] ✅ / 回测 N/A |
-| 只平仓退出(Flat 通道) | 任务书"不追单/不反手";Flip 模型的局限 | BacktestAccount Flat = 只平不开(2026-09-06 实现);实盘 OrderFlowExecutor 语义待验证 |
-| R6 日熔断 | 铁律 v2 §6;任务书红线(日亏/连亏 3/往返上限) | 可回测 ✅ |
-| R7 保本推损 | 铁律 v2 §7 | 回测 ⚠️ 收盘近似 |
-| G1 结构闸(长 EMA + 斜率) | 剥头皮/共振族的"顺大"思想;ema-resonance 全排列思路的轻量版 | 新实现 |
-| G2 sep ATR 归一 | 信号板设计 §4 方向过滤 + C 方案(置信 ATR 归一修复的工程结论) | 新实现(修复 E3 的关键) |
-| T-B 确认制/RSI 对冲/复证 | 复盘 #5/#6/M22 回合 130–132/回合 446 | 新实现 |
-| 时间止损/冷却/日界 | 任务书 §4/日界教训 | 可回测 ✅ |
-| 真事件日历门闸(§4.6)、maker-first 变体、intra-bar SL/TP | 任务书 g7/B2;M16;M33 路线图;XAU RED_WINDOW | 回测/信号侧 ✅(2026-09-06 落地,预置 UTC 窗 + Flat news_blackout);实盘强平执行(OrderFlowExecutor 吃 Flat)仍 [实盘增强];maker-first 变体、intra-bar SL/TP 待里程碑 |
+| R1 per-trade 2% / R6 daily loss 5% of equity | Iron rules v2 §1/§2/§6 (intraday 5% loss → halt, per-trade 2% review) | Backtest: paper-equity ledger (R0); live: risk gate + maxDailyDrawdown ✅ |
+| R3 native stop | Iron rules v2 §3 (futures price_orders); M21 attached SL/TP | [live] ✅; backtest ⚠️ close-price approximation, M33 intra-bar not implemented |
+| R4 no averaging down | Iron rules v2 §4; SNDK laddered longs during a decline got trapped (the catching-a-falling-knife counterexample, deepest floating loss beyond 1.956) | Structural guarantee + reduce-only ✅ |
+| R5 volatility discipline / regime / spike | Taskbook Gate2; reviews #9/#13; round 446; SNDK spike freeze | Backtestable ✅ (indicators implemented in the C++ phase); spike exclusion = approximation (flag + re-confirmation) |
+| Session tiering (main/tight) | XAU taskbook v3.1 session-aware weights (BTC 24/7 → threshold tiering, not a switch) | Backtestable ✅ |
+| R6 strongest signal after 2 consecutive losses | XAU "the next trade after 2 consecutive losses must be strongest-signal grade" (16 rounds after FOMC with 0 opens and 0 closes, no FOMO) | Backtestable ✅ |
+| Final pre-entry re-check | Round 178 (a decision-to-execution gap incident, net −0.12) | State-machine approximation ✅ |
+| Do not chase the first leg / second-leg top | User's own words + reviews #13/#15 | 4.5 checklist ✅ |
+| Warm-up blocks short-window false signals | Review #10 (a 25-bar warm-up false-cross instance) | warmup parameter ✅ |
+| Immediate handling of unprotected positions | Taskbook step 1 (a naked position = the highest-priority risk item; try a modify lock → close as the fallback) | [live] ✅ / backtest N/A |
+| Close-only exits (Flat channel) | Taskbook "no chasing / no flipping"; the limits of the Flip model | BacktestAccount Flat = close without opening (implemented 2026-09-06); live OrderFlowExecutor semantics pending verification |
+| R6 daily circuit breaker | Iron rules v2 §6; taskbook red lines (daily loss / 3 consecutive losses / round-trip cap) | Backtestable ✅ |
+| R7 break-even and stop trailing | Iron rules v2 §7 | Backtest ⚠️ close-price approximation |
+| G1 structure gate (long EMA + slope) | The "follow the big picture" idea of the scalping/resonance family; a lightweight version of the ema-resonance full-permutation approach | New implementation |
+| G2 sep ATR normalisation | Signal-board design §4 direction filter + plan C (the engineering conclusion of the confidence ATR-normalisation fix) | New implementation (the key to fixing E3) |
+| T-B confirmation rule / RSI hedge / re-confirmation | Reviews #5/#6, M22 rounds 130–132, round 446 | New implementation |
+| Time stop / cooldown / day boundary | Taskbook §4 / the day-boundary lesson | Backtestable ✅ |
+| Real event-calendar gate (§4.6), maker-first variant, intra-bar SL/TP | Taskbook g7/B2; M16; M33 roadmap; XAU RED_WINDOW | Backtest/signal side ✅ (landed 2026-09-06: preset UTC windows + Flat news_blackout); live flatten execution (OrderFlowExecutor consuming Flat) is still [live enhancement]; the maker-first variant and intra-bar SL/TP await a milestone |
 
 ---
 
-## 修订记录
+## Revision log
 
-| 版本 | 日期 | 变更 |
+| Version | Date | Change |
 |---|---|---|
-| v1.0-draft | 2026-09-06 | 初稿:素材(铁律 v2 / XAU 任务书 v3.4 / 信号板 §4 / M22 教训 / M33 实证)蒸馏为 IronTrader 规则基线 |
-| v1.1-draft | 2026-09-06 | 并入思考板挖掘(797KB+204KB 日志 + changelog)结果:确认制累计 13 破 6 真 7 假 100% 区分、RSI 对冲双侧重验、时段分层、连亏 2 最强信号、勿追第一波、暖机纪律、尖刺剔除口径(标注+复证近似)→ §0/§3/§4/§5/§6/§7/§9 |
-| v1.2-draft | 2026-09-06 | 用户裁定:资金闸改用 **% 口径**(R 单位退役)——新增 R0 纸面权益记账;R1 单笔止损成本 ≤ 2%×日初权益(超限拒发信号);R6 日亏 ≥ 5%×日初权益停手;保本/时间止损改用"止损距离倍数"(`it_be_x_sl`/`it_timeout_x_sl`);参数换入 `it_equity_ref_usd`/`it_risk_pct`/`it_day_loss_pct` |
-| v1.3 | 2026-09-06 | C++ 落地(1016 全绿):注册键 `iron_trader`;BacktestAccount 增 **Flat = 只平不开**通道;置信公式对齐实现(§5);补 `it_quanto_est`/`it_fee_est` [近似] 参数;§9 增 Flat 通道映射;回测初值表见 §8(默认参数 26 笔/周 −4.74,闸门收严不降频——BTC 1m 结构性结论,参数标定走 sweep) |
-| v1.4 | 2026-09-06 | 480 组合 sweep 标定结论落档(§8 + results/ 两份 CSV):taker 下无盈利组合;maker 最好角 +1.37 但 77% 来自单笔;spot 全负;1m 毛利≈0 → 默认参数保持初值,边际杠杆在时间尺度与 maker-first |
-| v1.5 | 2026-09-06 | **重大消息事件闸落地**(§4.6,1032 全绿 + E2E 实录):预置 UTC 窗实例级 `news_windows`(回测 `--news`),禁开 [T−X, T+Y) + 持仓跨 T−X 强制 Flat(`news_blackout`),框架级通用(NewsGate.hpp 纯逻辑 + UnifiedScalper 基类兜底),iron_trader 首个接线;**口径修正声明**:时段分层/日界/本闸一律以 K 线 **open_time** UTC 判定(早期 §4.1/§6 行文写 close_time,与实现不符,现文档与实现统一为 open_time) |
-| v1.6 | 2026-09-06 | **全周期实证落档**(§8,数据通道修复 7156f0f 使 `--interval` 5m/15m/1h 可用):同周/3 周/3 个月样本外对比 + 48 组合 15m sweep —— 周期越长形态越成立(15m 首个毛转正、赢亏比 1.30),但**无任何周期样本外稳健正期望**,表面盈利皆尾部单笔;**主周期推荐 15m**(86 笔可统计、参数规律 sl4·sep0.4·be1.5 跨周期一致),1h 观察窗、5m 最差勿用;默认参数保持初值 |
+| v1.0-draft | 2026-09-06 | Initial draft: distilled the material (iron rules v2 / XAU taskbook v3.4 / signal board §4 / M22 lesson / M33 evidence) into the IronTrader rule baseline |
+| v1.1-draft | 2026-09-06 | Merged the thinking-board mining results (797KB + 204KB of logs + changelog): the confirmation rule's cumulative 13 breakouts — 6 real, 7 false, a 100% separation; the RSI hedge retested on both sides; session tiering; strongest signal after 2 consecutive losses; do not chase the first leg; warm-up discipline; the spike-exclusion convention (flag + re-confirmation approximation) → §0/§3/§4/§5/§6/§7/§9 |
+| v1.2-draft | 2026-09-06 | User ruling: the capital gate switches to a **% basis** (the R unit is retired) — R0 paper-equity ledger added; R1 per-trade stop cost ≤ 2%× day-start equity (over the limit the signal is rejected); R6 stop at a daily loss ≥ 5%× day-start equity; break-even/time stop now use "stop-distance multiples" (`it_be_x_sl`/`it_timeout_x_sl`); parameters replaced with `it_equity_ref_usd`/`it_risk_pct`/`it_day_loss_pct` |
+| v1.3 | 2026-09-06 | C++ landed (1016 green): registration key `iron_trader`; BacktestAccount gains a **Flat = close without opening** channel; the confidence formula aligned with the implementation (§5); added the `it_quanto_est`/`it_fee_est` [approximation] parameters; §9 gains the Flat-channel mapping; the backtest initial-value table is in §8 (defaults 26 trades/week, −4.74; tightening the gates does not reduce the frequency — a structural BTC 1m conclusion; parameter calibration goes through the sweep) |
+| v1.4 | 2026-09-06 | 480-combination sweep calibration recorded (§8 + the two CSVs under results/): no profitable combination under taker; the best maker corner +1.37 but 77% from a single trade; spot all negative; 1m gross ≈ 0 → the defaults stay at their initial values, and the marginal lever is the time scale and maker-first |
+| v1.5 | 2026-09-06 | **The major-news event gate landed** (§4.6, 1032 green + an E2E record): instance-level `news_windows` with preset UTC windows (backtest `--news`), no-entry [T−X, T+Y) + forced Flat (`news_blackout`) for positions crossing T−X, framework-generic (NewsGate.hpp pure logic + UnifiedScalper base-class backstop), with iron_trader as the first wiring; **basis correction statement**: session tiering / day boundary / this gate are all judged on the candle's **open_time** UTC (earlier §4.1/§6 wording said close_time, inconsistent with the implementation; the doc and the implementation are now unified on open_time) |
+| v1.6 | 2026-09-06 | **Full-cycle evidence recorded** (§8; the data-channel fix 7156f0f made `--interval` work for 5m/15m/1h): same-week / 3-week / 3-month out-of-sample comparison + a 48-combination 15m sweep — the longer the timeframe, the better the pattern holds (15m is the first gross-positive, win/loss ratio 1.30), but **no timeframe shows a robust out-of-sample positive expectancy**; every apparent profit is a tail trade. **The recommended primary timeframe is 15m** (86 statistically treatable trades; the parameter regularity sl4·sep0.4·be1.5 is consistent across timeframes); 1h is an observation window and 5m is the worst — do not use it. The defaults stay at their initial values |

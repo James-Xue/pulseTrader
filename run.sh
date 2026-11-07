@@ -90,7 +90,8 @@ case "$1" in
         python3 "$(dirname "$0")/tools/backtest_sweep.py" "$@"
         ;;
     mcp)
-        # MCP 走 stdio 协议: stdout 必须是纯 JSON-RPC, 禁止 echo 污染
+        # MCP speaks the stdio protocol: stdout must be pure JSON-RPC, so no
+        # echo output is allowed to pollute it.
         "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.toml
         ;;
     strategy)

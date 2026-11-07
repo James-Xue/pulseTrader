@@ -1,4 +1,4 @@
-// iron_trader.cpp — IronTrader 铁律交易员 (rules baseline:
+// iron_trader.cpp — IronTrader, the iron-discipline trader (rules baseline:
 // docs/strategies/iron-trader.md — single source of truth)
 
 #include "strategy/scalping/IronTrader.hpp"
@@ -86,7 +86,7 @@ std::string IronTrader::idPrefix() const
 std::size_t IronTrader::klineNeeded() const
 {
     // Trend EMA SMA seed + 60 spare bars (20-bar slope window + ATR/RSI
-    // settling) — rules doc §5 暖机纪律.
+    // settling) — rules doc §5 warm-up discipline.
     return static_cast<std::size_t>(param("it_trend_ema", 200.0)) + 60;
 }
 
@@ -116,11 +116,11 @@ double IronTrader::sepGate(const Indicators &ind) const
     double gate = param("it_sep_gate", 0.25);
     if (ind.tight_session)
     {
-        gate *= param("it_tight_gate_mult", 1.25);   // 时段分层 (G2)
+        gate *= param("it_tight_gate_mult", 1.25);   // session tiering (G2)
     }
     if (m_after_streak_quota)
     {
-        gate *= param("it_streak_gate_mult", 1.25);  // 连亏 2 后最强信号 (R6)
+        gate *= param("it_streak_gate_mult", 1.25);  // strongest signal required after 2 consecutive losses (R6)
     }
     return gate;
 }
@@ -197,7 +197,7 @@ IronTrader::Indicators IronTrader::computeIndicators(
     if (ind.atr14 > 0.0 && ind.med_tr20 > 0.0)
     {
         ind.hot = ind.atr14 > param("it_regime_cap", 3.0) * ind.med_tr20;
-        // 尖刺根:近 3 根任一根 TR > 3×medTR20 (rules §4.1 G3).
+        // Spike root: any of the last 3 bars has TR > 3×medTR20 (rules §4.1 G3).
         for (std::size_t i = n - std::min<std::size_t>(3, tr_window); i < n; ++i)
         {
             if (trs[i - (n - tr_window)] > 3.0 * ind.med_tr20)
@@ -275,7 +275,7 @@ IronTrader::StructDir IronTrader::structDir(const Indicators &ind,
 
 // ---------------------------------------------------------------------------
 // Paper ledger (R0/R1/R6) — USD estimates; the account report is the
-// authoritative PnL source (§9, marked [近似]).
+// authoritative PnL source (§9, marked [approximation]).
 // ---------------------------------------------------------------------------
 
 double IronTrader::estimateNetUsd(bool is_long, double entry, double exit)
@@ -311,9 +311,9 @@ void IronTrader::settleTrade(bool is_long, double entry, double exit)
         || m_day.consec_losses
             >= static_cast<int>(param("it_consec_loss", 3.0)))
     {
-        m_day.day_stopped = true;   // R6 — 日亏红线压过一切
+        m_day.day_stopped = true;   // R6 — the daily-loss red line overrides everything
     }
-    // 连亏 2 → 当日剩余额度仅 1 笔,且要求"最强信号" (R6)。
+    // Two consecutive losses → the day's remaining allowance is a single trade, and only the "strongest signal" qualifies (R6).
     if (2 == m_day.consec_losses && !m_day.day_stopped)
     {
         m_after_streak_quota = true;
@@ -334,13 +334,13 @@ void IronTrader::rollDayIfNeeded(std::int64_t open_ms)
     }
     m_day = DayCounters{};
     m_day.day_id = day_id;
-    m_day.equity_ref_usd = m_paper_equity_usd;   // R0: 日初权益快照
+    m_day.equity_ref_usd = m_paper_equity_usd;   // R0: day-start equity snapshot
     m_after_streak_quota = false;
     m_quota_used = false;                        // R6 redemption quota is daily
 }
 
 // ---------------------------------------------------------------------------
-// R1 / R6 pre-trade checklist (30 秒检查表, rules §3)
+// R1 / R6 pre-trade checklist (the 30-second checklist, rules §3)
 // ---------------------------------------------------------------------------
 
 bool IronTrader::riskChecklistPasses(const Indicators &ind)
@@ -364,7 +364,7 @@ bool IronTrader::riskChecklistPasses(const Indicators &ind)
         return false;
     }
 
-    // R1 — 单笔止损成本 ≤ it_risk_pct × 日初权益;超限 → 不发信号。
+    // R1 — per-trade stop cost ≤ it_risk_pct × day-start equity; over the limit → no signal.
     const double qty = params().order_quantity.load(std::memory_order_acquire);
     const double quanto = param("it_quanto_est", 0.0001);
     const double stop_cost = stopDistance(ind) * qty * quanto;
@@ -391,12 +391,12 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
     const bool is_long = (Phase::Long == m_phase);
     const double stop_dist = stopDistance(ind);
 
-    // 1. Hard stop (R3) — close-based approximation (M33 收盘近似, §9).
+    // 1. Hard stop (R3) — close-based approximation (M33 close approximation, §9).
     bool exit_now = ((is_long && close <= m_stop_price)
                      || (!is_long && close >= m_stop_price));
     std::string reason = "hard_stop";
 
-    // 2. Structure reversal (G1 反向 → 提前离场).
+    // 2. Structure reversal (G1 flip → exit early).
     if (!exit_now)
     {
         const StructDir sd = structDir(ind, close);
@@ -408,7 +408,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
             reason = "structure_flip";
         }
     }
-    // 3. Momentum reversal (动能反转 — sep crossed to the other sign).
+    // 3. Momentum reversal (sep crossed to the other sign).
     if (!exit_now)
     {
         const bool flipped = is_long ? (ind.sep < 0.0) : (ind.sep > 0.0);
@@ -418,7 +418,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
             reason = "momentum_flip";
         }
     }
-    // 4. Time stop (时间止损) — flat or small-profit holds are cut.
+    // 4. Time stop — flat or small-profit holds are cut.
     if (!exit_now)
     {
         const double floating = is_long ? (close - m_entry_price)
@@ -436,7 +436,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
         settleTrade(is_long, m_entry_price, close);
 
         EntryContext exit_ctx;
-        exit_ctx.type = SignalType::Flat;   // 只平仓、不反手 (close-only channel)
+        exit_ctx.type = SignalType::Flat;   // close-only, never flip (close-only channel)
         exit_ctx.price = close;
         exit_ctx.confidence = 0.0;
         char buf[96];
@@ -458,7 +458,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
         return exit_ctx;
     }
 
-    // No exit → R7 盈利保护:best close, breakeven once, then trail one way.
+    // No exit → R7 profit protection: best close, breakeven once, then trail one way.
     const double floating = is_long ? (close - m_entry_price)
                                     : (m_entry_price - close);
     m_best_close = is_long ? std::max(m_best_close, close)
@@ -468,7 +468,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
     {
         m_stop_price = is_long ? std::max(m_stop_price, m_entry_price)
                                : std::min(m_stop_price, m_entry_price);
-        m_breakeven_done = true;   // 保本 (R7)
+        m_breakeven_done = true;   // breakeven (R7)
     }
     if (m_breakeven_done)
     {
@@ -481,7 +481,7 @@ std::optional<EntryContext> IronTrader::managePosition(const market::Kline &cur,
 }
 
 // ---------------------------------------------------------------------------
-// 重大消息事件闸 (§4.6) — pre-event forced flatten; commit block mirrors the
+// Major-news event gate (§4.6) — pre-event forced flatten; commit block mirrors the
 // managePosition exit above with exit_reason = "news_blackout" (Flat channel)
 // ---------------------------------------------------------------------------
 
@@ -494,7 +494,7 @@ std::optional<EntryContext> IronTrader::flattenForNews(const market::Kline &cur)
     settleTrade(is_long, m_entry_price, close);
 
     EntryContext exit_ctx;
-    exit_ctx.type = SignalType::Flat;   // 只平仓、不反手 (close-only channel)
+    exit_ctx.type = SignalType::Flat;   // close-only, never flip (close-only channel)
     exit_ctx.price = close;
     exit_ctx.confidence = 0.0;
     char buf[96];
@@ -644,7 +644,7 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
                                  : (close < m_break_level);
         if (!beyond)
         {
-            // 假破位 — 触发作废,锚点随箱体每根重算自然复位。
+            // False breakout — the trigger is voided; the anchor resets naturally because the box is recomputed on every candle.
             m_break_active = false;
             m_break_run = 0;
             return std::nullopt;
@@ -658,14 +658,14 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
         }
 
         // Entry needs ≥ 2 consecutive closes beyond; a spike root anywhere in
-        // the window demands one extra NORMAL bar outside (回合 446 复证) —
+        // the window demands one extra NORMAL bar outside (round 446 re-confirmation) —
         // !ind.spike_near supplies exactly that.
         if (m_break_run >= 2 && !ind.spike_near && !ind.hot
             && std::abs(ind.sep) >= sep_gate
             && ind.max_tr20 <= param("it_spike_skip_mult", 2.0)
                 * stopDistance(ind))
         {
-            // RSI 对冲过滤 (M22): 超买不追多破位 / 超卖不追空破位 (T-B only).
+            // RSI hedge filter (M22): do not chase a long breakout when overbought / a short breakout when oversold (T-B only).
             const bool rsi_blocks = bull ? (ind.rsi > param("it_rsi_ob", 70.0))
                                          : (ind.rsi < param("it_rsi_os", 30.0));
             if (rsi_blocks)
@@ -696,7 +696,7 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
     }
 
     // New T-B candidate: close breaks the N-bar box. The break bar itself
-    // counts as the first close beyond (等下一根收盘确认 → run ≥ 2 fires).
+    // counts as the first close beyond (wait for the next close to confirm → fires at run ≥ 2).
     const double level = bull ? ind.box_high : ind.box_low;
     const bool broke = bull ? (close > level) : (close < level);
     if (broke)
@@ -709,7 +709,7 @@ std::optional<EntryContext> IronTrader::evaluateEntrySetup(
         return std::nullopt;
     }
 
-    // T-A 拉回:上根收 < EMA_fast(多向),本根收复 EMA_fast → 入场 (首选)。
+    // T-A pullback: previous close < EMA_fast (long direction) and this candle reclaims EMA_fast → enter (preferred).
     const bool pullback = bull
         ? (ind.prev_close < ind.prev_ema_fast && close > ind.ema_fast)
         : (ind.prev_close > ind.prev_ema_fast && close < ind.ema_fast);
@@ -736,7 +736,7 @@ std::optional<EntryContext> IronTrader::evaluateEntry(
     const Indicators ind = computeIndicators(candles);
     const double close = candles.back().close;
 
-    // 重大消息事件闸 (§4.6): a position opened before a listed event must be
+    // Major-news event gate (§4.6): a position opened before a listed event must be
     // flat from the first candle with open_time ≥ T−X — the gate reason wins
     // over any coincident exit reason (either way the position closes and
     // settleTrade books the same realized PnL).
@@ -749,7 +749,7 @@ std::optional<EntryContext> IronTrader::evaluateEntry(
         {
             return flattenForNews(candles.back());
         }
-        return managePosition(candles.back(), ind);   // 有仓 → 只做管理 (R2)
+        return managePosition(candles.back(), ind);   // position open → management only (R2)
     }
 
     ++m_flat_bars;

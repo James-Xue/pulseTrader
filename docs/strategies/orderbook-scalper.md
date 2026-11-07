@@ -1,98 +1,98 @@
-# OrderBookScalper — 订单簿失衡策略
+# OrderBookScalper — Order book imbalance strategy
 
-> 通过分析订单簿买卖盘深度失衡，捕捉短期价格方向性变动。
+> Captures short-term directional price moves by analyzing the depth imbalance between bids and asks in the order book.
 
-## 核心原理
+## Core Principle
 
-### 订单簿失衡指标
+### Order book imbalance indicator
 
-**Imbalance** 衡量买卖盘压力的不平衡程度：
+**Imbalance** measures how unbalanced the bid/ask pressure is:
 
 ```
 imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume)
 ```
 
-- `imbalance > 0`：买盘压力大于卖盘（看涨）
-- `imbalance < 0`：卖盘压力大于买盘（看跌）
-- `imbalance ∈ [-1.0, 1.0]`：归一化后的值
+- `imbalance > 0`: bid pressure exceeds ask pressure (bullish)
+- `imbalance < 0`: ask pressure exceeds bid pressure (bearish)
+- `imbalance ∈ [-1.0, 1.0]`: the normalized value
 
-### 信号逻辑
+### Signal logic
 
-| 条件 | 信号 | 含义 |
+| Condition | Signal | Meaning |
 |------|------|------|
-| `imbalance > threshold` | Buy | 买盘显著强于卖盘，价格可能上涨 |
-| `imbalance < -threshold` | Sell | 卖盘显著强于买盘，价格可能下跌 |
+| `imbalance > threshold` | Buy | Bids are significantly stronger than asks; price may rise |
+| `imbalance < -threshold` | Sell | Asks are significantly stronger than bids; price may fall |
 
-### 置信度
+### Confidence
 
 ```
 confidence = clamp(|imbalance|, 0.0, 1.0)
 ```
 
-失衡越严重，信号置信度越高。
+The more severe the imbalance, the higher the signal confidence.
 
 ---
 
-## 实现细节
+## Implementation Details
 
-### 数据需求
+### Data requirements
 
-- **数据源**：订单簿深度快照（`onOrderbook()` 回调）
-- **深度层数**：默认分析前 5 档买卖盘
-- **轮询间隔**：100ms（最快的策略）
+- **Data source**: order book depth snapshot (`onOrderbook()` callback)
+- **Depth levels**: by default the top 5 bid and ask levels are analyzed
+- **Polling interval**: 100ms (the fastest strategy)
 
-### 计算步骤
+### Calculation steps
 
 ```cpp
-// 1. 累加前 N 档买盘量
+// 1. Accumulate the bid volume across the top N levels
 double bid_volume = 0;
 for (int i = 0; i < depth; ++i) {
     bid_volume += book.bids[i].quantity;
 }
 
-// 2. 累加前 N 档卖盘量
+// 2. Accumulate the ask volume across the top N levels
 double ask_volume = 0;
 for (int i = 0; i < depth; ++i) {
     ask_volume += book.asks[i].quantity;
 }
 
-// 3. 计算失衡度
+// 3. Compute the imbalance
 double imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume);
 ```
 
-### 冷却机制
+### Cooldown mechanism
 
-避免同一方向的信号过于密集：
+Prevents signals in the same direction from clustering:
 
 ```cpp
 auto nowMs = current_time_ms();
 if (nowMs - m_lastSignalTimeMs < cooldown_ms) {
-    return; // 冷却期内不发信号
+    return; // do not emit a signal during the cooldown period
 }
 ```
 
-默认冷却时间 30 秒。
+The default cooldown is 30 seconds.
 
-### 价格选择
+### Price selection
 
-- **Buy 信号**：使用 `book.bids[0].price`（最佳买价）
-- **Sell 信号**：使用 `book.asks[0].price`（最佳卖价）
+- **Buy signal**: uses `book.bids[0].price` (best bid)
+- **Sell signal**: uses `book.asks[0].price` (best ask)
 
-这确保信号价格是当前市场可执行的最优价格。
+This ensures the signal price is the best price currently executable in the market.
 
 ---
 
-## 参数配置
+## Parameter Configuration
 
-### 策略参数（StrategyParams）
+### Strategy parameters (StrategyParams)
 
-| 参数 | 类型 | 默认值 | 说明 |
+| Parameter | Type | Default | Description |
 |------|------|--------|------|
-| `ob_depth` | int | 5 | 分析的订单簿深度层数 |
-| `ob_imbalance_threshold` | double | 0.3 | 失衡阈值（0.0-1.0） |
-| `cooldown_seconds` | double | 30.0 | 信号冷却时间 |
+| `ob_depth` | int | 5 | Number of order book depth levels analyzed |
+| `ob_imbalance_threshold` | double | 0.3 | Imbalance threshold (0.0-1.0) |
+| `cooldown_seconds` | double | 30.0 | Signal cooldown time |
 
-### trading.toml 示例
+### trading.toml example
 
 ```toml
 [[strategy.instances]]
@@ -109,128 +109,128 @@ poll_interval_ms = 100
 
 ---
 
-## 优缺点分析
+## Pros and Cons Analysis
 
-### 优点
+### Pros
 
-1. **信号领先**：订单簿压力是价格变动的先行指标
-   - 大额买单堆积 → 价格即将上涨
-   - 大额卖单堆积 → 价格即将下跌
-2. **信号频率高**：每次订单簿更新都可以评估
-   - 适合高频交易
-   - 捕捉微观价格变动
-3. **无需预热**：只要有深度数据即可工作
-   - 启动后立即可以产生信号
-   - 不像 K 线策略需要等待数据积累
-4. **低延迟**：100ms 轮询，响应速度快
+1. **Leading signals**: order book pressure is a leading indicator of price movement
+   - Large bids piling up → price is about to rise
+   - Large asks piling up → price is about to fall
+2. **High signal frequency**: evaluated on every order book update
+   - Suited to high-frequency trading
+   - Captures micro price movements
+3. **No warm-up needed**: works as long as depth data is available
+   - Can produce signals immediately after startup
+   - Unlike kline strategies, no need to wait for data to accumulate
+4. **Low latency**: 100ms polling, fast response
 
-### 缺点
+### Cons
 
-1. **假信号多**：订单簿可以被快速撤销（Spoofing）
-   - 大单可能是诱饵，不会真正成交
-   - 需要配合成交量确认
-2. **深度数据噪音大**：订单簿变化频繁
-   - 需要合理设置阈值过滤
-   - 阈值太低 → 假信号多
-   - 阈值太高 → 信号太少
-3. **不适合趋势市**：只看微观压力，忽略宏观方向
-   - 强趋势中可能逆势交易
-   - 需要配合趋势指标
-4. **对数据质量依赖高**：需要稳定的 WS 连接
-   - WS 断线时无法工作
-   - 深度数据延迟会导致信号过时
-
----
-
-## 适用场景
-
-### 最佳市场条件
-
-- **高流动性市场**：BTC/ETH 等主流币合约
-- **震荡市**：价格在小区间内波动，订单簿压力有效
-- **低波动率**：避免极端波动导致的深度数据失真
-- **稳定 WS 连接**：确保订单簿数据实时准确
-
-### 不适合的市场
-
-- **低流动性**：深度数据稀疏，信号不可靠
-- **强趋势市**：订单簿压力无法预测趋势延续
-- **极端波动**：闪崩或暴涨时深度数据混乱
-- **WS 不稳定**：频繁断线导致数据缺失
+1. **Many false signals**: the order book can be pulled quickly (spoofing)
+   - Large orders can be bait and never actually fill
+   - Needs volume confirmation
+2. **Depth data is noisy**: the order book changes frequently
+   - Thresholds must be set sensibly to filter it
+   - Threshold too low → many false signals
+   - Threshold too high → too few signals
+3. **Not suited to trending markets**: it only sees micro pressure and ignores the macro direction
+   - May trade counter-trend in a strong trend
+   - Needs to be combined with trend indicators
+4. **Highly dependent on data quality**: requires a stable WS connection
+   - Cannot work when the WS connection drops
+   - Depth data latency makes signals stale
 
 ---
 
-## 调优建议
+## Applicable Scenarios
 
-### 提高灵敏度（更多信号）
+### Best market conditions
+
+- **Highly liquid markets**: major coin futures such as BTC/ETH
+- **Ranging markets**: price oscillates in a small range, where order book pressure is effective
+- **Low volatility**: avoids depth data distortion caused by extreme moves
+- **Stable WS connection**: ensures order book data is real-time and accurate
+
+### Unsuitable markets
+
+- **Low liquidity**: sparse depth data, unreliable signals
+- **Strong trending markets**: order book pressure cannot predict trend continuation
+- **Extreme volatility**: depth data is chaotic during flash crashes or spikes
+- **Unstable WS**: frequent disconnects cause missing data
+
+---
+
+## Tuning Recommendations
+
+### Increase sensitivity (more signals)
 
 ```
-ob_depth = 3                    # 只看前 3 档
-ob_imbalance_threshold = 0.2   # 降低阈值
-cooldown_seconds = 15          # 缩短冷却
+ob_depth = 3                    # look at only the top 3 levels
+ob_imbalance_threshold = 0.2   # lower the threshold
+cooldown_seconds = 15          # shorten the cooldown
 ```
 
-- 信号更频繁
-- 假信号更多
-- 适合超短线剥头皮
+- More frequent signals
+- More false signals
+- Suited to ultra-short-term scalping
 
-### 提高稳定性（更少信号）
+### Increase stability (fewer signals)
 
 ```
-ob_depth = 10                   # 看前 10 档
-ob_imbalance_threshold = 0.5   # 提高阈值
-cooldown_seconds = 60          # 延长冷却
+ob_depth = 10                   # look at the top 10 levels
+ob_imbalance_threshold = 0.5   # raise the threshold
+cooldown_seconds = 60          # lengthen the cooldown
 ```
 
-- 信号更少但更可靠
-- 响应更慢
-- 适合稳健交易
+- Fewer but more reliable signals
+- Slower response
+- Suited to steady trading
 
-### 深度加权
+### Depth weighting
 
-不同档位的权重不同（近档更重要）：
+Different levels carry different weights (nearer levels matter more):
 
 ```cpp
 double weighted_bid = 0;
 for (int i = 0; i < depth; ++i) {
-    double weight = 1.0 / (i + 1); // 第 1 档权重 1.0，第 2 档 0.5，...
+    double weight = 1.0 / (i + 1); // level 1 weighs 1.0, level 2 weighs 0.5, ...
     weighted_bid += book.bids[i].quantity * weight;
 }
 ```
 
 ---
 
-## 与其他策略的配合
+## Combining with Other Strategies
 
-### 与 MomentumScalper 配合
+### Combining with MomentumScalper
 
-- MomentumScalper 判断大趋势方向
-- OrderBookScalper 只在趋势方向上交易
-- 过滤逆势信号，提高胜率
+- MomentumScalper determines the direction of the larger trend
+- OrderBookScalper trades only in the direction of the trend
+- Filters out counter-trend signals and raises the win rate
 
-### 与 MeanReversionScalper 配合
+### Combining with MeanReversionScalper
 
-- MeanReversionScalper 识别超买/超卖
-- OrderBookScalper 确认微观压力方向
-- 双重确认反转信号
+- MeanReversionScalper identifies overbought/oversold conditions
+- OrderBookScalper confirms the direction of micro pressure
+- Double confirmation of the reversal signal
 
-### 与 SuperTrendScalper 配合
+### Combining with SuperTrendScalper
 
-- SuperTrend 判断趋势状态
-- 趋势中用 MomentumScalper，震荡中用 OrderBookScalper
-- 需要市场状态切换逻辑
-
----
-
-## 源码位置
-
-- **头文件**：`src/strategy/scalping/OrderBookScalper.hpp`
-- **实现文件**：`src/strategy/scalping/OrderBookScalper.cpp`
-- **参数定义**：`src/strategy/StrategyParams.hpp`
+- SuperTrend determines the trend state
+- Use MomentumScalper in a trend and OrderBookScalper in a range
+- Requires market-state switching logic
 
 ---
 
-## 日志示例
+## Source Locations
+
+- **Header**: `src/strategy/scalping/OrderBookScalper.hpp`
+- **Implementation**: `src/strategy/scalping/OrderBookScalper.cpp`
+- **Parameter definitions**: `src/strategy/StrategyParams.hpp`
+
+---
+
+## Log Examples
 
 ```
 [INFO] [strategy] [orderbook_scalper_ETH_USDT] Order book buy pressure 
