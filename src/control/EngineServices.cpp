@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <vector>
 
 namespace pulse::control
@@ -104,7 +105,159 @@ nlohmann::json spotUsdtAccount(const nlohmann::json &accounts)
     return result;
 }
 
+/// Full non-zero spot holdings with a best-effort USDT valuation.
+///
+/// `priceLookup` returns the USDT price of a currency, or 0.0 when none is
+/// available. A zero price keeps the holding in the list with
+/// price_usdt/value_usdt = null, so the UI can show the amount and a dash
+/// rather than inventing a value.
+///
+/// Entries are sorted by value descending; unpriced entries go last.
+nlohmann::json spotBalances(
+    const nlohmann::json &accounts,
+    const std::function<double(const std::string &)> &priceLookup)
+{
+    nlohmann::json out = nlohmann::json::array();
+
+    if (!accounts.is_array())
+    {
+        return out;
+    }
+
+    for (const auto &acc : accounts)
+    {
+        const std::string currency = acc.value("currency", "");
+        const double available =
+            safeParseDouble(acc.value("available", "0")).value_or(0.0);
+        const double locked =
+            safeParseDouble(acc.value("locked", "0")).value_or(0.0);
+        const double total = available + locked;
+
+        // Dust and zero balances would bury the meaningful rows.
+        if (currency.empty() || total <= 0.0)
+        {
+            continue;
+        }
+
+        const double price = priceLookup(currency);
+        const bool priced = price > 0.0;
+
+        nlohmann::json item = {
+            { "currency", currency },
+            { "available", available },
+            { "locked", locked },
+            { "total", total },
+            { "price_usdt", priced ? nlohmann::json(price)
+                                   : nlohmann::json(nullptr) },
+            { "value_usdt", priced ? nlohmann::json(total * price)
+                                   : nlohmann::json(nullptr) },
+        };
+        out.push_back(std::move(item));
+    }
+
+    std::stable_sort(out.begin(), out.end(),
+                     [](const nlohmann::json &lhs, const nlohmann::json &rhs)
+    {
+        const double left = lhs["value_usdt"].is_number()
+                                ? lhs["value_usdt"].get<double>()
+                                : -1.0;
+        const double right = rhs["value_usdt"].is_number()
+                                 ? rhs["value_usdt"].get<double>()
+                                 : -1.0;
+        return left > right;
+    });
+
+    return out;
+}
+
 } // anonymous namespace
+
+double EngineServices::spotPriceUsdt(const std::string &currency)
+{
+    // 1. USDT is the quote currency, so its value is exactly 1.0.
+    if ("USDT" == currency)
+    {
+        return 1.0;
+    }
+
+    const std::string symbol = currency + "_USDT";
+
+    // 2. Live ticker caches: spot first, then futures (some coins are listed
+    //    only as perpetuals).
+    if (nullptr != m_spotFeed)
+    {
+        const auto ticker = m_spotFeed->tickerCache().get(symbol);
+
+        if (ticker.has_value() && ticker->last > 0.0)
+        {
+            return ticker->last;
+        }
+    }
+
+    if (nullptr != m_futuresFeed)
+    {
+        const auto ticker = m_futuresFeed->tickerCache().get(symbol);
+
+        if (ticker.has_value() && ticker->last > 0.0)
+        {
+            return ticker->last;
+        }
+    }
+
+    // 3. Cached REST result. A found price lives 60 s; a failed lookup 300 s,
+    //    so a delisted or unpaired token does not cost a call on every poll.
+    const auto now = std::chrono::steady_clock::now();
+    const auto cached = m_spotPrices.find(symbol);
+
+    if (cached != m_spotPrices.end())
+    {
+        const auto ttl = cached->second.price > 0.0
+                             ? std::chrono::seconds(60)
+                             : std::chrono::seconds(300);
+
+        if (now - cached->second.fetched < ttl)
+        {
+            return cached->second.price;
+        }
+    }
+
+    // 4. Bound the REST lookups per snapshot: a wallet with many unpriced
+    //    altcoins must not turn one get_account into dozens of calls.
+    constexpr std::size_t kMaxLookupsPerSnapshot = 8;
+
+    if (m_spotPriceLookups >= kMaxLookupsPerSnapshot)
+    {
+        return 0.0;
+    }
+
+    ++m_spotPriceLookups;
+
+    double price = 0.0;
+
+    if (nullptr != m_spotRest)
+    {
+        auto result = m_spotRest->getTicker(symbol);
+
+        if (ok(result))
+        {
+            const auto &body = value(result);
+
+            if (body.is_array() && !body.empty())
+            {
+                price = safeParseDouble(body.front().value("last", "0"))
+                            .value_or(0.0);
+            }
+        }
+    }
+
+    if (price < 0.0)
+    {
+        price = 0.0;
+    }
+
+    m_spotPrices[symbol] = SpotPrice{ price, now };
+    return price;
+}
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -236,7 +389,17 @@ nlohmann::json EngineServices::account()
         auto spot = m_spotRest->getSpotAccounts();
         if (ok(spot))
         {
+            // `spot` stays the aggregate USDT view for backward compatibility;
+            // `spot_balances` carries every non-zero currency with its value.
+            // The lookup budget resets once per snapshot.
+            m_spotPriceLookups = 0;
             j["spot"] = spotUsdtAccount(value(spot));
+            j["spot_balances"] = spotBalances(
+                value(spot),
+                [this](const std::string &currency)
+                {
+                    return spotPriceUsdt(currency);
+                });
         }
     }
 

@@ -50,7 +50,27 @@ ACCOUNT = {
         "order_margin": 0.0,
         "currency": "USDT",
     },
-    "spot": {"available": 12.5},
+    "spot": {"available": 12.5, "currency": "USDT", "total": 12.5},
+    # One row per non-zero spot currency. `value_usdt` is null when the engine
+    # has no cached ticker; the client renders a dash instead of zero.
+    "spot_balances": [
+        {
+            "currency": "USDT", "available": 12.5, "locked": 0.0,
+            "total": 12.5, "price_usdt": 1.0, "value_usdt": 12.5,
+        },
+        {
+            "currency": "XAUT", "available": 0.0012, "locked": 0.0,
+            "total": 0.0012, "price_usdt": 2400.0, "value_usdt": 2.88,
+        },
+        {
+            "currency": "SLVON", "available": 0.0055, "locked": 0.0,
+            "total": 0.0055, "price_usdt": 30.0, "value_usdt": 0.165,
+        },
+        {
+            "currency": "LSK", "available": 1.5, "locked": 0.0,
+            "total": 1.5, "price_usdt": None, "value_usdt": None,
+        },
+    ],
 }
 
 POSITIONS = {

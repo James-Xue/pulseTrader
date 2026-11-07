@@ -1,6 +1,8 @@
 #include "models/AccountModel.hpp"
 
+#include <QJsonArray>
 #include <QJsonValue>
+#include <QVariantMap>
 
 namespace pulse::client
 {
@@ -41,6 +43,33 @@ void AccountModel::setFromJson(const QJsonObject& account)
     m_spotCurrency = spot.value(QStringLiteral("currency")).toString();
     m_spotTotal = numberOr(spot, QStringLiteral("total"));
     m_spotAvailable = numberOr(spot, QStringLiteral("available"));
+
+    // 2b. Per-currency spot holdings. The engine filters zero balances and
+    //     sorts by USDT value, so its order is kept as-is. A null value_usdt
+    //     means "no ticker cached yet" and must not render as 0.00.
+    m_spotBalances.clear();
+    const QJsonArray balances =
+        account.value(QStringLiteral("spot_balances")).toArray();
+    m_spotBalances.reserve(balances.size());
+
+    for (const QJsonValue& entry : balances)
+    {
+        const QJsonObject row = entry.toObject();
+        const QJsonValue valueUsdt = row.value(QStringLiteral("value_usdt"));
+
+        QVariantMap item;
+        item[QStringLiteral("currency")] =
+            row.value(QStringLiteral("currency")).toString();
+        item[QStringLiteral("available")] =
+            row.value(QStringLiteral("available")).toDouble();
+        item[QStringLiteral("locked")] =
+            row.value(QStringLiteral("locked")).toDouble();
+        item[QStringLiteral("total")] =
+            row.value(QStringLiteral("total")).toDouble();
+        item[QStringLiteral("hasValue")] = valueUsdt.isDouble();
+        item[QStringLiteral("valueUsdt")] = valueUsdt.toDouble(0.0);
+        m_spotBalances.append(item);
+    }
 
     // 3. CFD block.
     const QJsonObject cfd = account.value(QStringLiteral("cfd")).toObject();

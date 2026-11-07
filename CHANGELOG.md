@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   network/market and stores the API credentials encrypted on disk.
 - The Qt client now starts and owns the engine process, generating a
   per-run signal-only config in the user runtime directory.
+- `get_account` reports every non-zero spot currency (`spot_balances`) with a
+  best-effort USDT valuation from the ticker cache; the Qt dashboard lists
+  those holdings with amount and value.
 
 ### Fixed
 

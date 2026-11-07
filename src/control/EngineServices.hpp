@@ -26,11 +26,13 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulse::grid
@@ -208,6 +210,15 @@ class EngineServices
     /// strategies_resumed / cancelled_orders (or an error object).
     [[nodiscard]] nlohmann::json switchDirection(const std::string &direction);
 
+    /// Best-effort USDT price for a spot currency.
+    ///
+    /// Order: USDT = 1.0, spot ticker cache, futures ticker cache, then one
+    /// REST `getTicker(<CUR>_USDT)` whose result is cached for 60 s (or 300 s
+    /// for a failed lookup). Returns 0.0 when no price can be obtained; the
+    /// caller then reports the holding with value_usdt = null. Call only with
+    /// m_restMutex held — the REST fallback needs the shared client.
+    [[nodiscard]] double spotPriceUsdt(const std::string &currency);
+
     /// Shared REST serialization mutex (also used by the heartbeat logger).
     [[nodiscard]] std::mutex &restMutex();
 
@@ -246,6 +257,18 @@ class EngineServices
     /// Futures contract registry (quanto multiplier lookup for the futures
     /// position sync). May be null — sync then assumes quanto 1.0.
     std::shared_ptr<market::SymbolRegistry> m_registry;
+
+    /// Per-currency REST price cache for `spot_balances` (see spotPriceUsdt).
+    struct SpotPrice
+    {
+        double price{ 0.0 };
+        std::chrono::steady_clock::time_point fetched{};
+    };
+    std::unordered_map<std::string, SpotPrice> m_spotPrices;
+
+    /// Budget for REST lookups inside one account() call, so a wallet with
+    /// many unpriced altcoins cannot turn one snapshot into dozens of calls.
+    std::size_t m_spotPriceLookups{ 0 };
 
     /// Sync futures positions from the exchange (mirrors the old startup
     /// free function in main.cpp; consolidated here so startup, the ~10s

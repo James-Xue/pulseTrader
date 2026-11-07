@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QVariantList>
 
 namespace pulse::client
 {
@@ -31,6 +32,12 @@ class AccountModel : public QObject
     Q_PROPERTY(double cfdAvailable READ cfdAvailable NOTIFY changed)
     Q_PROPERTY(double cfdUnrealised READ cfdUnrealised NOTIFY changed)
 
+    /// Every non-zero spot currency, sorted by value descending. Each element
+    /// is a map with currency / available / locked / total / valueUsdt /
+    /// hasValue. `hasValue` is false when no ticker was cached, in which case
+    /// valueUsdt is 0 and the UI must render a dash instead.
+    Q_PROPERTY(QVariantList spotBalances READ spotBalances NOTIFY changed)
+
 public:
     explicit AccountModel(QObject* parent = nullptr);
 
@@ -52,6 +59,7 @@ public:
     [[nodiscard]] bool cfdPresent() const { return m_cfdPresent; }
     [[nodiscard]] double cfdAvailable() const { return m_cfdAvailable; }
     [[nodiscard]] double cfdUnrealised() const { return m_cfdUnrealised; }
+    [[nodiscard]] QVariantList spotBalances() const { return m_spotBalances; }
 
 signals:
     void changed();
@@ -71,6 +79,7 @@ private:
     bool m_cfdPresent = false;
     double m_cfdAvailable = 0.0;
     double m_cfdUnrealised = 0.0;
+    QVariantList m_spotBalances;
 };
 
 } // namespace pulse::client

@@ -21,6 +21,38 @@ Flickable {
         ? account.futuresUnrealised
         : (cfdPresent ? account.cfdUnrealised : 0.0)
 
+    /// Non-zero spot currencies (engine-sorted by USDT value).
+    readonly property var spotHoldings: account ? account.spotBalances : []
+
+    /// Balances span many orders of magnitude (BTC vs a dust altcoin), so the
+    /// number of decimals follows the magnitude instead of a fixed 2.
+    function formatAmount(value) {
+        if (!isFinite(value) || 0 === value) {
+            return "0"
+        }
+        const magnitude = Math.abs(value)
+        if (magnitude >= 1000) {
+            return value.toFixed(2)
+        }
+        if (magnitude >= 1) {
+            return value.toFixed(4)
+        }
+        if (magnitude >= 0.0001) {
+            return value.toFixed(6)
+        }
+        return value.toExponential(4)
+    }
+
+    function formatValue(value) {
+        if (!isFinite(value)) {
+            return "—"
+        }
+        if (0 !== value && Math.abs(value) < 0.01) {
+            return value.toPrecision(2)
+        }
+        return value.toFixed(2)
+    }
+
     contentWidth: width
     contentHeight: content.implicitHeight + 2 * Style.pad
     clip: true
@@ -124,6 +156,97 @@ Flickable {
                 label: qsTr("Unrealised PnL")
                 value: root.account ? root.unrealised.toFixed(2) : "—"
                 valueColor: root.unrealised >= 0 ? Style.success : Style.danger
+            }
+        }
+
+        // -- Spot holdings --------------------------------------------------
+        // One row per non-zero currency, valued from the engine's ticker
+        // cache. A row without a cached price shows the amount and a dash.
+        Text {
+            visible: root.spotHoldings.length > 0
+            text: qsTr("Spot holdings")
+            color: Style.secondaryText
+            font.pixelSize: 12
+            Layout.topMargin: Style.gap
+        }
+
+        Rectangle {
+            visible: root.spotHoldings.length > 0
+            Layout.fillWidth: true
+            implicitHeight: holdings.implicitHeight + 2 * Style.pad
+            radius: Style.radius
+            color: Style.contentBackground
+            border.width: 1
+            border.color: Style.separator
+
+            ColumnLayout {
+                id: holdings
+                anchors.fill: parent
+                anchors.margins: Style.pad
+                spacing: Style.gapSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gap
+
+                    Text {
+                        Layout.preferredWidth: 96
+                        text: qsTr("Currency")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    Text {
+                        Layout.preferredWidth: 180
+                        text: qsTr("Amount")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        text: qsTr("Value")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                        horizontalAlignment: Text.AlignRight
+                    }
+                }
+
+                Repeater {
+                    model: root.spotHoldings
+
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.gap
+
+                        Text {
+                            Layout.preferredWidth: 96
+                            text: modelData.currency
+                            color: Style.text
+                            font.pixelSize: Style.fontSize
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            Layout.preferredWidth: 180
+                            text: root.formatAmount(modelData.total)
+                            color: Style.secondaryText
+                            font.pixelSize: Style.fontSize
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: modelData.hasValue
+                                  ? root.formatValue(modelData.valueUsdt) + " USDT"
+                                  : "—"
+                            color: modelData.hasValue ? Style.text : Style.tertiaryText
+                            font.pixelSize: Style.fontSize
+                            horizontalAlignment: Text.AlignRight
+                        }
+                    }
+                }
             }
         }
 
