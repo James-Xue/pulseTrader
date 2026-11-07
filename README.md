@@ -7,6 +7,10 @@
 
 **A C++20 trading-engine framework for Gate.io.** Production-grade plumbing — 9 layers, 1054 tests, a JSON-RPC/MCP control plane and a Qt client — plus an **experimental, unverified** AI parameter-tuning loop.
 
+![pulseTrader desktop client](docs/images/ui-light.png)
+
+*Qt 6.12 client in light mode against the demo fixture. A dark mode is built in and toggles from the title bar. Both images are rendered by the client itself — `client/qt/packaging/screenshot.sh` — so they cannot drift from the code.*
+
 ---
 
 ## Overview

@@ -49,6 +49,11 @@ public:
     /// then the token is unused and never written to the socket.
     void setToken(const QString& token);
 
+    /// Offset the request-id space. Each connection numbers its own requests
+    /// from 1, so a caller that routes replies through one shared table must
+    /// give every RpcClient a disjoint range or the ids collide.
+    void setIdBase(qint64 base);
+
     /// Start connecting and keep reconnecting until disconnectFromEngine().
     void connectToEngine();
 

@@ -46,7 +46,12 @@ EngineController::EngineController(QObject* parent)
     , m_accountModel(new AccountModel(this))
 {
     // 1. Every socket feeds the same router; the request id decides which poll
-    //    the reply belongs to.
+    //    the reply belongs to. Each connection numbers from 1, so give them
+    //    disjoint ranges or the replies land on the wrong poll.
+    m_fast->setIdBase(1);
+    m_rest->setIdBase(1000000);
+    m_slow->setIdBase(2000000);
+
     for (RpcClient* client : { m_fast, m_rest, m_slow })
     {
         connect(client, &RpcClient::callSucceeded, this, &EngineController::handleSuccess);

@@ -80,6 +80,11 @@ void RpcClient::setToken(const QString& token)
     m_token = token;
 }
 
+void RpcClient::setIdBase(qint64 base)
+{
+    m_nextId = base;
+}
+
 void RpcClient::connectToEngine()
 {
     m_wantConnected = true;
