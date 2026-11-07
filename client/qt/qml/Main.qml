@@ -45,11 +45,12 @@ ApplicationWindow {
     }
 
     /// Colour scheme persistence. Style is a singleton, so the value is copied
-    /// in at startup and written back whenever the toggle flips it.
+    /// in at startup and written back whenever the toggle flips it. The stored
+    /// default is dark; a user who picks light keeps that choice across runs.
     Settings {
         id: appearance
         category: "appearance"
-        property bool dark: false
+        property bool dark: true
     }
 
     Connections {

@@ -9,8 +9,8 @@ import QtQuick
 /// `dark` is a normal (writable) property: the title-bar toggle flips it and
 /// every binding re-evaluates, so the whole UI re-themes without a restart.
 QtObject {
-    /// Light is the default; Main.qml restores the saved choice at startup.
-    property bool dark: false
+    /// Dark is the default; Main.qml restores the saved choice at startup.
+    property bool dark: true
 
     // -- Surfaces -----------------------------------------------------------
     readonly property color windowBackground: dark ? "#1E1E1E" : "#ECECEC"
