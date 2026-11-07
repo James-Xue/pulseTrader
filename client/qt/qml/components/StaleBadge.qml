@@ -10,13 +10,13 @@ Rectangle {
     implicitWidth: label.implicitWidth + 12
     implicitHeight: 18
     radius: 4
-    color: Style.surfaceAlt
+    color: Style.controlBackgroundPressed
 
     Text {
         id: label
         anchors.centerIn: parent
         text: root.text
-        color: Style.warn
+        color: Style.warning
         font.pixelSize: 10
     }
 }
