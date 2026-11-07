@@ -47,19 +47,44 @@ Rectangle {
                                  || (root.engine
                                      && root.engine.connectionState === EngineController.Connecting)
 
-    Component.onCompleted: {
+    /// Copy the decrypted profile into the form.
+    ///
+    /// This must run when the page becomes visible, not only at construction:
+    /// StackLayout instantiates every child at startup, while the vault is
+    /// still locked and the profile getters return empty strings. Reloading on
+    /// unlock is what saves the user from retyping the API key every session.
+    function reloadProfile() {
         if (!root.account) {
             return
         }
 
-        // Prefill from the decrypted vault so an existing profile can be
-        // reconnected without retyping the keys.
         root.networkIndex = root.account.profileNetwork === "testnet" ? 1 : 0
         const index = root.marketNames.indexOf(root.account.profileMarket)
         root.marketIndex = index >= 0 ? index : 0
         keyField.text = root.account.profileApiKey
         secretField.text = root.account.profileApiSecret
         proxyField.text = root.account.profileProxy
+    }
+
+    Component.onCompleted: root.reloadProfile()
+
+    // Fired when the vault unlocks and this page replaces the login form.
+    onVisibleChanged: {
+        if (visible) {
+            root.reloadProfile()
+        }
+    }
+
+    // Fired when the profile is saved (and after unlock, in case visibility
+    // changes in the same frame).
+    Connections {
+        target: root.account
+
+        function onProfileChanged() {
+            if (root.visible) {
+                root.reloadProfile()
+            }
+        }
     }
 
     /// Persist the profile, start the engine, then attach the RPC clients.
