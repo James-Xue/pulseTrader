@@ -103,6 +103,8 @@ enum class ErrorCode : std::uint32_t
     ControlMethodNotFound = 9102,  ///< Unknown JSON-RPC method.
     ControlProtocolError = 9103,   ///< JSON-RPC/MCP protocol violation.
     ControlEngineUnreachable = 9104, ///< Control socket cannot reach the engine.
+    ControlTlsInitFailed = 9105,     ///< TLS context / certificate / key setup failed.
+    ControlAuthFailed = 9106,        ///< Token authentication required or rejected.
 
     // Grid service (92xx) — M27 engine-native grid execution service.
     GridNotStarted = 9200,         ///< grid_status/pause/stop before grid_start.

@@ -58,6 +58,12 @@ EngineController::EngineController(QObject* parent)
         });
         connect(client, &RpcClient::stateChanged, this,
                 &EngineController::onConnectionStateChanged);
+        connect(client, &RpcClient::authenticationFailed, this,
+                [this](const QString& message)
+        {
+            setLastError(QStringLiteral("auth: ") + message);
+            emit errorOccurred(m_lastError);
+        });
     }
 
     // 1b. Each socket polls its own methods as soon as IT is ready. Calling
@@ -363,6 +369,7 @@ void EngineController::onConnectionStateChanged()
     switch (m_fast->state())
     {
     case RpcClient::State::Connecting:
+    case RpcClient::State::Authenticating:
         next = ConnectionState::Connecting;
         break;
     case RpcClient::State::Ready:

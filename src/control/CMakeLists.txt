@@ -37,6 +37,11 @@ target_link_libraries(pulse_control
     PRIVATE
         spdlog::spdlog
         fmt::fmt
+        # TLS for the control socket (M-Q4). OpenSSL already reached this
+        # target transitively through pulse::exchange; make it explicit so the
+        # dependency does not break if that layer changes.
+        OpenSSL::SSL
+        OpenSSL::Crypto
 )
 
 if(PULSE_ENABLE_SQLITE)
