@@ -88,6 +88,19 @@ Rectangle {
         }
     }
 
+    /// One-click setup for the gold data feed.
+    ///
+    /// The local data server serves XAUUSD/CFD, but the engine only creates the
+    /// CFD feed and subscribes the watch list when the profile itself selects
+    /// that market. This preset removes the manual three-field dance: mainnet,
+    /// CFD and the XAUUSD watch symbol. Credentials and the proxy are left
+    /// untouched; the values are persisted when Connect() saves the profile.
+    function applyGoldPreset() {
+        root.networkIndex = 0          // mainnet: CFD is not available on testnet
+        root.marketIndex = 2           // cfd
+        symbolsField.text = "XAUUSD"   // Gate TradFi gold, no underscore
+    }
+
     /// Persist the profile, start the engine, then attach the RPC clients.
     /// Each step reports its own failure through the shared error line.
     function connectNow() {
@@ -334,24 +347,45 @@ Rectangle {
                     }
 
                     Text {
+                        // The card has a fixed 440 px outer width, so the hint
+                        // must take the column width (and wrap) instead of its
+                        // own unwrapped implicit width — otherwise it overflows
+                        // the card's right edge.
+                        Layout.fillWidth: true
                         text: qsTr("Comma separated, streamed in the selected "
                                    + "market. Use names valid there — spot "
-                                   + "XAUT_USDT, futures XAU_USDT.")
+                                   + "XAUT_USDT, futures XAU_USDT, CFD XAUUSD.")
                         color: Style.tertiaryText
                         font.pixelSize: Style.fontSizeSmall
                         wrapMode: Text.WordWrap
                     }
                 }
 
-                MacButton {
+                RowLayout {
                     Layout.fillWidth: true
-                    primary: true
-                    enabled: !root.busy
-                    text: root.starting
-                          ? qsTr("Starting engine…")
-                          : (root.engine && root.engine.connectionState === EngineController.Connecting
-                             ? qsTr("Connecting…") : qsTr("Connect"))
-                    onClicked: root.connectNow()
+                    spacing: Style.gap
+
+                    // Account, market and watch list are otherwise three
+                    // separate controls; the gold data feed only needs this one
+                    // combination, so make it a single action.
+                    MacButton {
+                        text: qsTr("Gold preset")
+                        enabled: !root.busy
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Mainnet · CFD · XAUUSD")
+                        onClicked: root.applyGoldPreset()
+                    }
+
+                    MacButton {
+                        Layout.fillWidth: true
+                        primary: true
+                        enabled: !root.busy
+                        text: root.starting
+                              ? qsTr("Starting engine…")
+                              : (root.engine && root.engine.connectionState === EngineController.Connecting
+                                 ? qsTr("Connecting…") : qsTr("Connect"))
+                        onClicked: root.connectNow()
+                    }
                 }
             }
         }
