@@ -103,3 +103,16 @@ target_link_libraries(test_control_auth
 )
 include(GoogleTest)
 gtest_discover_tests(test_control_auth)
+
+add_executable(test_decision_intake
+    test_decision_intake.cpp
+)
+target_link_libraries(test_decision_intake
+    PRIVATE
+        pulse::control
+        pulse::core
+        pulse::logging
+        GTest::gtest_main
+)
+include(GoogleTest)
+gtest_discover_tests(test_decision_intake)

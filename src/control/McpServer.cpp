@@ -513,6 +513,20 @@ nlohmann::json McpServer::toolDefinitions()
         },
         { "strategy_id", "enabled" });
 
+    add("submit_decision",
+        "Validate a gold decision packet (schema gold.decision/1) produced by "
+        "the decision repository and return a dry-run verdict: schema, "
+        "freshness, instrument, level geometry and risk arithmetic. It never "
+        "places, cancels or modifies an order.",
+        nlohmann::json{
+            { "decision", nlohmann::json{
+                  { "type", "object" },
+                  { "description",
+                    "decision packet: schema, id, valid_until, instrument, "
+                    "stance, levels, sizing, context, invalidation, reason" } } },
+        },
+        { "decision" });
+
     return defs;
 }
 

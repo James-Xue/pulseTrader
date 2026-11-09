@@ -7,6 +7,7 @@
 #include "control/JsonRpcServer.hpp"
 
 #include "control/EngineServices.hpp"
+#include "control/DecisionIntake.hpp"
 #include "logging/Logger.hpp"
 
 #include <asio/read_until.hpp>
@@ -827,6 +828,13 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
                 "set_strategy_trading: strategy not found: " + id } };
         }
         return RpcResult{ services.strategies() };
+    };
+
+    // Decision intake: the bridge from the decision repository to the engine.
+    // Validation and dry-run arithmetic only — this path never places an order.
+    reg["submit_decision"] = [](const nlohmann::json &params)
+    {
+        return validateDecision(params);
     };
 
     return reg;

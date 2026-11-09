@@ -15,6 +15,7 @@ add_library(pulse_control STATIC
     ControlClient.cpp
     CommandParser.cpp
     McpServer.cpp
+    DecisionIntake.cpp
 )
 add_library(pulse::control ALIAS pulse_control)
 
