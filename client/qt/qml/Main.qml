@@ -67,6 +67,14 @@ ApplicationWindow {
         id: launcher
     }
 
+    /// Local market-data server for downstream consumers (the gold-trader
+    /// bot). It listens on loopback only and polls the engine's control
+    /// socket through its own RpcClient, so it stays independent of the UI's
+    /// polling and lives as long as the window does.
+    DataServer {
+        id: dataServer
+    }
+
     /// Colour scheme persistence. Style is a singleton, so the value is copied
     /// in at startup and written back whenever the toggle flips it. The stored
     /// default is dark; a user who picks light keeps that choice across runs.
@@ -236,6 +244,7 @@ ApplicationWindow {
                             controller: engine
                             account: accounts
                             launcher: launcher
+                            dataServer: dataServer
                         }
                     }
                 }
@@ -247,5 +256,10 @@ ApplicationWindow {
         // Restore the saved scheme before the first frame so the window does
         // not flash light before switching to dark.
         Style.dark = appearance.dark
+
+        // Bind the data-server port and start engine polling. Deferred to
+        // Component.onCompleted (rather than a constructor) so a bind failure
+        // is reported through the component's own signals.
+        dataServer.start()
     }
 }

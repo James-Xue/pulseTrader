@@ -67,6 +67,11 @@ qt_add_qml_module(pulseTraderQt
         src/account/AccountService.cpp src/account/AccountService.hpp
         src/engine/EngineController.cpp src/engine/EngineController.hpp
         src/engine/EngineLauncher.cpp  src/engine/EngineLauncher.hpp
+        src/data/DataServerConfig.hpp
+        src/data/IndicatorEngine.cpp   src/data/IndicatorEngine.hpp
+        src/data/MarketDataService.cpp src/data/MarketDataService.hpp
+        src/data/DataSession.cpp       src/data/DataSession.hpp
+        src/data/DataServer.cpp        src/data/DataServer.hpp
         src/models/JsonListModel.cpp   src/models/JsonListModel.hpp
         src/models/PositionsModel.hpp
         src/models/OrdersModel.hpp
@@ -84,6 +89,7 @@ target_include_directories(pulseTraderQt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/account
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/data
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc

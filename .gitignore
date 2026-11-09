@@ -86,8 +86,10 @@ trading.toml
 trading.toml.bak*
 trading.testnet.toml
 
-# SQLite database
-data/
+# SQLite database and runtime state (engine lock, kline cache).
+# Leading slash anchors to the repo root so source directories named "data"
+# (e.g. client/qt/src/data) stay trackable.
+/data/
 
 # Frontend deps (WebUI removed on headless; leftover from M13 era)
 frontend/node_modules/

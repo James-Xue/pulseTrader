@@ -14,6 +14,7 @@ ColumnLayout {
     property var controller
     property var account
     property var launcher
+    property var dataServer
 
     spacing: Style.gap
 
@@ -60,6 +61,153 @@ ColumnLayout {
                   : qsTr("no controller"))
             color: Style.secondaryText
             font.pixelSize: 13
+        }
+    }
+
+    // -- Data server --------------------------------------------------------
+    //
+    // The local market-data endpoint for downstream consumers. It listens on
+    // loopback only, so this card is the only place the operator sees whether
+    // a bot is actually attached and whether the engine feed is live.
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.leftMargin: Style.pad
+        Layout.rightMargin: Style.pad
+        Layout.preferredHeight: dataCard.implicitHeight + (Style.pad * 2)
+        color: Style.controlBackground
+        radius: Style.radius
+        border.width: 1
+        border.color: Style.separator
+
+        ColumnLayout {
+            id: dataCard
+            anchors.fill: parent
+            anchors.margins: Style.pad
+            spacing: Style.gapSmall
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.gapSmall
+
+                Rectangle {
+                    width: 8
+                    height: 8
+                    radius: 4
+                    color: !root.dataServer
+                           ? Style.tertiaryText
+                           : (root.dataServer.listening ? Style.success
+                                                        : Style.danger)
+                }
+
+                Text {
+                    text: qsTr("Data server")
+                    color: Style.text
+                    font.pixelSize: Style.sectionTitleSize
+                    font.weight: Font.DemiBold
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Text {
+                    text: !root.dataServer
+                          ? qsTr("unavailable")
+                          : (root.dataServer.listening
+                             ? qsTr("listening on 127.0.0.1:%1").arg(root.dataServer.port)
+                             : qsTr("stopped"))
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 4
+                columnSpacing: Style.gapLarge
+                rowSpacing: 2
+
+                Text {
+                    text: qsTr("Engine feed")
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                }
+                Text {
+                    text: root.dataServer && root.dataServer.engineReady
+                          ? qsTr("ready") : qsTr("waiting")
+                    color: root.dataServer && root.dataServer.engineReady
+                           ? Style.success : Style.warning
+                    font.pixelSize: Style.fontSizeSmall
+                }
+                Text {
+                    text: qsTr("Consumers")
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                }
+                Text {
+                    text: root.dataServer
+                          ? qsTr("%1 / %2").arg(root.dataServer.connectedCount)
+                                          .arg(root.dataServer.maxClients)
+                          : "—"
+                    color: Style.text
+                    font.pixelSize: Style.fontSizeSmall
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("XAUUSD · CFD · 1m · 500 candles · updates at 2 Hz")
+                color: Style.tertiaryText
+                font.pixelSize: Style.fontSizeSmall
+                wrapMode: Text.WordWrap
+            }
+
+            // One row per attached consumer: the identity it presented in its
+            // hello plus the last time any frame arrived from it.
+            Column {
+                Layout.fillWidth: true
+                spacing: 2
+                visible: root.dataServer && root.dataServer.connectedCount > 0
+
+                Repeater {
+                    model: root.dataServer ? root.dataServer.clients : []
+
+                    delegate: Row {
+                        required property var modelData
+                        width: parent.width
+                        spacing: Style.gap
+
+                        Text {
+                            width: 140
+                            text: modelData.client_id
+                            color: Style.text
+                            font.pixelSize: Style.fontSizeSmall
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            width: 160
+                            text: modelData.strategy.length > 0
+                                  ? modelData.strategy : qsTr("(no strategy)")
+                            color: Style.secondaryText
+                            font.pixelSize: Style.fontSizeSmall
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            text: qsTr("last seen %1").arg(
+                                      Qt.formatTime(new Date(modelData.last_seen_ms),
+                                                    "hh:mm:ss"))
+                            color: Style.tertiaryText
+                            font.pixelSize: Style.fontSizeSmall
+                        }
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: !root.dataServer || root.dataServer.connectedCount === 0
+                text: qsTr("No consumers connected.")
+                color: Style.tertiaryText
+                font.pixelSize: Style.fontSizeSmall
+            }
         }
     }
 
