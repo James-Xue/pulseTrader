@@ -165,12 +165,17 @@ void TestSecretStore::configMainnet()
     const QString config = EngineLauncher::buildConfig(
         QStringLiteral("KEY"), QStringLiteral("SECRET"),
         QStringLiteral("mainnet"), QStringLiteral("spot"),
-        QStringLiteral("http://127.0.0.1:7897"), 8081, dir);
+        QStringLiteral("http://127.0.0.1:7897"),
+        QStringLiteral("btc_usdt, ETH_USDT, XAUT_USDT, XAUT_USDT"), 8081, dir);
 
     QVERIFY(config.contains(QStringLiteral("testnet = false")));
     QVERIFY(config.contains(QStringLiteral("active_market = \"spot\"")));
     QVERIFY(config.contains(QStringLiteral("market_type = \"spot\"")));
     QVERIFY(config.contains(QStringLiteral("signal_only = true")));
+    // The watchlist is uppercased, deduplicated and kept separate from the
+    // fallback `symbols` array.
+    QVERIFY(config.contains(
+        QStringLiteral("watch_symbols = [\"BTC_USDT\", \"ETH_USDT\", \"XAUT_USDT\"]")));
     QVERIFY(config.contains(QStringLiteral("proxyUrl = \"http://127.0.0.1:7897\"")));
     QVERIFY(config.contains(QStringLiteral("port = 8081")));
     QVERIFY(config.contains(dir + QStringLiteral("/trades.db")));
@@ -183,7 +188,7 @@ void TestSecretStore::configTestnetForcesFutures()
     const QString config = EngineLauncher::buildConfig(
         QStringLiteral("KEY"), QStringLiteral("SECRET"),
         QStringLiteral("testnet"), QStringLiteral("spot"),
-        QString(), 8081, QStringLiteral("/tmp/rt"));
+        QString(), QString(), 8081, QStringLiteral("/tmp/rt"));
 
     QVERIFY(config.contains(QStringLiteral("testnet = true")));
     QVERIFY(config.contains(QStringLiteral("active_market = \"futures\"")));
@@ -197,7 +202,7 @@ void TestSecretStore::configEscapesSecret()
     const QString config = EngineLauncher::buildConfig(
         QStringLiteral("KEY"), QStringLiteral("sec\"ret\\x"),
         QStringLiteral("mainnet"), QStringLiteral("futures"),
-        QString(), 8081, QStringLiteral("/tmp/rt"));
+        QString(), QString(), 8081, QStringLiteral("/tmp/rt"));
 
     QVERIFY(config.contains(QStringLiteral("apiSecret = \"sec\\\"ret\\\\x\"")));
 }

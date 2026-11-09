@@ -40,7 +40,8 @@ public:
     /// start. `proxy` may be empty.
     Q_INVOKABLE bool start(const QString& apiKey, const QString& apiSecret,
                            const QString& network, const QString& market,
-                           const QString& proxy, int port);
+                           const QString& proxy, const QString& symbols,
+                           int port);
 
     /// Terminate the engine (SIGTERM, then SIGKILL after five seconds) and
     /// delete the runtime config that contains the credentials.
@@ -57,6 +58,7 @@ public:
                                              const QString& network,
                                              const QString& market,
                                              const QString& proxy,
+                                             const QString& symbols,
                                              int port,
                                              const QString& runtimeDir);
 

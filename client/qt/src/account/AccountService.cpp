@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QStringList>
 
 #include "security/SecretStore.hpp"
 
@@ -25,6 +26,44 @@ QString profileString(const QJsonObject& payload, const char* key)
         .toObject()
         .value(QString::fromLatin1(key))
         .toString();
+}
+
+/// Normalize the active-market watchlist: uppercase, comma/space separated,
+/// deduplicated, capped at 12 entries. Malformed tokens are dropped instead
+/// of failing the whole save; the caller rejects an empty result.
+QString normalizeWatchSymbols(const QString& input)
+{
+    QString text = input;
+    text.replace(QLatin1Char(','), QLatin1Char(' '));
+
+    const QStringList parts = text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    QStringList symbols;
+
+    for (QString part : parts)
+    {
+        part = part.trimmed().toUpper();
+
+        // A Gate pair is BASE_QUOTE. Anything else would only produce
+        // SYMBOL_NOT_EXISTS noise in the engine log.
+        if (part.isEmpty() || !part.contains(QLatin1Char('_'))
+            || part.startsWith(QLatin1Char('_'))
+            || part.endsWith(QLatin1Char('_')))
+        {
+            continue;
+        }
+
+        if (!symbols.contains(part))
+        {
+            symbols.append(part);
+        }
+
+        if (symbols.size() >= 12)
+        {
+            break;
+        }
+    }
+
+    return symbols.join(QStringLiteral(", "));
 }
 
 } // namespace
@@ -104,6 +143,7 @@ void AccountService::createAccount(const QString& username,
     profile[QStringLiteral("apiKey")] = QString();
     profile[QStringLiteral("apiSecret")] = QString();
     profile[QStringLiteral("proxy")] = QString();
+    profile[QStringLiteral("symbols")] = QStringLiteral("BTC_USDT, ETH_USDT");
 
     QJsonObject payload;
     payload[QStringLiteral("username")] = accountName;
@@ -180,7 +220,8 @@ bool AccountService::saveProfile(const QString& network,
                                  const QString& market,
                                  const QString& apiKey,
                                  const QString& apiSecret,
-                                 const QString& proxy)
+                                 const QString& proxy,
+                                 const QString& symbols)
 {
     clearError();
 
@@ -211,6 +252,16 @@ bool AccountService::saveProfile(const QString& network,
         return false;
     }
 
+    // 1b. The engine requires at least one symbol for its feed subscriptions;
+    //     the watchlist replaces the fixed default here.
+    const QString normalizedSymbols = normalizeWatchSymbols(symbols);
+
+    if (normalizedSymbols.isEmpty())
+    {
+        setError(tr("Enter at least one watch symbol, e.g. BTC_USDT."));
+        return false;
+    }
+
     // 2. Update the decrypted payload and re-encrypt it with a fresh IV.
     QJsonObject profile;
     profile[QStringLiteral("network")] = network;
@@ -218,6 +269,7 @@ bool AccountService::saveProfile(const QString& network,
     profile[QStringLiteral("apiKey")] = apiKey.trimmed();
     profile[QStringLiteral("apiSecret")] = apiSecret.trimmed();
     profile[QStringLiteral("proxy")] = proxy.trimmed();
+    profile[QStringLiteral("symbols")] = normalizedSymbols;
 
     m_payload[QStringLiteral("profile")] = profile;
 
@@ -256,6 +308,16 @@ QString AccountService::profileApiSecret() const
 QString AccountService::profileProxy() const
 {
     return profileString(m_payload, "proxy");
+}
+
+QString AccountService::profileSymbols() const
+{
+    const QString stored = profileString(m_payload, "symbols");
+
+    // Vaults created before the watchlist existed have no stored value; the
+    // engine still needs at least one symbol, so hand back the default rather
+    // than an empty field that would fail validation on the next Connect.
+    return stored.isEmpty() ? QStringLiteral("BTC_USDT, ETH_USDT") : stored;
 }
 
 void AccountService::setError(const QString& message)

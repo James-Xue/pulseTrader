@@ -12,6 +12,12 @@
 # WebSocket 订阅的币种列表，策略只能使用此列表中的币种。
 symbols = ["BTC_USDT", "ETH_USDT"]
 
+# ── 自选观察列表（可选）──────────────────────────────────────────────
+# 只在“活跃市场(active_market)”里额外订阅的币种：不创建策略、不下单，
+# 只为行情/客户端下拉框提供数据。名字必须是该市场存在的合约/交易对
+# （现货用 XAUT_USDT，合约用 XAU_USDT），跨市场名字会刷 SYMBOL_NOT_EXISTS。
+# watch_symbols = ["BTC_USDT", "ETH_USDT", "XAU_USDT", "XAUT_USDT"]
+
 # ── 默认市场类型（可选，默认 spot）──────────────────────────────────
 # 策略未指定 market_type 时使用此值。可选: "spot" | "futures" | "cfd"
 # default_market_type = "spot"

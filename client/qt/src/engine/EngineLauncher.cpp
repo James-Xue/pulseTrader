@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QTextStream>
 
 #ifdef Q_OS_LINUX
@@ -53,6 +54,44 @@ QString tomlString(const QString& value)
     }
 
     return out;
+}
+
+/// Split "BTC_USDT, ETH_USDT" into a normalized watchlist for the engine's
+/// `watch_symbols`. Uppercase, deduplicated, capped at 12; falls back to the
+/// historical default when the profile has no valid entry.
+QStringList watchSymbols(const QString& input)
+{
+    QString text = input;
+    text.replace(QLatin1Char(','), QLatin1Char(' '));
+
+    QStringList symbols;
+
+    for (QString part : text.split(QLatin1Char(' '), Qt::SkipEmptyParts))
+    {
+        part = part.trimmed().toUpper();
+
+        if (part.isEmpty() || !part.contains(QLatin1Char('_')))
+        {
+            continue;
+        }
+
+        if (!symbols.contains(part))
+        {
+            symbols.append(part);
+        }
+
+        if (symbols.size() >= 12)
+        {
+            break;
+        }
+    }
+
+    if (symbols.isEmpty())
+    {
+        symbols << QStringLiteral("BTC_USDT") << QStringLiteral("ETH_USDT");
+    }
+
+    return symbols;
 }
 
 /// Private directory for the generated config and the engine log. Prefers
@@ -129,6 +168,7 @@ QString EngineLauncher::buildConfig(const QString& apiKey,
                                     const QString& network,
                                     const QString& market,
                                     const QString& proxy,
+                                    const QString& symbols,
                                     int port,
                                     const QString& runtimeDir)
 {
@@ -146,6 +186,19 @@ QString EngineLauncher::buildConfig(const QString& apiKey,
         << "# Rewritten on every start; edit the client profile instead.\n\n";
 
     out << "symbols = [\"BTC_USDT\", \"ETH_USDT\"]\n";
+
+    // `watch_symbols` is streamed in the active market only; `symbols` stays
+    // as the fallback list for markets without strategies.
+    const QStringList watchlist = watchSymbols(symbols);
+    out << "watch_symbols = [";
+
+    for (int index = 0; index < watchlist.size(); ++index)
+    {
+        out << (0 == index ? "\"" : ", \"")
+            << tomlString(watchlist.at(index)) << "\"";
+    }
+
+    out << "]\n";
     out << "active_market = \"" << tomlString(activeMarket) << "\"\n\n";
 
     // 2. Exchange credentials. proxyUrl is omitted when the client profile has
@@ -211,7 +264,8 @@ QString EngineLauncher::buildConfig(const QString& apiKey,
 
 bool EngineLauncher::start(const QString& apiKey, const QString& apiSecret,
                            const QString& network, const QString& market,
-                           const QString& proxy, int port)
+                           const QString& proxy, const QString& symbols,
+                           int port)
 {
     // 1. One engine per client: never spawn a second process on top of a
     //    running one, because two engines would trade independently.
@@ -262,7 +316,8 @@ bool EngineLauncher::start(const QString& apiKey, const QString& apiSecret,
     }
 
     const QByteArray config =
-        buildConfig(apiKey, apiSecret, network, market, proxy, port, runtimeDir)
+        buildConfig(apiKey, apiSecret, network, market, proxy, symbols, port,
+                    runtimeDir)
             .toUtf8();
     configFile.write(config);
     configFile.close();

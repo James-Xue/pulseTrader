@@ -337,7 +337,20 @@ nlohmann::json EngineServices::status() const
     j["version"] = m_version;
     j["uptime_sec"] = uptime;
     j["network"] = m_cfg.exchange.testnet ? "testnet" : "mainnet";
-    j["symbols"] = m_cfg.symbols;
+    // Report the watchlist as well, so a client dropdown offers every symbol
+    // the engine actually streams in the active market.
+    std::vector<std::string> reportedSymbols = m_cfg.symbols;
+
+    for (const auto& symbol : m_cfg.watch_symbols)
+    {
+        if (std::find(reportedSymbols.begin(), reportedSymbols.end(), symbol)
+            == reportedSymbols.end())
+        {
+            reportedSymbols.push_back(symbol);
+        }
+    }
+
+    j["symbols"] = reportedSymbols;
     j["strategies_running"] = m_strategyMgr.runningCount();
     j["strategies_total"] = m_strategyMgr.strategyCount();
     j["open_positions"] = m_positionMgr.openPositionCount();

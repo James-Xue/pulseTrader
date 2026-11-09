@@ -317,20 +317,22 @@ PulseError parseLog(const toml::value &root, LogConfig &out)
     return {};
 }
 
-PulseError parseSymbols(const toml::value &root,
-                         std::vector<std::string> &out)
+/// Parse a top-level array of symbol strings. Used for both `symbols` (the
+/// trading/fallback list) and `watch_symbols` (active-market watchlist).
+PulseError parseSymbolArray(const toml::value &root, const char *key,
+                            std::vector<std::string> &out)
 {
-    if (!root.contains("symbols"))
+    if (!root.contains(key))
     {
         return {};
     }
 
-    const auto &arr = root.at("symbols");
+    const auto &arr = root.at(key);
 
     if (!arr.is_array())
     {
         return PulseError{ErrorCode::ConfigInvalidValue,
-                          "symbols must be an array of strings"};
+                          std::string{ key } + " must be an array of strings"};
     }
 
     out.clear();
@@ -340,7 +342,8 @@ PulseError parseSymbols(const toml::value &root,
         if (!elem.is_string())
         {
             return PulseError{ErrorCode::ConfigInvalidValue,
-                              "symbols array elements must be strings"};
+                              std::string{ key }
+                                  + " array elements must be strings"};
         }
         out.push_back(elem.as_string());
     }
@@ -1137,7 +1140,14 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
         return err;
     }
 
-    err = parseSymbols(root, cfg.symbols);
+    err = parseSymbolArray(root, "symbols", cfg.symbols);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseSymbolArray(root, "watch_symbols", cfg.watch_symbols);
 
     if (ErrorCode::Ok != err.code)
     {

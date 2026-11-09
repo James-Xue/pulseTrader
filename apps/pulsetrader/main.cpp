@@ -676,6 +676,21 @@ static int runTrade(int argc, char* argv[])
                 syms.push_back(inst.symbol);
             }
         }
+
+        // Watchlist symbols are streamed in the ACTIVE market only. A name
+        // can be foreign to the other venues (XAU_USDT is futures-only), and
+        // a feed polling a symbol it does not know logs an error every tick.
+        if (mt == cfg.active_market)
+        {
+            for (const auto &symbol : cfg.watch_symbols)
+            {
+                if (std::find(syms.begin(), syms.end(), symbol) == syms.end())
+                {
+                    syms.push_back(symbol);
+                }
+            }
+        }
+
         return syms.empty() ? cfg.symbols : syms;
     };
     const auto spot_symbols    = symbols_for(MarketType::Spot);

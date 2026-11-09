@@ -36,6 +36,9 @@ class AccountService : public QObject
     Q_PROPERTY(QString profileApiKey READ profileApiKey NOTIFY profileChanged)
     Q_PROPERTY(QString profileApiSecret READ profileApiSecret NOTIFY profileChanged)
     Q_PROPERTY(QString profileProxy READ profileProxy NOTIFY profileChanged)
+    /// Active-market watchlist as a comma-separated string, e.g.
+    /// "BTC_USDT, ETH_USDT, XAU_USDT".
+    Q_PROPERTY(QString profileSymbols READ profileSymbols NOTIFY profileChanged)
 
 public:
     explicit AccountService(QObject* parent = nullptr);
@@ -59,7 +62,8 @@ public:
                                  const QString& market,
                                  const QString& apiKey,
                                  const QString& apiSecret,
-                                 const QString& proxy);
+                                 const QString& proxy,
+                                 const QString& symbols);
 
     [[nodiscard]] bool hasAccount() const { return m_hasAccount; }
     [[nodiscard]] bool unlocked() const { return m_unlocked; }
@@ -70,6 +74,7 @@ public:
     [[nodiscard]] QString profileApiKey() const;
     [[nodiscard]] QString profileApiSecret() const;
     [[nodiscard]] QString profileProxy() const;
+    [[nodiscard]] QString profileSymbols() const;
 
 signals:
     void stateChanged();

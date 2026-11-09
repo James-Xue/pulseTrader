@@ -64,6 +64,7 @@ Rectangle {
         keyField.text = root.account.profileApiKey
         secretField.text = root.account.profileApiSecret
         proxyField.text = root.account.profileProxy
+        symbolsField.text = root.account.profileSymbols
     }
 
     Component.onCompleted: root.reloadProfile()
@@ -96,7 +97,7 @@ Rectangle {
 
         if (!root.account.saveProfile(root.network, root.market,
                                       keyField.text, secretField.text,
-                                      proxyField.text)) {
+                                      proxyField.text, symbolsField.text)) {
             return
         }
 
@@ -104,6 +105,7 @@ Rectangle {
                                  root.account.profileApiSecret,
                                  root.network, root.market,
                                  root.account.profileProxy,
+                                 root.account.profileSymbols,
                                  root.controlPort)) {
             return
         }
@@ -311,6 +313,33 @@ Rectangle {
                         Layout.fillWidth: true
                         enabled: !root.busy
                         placeholderText: qsTr("http://127.0.0.1:7897")
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gapSmall
+
+                    Text {
+                        text: qsTr("Watch symbols")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    MacTextField {
+                        id: symbolsField
+                        Layout.fillWidth: true
+                        enabled: !root.busy
+                        placeholderText: qsTr("BTC_USDT, ETH_USDT, XAU_USDT")
+                    }
+
+                    Text {
+                        text: qsTr("Comma separated, streamed in the selected "
+                                   + "market. Use names valid there — spot "
+                                   + "XAUT_USDT, futures XAU_USDT.")
+                        color: Style.tertiaryText
+                        font.pixelSize: Style.fontSizeSmall
+                        wrapMode: Text.WordWrap
                     }
                 }
 

@@ -501,6 +501,12 @@ struct PulseConfig
     FundingWatchConfig funding_watch;   ///< [funding_watch] funding-window monitor.
     BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
+    /// Extra symbols to stream in the ACTIVE market only (watchlist). They are
+    /// unioned into that market's feed subscriptions but create no strategy
+    /// instances. Kept separate from `symbols` because the same ticker name
+    /// may not exist on the other venues (e.g. XAU_USDT is futures-only), and
+    /// a feed polling a foreign symbol logs SYMBOL_NOT_EXISTS every tick.
+    std::vector<std::string> watch_symbols;
     MarketType default_market_type = MarketType::Spot; ///< Default market type for strategies without explicit setting.
     MarketType active_market = MarketType::Futures; ///< Single active trading direction at startup; runtime switch is ephemeral (restart returns here).
 };
