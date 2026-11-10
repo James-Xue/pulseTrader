@@ -25,16 +25,18 @@ AccountModel::AccountModel(QObject* parent)
 
 void AccountModel::setFromJson(const QJsonObject& account)
 {
-    // 1. Futures block. Every field inside it is optional in practice, but the
-    //    block itself only appears when the exchange call succeeded.
-    const QJsonObject futures = account.value(QStringLiteral("futures")).toObject();
-    m_futuresPresent = !futures.isEmpty();
-    m_futuresCurrency = futures.value(QStringLiteral("currency")).toString();
-    m_futuresTotal = numberOr(futures, QStringLiteral("total"));
-    m_futuresAvailable = numberOr(futures, QStringLiteral("available_balance"));
-    m_futuresUnrealised = numberOr(futures, QStringLiteral("unrealised_pnl"));
-    m_futuresPositionMargin = numberOr(futures, QStringLiteral("position_margin"));
-    m_futuresOrderMargin = numberOr(futures, QStringLiteral("order_margin"));
+    // 1. Futures block. Unlike spot and CFD, the futures fields are reported
+    //    at the TOP LEVEL of the result, not under a "futures" key — see the
+    //    get_account example in docs/qt-client-design.md §3.2. Reading a
+    //    nested object here silently hid the futures tiles on every machine.
+    //    `available` is the flag that says the exchange call succeeded.
+    m_futuresPresent = account.value(QStringLiteral("available")).toBool(false);
+    m_futuresCurrency = account.value(QStringLiteral("currency")).toString();
+    m_futuresTotal = numberOr(account, QStringLiteral("total"));
+    m_futuresAvailable = numberOr(account, QStringLiteral("available_balance"));
+    m_futuresUnrealised = numberOr(account, QStringLiteral("unrealised_pnl"));
+    m_futuresPositionMargin = numberOr(account, QStringLiteral("position_margin"));
+    m_futuresOrderMargin = numberOr(account, QStringLiteral("order_margin"));
 
     // 2. Spot block. This is the only block a spot-only API key can populate,
     //    so the UI must be able to show it with no futures data at all.
@@ -71,10 +73,14 @@ void AccountModel::setFromJson(const QJsonObject& account)
         m_spotBalances.append(item);
     }
 
-    // 3. CFD block.
+    // 3. CFD block. `total` is the TradFi account equity and `margin` the
+    //    margin in use; a CFD-only key shows this and nothing else.
     const QJsonObject cfd = account.value(QStringLiteral("cfd")).toObject();
     m_cfdPresent = !cfd.isEmpty();
+    m_cfdCurrency = cfd.value(QStringLiteral("currency")).toString(QStringLiteral("USD"));
+    m_cfdTotal = numberOr(cfd, QStringLiteral("total"));
     m_cfdAvailable = numberOr(cfd, QStringLiteral("available"));
+    m_cfdMargin = numberOr(cfd, QStringLiteral("margin"));
     m_cfdUnrealised = numberOr(cfd, QStringLiteral("unrealised_pnl"));
 
     emit changed();
