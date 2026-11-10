@@ -837,6 +837,28 @@ static int runTrade(int argc, char* argv[])
         log->info("[L1] TradFi CFD exchange clients created (REST poll mode)");
     }
 
+    // Balance-only REST clients for markets with no strategies configured.
+    // The account snapshot must reflect every market the key can reach: a
+    // spot-only strategy list used to leave futures_rest/cfd_rest null, so
+    // get_account reported a spot balance and nothing else — the dashboard had
+    // no futures or CFD block to draw. This mirrors the spot fallback above
+    // ("balance queries only"). No feed, no WS client, no executor is created
+    // here; these clients exist purely for account queries (every 30 s at most
+    // per market in the Qt client), and a rejected call just omits that block.
+    if (!has_futures)
+    {
+        futures_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Futures);
+        log->info("[L1] Futures REST client created (balance queries only)");
+    }
+
+    if (!has_cfd)
+    {
+        cfd_rest = std::make_unique<pulse::exchange::GateRestClient>(
+            cfg.exchange, MarketType::Cfd);
+        log->info("[L1] CFD REST client created (balance queries only)");
+    }
+
     // ------------------------------------------------------------------
     // 4. L3: Market Data (per-market feeds already created above)
     // ------------------------------------------------------------------
