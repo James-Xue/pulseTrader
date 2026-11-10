@@ -201,6 +201,27 @@ pulseTrader/
 └── LICENSE
 ```
 
+### Codebase size
+
+Counted from tracked sources (`git ls-files`). Vendored `third_party/`, build
+directories, and the generated `frontend/dist/` assets are excluded:
+
+| Area | Files | Lines |
+|---|---:|---:|
+| Engine (`src/`) | 162 | 37,736 |
+| Tests (`tests/`) | 76 | 23,547 |
+| Qt client, C++ (`client/`) | 35 | 6,549 |
+| Apps (`apps/`) | 5 | 2,744 |
+| Tools (`tools/`) | 10 | 2,623 |
+| **C++ total** | **288** | **73,199** |
+| QML UI (`client/qt`) | 26 | 2,897 |
+| CMake (`CMakeLists.txt` + `cmake/*.cmake`) | 39 | 1,525 |
+| Python + shell tooling | 21 | 3,702 |
+| **All code** | **374** | **81,323** |
+
+Test code is 32% of the C++ total (23,547 of 73,199 lines), the ratio the
+project's test-first policy is meant to produce.
+
 ---
 
 ## Getting Started
