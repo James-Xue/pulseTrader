@@ -21,7 +21,9 @@ add_library(pulse::control ALIAS pulse_control)
 
 target_include_directories(pulse_control
     PUBLIC ${PROJECT_SOURCE_DIR}/src
-    SYSTEM PRIVATE ${PULSE_ASIO_INCLUDE_DIR}
+    # PUBLIC: ControlClient.hpp and JsonRpcServer.hpp include asio headers, so
+    # consumers of this library need the same include path.
+    SYSTEM PUBLIC ${PULSE_ASIO_INCLUDE_DIR}
 )
 
 target_link_libraries(pulse_control

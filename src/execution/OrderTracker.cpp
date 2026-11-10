@@ -324,10 +324,10 @@ Result<OrderStatus> OrderTracker::pollCfdOrderStatus(const std::string &order_id
             const auto &pos_list = pos_data.value("list", nlohmann::json::array());
             if (pos_list.is_array())
             {
-                const std::int64_t submit_sec =
-                    std::chrono::duration_cast<std::chrono::seconds>(
-                        tracked->submit_time.time_since_epoch())
-                        .count();
+                // Reuse the submit-time window computed for the key-match
+                // fallback above: `tracked` is const here, so the value is
+                // identical. Declaring a second local shadowed the first and
+                // tripped MSVC C4456, which /WX promotes to an error.
                 for (const auto &p : pos_list)
                 {
                     if (p.value("symbol", "") != tracked->symbol)

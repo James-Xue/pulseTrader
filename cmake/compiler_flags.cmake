@@ -9,6 +9,11 @@ if(MSVC)
         /WX         # Treat warnings as errors
         /permissive- # Strict standard conformance
         /Zc:__cplusplus  # Report correct __cplusplus value
+        # Parity with -Wno-unused-parameter below: parameters left unused in
+        # virtual overrides and callback signatures are deliberate, and GCC
+        # is already told to ignore them. Without this, the same code builds
+        # on Linux and fails here at /W4 /WX.
+        /wd4100
     )
     add_compile_definitions(
         _CRT_SECURE_NO_WARNINGS  # Suppress MSVC deprecation warnings for getenv, etc.

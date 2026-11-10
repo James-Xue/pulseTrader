@@ -46,8 +46,10 @@ else()
         "websocketpp not found. Install via vcpkg or place headers in third_party/websocketpp/")
 endif()
 
+# PUBLIC: ProxyTunnel.hpp includes <asio/ip/tcp.hpp>, so consumers of this
+# library need the same include path.
 if(PULSE_ASIO_INCLUDE_DIR)
-    target_include_directories(pulse_exchange SYSTEM PRIVATE ${PULSE_ASIO_INCLUDE_DIR})
+    target_include_directories(pulse_exchange SYSTEM PUBLIC ${PULSE_ASIO_INCLUDE_DIR})
 endif()
 
 # Suppress warnings from websocketpp third-party headers (C4127: constant conditional,

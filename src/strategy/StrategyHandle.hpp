@@ -11,7 +11,10 @@
 namespace pulse::strategy
 {
 
-class StrategyParams;
+// Forward declaration must use the same class-key as the definition in
+// StrategyParams.hpp: MSVC reports the mixed spelling as C4099 at /W4, and
+// /WX turns that into a build error.
+struct StrategyParams;
 
 struct StrategyHandle
 {
