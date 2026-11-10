@@ -13,12 +13,16 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 #include <string>
 
 // Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
 // Windows uses _putenv_s / _dupenv_s).
 #ifdef _WIN32
+#include <process.h> // _getpid
+#define getpid _getpid
 static void setenv(const char *name, const char *value, int /*overwrite*/)
 {
     _putenv_s(name, value);

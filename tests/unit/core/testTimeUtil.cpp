@@ -9,10 +9,27 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib> // setenv
-#include <ctime>   // tzset
+#include <cstdlib> // setenv / _putenv_s
+#include <ctime>   // tzset / _tzset
 
 #include "core/TimeUtil.hpp"
+
+// Cross-platform TZ setup: POSIX has setenv/tzset, MSVC has _putenv_s/_tzset.
+// (The MSVC CRT only understands POSIX TZ strings, not IANA zone names, so the
+// local-timezone test skips itself on Windows.)
+#if defined(_WIN32)
+static void setTimezone(const char *name)
+{
+    _putenv_s("TZ", name);
+    _tzset();
+}
+#else
+static void setTimezone(const char *name)
+{
+    setenv("TZ", name, 1);
+    tzset();
+}
+#endif
 
 using namespace pulse;
 
@@ -104,6 +121,9 @@ TEST(FormatEpochMs, NegativeClamped)
 
 TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "MSVC CRT does not resolve IANA timezone names";
+#endif
     // Force a known timezone so the assertions are deterministic no matter
     // which machine runs the suite. Regression: the old offset computation
     // (mktime-based) always produced 0, labelling e.g. a Beijing wall clock
@@ -112,24 +132,20 @@ TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
     // 1786856207143 ms == 2026-08-16 04:56:47.143 UTC
     //                  == 2026-08-16 12:56:47.143 Beijing (+08:00)
     //                  == 2026-08-16 00:56:47.143 US Eastern EDT (-04:00)
-    setenv("TZ", "Asia/Shanghai", 1);
-    tzset();
+    setTimezone("Asia/Shanghai");
     EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
               "2026-08-16T12:56:47.143+08:00");
 
-    setenv("TZ", "UTC", 1);
-    tzset();
+    setTimezone("UTC");
     EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
               "2026-08-16T04:56:47.143+00:00");
 
-    setenv("TZ", "America/New_York", 1);
-    tzset();
+    setTimezone("America/New_York");
     EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
               "2026-08-16T00:56:47.143-04:00");
 
     // Restore a neutral TZ so later tests in the same process are unaffected.
-    setenv("TZ", "UTC", 1);
-    tzset();
+    setTimezone("UTC");
 }
 
 TEST(FormatIsoTimestamp, NanosecondAlias)

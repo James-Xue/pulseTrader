@@ -14,9 +14,11 @@
 
 #include <gtest/gtest.h>
 
+#if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <cstdint>
 #include <memory>
@@ -45,6 +47,7 @@ JsonRpcServer::Security tokenSecurity(const std::string &token)
     return security;
 }
 
+#if !defined(_WIN32)
 /// Connect a blocking POSIX socket to the loopback control port.
 int connectRaw(std::uint16_t port)
 {
@@ -90,6 +93,7 @@ void sendLineRaw(int fd, const std::string &line)
     const std::string payload = line + "\n";
     ::send(fd, payload.data(), payload.size(), 0);
 }
+#endif // !defined(_WIN32)
 
 } // anonymous namespace
 
@@ -178,6 +182,7 @@ TEST(ControlAuth, ClientTokenAgainstOpenServerFails)
     server->stop();
 }
 
+#if !defined(_WIN32)
 TEST(ControlAuth, FirstMethodMustBeAuth)
 {
     auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
@@ -232,3 +237,8 @@ TEST(ControlAuth, AuthReplyEchoesIdAndOpensTheSession)
 
     server->stop();
 }
+#endif // !defined(_WIN32)
+
+// The two tests between the guards drive raw POSIX socket fds to pin the wire
+// shape; the ControlClient-based tests above them exercise the same auth gate
+// portably.

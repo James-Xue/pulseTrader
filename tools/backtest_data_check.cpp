@@ -166,15 +166,15 @@ int main(int argc, char **argv)
                   << " (" << market << "):\n";
 
 #ifdef PULSE_ENABLE_SQLITE
-        pulse::backtest::SqliteKlineReader reader(db_path);
-        auto cov = reader.coverage(symbol, mt);
-        if (!(pulse::ok(cov) && pulse::value(cov).has_value()))
+        pulse::backtest::SqliteKlineReader replay_reader(db_path);
+        auto replay_cov = replay_reader.coverage(symbol, mt);
+        if (!(pulse::ok(replay_cov) && pulse::value(replay_cov).has_value()))
         {
             std::cerr << "  no local coverage — nothing to replay\n";
             return 1;
         }
-        auto rows = reader.fetch(symbol, mt, pulse::value(cov)->first,
-                                 pulse::value(cov)->second);
+        auto rows = replay_reader.fetch(symbol, mt, pulse::value(replay_cov)->first,
+                                        pulse::value(replay_cov)->second);
         if (!pulse::ok(rows) || pulse::value(rows).empty())
         {
             std::cerr << "  no candles to replay\n";
