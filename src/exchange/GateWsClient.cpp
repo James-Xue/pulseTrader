@@ -34,6 +34,8 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 namespace pulse::exchange
 {
@@ -44,6 +46,40 @@ namespace pulse::exchange
 using WsClient = websocketpp::client<websocketpp::config::asio_tls_client>;
 using WsConnectionPtr = websocketpp::connection_hdl;
 using WsMessagePtr = WsClient::message_ptr;
+
+namespace
+{
+
+/// websocketpp exposes the asio context under two different names depending on
+/// the source: upstream 0.8.2 has get_io_service(), while Debian's packaged
+/// build carries a rename to get_io_context(). The two are mutually exclusive,
+/// so detect which one exists instead of pinning the build to one distributor.
+template <typename T, typename = void>
+struct HasGetIoContext : std::false_type
+{
+};
+
+template <typename T>
+struct HasGetIoContext<T,
+                       std::void_t<decltype(std::declval<T &>().get_io_context())>>
+    : std::true_type
+{
+};
+
+/// The client's io_context, whatever the websocketpp build calls it.
+template <typename Client> auto &ioContextOf(Client &client)
+{
+    if constexpr (HasGetIoContext<Client>::value)
+    {
+        return client.get_io_context();
+    }
+    else
+    {
+        return client.get_io_service();
+    }
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // detail — Pure functions for testing
@@ -437,7 +473,7 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
 
             // 3. Initialise the asio transport
             client.init_asio();
-            m_internal->io_ctx_ptr = &client.get_io_context();
+            m_internal->io_ctx_ptr = &ioContextOf(client);
 
             // 4. Set TLS handler for wss:// connections
             //    When using a proxy tunnel, we connect via wss:// to 127.0.0.1
@@ -686,7 +722,7 @@ void GateWsClient::runIoLoop(std::stop_token stop_token)
             }
 
             // Brief pause to let close handshake complete
-            client.get_io_context().run_for(std::chrono::milliseconds(500));
+            ioContextOf(client).run_for(std::chrono::milliseconds(500));
 
             if (stop_token.stop_requested())
             {

@@ -4,6 +4,7 @@ build_headless/
 build_qt/
 build_main/
 build_qt_main/
+build_fetch/
 build_qt_android/
 
 # Qt client build artifacts

@@ -113,7 +113,10 @@ static std::string envOr(const char* name, const std::string& fallback)
 
 // SignalType → lowercase wire string ("buy" / "sell" / "flat") for the
 // signal journal; mirrors the SignalBoard entry serialization.
-static const char *signalTypeWire(pulse::strategy::SignalType type)
+// Only used by the SQLite signal journal, so a build without
+// -DPULSE_ENABLE_SQLITE has no caller.
+[[maybe_unused]] static const char *
+signalTypeWire(pulse::strategy::SignalType type)
 {
     switch (type)
     {

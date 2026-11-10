@@ -31,19 +31,23 @@ target_link_libraries(pulse_exchange
 # in third_party/websocketpp (required on Windows where vcpkg websocketpp is unavailable).
 # asio: header-only, installed via vcpkg.
 # ASIO_STANDALONE is defined in GateWsClient.cpp before including websocketpp headers.
-if(websocketpp_FOUND)
+if(DEFINED PULSE_WEBSOCKETPP_INCLUDE_DIR)
+    # FetchContent build (-DPULSE_USE_FETCHCONTENT=ON): use the pinned upstream
+    # release, not the stale vendored copy below.
+    target_include_directories(pulse_exchange SYSTEM PRIVATE ${PULSE_WEBSOCKETPP_INCLUDE_DIR})
+elseif(websocketpp_FOUND)
     # vcpkg or system package found (typical on Linux / macOS)
     target_link_libraries(pulse_exchange PRIVATE websocketpp::websocketpp)
 elseif(EXISTS "${PROJECT_SOURCE_DIR}/third_party/websocketpp/websocketpp/client.hpp")
     set(WEBSOCKETPP_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/third_party/websocketpp")
-    target_include_directories(pulse_exchange PRIVATE ${WEBSOCKETPP_INCLUDE_DIR})
+    target_include_directories(pulse_exchange SYSTEM PRIVATE ${WEBSOCKETPP_INCLUDE_DIR})
 else()
     message(FATAL_ERROR
         "websocketpp not found. Install via vcpkg or place headers in third_party/websocketpp/")
 endif()
 
 if(PULSE_ASIO_INCLUDE_DIR)
-    target_include_directories(pulse_exchange PRIVATE ${PULSE_ASIO_INCLUDE_DIR})
+    target_include_directories(pulse_exchange SYSTEM PRIVATE ${PULSE_ASIO_INCLUDE_DIR})
 endif()
 
 # Suppress warnings from websocketpp third-party headers (C4127: constant conditional,

@@ -29,6 +29,10 @@ option(PULSE_ENABLE_SQLITE "Enable SQLite trade recorder"     OFF)
 # The Qt client is a standalone CMake project under client/qt. It is off by
 # default so the engine configure path stays byte-identical.
 option(PULSE_BUILD_QT_CLIENT "Build the Qt 6 client under client/qt" OFF)
+# Fetch third-party dependencies at configure time instead of using system
+# packages. Intended for Windows machines with CMake + MSVC + Qt only; CURL and
+# OpenSSL still need prebuilt binaries (see cmake/DependenciesFetch.cmake).
+option(PULSE_USE_FETCHCONTENT "Fetch dependencies instead of using system packages" OFF)
 
 # ---------------------------------------------------------------------------
 # Compiler flags
@@ -38,26 +42,39 @@ include(cmake/compiler_flags.cmake)
 # ---------------------------------------------------------------------------
 # Third-party dependencies
 # ---------------------------------------------------------------------------
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(spdlog        CONFIG REQUIRED)
-find_package(fmt           CONFIG REQUIRED)
-find_package(CURL          REQUIRED)
-find_package(OpenSSL       REQUIRED)
-find_package(toml11        CONFIG REQUIRED)
+if(PULSE_USE_FETCHCONTENT)
+    # No package manager required: header-only libraries are fetched and built
+    # by CMake. CURL and OpenSSL must still be provided as binaries
+    # (-DCURL_ROOT, -DOPENSSL_ROOT_DIR) because both are platform-specific C
+    # libraries that cannot be header-only.
+    include(cmake/DependenciesFetch.cmake)
+else()
+    find_package(nlohmann_json CONFIG REQUIRED)
+    find_package(spdlog        CONFIG REQUIRED)
+    find_package(fmt           CONFIG REQUIRED)
+    find_package(toml11        CONFIG REQUIRED)
 
-# asio and websocketpp ship headers only; CONFIG mode may not be available
-# on all vcpkg triples — fall back to finding the include path manually.
-# asio include dir is hoisted so exchange and control targets share it.
-find_package(asio        CONFIG QUIET)
-find_package(websocketpp CONFIG QUIET)
+    # asio and websocketpp ship headers only; CONFIG mode may not be available
+    # on all vcpkg triples — fall back to finding the include path manually.
+    # asio include dir is hoisted so exchange and control targets share it.
+    find_package(asio        CONFIG QUIET)
+    find_package(websocketpp CONFIG QUIET)
 
-find_path(PULSE_ASIO_INCLUDE_DIR asio.hpp)
-if(NOT PULSE_ASIO_INCLUDE_DIR)
-    message(FATAL_ERROR "asio.hpp not found. Install via vcpkg or apt (libasio-dev).")
+    find_path(PULSE_ASIO_INCLUDE_DIR asio.hpp)
+    if(NOT PULSE_ASIO_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "asio.hpp not found. Install via vcpkg or apt (libasio-dev), or "
+            "configure with -DPULSE_USE_FETCHCONTENT=ON.")
+    endif()
 endif()
 
+find_package(CURL          REQUIRED)
+find_package(OpenSSL       REQUIRED)
+
 if(PULSE_BUILD_TESTS)
-    find_package(GTest CONFIG REQUIRED)
+    if(NOT PULSE_USE_FETCHCONTENT)
+        find_package(GTest CONFIG REQUIRED)
+    endif()
     enable_testing()
 endif()
 

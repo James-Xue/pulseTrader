@@ -103,7 +103,8 @@ std::vector<std::string> futuresInstanceSymbols(const PulseConfig &cfg)
     return out;
 }
 
-std::string isoUtc(std::int64_t epoch_ms)
+// Only referenced from the SQLite-gated body of runKlineStore.
+[[maybe_unused]] std::string isoUtc(std::int64_t epoch_ms)
 {
     return formatEpochMs(epoch_ms, DisplayTimezone::utc());
 }
@@ -117,7 +118,8 @@ std::string isoUtc(std::int64_t epoch_ms)
 int runKlineStore(int argc, char *argv[])
 {
     std::vector<std::string> symbols_cli;
-    MarketType market_type = MarketType::Futures;
+    // Parsed below; consumed only when PULSE_ENABLE_SQLITE is defined.
+    [[maybe_unused]] MarketType market_type = MarketType::Futures;
     std::string db_path;
     std::string config_path;
     std::string import_source;

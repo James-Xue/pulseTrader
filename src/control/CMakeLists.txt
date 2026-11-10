@@ -21,7 +21,7 @@ add_library(pulse::control ALIAS pulse_control)
 
 target_include_directories(pulse_control
     PUBLIC ${PROJECT_SOURCE_DIR}/src
-    PRIVATE ${PULSE_ASIO_INCLUDE_DIR}
+    SYSTEM PRIVATE ${PULSE_ASIO_INCLUDE_DIR}
 )
 
 target_link_libraries(pulse_control

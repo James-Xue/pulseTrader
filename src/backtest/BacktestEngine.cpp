@@ -99,6 +99,10 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
 
     if (0 == to)
     {
+        // coverage() lives in a TU that is only compiled with SQLite support.
+        // Without it the reader is never constructed, so this branch is dead
+        // and must not emit a symbol reference.
+#ifdef PULSE_ENABLE_SQLITE
         if (sqlite)
         {
             auto cov = sqlite->coverage(opts.symbol, opts.market_type);
@@ -107,6 +111,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
                 to = value(cov)->second;
             }
         }
+#endif
         if (0 == to)
         {
             const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -116,6 +121,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
     }
     if (0 == from)
     {
+#ifdef PULSE_ENABLE_SQLITE
         if (sqlite)
         {
             auto cov = sqlite->coverage(opts.symbol, opts.market_type);
@@ -124,6 +130,7 @@ Result<std::pair<std::int64_t, std::int64_t>> resolveWindow(
                 from = value(cov)->first;
             }
         }
+#endif
         if (0 == from)
         {
             from = to - kDefaultWindowMs;
