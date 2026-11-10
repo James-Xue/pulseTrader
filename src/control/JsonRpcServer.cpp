@@ -18,7 +18,15 @@
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
 
+// Cross-platform readiness wait: poll() on POSIX, Winsock select() on Windows
+// (Winsock has no poll(); the WSAPoll shim has known defects on older builds).
+// <winsock2.h> must precede <windows.h>, which is guaranteed here because asio
+// is already included above.
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
 #include <poll.h>
+#endif
 
 #include <array>
 #include <chrono>
@@ -43,6 +51,30 @@ using TlsStream = asio::ssl::stream<asio::ip::tcp::socket>;
 /// Handshake budget. A blocking sync handshake would hang stop() forever on a
 /// client that connects and then says nothing.
 constexpr std::chrono::seconds kTlsHandshakeBudget{ 5 };
+
+/// Wait until `handle` is readable or `timeout_ms` elapses. Returns the number
+/// of ready descriptors (> 0), 0 on timeout, or < 0 on a wait error — the
+/// same contract as POSIX poll(), so the accept and TLS-handshake loops keep
+/// their existing "ret <= 0 means retry" logic unchanged.
+///
+/// Windows: Winsock's select() only accepts sockets, which is all this server
+/// ever watches; its first argument (nfd) is ignored on that platform.
+int waitReadable(asio::ip::tcp::socket::native_handle_type handle,
+                 int timeout_ms) noexcept
+{
+#if defined(_WIN32)
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(handle, &read_fds);
+    timeval tv{};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = static_cast<long>(timeout_ms % 1000) * 1000;
+    return static_cast<int>(::select(0, &read_fds, nullptr, nullptr, &tv));
+#else
+    pollfd pfd{ handle, POLLIN, 0 };
+    return static_cast<int>(::poll(&pfd, 1, timeout_ms));
+#endif
+}
 } // namespace
 
 namespace
@@ -367,9 +399,8 @@ void JsonRpcServer::acceptLoop()
             {
                 if (asio::error::would_block == ec)
                 {
-                    // No pending connection — poll briefly, then re-check.
-                    struct pollfd pfd{ m_acceptor.native_handle(), POLLIN, 0 };
-                    ::poll(&pfd, 1, 200);
+                    // No pending connection — wait briefly, then re-check.
+                    waitReadable(m_acceptor.native_handle(), 200);
                     continue;
                 }
                 // Acceptor closed during stop() — exit the loop.
@@ -582,8 +613,7 @@ void JsonRpcServer::handleSessionTls(std::shared_ptr<void> handle)
             {
                 return;
             }
-            struct pollfd pfd{ stream->lowest_layer().native_handle(), POLLIN, 0 };
-            ::poll(&pfd, 1, 100);
+            waitReadable(stream->lowest_layer().native_handle(), 100);
         }
         stream->lowest_layer().non_blocking(false);
 

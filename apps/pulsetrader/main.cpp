@@ -79,6 +79,7 @@ class SignalRecorder;
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
@@ -89,8 +90,17 @@ class SignalRecorder;
 #include <thread>
 #include <vector>
 
+// Console I/O split: POSIX uses poll()/read()/isatty(); Windows waits on the
+// console input handle because Winsock's select() only accepts sockets and
+// poll() does not exist there. <winsock2.h> must precede <windows.h>.
+#if defined(_WIN32)
+#include <io.h>
+#include <winsock2.h>
+#include <windows.h>
+#else
 #include <poll.h>
 #include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Global stop flag — set by SIGINT / SIGTERM handler
@@ -100,6 +110,60 @@ static std::atomic<bool> g_stop_requested{ false };
 static void signalHandler(int /*sig*/)
 {
     g_stop_requested.store(true, std::memory_order_release);
+}
+
+// ---------------------------------------------------------------------------
+// Console helpers — platform split for the embedded REPL
+// ---------------------------------------------------------------------------
+// The REPL waits on stdin with a 200ms timeout instead of blocking, so the
+// stop flag and the periodic engine work keep running between keypresses.
+
+/// True when stdin is an interactive terminal (the REPL is enabled only then).
+[[nodiscard]] static bool stdinIsTty() noexcept
+{
+#if defined(_WIN32)
+    return 0 != ::_isatty(_fileno(stdin));
+#else
+    return 0 != isatty(STDIN_FILENO);
+#endif
+}
+
+/// Wait up to `timeout_ms` for stdin to become readable. Returns > 0 when
+/// input is pending, 0 on timeout, < 0 on a wait error (same as poll()).
+static int waitStdinReadable(int timeout_ms) noexcept
+{
+#if defined(_WIN32)
+    // A console input handle is signaled once a line is queued (after Enter in
+    // the default line-input mode); the same wait also works for a redirected
+    // pipe handle, where poll() would have been used on POSIX.
+    const HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
+    if (INVALID_HANDLE_VALUE == in || nullptr == in)
+    {
+        return -1;
+    }
+    const DWORD rc = ::WaitForSingleObject(in, static_cast<DWORD>(timeout_ms));
+    if (WAIT_OBJECT_0 == rc)
+    {
+        return 1;
+    }
+    return (WAIT_TIMEOUT == rc) ? 0 : -1;
+#else
+    pollfd pfd{ STDIN_FILENO, POLLIN, 0 };
+    const int rc = ::poll(&pfd, 1, timeout_ms);
+    return (rc > 0 && 0 != (pfd.revents & POLLIN)) ? 1 : rc;
+#endif
+}
+
+/// Read up to `len` bytes from stdin. Returns the byte count, 0 on EOF, or
+/// < 0 on error (same contract as POSIX read()).
+static std::ptrdiff_t readStdin(char* buf, std::size_t len) noexcept
+{
+#if defined(_WIN32)
+    return static_cast<std::ptrdiff_t>(
+        ::_read(_fileno(stdin), buf, static_cast<unsigned int>(len)));
+#else
+    return static_cast<std::ptrdiff_t>(::read(STDIN_FILENO, buf, len));
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1535,7 +1599,7 @@ static int runTrade(int argc, char* argv[])
 
     // Embedded REPL: enabled when stdin is a TTY. Commands dispatch
     // directly to EngineServices in-process (no socket round-trip).
-    bool repl_enabled = isatty(STDIN_FILENO);
+    bool repl_enabled = stdinIsTty();
     std::string repl_buffer;
     if (repl_enabled)
     {
@@ -1547,13 +1611,12 @@ static int runTrade(int argc, char* argv[])
     {
         if (repl_enabled)
         {
-            // Poll stdin with a 200ms timeout (EINTR-safe).
-            struct pollfd pfd{ STDIN_FILENO, POLLIN, 0 };
-            int rc = ::poll(&pfd, 1, 200);
-            if (rc > 0 && (pfd.revents & POLLIN))
+            // Wait on stdin with a 200ms timeout (EINTR-safe).
+            const int rc = waitStdinReadable(200);
+            if (rc > 0)
             {
                 char buf[512];
-                const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
+                const std::ptrdiff_t n = readStdin(buf, sizeof(buf));
                 if (n > 0)
                 {
                     repl_buffer.append(buf, static_cast<std::size_t>(n));

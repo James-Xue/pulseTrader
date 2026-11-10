@@ -29,6 +29,57 @@ namespace pulse
 {
 
 // ---------------------------------------------------------------------------
+// Portable time decomposition
+// ---------------------------------------------------------------------------
+// POSIX exposes gmtime_r() / localtime_r() / timegm(). The MSVC CRT spells
+// the same operations gmtime_s() / localtime_s() / _mkgmtime(), takes the
+// std::tm* FIRST, and returns errno_t instead of a pointer. Neither the names
+// nor the argument order survive a bare #ifdef at each call site, so the
+// platform split is contained here and everything below stays neutral.
+//
+// These wrappers deliberately omit [[nodiscard]]: the formatting code ignores
+// the result by design (a failed decomposition leaves the caller's zeroed tm
+// untouched, which renders as 1970-01-01 rather than garbage).
+#if defined(_WIN32)
+/// UTC decomposition into `out`. Returns `out`, or nullptr on failure.
+inline std::tm *gmtimeThreadSafe(const std::time_t *t, std::tm *out) noexcept
+{
+    return (0 == ::gmtime_s(out, t)) ? out : nullptr;
+}
+
+/// Local-time decomposition into `out`. Returns `out`, or nullptr on failure.
+inline std::tm *localtimeThreadSafe(const std::time_t *t, std::tm *out) noexcept
+{
+    return (0 == ::localtime_s(out, t)) ? out : nullptr;
+}
+
+/// Interpret `tm` as UTC and convert to time_t. Must exist on every platform:
+/// the Local branch below uses it to derive the machine's UTC offset.
+inline std::time_t timegmPortable(std::tm *tm) noexcept
+{
+    return ::_mkgmtime(tm);
+}
+#else
+/// UTC decomposition into `out`. Returns `out`, or nullptr on failure.
+inline std::tm *gmtimeThreadSafe(const std::time_t *t, std::tm *out) noexcept
+{
+    return ::gmtime_r(t, out);
+}
+
+/// Local-time decomposition into `out`. Returns `out`, or nullptr on failure.
+inline std::tm *localtimeThreadSafe(const std::time_t *t, std::tm *out) noexcept
+{
+    return ::localtime_r(t, out);
+}
+
+/// Interpret `tm` as UTC and convert to time_t.
+inline std::time_t timegmPortable(std::tm *tm) noexcept
+{
+    return ::timegm(tm);
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // DisplayTimezone — how timestamps are rendered in human-readable output
 // ---------------------------------------------------------------------------
 struct DisplayTimezone
@@ -155,26 +206,26 @@ parseDisplayTimezone(std::string_view sv) noexcept
     switch (tz.mode)
     {
     case DisplayTimezone::Mode::Utc:
-        gmtime_r(&seconds, &tm);
+        gmtimeThreadSafe(&seconds, &tm);
         break;
     case DisplayTimezone::Mode::Fixed:
     {
         const std::time_t shifted = seconds + static_cast<std::time_t>(tz.offsetMinutes) * 60;
-        gmtime_r(&shifted, &tm);
+        gmtimeThreadSafe(&shifted, &tm);
         offset_seconds = tz.offsetMinutes * 60;
         break;
     }
     case DisplayTimezone::Mode::Local:
     default:
     {
-        localtime_r(&seconds, &tm);
+        localtimeThreadSafe(&seconds, &tm);
         // Local UTC offset for the instant being rendered: how far the wall
         // clock is ahead of UTC. Interpret the wall clock AS IF it were UTC
         // (timegm) and subtract the true instant. Using mktime(&tm) instead
         // would convert the wall clock back to the SAME instant (mktime
         // treats tm as local time), yielding offset 0 and labelling a
         // Beijing wall clock as "+00:00" — the old +8h display bug.
-        offset_seconds = static_cast<int>(timegm(&tm) - seconds);
+        offset_seconds = static_cast<int>(timegmPortable(&tm) - seconds);
         break;
     }
     }
@@ -247,7 +298,7 @@ parseDisplayTimezone(std::string_view sv) noexcept
     tm.tm_sec = second;
     tm.tm_isdst = 0;
 
-    const std::time_t secs = timegm(&tm);
+    const std::time_t secs = timegmPortable(&tm);
     if (-1 == secs)
     {
         return false;

@@ -10,6 +10,8 @@
 
 #include "control/DecisionIntake.hpp"
 
+#include "core/TimeUtil.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -78,7 +80,9 @@ bool parseIso8601Utc(const std::string &text, std::int64_t &epochSeconds)
         return false;
     }
 
-    epochSeconds = static_cast<std::int64_t>(::timegm(&tm));
+    // timegmPortable() is timegm() on POSIX and _mkgmtime() on MSVC — see
+    // core/TimeUtil.hpp. The packet's "valid_until" text is UTC by contract.
+    epochSeconds = static_cast<std::int64_t>(timegmPortable(&tm));
     return true;
 }
 
