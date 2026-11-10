@@ -112,6 +112,13 @@ TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
     // 1786856207143 ms == 2026-08-16 04:56:47.143 UTC
     //                  == 2026-08-16 12:56:47.143 Beijing (+08:00)
     //                  == 2026-08-16 00:56:47.143 US Eastern EDT (-04:00)
+#if defined(_WIN32)
+    // The MSVC CRT parses TZ with POSIX-style standard/DST names ("PST8PDT"),
+    // not IANA identifiers such as "Asia/Shanghai", so the local-offset
+    // assertions cannot be made deterministic here. The UTC and fixed-offset
+    // cases in this file still exercise the same formatting code on Windows.
+    GTEST_SKIP() << "MSVC CRT cannot select an IANA timezone via TZ";
+#else
     setenv("TZ", "Asia/Shanghai", 1);
     tzset();
     EXPECT_EQ(formatEpochMs(1786856207143LL, DisplayTimezone::local()),
@@ -130,6 +137,7 @@ TEST(FormatEpochMs, LocalOffsetMatchesMachineTimezone)
     // Restore a neutral TZ so later tests in the same process are unaffected.
     setenv("TZ", "UTC", 1);
     tzset();
+#endif
 }
 
 TEST(FormatIsoTimestamp, NanosecondAlias)

@@ -13,8 +13,16 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <unistd.h>
 #include <string>
+
+// getpid(): POSIX declares it in <unistd.h>, MSVC in <process.h> as _getpid.
+// The alias mirrors tests/unit/logging/testLogger.cpp.
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 // Cross-platform environment variable helpers (POSIX has setenv/unsetenv;
 // Windows uses _putenv_s / _dupenv_s).

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 using namespace pulse;
@@ -118,6 +119,19 @@ TEST(SignalBoard, ConcurrentPublishAndSnapshotSmoke)
     {
         const auto snap = board.snapshot();
         EXPECT_TRUE(snap["signals"].is_array());
+    }
+
+    // Wait for the writer to fill all four ids before stopping it. Thread
+    // start-up latency is unbounded — on Windows the 200 snapshot rounds can
+    // finish before the writer is even scheduled, which used to leave the
+    // board empty and fail the final count. The bound keeps a broken writer
+    // from hanging the suite instead of failing it.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (4u != board.entryCount()
+           && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::yield();
     }
 
     stop.store(true);
