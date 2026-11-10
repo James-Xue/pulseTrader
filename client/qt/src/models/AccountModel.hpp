@@ -29,7 +29,10 @@ class AccountModel : public QObject
     Q_PROPERTY(double spotTotal READ spotTotal NOTIFY changed)
     Q_PROPERTY(double spotAvailable READ spotAvailable NOTIFY changed)
     Q_PROPERTY(bool cfdPresent READ cfdPresent NOTIFY changed)
+    Q_PROPERTY(QString cfdCurrency READ cfdCurrency NOTIFY changed)
+    Q_PROPERTY(double cfdTotal READ cfdTotal NOTIFY changed)
     Q_PROPERTY(double cfdAvailable READ cfdAvailable NOTIFY changed)
+    Q_PROPERTY(double cfdMargin READ cfdMargin NOTIFY changed)
     Q_PROPERTY(double cfdUnrealised READ cfdUnrealised NOTIFY changed)
 
     /// Every non-zero spot currency, sorted by value descending. Each element
@@ -57,7 +60,10 @@ public:
     [[nodiscard]] double spotTotal() const { return m_spotTotal; }
     [[nodiscard]] double spotAvailable() const { return m_spotAvailable; }
     [[nodiscard]] bool cfdPresent() const { return m_cfdPresent; }
+    [[nodiscard]] QString cfdCurrency() const { return m_cfdCurrency; }
+    [[nodiscard]] double cfdTotal() const { return m_cfdTotal; }
     [[nodiscard]] double cfdAvailable() const { return m_cfdAvailable; }
+    [[nodiscard]] double cfdMargin() const { return m_cfdMargin; }
     [[nodiscard]] double cfdUnrealised() const { return m_cfdUnrealised; }
     [[nodiscard]] QVariantList spotBalances() const { return m_spotBalances; }
 
@@ -77,7 +83,10 @@ private:
     double m_spotTotal = 0.0;
     double m_spotAvailable = 0.0;
     bool m_cfdPresent = false;
+    QString m_cfdCurrency;
+    double m_cfdTotal = 0.0;
     double m_cfdAvailable = 0.0;
+    double m_cfdMargin = 0.0;
     double m_cfdUnrealised = 0.0;
     QVariantList m_spotBalances;
 };

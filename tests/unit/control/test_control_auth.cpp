@@ -14,7 +14,13 @@
 
 #include <gtest/gtest.h>
 
-#if !defined(_WIN32)
+// Raw sockets observe the wire shape the client hides. POSIX and Winsock
+// differ in header names, handle type (int vs SOCKET) and the close call, so
+// the split is contained in the helpers below.
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -29,6 +35,45 @@ using namespace pulse::control;
 
 namespace
 {
+
+#ifdef _WIN32
+/// Winsock handle; must be released with closesocket(), not close().
+using RawSocket = SOCKET;
+constexpr RawSocket kInvalidRawSocket = INVALID_SOCKET;
+
+/// asio initialises Winsock lazily and every test builds a JsonRpcServer
+/// first, but connectRaw() should not depend on that ordering. Take a
+/// process-lifetime reference and never call WSACleanup: asio still owns its
+/// own reference, and a cleanup here would tear the socket library out from
+/// under it.
+void ensureWinsock() noexcept
+{
+    static const int init = []
+    {
+        WSADATA data{};
+        return ::WSAStartup(MAKEWORD(2, 2), &data);
+    }();
+    (void)init;
+}
+#else
+using RawSocket = int;
+constexpr RawSocket kInvalidRawSocket = -1;
+
+/// POSIX needs no explicit socket-library initialisation.
+void ensureWinsock() noexcept
+{
+}
+#endif
+
+/// Close a raw socket with the platform's spelling.
+void closeRaw(RawSocket sock) noexcept
+{
+#ifdef _WIN32
+    ::closesocket(sock);
+#else
+    ::close(sock);
+#endif
+}
 
 MethodRegistry makeRegistry()
 {
@@ -47,14 +92,16 @@ JsonRpcServer::Security tokenSecurity(const std::string &token)
     return security;
 }
 
-#if !defined(_WIN32)
-/// Connect a blocking POSIX socket to the loopback control port.
-int connectRaw(std::uint16_t port)
+/// Connect a blocking raw socket to the loopback control port.
+RawSocket connectRaw(std::uint16_t port)
 {
-    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
+    ensureWinsock();
+    // Never compare a Winsock SOCKET against 0: it is unsigned, and failure is
+    // INVALID_SOCKET rather than a negative descriptor.
+    const RawSocket fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (kInvalidRawSocket == fd)
     {
-        return -1;
+        return kInvalidRawSocket;
     }
     sockaddr_in address{};
     address.sin_family = AF_INET;
@@ -62,20 +109,22 @@ int connectRaw(std::uint16_t port)
     ::inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
     if (0 != ::connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)))
     {
-        ::close(fd);
-        return -1;
+        closeRaw(fd);
+        return kInvalidRawSocket;
     }
     return fd;
 }
 
 /// Read one newline-terminated line, or "" when the peer closed.
-std::string readLineRaw(int fd)
+std::string readLineRaw(RawSocket fd)
 {
     std::string line;
     char ch = 0;
     while (true)
     {
-        const ssize_t n = ::recv(fd, &ch, 1, 0);
+        // recv() returns ssize_t on POSIX and int on Windows; a one-byte read
+        // cannot truncate either way.
+        const int n = static_cast<int>(::recv(fd, &ch, 1, 0));
         if (n <= 0)
         {
             return line;
@@ -88,12 +137,13 @@ std::string readLineRaw(int fd)
     }
 }
 
-void sendLineRaw(int fd, const std::string &line)
+void sendLineRaw(RawSocket fd, const std::string &line)
 {
     const std::string payload = line + "\n";
-    ::send(fd, payload.data(), payload.size(), 0);
+    // Winsock's send() takes an int length; POSIX takes size_t. The cast is a
+    // no-op on POSIX and keeps /W4 quiet on Windows.
+    ::send(fd, payload.data(), static_cast<int>(payload.size()), 0);
 }
-#endif // !defined(_WIN32)
 
 } // anonymous namespace
 
@@ -182,20 +232,19 @@ TEST(ControlAuth, ClientTokenAgainstOpenServerFails)
     server->stop();
 }
 
-#if !defined(_WIN32)
 TEST(ControlAuth, FirstMethodMustBeAuth)
 {
     auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
     server->setSecurity(tokenSecurity("s3cret"));
     ASSERT_TRUE(server->start());
 
-    const int fd = connectRaw(server->port());
-    ASSERT_GE(fd, 0);
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
 
     // A normal request before authenticating is refused with 9106.
     sendLineRaw(fd, R"({"jsonrpc":"2.0","id":7,"method":"echo","params":{}})");
     const std::string reply = readLineRaw(fd);
-    ::close(fd);
+    closeRaw(fd);
 
     ASSERT_FALSE(reply.empty());
     const auto parsed = nlohmann::json::parse(reply);
@@ -214,8 +263,8 @@ TEST(ControlAuth, AuthReplyEchoesIdAndOpensTheSession)
     server->setSecurity(tokenSecurity("s3cret"));
     ASSERT_TRUE(server->start());
 
-    const int fd = connectRaw(server->port());
-    ASSERT_GE(fd, 0);
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
 
     sendLineRaw(fd, R"({"jsonrpc":"2.0","id":3,"method":"auth","params":{"token":"s3cret"}})");
     const std::string authReply = readLineRaw(fd);
@@ -228,7 +277,7 @@ TEST(ControlAuth, AuthReplyEchoesIdAndOpensTheSession)
     // The same connection now carries normal requests.
     sendLineRaw(fd, R"({"jsonrpc":"2.0","id":4,"method":"echo","params":{"after":true}})");
     const std::string echoReply = readLineRaw(fd);
-    ::close(fd);
+    closeRaw(fd);
 
     ASSERT_FALSE(echoReply.empty());
     const auto parsedEcho = nlohmann::json::parse(echoReply);
@@ -237,8 +286,3 @@ TEST(ControlAuth, AuthReplyEchoesIdAndOpensTheSession)
 
     server->stop();
 }
-#endif // !defined(_WIN32)
-
-// The two tests between the guards drive raw POSIX socket fds to pin the wire
-// shape; the ControlClient-based tests above them exercise the same auth gate
-// portably.

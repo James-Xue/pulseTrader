@@ -68,3 +68,19 @@ target_link_libraries(tst_dataserver PRIVATE
     Qt6::Test Qt6::Core Qt6::Network Qt6::Qml)
 
 add_test(NAME dataserver COMMAND tst_dataserver)
+
+# AccountModel mapping: pure JSON in, properties out. Guards the futures
+# top-level layout regression (see the header comment in the test).
+qt_add_executable(tst_accountmodel
+    tst_accountmodel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/AccountModel.cpp
+)
+
+set_target_properties(tst_accountmodel PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_accountmodel PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_accountmodel PRIVATE Qt6::Test Qt6::Core)
+
+add_test(NAME accountmodel COMMAND tst_accountmodel)

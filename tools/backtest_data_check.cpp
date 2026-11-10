@@ -180,10 +180,6 @@ int main(int argc, char **argv)
             std::cerr << "  no candles to replay\n";
             return 1;
         }
-#else
-        std::cerr << "  built without PULSE_ENABLE_SQLITE\n";
-        return 1;
-#endif
 
         pulse::backtest::BacktestOptions opts;
         opts.strategy_name = replay_strategy;
@@ -222,6 +218,14 @@ int main(int argc, char **argv)
             std::cout << "  trades = " << account.trades().size()
                       << ", net_pnl = " << account.realizedCash() << "\n";
         }
+#else
+        // `rows` only exists when the SQLite reader is compiled in, so the
+        // whole replay body — not just the reader setup — lives under the
+        // guard. Without this, a SQLITE=OFF build fails to compile here while
+        // a SQLITE=ON build never notices.
+        std::cerr << "  built without PULSE_ENABLE_SQLITE\n";
+        return 1;
+#endif
     }
 
     return 0;

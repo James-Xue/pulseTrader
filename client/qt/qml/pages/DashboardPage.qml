@@ -170,14 +170,36 @@ Flickable {
                 visible: root.futuresPresent
                 label: qsTr("Futures available")
                 value: root.account
-                       ? root.account.futuresAvailable.toFixed(2) : "—"
+                       ? "%1 %2".arg(root.account.futuresAvailable.toFixed(2))
+                                 .arg(root.account.futuresCurrency)
+                       : "—"
+            }
+
+            MetricTile {
+                visible: root.cfdPresent
+                label: qsTr("CFD equity")
+                value: root.account
+                       ? "%1 %2".arg(root.account.cfdTotal.toFixed(2))
+                                 .arg(root.account.cfdCurrency)
+                       : "—"
             }
 
             MetricTile {
                 visible: root.cfdPresent
                 label: qsTr("CFD available")
                 value: root.account
-                       ? root.account.cfdAvailable.toFixed(2) : "—"
+                       ? "%1 %2".arg(root.account.cfdAvailable.toFixed(2))
+                                 .arg(root.account.cfdCurrency)
+                       : "—"
+            }
+
+            MetricTile {
+                visible: root.cfdPresent
+                label: qsTr("CFD margin used")
+                value: root.account
+                       ? "%1 %2".arg(root.account.cfdMargin.toFixed(2))
+                                 .arg(root.account.cfdCurrency)
+                       : "—"
             }
 
             MetricTile {

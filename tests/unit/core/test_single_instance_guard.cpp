@@ -54,8 +54,13 @@ TEST(SingleInstanceGuard, LockReleasedOnDestruction)
     } // first destroyed here — flock released by the kernel
 
     // A fresh guard must now succeed even though the file still exists.
-    SingleInstanceGuard after(path);
-    EXPECT_TRUE(after.acquired());
+    // The guard is scoped: Windows refuses to delete a file that any handle
+    // still has open (POSIX would allow the unlink), so it must be destroyed
+    // before the cleanup below.
+    {
+        SingleInstanceGuard after(path);
+        EXPECT_TRUE(after.acquired());
+    }
 
     std::filesystem::remove(path);
 }
