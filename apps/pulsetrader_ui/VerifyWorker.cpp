@@ -328,6 +328,44 @@ const nlohmann::json *VerifyWorker::unwrapData(const nlohmann::json *obj)
     return obj;
 }
 
+std::optional<double> VerifyWorker::tickerLastPrice(const nlohmann::json &tickerResponse)
+{
+    // Same normalisation the login summary uses for the gold ticker: the
+    // response is either the payload object itself or a one-element array,
+    // wrapped in the TradFi envelope.
+    const nlohmann::json *obj = unwrapData(firstObject(tickerResponse));
+    if (nullptr == obj || false == obj->contains("last_price"))
+    {
+        return std::nullopt;
+    }
+    const double price = jsonToDouble((*obj)["last_price"]);
+    // A closed or not-yet-traded market answers with 0 — reporting it as the
+    // price would blank the panel, so treat it as "no usable price".
+    if (price <= 0.0)
+    {
+        return std::nullopt;
+    }
+    return price;
+}
+
+bool VerifyWorker::tickerMarketOpen(const nlohmann::json &tickerResponse)
+{
+    const nlohmann::json *obj = unwrapData(firstObject(tickerResponse));
+    if (nullptr == obj)
+    {
+        return true;
+    }
+    // find() + is_string() rather than value(): value() throws a
+    // type_error on a mismatched field type, and this runs on a polling
+    // thread where an escaping exception means std::terminate.
+    const auto it = obj->find("status");
+    if (obj->end() == it || false == it->is_string())
+    {
+        return true;
+    }
+    return "open" == it->get<std::string>();
+}
+
 std::vector<PermissionInfo> VerifyWorker::parsePermissions(const nlohmann::json &mainKeysJson)
 {
     std::vector<PermissionInfo> out;

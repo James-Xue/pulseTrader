@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <vector>
 
 namespace pulse::ui
@@ -85,6 +86,30 @@ class VerifyWorker
     /// "data" sub-object. Returns the inner object when present, otherwise
     /// the object itself. Returns nullptr for a null input.
     static const nlohmann::json *unwrapData(const nlohmann::json *obj);
+
+    /// Extract the last price from a CFD ticker response
+    /// (GET /tradfi/symbols/{symbol}/tickers — XAUUSD, USIDX, ...):
+    ///
+    ///   1. Normalise the payload (object or one-element array) and unwrap
+    ///      the TradFi {"label", "data", "timestamp"} envelope
+    ///   2. Read "last_price" — Gate encodes it as a decimal string
+    ///   3. A missing, unparseable or non-positive price yields std::nullopt
+    ///      so the caller can keep the previously displayed value instead of
+    ///      overwriting it with 0.00
+    static std::optional<double> tickerLastPrice(const nlohmann::json &tickerResponse);
+
+    /// Whether a CFD ticker marks its own market as tradable — the "status"
+    /// field equals "open". Each symbol carries its own session (the USD
+    /// index closes with the index session, not with gold):
+    ///
+    ///   1. A missing status means open — the rule the gold path has always
+    ///      used, kept here so both symbols agree
+    ///   2. A present-but-non-string status (a malformed payload) also means
+    ///      open: this is read on a worker thread, where letting
+    ///      json::value() throw type_error would terminate the process
+    ///   3. An unparseable payload (nullptr) means open as well — never slow
+    ///      a poll loop down on a parse failure
+    static bool tickerMarketOpen(const nlohmann::json &tickerResponse);
 
     /// Parse a GET /account/main_keys response into per-product permissions.
     ///

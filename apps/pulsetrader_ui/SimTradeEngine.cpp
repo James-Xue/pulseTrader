@@ -20,15 +20,19 @@ QString nowStamp()
 
 } // namespace
 
-SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
-                                                    double volumeLots,
-                                                    double entryPrice,
-                                                    double takeProfit,
-                                                    double stopLoss,
-                                                    double leverage,
-                                                    std::int64_t nowMs)
+namespace
 {
-    OpenResult result;
+
+// Shared open-core for both sides. `feeUsdt` is 0 for shorts (sell side is
+// free in the real CFD fee model). The caller pre-validates the TP/SL
+// orientation for its side.
+SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &side,
+                                        double volumeLots, double entryPrice,
+                                        double takeProfit, double stopLoss,
+                                        double leverage, double feeUsdt,
+                                        std::int64_t nowMs)
+{
+    SimTradeEngine::OpenResult result;
     if (volumeLots <= 0.0 || entryPrice <= 0.0)
     {
         result.error = QStringLiteral("开仓参数无效（手数 %1，价格 %2）")
@@ -41,38 +45,19 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
         result.error = QStringLiteral("杠杆倍数无效：%1").arg(leverage);
         return result;
     }
-
-    // 1. Real CFD rule: an opening order MUST carry both a take-profit and a
-    //    stop-loss (the exchange attaches them to the entry order). A long
-    //    needs TP above and SL below the entry — reject anything else,
-    //    mirroring the real rejection.
     if (takeProfit <= 0.0 || stopLoss <= 0.0)
     {
         result.error = QStringLiteral("真实 CFD 开仓必须同时带止盈止损（TP/SL 缺失）");
         return result;
     }
-    if (takeProfit <= entryPrice)
-    {
-        result.error = QStringLiteral("止盈必须高于开仓价（多头 TP %1 ≤ 开仓 %2）")
-                           .arg(takeProfit, 0, 'f', 2)
-                           .arg(entryPrice, 0, 'f', 2);
-        return result;
-    }
-    if (stopLoss >= entryPrice)
-    {
-        result.error = QStringLiteral("止损必须低于开仓价（多头 SL %1 ≥ 开仓 %2）")
-                           .arg(stopLoss, 0, 'f', 2)
-                           .arg(entryPrice, 0, 'f', 2);
-        return result;
-    }
 
-    // 2. Real CFD margin & fee model.
-    const double notional = volumeLots * kOzPerLot * entryPrice;
+    // Real CFD margin model.
+    const double notional = volumeLots * SimTradeEngine::kOzPerLot * entryPrice;
     result.marginUsdt = notional / leverage;
-    result.feeUsdt = volumeLots * kFeeUsdtPerLot;  // BUY side, once.
+    result.feeUsdt = feeUsdt;
 
-    // 2. Balance check — the real account rejects the order on insufficient
-    //    margin; the paper account behaves the same.
+    // Balance check — the real account rejects the order on insufficient
+    // margin; the paper account behaves the same.
     const auto account = SimAccountStore::load(apiKey);
     if (false == account.has_value())
     {
@@ -91,13 +76,20 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
         return result;
     }
 
-    // 3. Deduct margin + fee, append the position.
+    // Deduct margin + fee, append the position.
     SimAccount updated = *account;
     updated.balanceUsdt -= required;
     updated.updatedAt = nowStamp();
 
+    // Unique order id: timestamp + in-process sequence (uniqueness holds
+    // across restarts because the timestamp differs, and within a millisecond
+    // because of the counter).
+    static std::atomic<int> s_orderSeq{ 0 };
     SimPosition position;
-    position.id = QStringLiteral("SIM-%1").arg(nowMs);
+    position.id = QStringLiteral("SIM-%1-%2")
+                      .arg(nowMs)
+                      .arg(s_orderSeq.fetch_add(1));
+    position.side = side;
     position.volumeLots = volumeLots;
     position.entryPrice = entryPrice;
     position.takeProfit = takeProfit;
@@ -114,9 +106,107 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
                            .arg(SimAccountStore::filePath());
         return result;
     }
+
+    // Persist the order + its initial stop attachment for post-trade
+    // analysis. A DB failure must not block the paper trade itself.
+    OrderRecord record;
+    record.orderId = position.id;
+    record.apiKey = apiKey;
+    record.side = side;
+    record.symbol = QStringLiteral("XAUUSD");
+    record.volumeLots = position.volumeLots;
+    record.entryPrice = position.entryPrice;
+    record.takeProfit = position.takeProfit;
+    record.stopLoss = position.stopLoss;
+    record.leverage = position.leverage;
+    record.marginUsdt = position.marginUsdt;
+    record.feeUsdt = position.feeUsdt;
+    record.status = QStringLiteral("open");
+    record.openedAt = nowStamp();
+    SimOrderDb::insertOrder(record);
+
     result.ok = true;
     result.positionId = position.id;
     return result;
+}
+
+} // namespace
+
+SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
+                                                    double volumeLots,
+                                                    double entryPrice,
+                                                    double takeProfit,
+                                                    double stopLoss,
+                                                    double leverage,
+                                                    std::int64_t nowMs)
+{
+    // Real CFD rule: an opening order MUST carry both stops (checked before
+    // the orientation checks so the message is precise).
+    if (takeProfit <= 0.0 || stopLoss <= 0.0)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("真实 CFD 开仓必须同时带止盈止损（TP/SL 缺失）");
+        return result;
+    }
+    // Real CFD rule: TP above entry, SL below entry (long orientation).
+    if (takeProfit <= entryPrice)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("止盈必须高于开仓价（多头 TP %1 ≤ 开仓 %2）")
+                           .arg(takeProfit, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+    if (stopLoss >= entryPrice)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("止损必须低于开仓价（多头 SL %1 ≥ 开仓 %2）")
+                           .arg(stopLoss, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+    return openPosition(apiKey, QStringLiteral("long"), volumeLots, entryPrice,
+                        takeProfit, stopLoss, leverage,
+                        volumeLots * SimTradeEngine::kFeeUsdtPerLot,  // BUY side commission.
+                        nowMs);
+}
+
+SimTradeEngine::OpenResult SimTradeEngine::openShort(const QString &apiKey,
+                                                     double volumeLots,
+                                                     double entryPrice,
+                                                     double takeProfit,
+                                                     double stopLoss,
+                                                     double leverage,
+                                                     std::int64_t nowMs)
+{
+    // Real CFD rule: an opening order MUST carry both stops.
+    if (takeProfit <= 0.0 || stopLoss <= 0.0)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("真实 CFD 开仓必须同时带止盈止损（TP/SL 缺失）");
+        return result;
+    }
+    // Short orientation: TP below entry, SL above entry.
+    if (takeProfit >= entryPrice)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("止盈必须低于开仓价（空头 TP %1 ≥ 开仓 %2）")
+                           .arg(takeProfit, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+    if (stopLoss <= entryPrice)
+    {
+        OpenResult result;
+        result.error = QStringLiteral("止损必须高于开仓价（空头 SL %1 ≤ 开仓 %2）")
+                           .arg(stopLoss, 0, 'f', 2)
+                           .arg(entryPrice, 0, 'f', 2);
+        return result;
+    }
+    return openPosition(apiKey, QStringLiteral("short"), volumeLots, entryPrice,
+                        takeProfit, stopLoss, leverage,
+                        0.0,  // Sell side: no commission.
+                        nowMs);
 }
 
 std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QString &apiKey,
@@ -138,22 +228,44 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
     {
         double exitPrice = 0.0;
         QString reason;
-        if (price >= it->takeProfit && it->takeProfit > 0.0)
+        const bool isLong = (it->side != QStringLiteral("short"));
+        if (isLong)
         {
-            exitPrice = it->takeProfit;  // TP fills at the TP price.
-            reason = QStringLiteral("TP");
+            if (price >= it->takeProfit && it->takeProfit > 0.0)
+            {
+                exitPrice = it->takeProfit;  // TP fills at the TP price.
+                reason = QStringLiteral("TP");
+            }
+            else if (price <= it->stopLoss && it->stopLoss > 0.0)
+            {
+                exitPrice = it->stopLoss;    // SL fills at the SL price.
+                reason = QStringLiteral("SL");
+            }
         }
-        else if (price <= it->stopLoss && it->stopLoss > 0.0)
+        else
         {
-            exitPrice = it->stopLoss;    // SL fills at the SL price.
-            reason = QStringLiteral("SL");
+            // Short: TP below the entry, SL above — triggered when the price
+            // falls to the TP or rises to the SL.
+            if (price <= it->takeProfit && it->takeProfit > 0.0)
+            {
+                exitPrice = it->takeProfit;
+                reason = QStringLiteral("TP");
+            }
+            else if (price >= it->stopLoss && it->stopLoss > 0.0)
+            {
+                exitPrice = it->stopLoss;
+                reason = QStringLiteral("SL");
+            }
         }
 
         if (false == reason.isEmpty())
         {
-            // Long settlement: PnL = (exit − entry) × lots × 100; margin is
-            // released; the sell side carries no commission.
-            const double pnl = (exitPrice - it->entryPrice) * it->volumeLots * kOzPerLot;
+            // Settlement: long PnL = (exit − entry) × lots × 100;
+            // short PnL = (entry − exit) × lots × 100. Margin is released;
+            // the closing side carries no commission in the paper model.
+            const double pnl = isLong
+                                   ? (exitPrice - it->entryPrice) * it->volumeLots * SimTradeEngine::kOzPerLot
+                                   : (it->entryPrice - exitPrice) * it->volumeLots * SimTradeEngine::kOzPerLot;
             updated.balanceUsdt += it->marginUsdt + pnl;
 
             CloseResult close;
@@ -164,6 +276,10 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
             close.realizedPnl = pnl;
             close.releasedMargin = it->marginUsdt;
             results.push_back(close);
+
+            // Persist the close (analysis); a failure must not break the
+            // settlement.
+            SimOrderDb::closeOrder(it->id, exitPrice, pnl, nowStamp());
 
             it = positions.erase(it);
         }
@@ -182,17 +298,11 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
 }
 
 SimTradeEngine::StopsUpdateResult SimTradeEngine::updateStops(const QString &apiKey,
-                                                               double suggestedTp,
-                                                               double suggestedSl)
+                                                               double price,
+                                                               double tpPoints,
+                                                               double slPoints)
 {
     StopsUpdateResult result;
-    if (suggestedTp <= suggestedSl)
-    {
-        result.error = QStringLiteral("止盈止损建议无效（TP %1 ≤ SL %2）")
-                           .arg(suggestedTp, 0, 'f', 2)
-                           .arg(suggestedSl, 0, 'f', 2);
-        return result;
-    }
 
     const auto account = SimAccountStore::load(apiKey);
     if (false == account.has_value() || account->positions.empty())
@@ -204,18 +314,47 @@ SimTradeEngine::StopsUpdateResult SimTradeEngine::updateStops(const QString &api
     SimAccount updated = *account;
     for (auto &p : updated.positions)
     {
-        // Long positions: stops move only UP (favourable direction).
-        const double newTp = std::max(p.takeProfit, suggestedTp);
-        const double newSl = std::max(p.stopLoss, suggestedSl);
-        if (newTp <= newSl)
+        // Trailing rule: stops move only in the favourable direction. The
+        // distance envelope is computed per side from the live price —
+        // long: TP/SL only move UP (price + tpPoints / price − slPoints);
+        // short: TP/SL only move DOWN (price − tpPoints / price + slPoints).
+        // This mirrors the real CFD trailing behaviour; a suggestion that
+        // would widen risk is ignored.
+        const bool isLong = (p.side != QStringLiteral("short"));
+        double newTp = 0.0;
+        double newSl = 0.0;
+        if (isLong)
         {
-            continue;  // Keep the existing (valid) pair.
+            newTp = std::max(p.takeProfit, price + tpPoints);
+            newSl = std::max(p.stopLoss, price - slPoints);
+        }
+        else
+        {
+            newTp = std::min(p.takeProfit, price - tpPoints);
+            newSl = std::min(p.stopLoss, price + slPoints);
+        }
+        // Validity check is side-aware: a long's TP sits ABOVE the SL
+        // (newTp > newSl), a short's TP sits BELOW the SL (newTp < newSl).
+        // Keep the existing pair when the computed pair is degenerate.
+        if ((isLong && newTp <= newSl) || (false == isLong && newTp >= newSl))
+        {
+            continue;
         }
         if (newTp != p.takeProfit || newSl != p.stopLoss)
         {
             p.takeProfit = newTp;
             p.stopLoss = newSl;
             ++result.updatedCount;
+
+            // Append the stop move to the order history (analysis).
+            StopUpdateRecord update;
+            update.orderId = p.id;
+            update.updatedAt = nowStamp();
+            update.takeProfit = newTp;
+            update.stopLoss = newSl;
+            update.price = price;
+            update.reason = QStringLiteral("trailing");
+            SimOrderDb::insertStopUpdate(update);
         }
     }
 

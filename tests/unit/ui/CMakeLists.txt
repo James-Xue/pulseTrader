@@ -8,6 +8,9 @@ add_executable(test_ui
     test_verify_worker.cpp
     test_sim_account_store.cpp
     test_sim_trade_engine.cpp
+    test_sim_order_db.cpp
+    test_sim_order_analyzer.cpp
+    test_multi_timeframe_ema.cpp
     test_gold_strategy.cpp
     test_engine_strategy_adapter.cpp
 )

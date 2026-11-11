@@ -30,10 +30,11 @@ namespace pulse::ui
 struct SimPosition
 {
     QString id;                  ///< e.g. "SIM-1700000000000".
+    QString side = QStringLiteral("long");  ///< "long" or "short".
     double volumeLots = 0.0;     ///< Lots (XAUUSD min 0.01).
     double entryPrice = 0.0;     ///< Open price.
-    double takeProfit = 0.0;     ///< TP price (long: above entry).
-    double stopLoss = 0.0;       ///< SL price (long: below entry).
+    double takeProfit = 0.0;     ///< TP price (long: above entry; short: below).
+    double stopLoss = 0.0;       ///< SL price (long: below entry; short: above).
     double marginUsdt = 0.0;     ///< Margin locked at open (notional / leverage).
     double feeUsdt = 0.0;        ///< Commission paid at open (BUY side only).
     double leverage = 1.0;       ///< Leverage used for the margin.

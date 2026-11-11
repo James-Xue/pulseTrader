@@ -45,6 +45,24 @@ class SuperTrendScalper : public UnifiedScalper
     // Inherit the UnifiedScalper(context) constructor (public API unchanged).
     using UnifiedScalper::UnifiedScalper;
 
+    /// Current SuperTrend indicator state (line value + trend direction).
+    ///
+    /// Provided for indicator consumers (e.g. the launcher adapter) that
+    /// need the line every pass, not only on trend flips.
+    struct SupertrendState
+    {
+        double value = 0.0;    ///< Current SuperTrend line price.
+        bool bullish = false;  ///< True = uptrend (price above the line).
+        double atr = 0.0;      ///< ATR used for the bands.
+    };
+
+    /// Evaluate the current SuperTrend state and COMMIT the rolling band/
+    /// direction state — exactly like evaluateEntry's internal pass, but
+    /// without producing a signal. Returns nullopt while ATR is zero or the
+    /// candle history is insufficient.
+    std::optional<SupertrendState> evaluateState(
+        const std::vector<market::Kline> &candles);
+
   protected:
     // --- UnifiedScalper hooks ---
 

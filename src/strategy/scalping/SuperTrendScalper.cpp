@@ -162,6 +162,85 @@ std::optional<EntryContext> SuperTrendScalper::evaluateEntry(
     return entry;
 }
 
+std::optional<SuperTrendScalper::SupertrendState> SuperTrendScalper::evaluateState(
+    const std::vector<market::Kline> &candles)
+{
+    // Same core pass as evaluateEntry (ATR → bands → final bands → trend
+    // direction), committing the rolling state, but without the flip
+    // detection / signal emission. Kept separate from evaluateEntry so the
+    // engine's signal path stays untouched.
+    const auto period = static_cast<std::size_t>(
+        m_params.supertrend_period.load(std::memory_order_acquire));
+    const double multiplier = m_params.supertrend_multiplier.load(std::memory_order_acquire);
+
+    const double atr = computeAtr(candles, period);
+    if (0.0 >= atr || candles.empty())
+    {
+        return std::nullopt;
+    }
+
+    const auto &latest = candles.back();
+    const double midpoint = (latest.high + latest.low) / 2.0;
+    const double basic_upper = midpoint + multiplier * atr;
+    const double basic_lower = midpoint - multiplier * atr;
+
+    double final_upper = basic_upper;
+    double final_lower = basic_lower;
+    if (m_hasPrev)
+    {
+        final_upper = (basic_upper < m_prevUpperBand || m_prevClose > m_prevUpperBand)
+                          ? basic_upper
+                          : m_prevUpperBand;
+        final_lower = (basic_lower > m_prevLowerBand || m_prevClose < m_prevLowerBand)
+                          ? basic_lower
+                          : m_prevLowerBand;
+    }
+
+    bool current_bullish = m_isBullish;
+    double current_supertrend = 0.0;
+    if (m_hasPrev)
+    {
+        if (m_isBullish && latest.close >= final_lower)
+        {
+            current_bullish = true;
+            current_supertrend = final_lower;
+        }
+        else if (!m_isBullish && latest.close <= final_upper)
+        {
+            current_bullish = false;
+            current_supertrend = final_upper;
+        }
+        else if (m_isBullish && latest.close < final_lower)
+        {
+            current_bullish = false;
+            current_supertrend = final_upper;
+        }
+        else
+        {
+            current_bullish = true;
+            current_supertrend = final_lower;
+        }
+    }
+    else
+    {
+        current_bullish = (latest.close >= midpoint);
+        current_supertrend = current_bullish ? final_lower : final_upper;
+    }
+
+    m_prevUpperBand = final_upper;
+    m_prevLowerBand = final_lower;
+    m_prevClose = latest.close;
+    m_prevSupertrend = current_supertrend;
+    m_isBullish = current_bullish;
+    m_hasPrev = true;
+
+    SupertrendState state;
+    state.value = current_supertrend;
+    state.bullish = current_bullish;
+    state.atr = atr;
+    return state;
+}
+
 void SuperTrendScalper::logSignal(const TradingSignal &sig) const
 {
     PULSE_LOG_INFO("strategy",

@@ -189,25 +189,36 @@ TEST_F(SimTradeEngineTest, PositionsPersistAcrossLoad)
 
 TEST_F(SimTradeEngineTest, UpdateStopsMovesUpOnRisingMarket)
 {
-    ASSERT_TRUE(openOne().ok);  // TP 4100, SL 3950.
-    // Market moved up: suggestion TP 4150 / SL 3980 → both move up.
+    ASSERT_TRUE(openOne().ok);  // long TP 4100, SL 3950.
+    // Price 4050 with 5-point distances: long envelope TP 4055 / SL 4045.
+    // TP stays (4100 > 4055), SL moves up (3950 → 4045).
     const auto update =
-        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4150.0, 3980.0);
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4050.0, 5.0, 5.0);
     ASSERT_TRUE(update.ok);
     EXPECT_EQ(1, update.updatedCount);
-    const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
     ASSERT_EQ(1, positions.size());
-    EXPECT_DOUBLE_EQ(4150.0, positions[0].takeProfit);
-    EXPECT_DOUBLE_EQ(3980.0, positions[0].stopLoss);
+    EXPECT_DOUBLE_EQ(4100.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(4045.0, positions[0].stopLoss);
+
+    // Price 4120: both move up (TP 4125 > 4100, SL 4115 > 4045).
+    const auto update2 =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4120.0, 5.0, 5.0);
+    ASSERT_TRUE(update2.ok);
+    EXPECT_EQ(1, update2.updatedCount);
+    positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    EXPECT_DOUBLE_EQ(4125.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(4115.0, positions[0].stopLoss);
 }
 
-TEST_F(SimTradeEngineTest, UpdateStopsNeverLowersStops)
+TEST_F(SimTradeEngineTest, UpdateStopsNeverLowersLongStops)
 {
-    ASSERT_TRUE(openOne().ok);  // TP 4100, SL 3950.
-    // Suggestion below the current stops → nothing moves (profit is
-    // protected, mirroring a real trailing stop).
+    ASSERT_TRUE(openOne().ok);  // long TP 4100, SL 3950.
+    // Price 3900 (below the SL): the envelope TP 3905 / SL 3895 is below
+    // both current stops → nothing moves (a trailing stop never widens
+    // risk).
     const auto update =
-        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4080.0, 3930.0);
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 3900.0, 5.0, 5.0);
     ASSERT_TRUE(update.ok);
     EXPECT_EQ(0, update.updatedCount);
     const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
@@ -216,23 +227,51 @@ TEST_F(SimTradeEngineTest, UpdateStopsNeverLowersStops)
     EXPECT_DOUBLE_EQ(3950.0, positions[0].stopLoss);
 }
 
-TEST_F(SimTradeEngineTest, UpdateStopsSkipsInvalidSuggestions)
+TEST_F(SimTradeEngineTest, ShortStopsMoveDownWithSlAbovePrice)
 {
-    ASSERT_TRUE(openOne().ok);
+    // Regression: a short's SL must stay ABOVE the price — the old bug
+    // pulled it below the price, so a normal price move triggered a wrong
+    // close. Short @4000: TP 3995, SL 4005.
+    ASSERT_TRUE(SimTradeEngine::openShort(
+                    QStringLiteral("keyA"), 0.01, 4000.0, 3995.0, 4005.0, 100.0, kNow)
+                    .ok);
+    // Price 3996 (above TP 3995 — nothing should trigger): envelope for a
+    // short = TP 3991, SL 4001. Both move down; SL stays above the price.
     const auto update =
-        SimTradeEngine::updateStops(QStringLiteral("keyA"), 3900.0, 4100.0);  // TP < SL
-    EXPECT_FALSE(update.ok);
-    // Position untouched.
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 3996.0, 5.0, 5.0);
+    ASSERT_TRUE(update.ok);
+    EXPECT_EQ(1, update.updatedCount);
     const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
     ASSERT_EQ(1, positions.size());
-    EXPECT_DOUBLE_EQ(4100.0, positions[0].takeProfit);
-    EXPECT_DOUBLE_EQ(3950.0, positions[0].stopLoss);
+    EXPECT_DOUBLE_EQ(3991.0, positions[0].takeProfit);
+    EXPECT_DOUBLE_EQ(4001.0, positions[0].stopLoss);
+    EXPECT_GT(positions[0].stopLoss, positions[0].takeProfit);
+    // No spurious close while the price sits between TP and SL.
+    const auto closes = SimTradeEngine::checkAndClose(QStringLiteral("keyA"), 3996.0, kNow + 1);
+    EXPECT_TRUE(closes.empty());
+}
+
+TEST_F(SimTradeEngineTest, ShortSlNeverCrossesBelowTp)
+{
+    // With the price near the short TP, the mirrored envelope must keep
+    // TP < SL (no degenerate pair that would close immediately).
+    ASSERT_TRUE(SimTradeEngine::openShort(
+                    QStringLiteral("keyA"), 0.01, 4000.0, 3995.0, 4005.0, 100.0, kNow)
+                    .ok);
+    const auto update =
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 3992.0, 5.0, 5.0);
+    ASSERT_TRUE(update.ok);
+    const auto positions = SimTradeEngine::positions(QStringLiteral("keyA"));
+    ASSERT_EQ(1, positions.size());
+    EXPECT_GT(positions[0].stopLoss, positions[0].takeProfit);
+    EXPECT_GT(positions[0].stopLoss, 3992.0);   // SL above the live price.
+    EXPECT_LT(positions[0].takeProfit, 3992.0); // TP below the live price.
 }
 
 TEST_F(SimTradeEngineTest, UpdateStopsIsNoOpWithoutPositions)
 {
     const auto update =
-        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4150.0, 3980.0);
+        SimTradeEngine::updateStops(QStringLiteral("keyA"), 4000.0, 5.0, 5.0);
     ASSERT_TRUE(update.ok);
     EXPECT_EQ(0, update.updatedCount);
 }

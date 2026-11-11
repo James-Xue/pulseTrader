@@ -357,9 +357,10 @@ Result<nlohmann::json> GateRestClient::getCfdTicker(const std::string &symbol)
     return request("GET", EndpointRouter::cfdTickerPath(symbol));
 }
 
-Result<nlohmann::json> GateRestClient::getCfdKlines(const std::string &symbol, int limit)
+Result<nlohmann::json> GateRestClient::getCfdKlines(const std::string &symbol, int limit,
+                                                    const std::string &kline_type)
 {
-    const std::string query = "kline_type=1m&limit=" + std::to_string(limit);
+    const std::string query = "kline_type=" + kline_type + "&limit=" + std::to_string(limit);
     return request("GET", EndpointRouter::cfdKlinesPath(symbol), query);
 }
 

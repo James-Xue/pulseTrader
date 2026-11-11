@@ -19,9 +19,11 @@
 // in the launcher). Pure logic — unit-testable without any network.
 
 #include "SimAccountStore.hpp"
+#include "SimOrderDb.hpp"
 
 #include <QString>
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -56,11 +58,19 @@ class SimTradeEngine
     };
 
     /// Open a simulated long position. `leverage` ≥ 1; margin =
-    /// lots × 100 × price / leverage; commission = lots × 6 USDT.
+    /// lots × 100 × price / leverage; commission = lots × 6 USDT (BUY side).
+    /// Requires TP > entry > SL.
     static OpenResult openLong(const QString &apiKey, double volumeLots,
                                double entryPrice, double takeProfit,
                                double stopLoss, double leverage,
                                std::int64_t nowMs);
+
+    /// Open a simulated short position. Same margin model; the sell side
+    /// carries no commission (real CFD fee model). Requires TP < entry < SL.
+    static OpenResult openShort(const QString &apiKey, double volumeLots,
+                                double entryPrice, double takeProfit,
+                                double stopLoss, double leverage,
+                                std::int64_t nowMs);
 
     /// Evaluate every open position against `price`; TP/SL hits are closed
     /// and settled immediately (one round of closes, in open order).
@@ -78,15 +88,18 @@ class SimTradeEngine
         QString error;
     };
 
-    /// Apply trailing-stop suggestions to every open long position.
+    /// Apply trailing stops to every open position at `price`.
     ///
     /// Real-CFD behaviour: stops move only in the favourable direction — a
-    /// long's TP and SL only ever move UP (locking in profit on a trending
-    /// market); a suggestion below the current stops is ignored for that
-    /// position. Invalid suggestions (tp ≤ sl) are skipped entirely.
+    /// long's TP/SL only move UP (price + tpPoints / price − slPoints), a
+    /// short's only move DOWN (price − tpPoints / price + slPoints) — so a
+    /// position can only lock in profit, never widen its risk. An
+    /// unfavourable move is ignored for that position. Every applied move is
+    /// appended to the order_stops history (reason "trailing").
     static StopsUpdateResult updateStops(const QString &apiKey,
-                                         double suggestedTp,
-                                         double suggestedSl);
+                                         double price,
+                                         double tpPoints,
+                                         double slPoints);
 };
 
 } // namespace pulse::ui

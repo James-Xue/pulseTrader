@@ -106,6 +106,128 @@ TEST(VerifyWorkerTest, UnwrapDataRejectsNullAndScalarData)
 }
 
 // ---------------------------------------------------------------------------
+// tickerLastPrice — GET /tradfi/symbols/{symbol}/tickers (XAUUSD, USIDX, ...)
+// ---------------------------------------------------------------------------
+
+TEST(VerifyWorkerTest, TickerLastPriceReadsGoldTicker)
+{
+    // Verbatim shape captured from the live XAUUSD endpoint (2026-09-23).
+    const nlohmann::json ticker = {
+        {"data",
+         {{"ask_price", "4331.08"},
+          {"bid_price", "4330.98"},
+          {"category_name", "Metals"},
+          {"last_price", "4331.43"},
+          {"price_change", "-0.61"},
+          {"status", "open"}}},
+        {"label", ""},
+        {"timestamp", 1790143826687LL},
+    };
+    const std::optional<double> price = VerifyWorker::tickerLastPrice(ticker);
+    ASSERT_TRUE(price.has_value());
+    EXPECT_DOUBLE_EQ(4331.43, *price);
+}
+
+TEST(VerifyWorkerTest, TickerLastPriceReadsUsdIndexTicker)
+{
+    // Verbatim shape captured from the live USIDX endpoint (2026-09-23);
+    // identical envelope to gold, three decimals of precision.
+    const nlohmann::json ticker = {
+        {"data",
+         {{"ask_price", "100.759"},
+          {"bid_price", "100.739"},
+          {"category_name", "Indices"},
+          {"last_price", "100.734"},
+          {"price_change", "0.20"},
+          {"status", "open"}}},
+        {"label", ""},
+        {"timestamp", 1790143812765LL},
+    };
+    const std::optional<double> price = VerifyWorker::tickerLastPrice(ticker);
+    ASSERT_TRUE(price.has_value());
+    EXPECT_DOUBLE_EQ(100.734, *price);
+}
+
+TEST(VerifyWorkerTest, TickerLastPriceAcceptsNumberAndUnwrappedPayload)
+{
+    // Gate encodes decimals as strings, but a numeric field (and a payload
+    // with no "data" wrapper) must work too — the parser is lenient.
+    const nlohmann::json numeric = {{"data", {{"last_price", 4321.5}}}};
+    const std::optional<double> fromNumber = VerifyWorker::tickerLastPrice(numeric);
+    ASSERT_TRUE(fromNumber.has_value());
+    EXPECT_DOUBLE_EQ(4321.5, *fromNumber);
+
+    const nlohmann::json unwrapped = {{"last_price", "3320.5"}};
+    const std::optional<double> plain = VerifyWorker::tickerLastPrice(unwrapped);
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_DOUBLE_EQ(3320.5, *plain);
+}
+
+TEST(VerifyWorkerTest, TickerLastPriceRejectsMissingField)
+{
+    // A closed market / error payload has no last_price at all.
+    const nlohmann::json noPrice = {{"data", {{"status", "closed"}}}};
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(noPrice).has_value());
+    // Empty envelope.
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(nlohmann::json::object()).has_value());
+}
+
+TEST(VerifyWorkerTest, TickerLastPriceRejectsUnusableValues)
+{
+    // Garbage strings, null, booleans and zero/negative quotes all mean
+    // "no usable price" — the caller keeps the previously shown value
+    // rather than blanking the panel with 0.000.
+    const nlohmann::json garbage = {{"data", {{"last_price", "abc"}}}};
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(garbage).has_value());
+
+    const nlohmann::json nullPrice = {{"data", {{"last_price", nullptr}}}};
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(nullPrice).has_value());
+
+    const nlohmann::json zero = {{"data", {{"last_price", "0"}}}};
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(zero).has_value());
+
+    const nlohmann::json negative = {{"data", {{"last_price", "-1.5"}}}};
+    EXPECT_FALSE(VerifyWorker::tickerLastPrice(negative).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// tickerMarketOpen — per-symbol session state
+// ---------------------------------------------------------------------------
+
+TEST(VerifyWorkerTest, TickerMarketOpenReadsStatusField)
+{
+    const nlohmann::json open = {{"data", {{"status", "open"}}}};
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(open));
+
+    const nlohmann::json closed = {{"data", {{"status", "closed"}}}};
+    EXPECT_FALSE(VerifyWorker::tickerMarketOpen(closed));
+}
+
+TEST(VerifyWorkerTest, TickerMarketOpenDefaultsToOpen)
+{
+    // Absent status is the rule the gold path has always used, and a
+    // payload too malformed to judge must never slow a poll loop down.
+    const nlohmann::json noStatus = {{"data", {{"last_price", "100.7"}}}};
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(noStatus));
+
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(nlohmann::json::object()));
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(nlohmann::json::array()));
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(nlohmann::json(nullptr)));
+}
+
+TEST(VerifyWorkerTest, TickerMarketOpenSurvivesNonStringStatus)
+{
+    // A number/object where a string is expected must not throw — this runs
+    // on a polling thread, where an escaping type_error terminates the
+    // process (json::value() would throw here; find() + is_string() does not).
+    const nlohmann::json numeric = {{"data", {{"status", 1}}}};
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(numeric));
+
+    const nlohmann::json nested = {{"data", {{"status", {{"code", 0}}}}}};
+    EXPECT_TRUE(VerifyWorker::tickerMarketOpen(nested));
+}
+
+// ---------------------------------------------------------------------------
 // parsePermissions — GET /account/main_keys response
 // ---------------------------------------------------------------------------
 

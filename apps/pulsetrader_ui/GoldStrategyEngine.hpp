@@ -55,12 +55,18 @@ class GoldStrategyEngine
         std::atomic<int> volWindow{ 20 };         ///< Ticks used for the volatility range.
         std::atomic<double> tpVolMult{ 1.5 };     ///< TP = entry + mult × volatility.
         std::atomic<double> slVolMult{ 1.0 };     ///< SL = entry − mult × volatility.
+        std::atomic<double> tpPoints{ 5.0 };      ///< Fixed-point TP distance (SuperTrend mode).
+        std::atomic<double> slPoints{ 5.0 };      ///< Fixed-point SL distance (SuperTrend mode).
         std::atomic<double> minVolUsd{ 0.5 };     ///< Volatility floor (USD) — silence noise.
         std::atomic<double> maxVolUsd{ 50.0 };    ///< Volatility ceiling (USD) — reject spikes.
         std::atomic<std::int64_t> cooldownMs{ 60'000 };  ///< Min gap between open signals.
         std::atomic<double> openVolumeLots{ 0.01 };      ///< Open size (lots) per signal.
         std::atomic<double> openLeverage{ 1.0 };         ///< Simulated margin leverage (real-CFD model).
         std::atomic<int> openProtectMin{ 10 };           ///< Minutes after market open with entries blocked.
+        // Real-position auto-follow (throttled PUT of live CFD stops).
+        std::atomic<bool> autoFollowReal{ false };       ///< Master switch (default OFF — real writes).
+        std::atomic<int> followIntervalSec{ 30 };        ///< Min seconds between follow PUTs.
+        std::atomic<double> followThresholdPoints{ 2.0 };///< Min price move to trigger a follow.
     };
 
     explicit GoldStrategyEngine(

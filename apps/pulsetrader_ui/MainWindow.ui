@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>760</width>
-    <height>680</height>
+    <width>880</width>
+    <height>820</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -61,6 +61,19 @@
        </property>
        <property name="text">
         <string>模拟账户</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pushBtn_analyze">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>订单分析</string>
        </property>
       </widget>
      </item>
@@ -194,7 +207,7 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label_tpMult">
         <property name="text">
-         <string>止盈倍数</string>
+         <string>止盈点数</string>
         </property>
        </widget>
       </item>
@@ -207,20 +220,20 @@
          <double>0.10000000000000001</double>
         </property>
         <property name="maximum">
-         <double>10.0</double>
+         <double>100.0</double>
         </property>
         <property name="singleStep">
-         <double>0.10000000000000001</double>
+         <double>0.5</double>
         </property>
         <property name="value">
-         <double>1.5</double>
+         <double>5.0</double>
         </property>
        </widget>
       </item>
       <item row="0" column="2">
        <widget class="QLabel" name="label_slMult">
         <property name="text">
-         <string>止损倍数</string>
+         <string>止损点数</string>
         </property>
        </widget>
       </item>
@@ -233,13 +246,13 @@
          <double>0.10000000000000001</double>
         </property>
         <property name="maximum">
-         <double>10.0</double>
+         <double>100.0</double>
         </property>
         <property name="singleStep">
-         <double>0.10000000000000001</double>
+         <double>0.5</double>
         </property>
         <property name="value">
-         <double>1.0</double>
+         <double>5.0</double>
         </property>
        </widget>
       </item>
@@ -332,7 +345,7 @@
       <item row="2" column="0" colspan="4">
        <widget class="QLabel" name="label_leverageHint">
         <property name="text">
-         <string>TP/SL = 开仓价 ± 倍数×ATR；保证金 = 名义价值 ÷ 杠杆；开市后保护期内不开仓</string>
+         <string>TP/SL = 开仓价 ± 点数；保证金 = 名义价值 ÷ 杠杆；开市后保护期内不开仓</string>
         </property>
         <property name="styleSheet">
          <string notr="true">color: #888;</string>
@@ -359,54 +372,265 @@
         </property>
        </widget>
       </item>
+      <item row="4" column="4">
+       <widget class="QLabel" name="label_dynamicStopsHint">
+        <property name="text">
+         <string>仅调整已有持仓的止盈止损，不开新仓</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #888;</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="5">
+       <widget class="QPushButton" name="pushBtn_dynamicStops">
+        <property name="text">
+         <string>动态止盈止损</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QCheckBox" name="check_autoFollow">
+        <property name="text">
+         <string>自动跟随真实持仓</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QSpinBox" name="spin_followInterval">
+        <property name="suffix">
+         <string> 秒</string>
+        </property>
+        <property name="minimum">
+         <number>10</number>
+        </property>
+        <property name="maximum">
+         <number>600</number>
+        </property>
+        <property name="value">
+         <number>30</number>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="2">
+       <widget class="QLabel" name="label_followThreshold">
+        <property name="text">
+         <string>触发移动（点）</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="3">
+       <widget class="QDoubleSpinBox" name="spin_followThreshold">
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.5</double>
+        </property>
+        <property name="maximum">
+         <double>50.0</double>
+        </property>
+        <property name="singleStep">
+         <double>0.5</double>
+        </property>
+        <property name="value">
+         <double>2.0</double>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="4" colspan="2">
+       <widget class="QLabel" name="label_autoFollowHint">
+        <property name="text">
+         <string>按间隔+价格移动阈值自动 PUT 真实持仓止损（需读写 Key）</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #888;</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
    <item>
-    <widget class="QLabel" name="label_log">
-     <property name="text">
-      <string>日志信息：</string>
+    <layout class="QHBoxLayout" name="lowerRow">
+     <property name="spacing">
+      <number>8</number>
      </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QTextEdit" name="textEdit_log">
-     <property name="readOnly">
-      <bool>true</bool>
-     </property>
-     <property name="verticalScrollBarPolicy">
-      <enum>Qt::ScrollBarAlwaysOn</enum>
-     </property>
-     <property name="font">
-      <font>
-       <family>Consolas</family>
-       <pointsize>9</pointsize>
-      </font>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QLabel" name="label_trade">
-     <property name="text">
-      <string>交易信息：</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QTextEdit" name="textEdit_trade">
-     <property name="readOnly">
-      <bool>true</bool>
-     </property>
-     <property name="verticalScrollBarPolicy">
-      <enum>Qt::ScrollBarAlwaysOn</enum>
-     </property>
-     <property name="font">
-      <font>
-       <family>Consolas</family>
-       <pointsize>9</pointsize>
-      </font>
-     </property>
-    </widget>
+     <item>
+      <layout class="QVBoxLayout" name="priceColumn">
+       <property name="spacing">
+        <number>4</number>
+       </property>
+       <item>
+        <widget class="QLabel" name="label_xau">
+         <property name="text">
+          <string>黄金（XAUUSD）：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="textEdit_xau">
+         <property name="undoRedoEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarAlwaysOn</enum>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>60</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <family>Consolas</family>
+           <pointsize>9</pointsize>
+          </font>
+         </property>
+         <property name="maximumBlockCount">
+          <number>50</number>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_usidx">
+         <property name="text">
+          <string>美元指数（USIDX）：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="textEdit_usidx">
+         <property name="undoRedoEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarAlwaysOn</enum>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>60</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <family>Consolas</family>
+           <pointsize>9</pointsize>
+          </font>
+         </property>
+         <property name="maximumBlockCount">
+          <number>50</number>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_xbrusd">
+         <property name="text">
+          <string>XBRUSD：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="textEdit_xbrusd">
+         <property name="undoRedoEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarAlwaysOn</enum>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>60</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <family>Consolas</family>
+           <pointsize>9</pointsize>
+          </font>
+         </property>
+         <property name="maximumBlockCount">
+          <number>50</number>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="infoColumn">
+       <property name="spacing">
+        <number>4</number>
+       </property>
+       <item>
+        <widget class="QLabel" name="label_log">
+         <property name="text">
+          <string>日志信息：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="textEdit_log">
+         <property name="undoRedoEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarAlwaysOn</enum>
+         </property>
+         <property name="font">
+          <font>
+           <family>Consolas</family>
+           <pointsize>9</pointsize>
+          </font>
+         </property>
+         <property name="maximumBlockCount">
+          <number>5000</number>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_trade">
+         <property name="text">
+          <string>交易信息：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTextEdit" name="textEdit_trade">
+         <property name="undoRedoEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarAlwaysOn</enum>
+         </property>
+         <property name="font">
+          <font>
+           <family>Consolas</family>
+           <pointsize>9</pointsize>
+          </font>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>

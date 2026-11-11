@@ -11,11 +11,16 @@
 # ---------------------------------------------------------------------------
 # pulse_ui — launcher logic library (QString-based, no QWidgets)
 # ---------------------------------------------------------------------------
+find_package(Qt${PULSE_QT_MAJOR} REQUIRED COMPONENTS Sql)
+
 add_library(pulse_ui STATIC
     CredentialsStore.cpp
     VerifyWorker.cpp
     SimAccountStore.cpp
     SimTradeEngine.cpp
+    SimOrderDb.cpp
+    SimOrderAnalyzer.cpp
+    MultiTimeframeEma.cpp
     GoldStrategyEngine.cpp
     EngineStrategyAdapter.cpp
 )
@@ -30,6 +35,7 @@ target_link_libraries(pulse_ui
         pulse::exchange
         pulse::strategy
         Qt${PULSE_QT_MAJOR}::Core
+        Qt${PULSE_QT_MAJOR}::Sql
 )
 
 # Qt headers are not warning-clean under /WX (global /W4 + /WX on MSVC).

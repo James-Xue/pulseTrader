@@ -29,6 +29,7 @@ QJsonObject positionToJson(const SimPosition &p)
 {
     QJsonObject obj;
     obj[QLatin1String("id")] = p.id;
+    obj[QLatin1String("side")] = p.side;
     obj[QLatin1String("volume")] = p.volumeLots;
     obj[QLatin1String("entry")] = p.entryPrice;
     obj[QLatin1String("tp")] = p.takeProfit;
@@ -45,6 +46,7 @@ SimPosition positionFromJson(const QJsonObject &obj)
 {
     SimPosition p;
     p.id = obj.value(QLatin1String("id")).toString();
+    p.side = obj.value(QLatin1String("side")).toString(QStringLiteral("long"));
     p.volumeLots = obj.value(QLatin1String("volume")).toDouble(0.0);
     p.entryPrice = obj.value(QLatin1String("entry")).toDouble(0.0);
     p.takeProfit = obj.value(QLatin1String("tp")).toDouble(0.0);

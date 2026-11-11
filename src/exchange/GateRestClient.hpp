@@ -224,8 +224,10 @@ class GateRestClient
 
     /// GET /api/v4/tradfi/symbols/{symbol}/klines — per-symbol CFD klines.
     ///
-    /// Query: kline_type=1m&limit=N (max 500). Times are Unix seconds.
-    [[nodiscard]] Result<nlohmann::json> getCfdKlines(const std::string &symbol, int limit = 500);
+    /// Query: kline_type={type}&limit=N (max 500). Times are Unix seconds.
+    /// `kline_type` accepts e.g. "10s", "1m", "5m", "15m", "30m", "1h".
+    [[nodiscard]] Result<nlohmann::json> getCfdKlines(const std::string &symbol, int limit = 500,
+                                                      const std::string &kline_type = "1m");
 
     /// GET /api/v4/tradfi/symbols/detail?symbols={sym} — contract specs.
     ///
