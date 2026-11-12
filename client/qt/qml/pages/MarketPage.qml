@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.Models
 import Pulse.Client
 
 /// Live market view: one symbol, one sample per second, 10-second candles.
@@ -21,6 +22,11 @@ ColumnLayout {
     property var controller
     property bool userStopped: false
     property bool showRaw: false
+    /// Discreet work mode: hide the chart and print one line per tick instead.
+    property bool terminalMode: false
+    /// Guards the log against being cleared when the same symbol resumes.
+    property string loggedSymbol: ""
+    property string loggedMarket: ""
 
     /// The stream is owned by EngineController so it shares the control-socket
     /// endpoint and token without duplicating the login form state.
@@ -37,6 +43,12 @@ ColumnLayout {
         : "—"
 
     spacing: 0
+
+    /// Newest-first command-line log. Capped so a full workday cannot grow the
+    /// model without bound.
+    ListModel {
+        id: tickerLog
+    }
 
     // -- helpers ------------------------------------------------------------
 
@@ -56,6 +68,41 @@ ColumnLayout {
             return value.toFixed(4)
         }
         return value.toFixed(6)
+    }
+
+    /// Pad a cell to a fixed width so the monospace log columns stay aligned.
+    function padRight(value, width) {
+        let text = "" + value
+        while (text.length < width) {
+            text += " "
+        }
+        return text
+    }
+
+    /// Append one command-line-style line per tick. Newest stays at index 0;
+    /// the list is capped at 200 lines.
+    function appendTickerLine() {
+        if (!root.stream || root.stream.lastPrice <= 0) {
+            return
+        }
+
+        const change = (root.stream.changePct >= 0 ? "+" : "")
+                       + root.stream.changePct.toFixed(2) + "%"
+        const line = root.padRight(Qt.formatTime(new Date(), "hh:mm:ss"), 9)
+                     + root.padRight(root.stream.symbol, 13)
+                     + root.padRight(root.fmtPrice(root.stream.lastPrice), 12)
+                     + root.padRight(change, 9)
+                     + root.padRight("bid " + root.fmtPrice(root.stream.bid), 15)
+                     + "ask " + root.fmtPrice(root.stream.ask)
+                     + (root.stream.stale ? "  stale" : "")
+
+        tickerLog.insert(0, { "line": line, "up": root.stream.changePct >= 0 })
+        if (tickerLog.count > 200) {
+            tickerLog.remove(200, tickerLog.count - 200)
+        }
+        if (terminalList.atYBeginning) {
+            terminalList.positionViewAtBeginning()
+        }
     }
 
     function effectiveSymbol() {
@@ -215,6 +262,7 @@ ColumnLayout {
             id: chart
             anchors.fill: parent
             anchors.margins: 1
+            visible: !root.terminalMode
 
             onPaint: {
                 const ctx = getContext("2d")
@@ -361,6 +409,11 @@ ColumnLayout {
 
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
+            onVisibleChanged: {
+                if (visible) {
+                    requestPaint()
+                }
+            }
         }
 
         // Live price overlay. Keeping it inside the card is what lets the
@@ -370,6 +423,7 @@ ColumnLayout {
             anchors.left: parent.left
             anchors.margins: 12
             spacing: 0
+            visible: !root.terminalMode
 
             Text {
                 text: root.fmtPrice(root.stream ? root.stream.lastPrice : 0)
@@ -401,12 +455,19 @@ ColumnLayout {
                            ? Style.danger : Style.success
                     font.pixelSize: Style.fontSizeSmall
                 }
+                Text {
+                    text: (root.stream && root.stream.engineReady && !root.stream.stale)
+                          ? "● LIVE" : "● WAITING"
+                    color: (root.stream && root.stream.engineReady && !root.stream.stale)
+                           ? Style.success : Style.warning
+                    font.pixelSize: Style.fontSizeSmall
+                }
             }
         }
 
         Text {
             anchors.centerIn: parent
-            visible: root.candleCount === 0
+            visible: !root.terminalMode && root.candleCount === 0
             text: (root.stream && root.stream.streaming)
                   ? qsTr("Collecting the first 1-second samples…")
                   : qsTr("Choose a symbol and press Start")
@@ -414,17 +475,72 @@ ColumnLayout {
             font.pixelSize: Style.fontSize
         }
 
-        Text {
+        // -- discreet terminal mode ----------------------------------------
+        Item {
+            anchors.fill: parent
+            anchors.topMargin: 40
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            anchors.bottomMargin: 10
+            visible: root.terminalMode
+
+            Text {
+                id: terminalHeader
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                text: root.padRight("TIME", 9)
+                      + root.padRight("SYMBOL", 13)
+                      + root.padRight("LAST", 12)
+                      + root.padRight("CHG%", 9)
+                      + root.padRight("BID", 15)
+                      + "ASK"
+                color: Style.tertiaryText
+                font.family: "monospace"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+
+            ListView {
+                id: terminalList
+                anchors.top: terminalHeader.bottom
+                anchors.topMargin: 6
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 44
+                clip: true
+                spacing: 2
+                model: tickerLog
+
+                delegate: Text {
+                    width: terminalList.width
+                    text: model.line
+                    color: model.up ? Style.success : Style.danger
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+            }
+
+            MacButton {
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                text: qsTr("Show chart")
+                onClicked: root.terminalMode = false
+            }
+        }
+
+        // The one control that puts the page into the discreet mode. It stays
+        // above the terminal list so it is reachable in both views.
+        MacSwitch {
+            id: modeSwitch
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.margins: 12
-            visible: root.stream && root.stream.streaming
-            text: (root.stream && root.stream.engineReady && !root.stream.stale)
-                  ? "● LIVE" : "● WAITING"
-            color: (root.stream && root.stream.engineReady && !root.stream.stale)
-                   ? Style.success : Style.warning
-            font.pixelSize: 10
-            font.bold: true
+            anchors.margins: 10
+            text: qsTr("Terminal")
+            checked: root.terminalMode
+            onToggled: root.terminalMode = checked
         }
     }
 
@@ -477,6 +593,13 @@ ColumnLayout {
             text: qsTr("Raw")
             checked: root.showRaw
             onToggled: root.showRaw = checked
+        }
+
+        // The requested bottom switch. The header switch does the same job;
+        // this one stays at the bottom of the page for a quick toggle.
+        MacButton {
+            text: root.terminalMode ? qsTr("Chart") : qsTr("Terminal")
+            onClicked: root.terminalMode = !root.terminalMode
         }
     }
 
@@ -545,9 +668,26 @@ ColumnLayout {
     Connections {
         target: root.stream
         function onCandlesChanged() { chart.requestPaint() }
-        function onTickerChanged() { chart.requestPaint() }
+        function onTickerChanged() {
+            chart.requestPaint()
+            // Terminal mode keeps a rolling log; the chart does not need it,
+            // but appending in both modes keeps the switch instant.
+            root.appendTickerLine()
+        }
         function onStreamingChanged() { chart.requestPaint() }
         function onStaleChanged() { chart.requestPaint() }
+
+        function onSymbolChanged() {
+            // A resume re-emits symbolChanged for the same instrument; only a
+            // real symbol or market change should wipe the log.
+            if (root.stream
+                && (root.stream.symbol !== root.loggedSymbol
+                    || root.stream.marketType !== root.loggedMarket)) {
+                tickerLog.clear()
+                root.loggedSymbol = root.stream.symbol
+                root.loggedMarket = root.stream.marketType
+            }
+        }
     }
 
     Connections {

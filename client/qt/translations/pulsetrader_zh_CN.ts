@@ -293,69 +293,85 @@
 <context>
     <name>MarketPage</name>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="144"/>
+        <location filename="../qml/pages/MarketPage.qml" line="190"/>
         <source>or type a symbol</source>
         <translation>或直接输入交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="157"/>
+        <location filename="../qml/pages/MarketPage.qml" line="203"/>
         <source>auto</source>
         <translation>自动</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="184"/>
+        <location filename="../qml/pages/MarketPage.qml" line="230"/>
         <source>Stop</source>
         <translation>停止</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="184"/>
+        <location filename="../qml/pages/MarketPage.qml" line="230"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="386"/>
+        <location filename="../qml/pages/MarketPage.qml" line="439"/>
         <source>bid %1</source>
         <translation>买一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="391"/>
+        <location filename="../qml/pages/MarketPage.qml" line="444"/>
         <source>ask %1</source>
         <translation>卖一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="411"/>
+        <location filename="../qml/pages/MarketPage.qml" line="471"/>
         <source>Collecting the first 1-second samples…</source>
         <translation>正在采集第一秒数据…</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="412"/>
+        <location filename="../qml/pages/MarketPage.qml" line="472"/>
         <source>Choose a symbol and press Start</source>
         <translation>选择交易对并点击开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="442"/>
+        <location filename="../qml/pages/MarketPage.qml" line="528"/>
+        <source>Show chart</source>
+        <translation>显示K线图</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="540"/>
+        <location filename="../qml/pages/MarketPage.qml" line="600"/>
+        <source>Terminal</source>
+        <translation>命令行</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="557"/>
         <source>Samples %1</source>
         <translation>采样 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="447"/>
+        <location filename="../qml/pages/MarketPage.qml" line="562"/>
         <source>Candles %1</source>
         <translation>K线 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="452"/>
+        <location filename="../qml/pages/MarketPage.qml" line="567"/>
         <source>Period %1s</source>
         <translation>周期 %1 秒</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="457"/>
+        <location filename="../qml/pages/MarketPage.qml" line="572"/>
         <source>Last %1</source>
         <translation>最近 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="477"/>
+        <location filename="../qml/pages/MarketPage.qml" line="592"/>
         <source>Raw</source>
         <translation>原始</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="600"/>
+        <source>Chart</source>
+        <translation>K线图</translation>
     </message>
 </context>
 <context>
