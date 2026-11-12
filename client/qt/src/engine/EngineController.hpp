@@ -13,6 +13,7 @@
 // The models are Q_PROPERTY pointer types, so moc needs their complete
 // definitions: a forward declaration trips the "Pointer Meta Types must either
 // point to fully-defined types" static assertion.
+#include "market/MarketStream.hpp"
 #include "models/AccountModel.hpp"
 #include "models/MarketFilterModel.hpp"
 #include "models/OrdersModel.hpp"
@@ -62,6 +63,11 @@ class EngineController : public QObject
     Q_PROPERTY(pulse::client::ReportsModel* reportsModel READ reportsModel CONSTANT)
     Q_PROPERTY(pulse::client::SignalsModel* signalsModel READ signalsModel CONSTANT)
     Q_PROPERTY(pulse::client::AccountModel* accountModel READ accountModel CONSTANT)
+
+    /// One-symbol 1 Hz price stream used by the Market page. The stream owns
+    /// its own control socket and stays idle until the page calls start(), so
+    /// the dashboard pays nothing for it.
+    Q_PROPERTY(pulse::client::MarketStream* marketStream READ marketStream CONSTANT)
 
     // Per-market views over the three list models. The source models stay the
     // single polled snapshot; these proxies only narrow it, so switching a
@@ -127,6 +133,7 @@ public:
     [[nodiscard]] ReportsModel* reportsModel() const { return m_reportsModel; }
     [[nodiscard]] SignalsModel* signalsModel() const { return m_signalsModel; }
     [[nodiscard]] AccountModel* accountModel() const { return m_accountModel; }
+    [[nodiscard]] MarketStream* marketStream() const { return m_marketStream; }
 
     [[nodiscard]] MarketFilterModel* spotPositions() const { return m_spotPositions; }
     [[nodiscard]] MarketFilterModel* cfdPositions() const { return m_cfdPositions; }
@@ -192,6 +199,7 @@ private:
     ReportsModel* m_reportsModel = nullptr;
     SignalsModel* m_signalsModel = nullptr;
     AccountModel* m_accountModel = nullptr;
+    MarketStream* m_marketStream = nullptr;
 
     MarketFilterModel* m_spotPositions = nullptr;
     MarketFilterModel* m_cfdPositions = nullptr;

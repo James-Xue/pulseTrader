@@ -74,6 +74,8 @@ qt_add_qml_module(pulseTraderQt
         src/data/MarketDataService.cpp src/data/MarketDataService.hpp
         src/data/DataSession.cpp       src/data/DataSession.hpp
         src/data/DataServer.cpp        src/data/DataServer.hpp
+        src/market/CandleAggregator.cpp src/market/CandleAggregator.hpp
+        src/market/MarketStream.cpp    src/market/MarketStream.hpp
         src/models/JsonListModel.cpp   src/models/JsonListModel.hpp
         src/models/MarketFilterModel.cpp src/models/MarketFilterModel.hpp
         src/models/PositionsModel.hpp
@@ -95,6 +97,7 @@ target_include_directories(pulseTraderQt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/data
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
     ${CMAKE_CURRENT_SOURCE_DIR}/src/i18n
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/market
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security)

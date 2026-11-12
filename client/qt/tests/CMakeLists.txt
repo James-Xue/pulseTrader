@@ -129,3 +129,38 @@ qt_add_resources(tst_translator "translations"
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/../translations/pulsetrader_zh_CN.qm")
 
 add_test(NAME translator COMMAND tst_translator)
+
+# 10-second candle aggregation: pure arithmetic over synthetic samples, no
+# sockets and no clock.
+qt_add_executable(tst_candleaggregator
+    tst_candleaggregator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/CandleAggregator.cpp
+)
+
+target_include_directories(tst_candleaggregator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_candleaggregator PRIVATE Qt6::Test Qt6::Core)
+
+add_test(NAME candleaggregator COMMAND tst_candleaggregator)
+
+# Live market stream: a scripted loopback control socket answers get_market,
+# so the test exercises the 1 Hz poll, freshness guard and OHLC folding
+# without an engine process.
+qt_add_executable(tst_marketstream
+    tst_marketstream.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/MarketStream.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/CandleAggregator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcError.cpp
+)
+
+set_target_properties(tst_marketstream PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_marketstream PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_marketstream PRIVATE
+    Qt6::Test Qt6::Core Qt6::Network)
+
+add_test(NAME marketstream COMMAND tst_marketstream)

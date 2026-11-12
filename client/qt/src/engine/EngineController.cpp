@@ -52,6 +52,7 @@ EngineController::EngineController(QObject* parent)
     , m_reportsModel(new ReportsModel(this))
     , m_signalsModel(new SignalsModel(this))
     , m_accountModel(new AccountModel(this))
+    , m_marketStream(new MarketStream(this))
     , m_spotPositions(new MarketFilterModel(this))
     , m_cfdPositions(new MarketFilterModel(this))
     , m_futuresPositions(new MarketFilterModel(this))
@@ -191,6 +192,10 @@ void EngineController::connectToEngine(const QString& host, int port, bool tls,
         client->setToken(token);
     }
 
+    // 1a. The market stream keeps the same endpoint but opens its socket
+    //     lazily, only when the Market page starts streaming.
+    m_marketStream->setEndpoint(host, static_cast<quint16>(port), tls, token);
+
     // 2. The fast socket drives the aggregate state; the other two follow.
     m_fast->connectToEngine();
     m_rest->connectToEngine();
@@ -200,6 +205,7 @@ void EngineController::connectToEngine(const QString& host, int port, bool tls,
 void EngineController::disconnectFromEngine()
 {
     stopPolling();
+    m_marketStream->stop();
     for (RpcClient* client : { m_fast, m_rest, m_slow })
     {
         client->disconnectFromEngine();
@@ -226,6 +232,9 @@ void EngineController::setPollingEnabled(bool enabled)
     else
     {
         stopPolling();
+        // The live chart is a poller too; leaving it running while the user
+        // asked the client to stop polling would contradict the setting.
+        m_marketStream->stop();
     }
 }
 

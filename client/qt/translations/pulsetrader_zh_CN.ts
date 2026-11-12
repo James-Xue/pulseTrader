@@ -4,199 +4,199 @@
 <context>
     <name>DashboardPage</name>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="134"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="138"/>
         <source>Open positions</source>
         <translation>持仓数</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="139"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="143"/>
         <source>Strategies</source>
         <translation>策略</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="147"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="151"/>
         <source>Network</source>
         <translation>网络</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="153"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="157"/>
         <source>Uptime</source>
         <translation>运行时长</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="155"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="159"/>
         <source>%1 min</source>
         <translation>%1 分钟</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="194"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="198"/>
         <source>Alt-coin holdings</source>
         <translation>小币持仓</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="221"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="225"/>
         <source>Spot equity</source>
         <translation>现货权益</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="230"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="235"/>
         <source>Spot available</source>
         <translation>现货可用</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="266"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="275"/>
         <source>Futures equity</source>
         <translation>合约权益</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="275"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="285"/>
         <source>Futures available</source>
         <translation>合约可用</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="239"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="245"/>
         <source>CFD equity</source>
         <translation>CFD 权益</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="107"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="111"/>
         <source>Spot</source>
         <translation>现货</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="110"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="114"/>
         <source>CFD</source>
         <translation>CFD</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="112"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="116"/>
         <source>Futures</source>
         <translation>合约</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="167"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="171"/>
         <source>Market</source>
         <translation>市场</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="176"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="180"/>
         <source>Spot (%1)</source>
         <translation>现货 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="177"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="181"/>
         <source>CFD (%1)</source>
         <translation>CFD (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="178"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="182"/>
         <source>Futures (%1)</source>
         <translation>合约 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="248"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="255"/>
         <source>CFD available</source>
         <translation>CFD 可用</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="257"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="265"/>
         <source>CFD margin used</source>
         <translation>CFD 已用保证金</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="284"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="295"/>
         <source>Position margin</source>
         <translation>持仓保证金</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="293"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="305"/>
         <source>Unrealised PnL</source>
         <translation>未实现盈亏</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="302"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="315"/>
         <source>The engine did not report a %1 balance yet.</source>
         <translation>引擎尚未上报 %1 余额。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="312"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="325"/>
         <source>Positions · %1 (%2)</source>
         <translation>持仓 · %1(%2)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="337"/>
-        <location filename="../qml/pages/DashboardPage.qml" line="427"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="350"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="440"/>
         <source>Symbol</source>
         <translation>交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="338"/>
-        <location filename="../qml/pages/DashboardPage.qml" line="428"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="351"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="441"/>
         <source>Side</source>
         <translation>方向</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="339"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="352"/>
         <source>Qty</source>
         <translation>数量</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="340"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="353"/>
         <source>Entry</source>
         <translation>开仓价</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="341"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="354"/>
         <source>uPnL</source>
         <translation>未实现盈亏</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="391"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="404"/>
         <source>No open positions on this market</source>
         <translation>该市场暂无持仓</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="402"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="415"/>
         <source>Open orders · %1 (%2)</source>
         <translation>挂单 · %1(%2)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="429"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="442"/>
         <source>Type</source>
         <translation>类型</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="430"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="443"/>
         <source>Filled / qty</source>
         <translation>成交 / 委托</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="431"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="444"/>
         <source>Status</source>
         <translation>状态</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="481"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="494"/>
         <source>No open orders on this market</source>
         <translation>该市场暂无挂单</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="491"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="504"/>
         <source>Spot holdings</source>
         <translation>现货持仓</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="518"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="531"/>
         <source>Currency</source>
         <translation>币种</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="525"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="538"/>
         <source>Amount</source>
         <translation>数量</translation>
     </message>
     <message>
-        <location filename="../qml/pages/DashboardPage.qml" line="533"/>
+        <location filename="../qml/pages/DashboardPage.qml" line="546"/>
         <source>Value</source>
         <translation>市值</translation>
     </message>
@@ -293,19 +293,69 @@
 <context>
     <name>MarketPage</name>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="39"/>
+        <location filename="../qml/pages/MarketPage.qml" line="144"/>
         <source>or type a symbol</source>
         <translation>或直接输入交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="43"/>
-        <source>Fetch</source>
-        <translation>获取</translation>
+        <location filename="../qml/pages/MarketPage.qml" line="157"/>
+        <source>auto</source>
+        <translation>自动</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="72"/>
-        <source>No snapshot loaded. Pick a symbol and press Fetch.</source>
-        <translation>尚未加载行情快照。选择交易对后点击“获取”。</translation>
+        <location filename="../qml/pages/MarketPage.qml" line="184"/>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="184"/>
+        <source>Start</source>
+        <translation>开始</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="386"/>
+        <source>bid %1</source>
+        <translation>买一 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="391"/>
+        <source>ask %1</source>
+        <translation>卖一 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="411"/>
+        <source>Collecting the first 1-second samples…</source>
+        <translation>正在采集第一秒数据…</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="412"/>
+        <source>Choose a symbol and press Start</source>
+        <translation>选择交易对并点击开始</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="442"/>
+        <source>Samples %1</source>
+        <translation>采样 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="447"/>
+        <source>Candles %1</source>
+        <translation>K线 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="452"/>
+        <source>Period %1s</source>
+        <translation>周期 %1 秒</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="457"/>
+        <source>Last %1</source>
+        <translation>最近 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/MarketPage.qml" line="477"/>
+        <source>Raw</source>
+        <translation>原始</translation>
     </message>
 </context>
 <context>
@@ -319,100 +369,100 @@
 <context>
     <name>OrdersPage</name>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="66"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="74"/>
         <source>Orders</source>
         <translation>订单</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="73"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="81"/>
         <source>%1 active · %2 recent</source>
         <translation>%1 个活动 · %2 条最近</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="84"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="102"/>
         <source>All (%1)</source>
         <translation>全部 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="85"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="103"/>
         <source>Spot (%1)</source>
         <translation>现货 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="86"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="104"/>
         <source>CFD (%1)</source>
         <translation>CFD (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="87"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="105"/>
         <source>Futures (%1)</source>
         <translation>合约 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="95"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="115"/>
         <source>Active (%1)</source>
         <translation>活动 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="96"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="116"/>
         <source>Recent (%1)</source>
         <translation>最近 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="102"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="90"/>
         <source>Refresh</source>
         <translation>刷新</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="124"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="220"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="140"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="236"/>
         <source>Symbol</source>
         <translation>交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="125"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="141"/>
         <source>Side</source>
         <translation>方向</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="126"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="142"/>
         <source>Type</source>
         <translation>类型</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="127"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="143"/>
         <source>Filled / qty</source>
         <translation>成交 / 委托</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="128"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="221"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="144"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="237"/>
         <source>Status</source>
         <translation>状态</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="129"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="223"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="145"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="239"/>
         <source>Market</source>
         <translation>市场</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="205"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="221"/>
         <source>No active orders</source>
         <translation>暂无活动订单</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="222"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="238"/>
         <source>Fill price</source>
         <translation>成交价</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="224"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="240"/>
         <source>Filled at</source>
         <translation>成交时间</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="296"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="312"/>
         <source>No recent fills</source>
         <translation>暂无最近成交</translation>
     </message>
@@ -844,9 +894,6 @@
     <name>StatusBar</name>
     <message>
         <location filename="../qml/components/StatusBar.qml" line="40"/>
-        <location filename="../tests/tst_translator.cpp" line="71"/>
-        <location filename="../tests/tst_translator.cpp" line="86"/>
-        <location filename="../tests/tst_translator.cpp" line="108"/>
         <source>connected</source>
         <translation>已连接</translation>
     </message>
@@ -890,7 +937,6 @@
     </message>
     <message>
         <location filename="../src/account/AccountService.cpp" line="134"/>
-        <location filename="../tests/tst_translator.cpp" line="87"/>
         <source>The two passwords do not match.</source>
         <translation>两次输入的密码不一致。</translation>
     </message>
