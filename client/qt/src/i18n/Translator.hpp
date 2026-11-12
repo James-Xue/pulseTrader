@@ -31,7 +31,12 @@ class Translator : public QObject
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
 
 public:
-    explicit Translator(QObject* parent = nullptr);
+    /// Deliberately NOT default-constructible. Qt's QML singleton registration
+    /// prefers a default constructor over the create() factory
+    /// (qqmlprivate.h: singletonConstructionMode()), which would build a second
+    /// instance that has no QQmlEngine and therefore can never retranslate the
+    /// UI. Keeping the parent argument mandatory forces the factory path.
+    explicit Translator(QObject* parent);
     ~Translator() override;
 
     /// QML singleton factory. Returns the instance created in main() so the

@@ -61,7 +61,7 @@ Translator* Translator::instance()
     // Intentionally leaked: a static object would be destroyed after
     // QCoreApplication, and its destructor touches the application's
     // translator list. One small object per process is the cheaper trade.
-    static Translator* translator = new Translator();
+    static Translator* translator = new Translator(nullptr);
     return translator;
 }
 

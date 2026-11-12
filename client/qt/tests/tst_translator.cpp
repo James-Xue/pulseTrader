@@ -4,7 +4,18 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <type_traits>
+
 #include "i18n/Translator.hpp"
+
+// Regression guard. Qt's QML singleton registration prefers a default
+// constructor over the create() factory (qqmlprivate.h,
+// singletonConstructionMode()). Adding one back would make QML build a second
+// instance with no QQmlEngine: the toggle would swap the translator but never
+// call retranslate(), so the visible UI would stop switching languages.
+static_assert(!std::is_default_constructible_v<pulse::client::Translator>,
+              "Translator must not be default-constructible: Qt would construct a second "
+              "instance for QML instead of calling create()");
 
 /// Interface-language switching.
 ///
