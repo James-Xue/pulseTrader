@@ -1,5 +1,6 @@
 #include "security/SecretStore.hpp"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -236,7 +237,7 @@ bool SecretStore::create(const QString& path, const QJsonObject& payload,
     if (1 != RAND_bytes(reinterpret_cast<unsigned char*>(salt.data()), salt.size())
         || 1 != RAND_bytes(reinterpret_cast<unsigned char*>(iv.data()), iv.size()))
     {
-        setError(error, QStringLiteral("system random generator unavailable"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "system random generator unavailable"));
         return false;
     }
 
@@ -245,7 +246,7 @@ bool SecretStore::create(const QString& path, const QJsonObject& payload,
 
     if (!deriveKey(password, salt, kIterations, key))
     {
-        setError(error, QStringLiteral("key derivation failed"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "key derivation failed"));
         return false;
     }
 
@@ -256,7 +257,7 @@ bool SecretStore::create(const QString& path, const QJsonObject& payload,
                     ciphertext, tag))
     {
         wipe(key);
-        setError(error, QStringLiteral("encryption failed"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "encryption failed"));
         return false;
     }
 
@@ -275,14 +276,14 @@ bool SecretStore::create(const QString& path, const QJsonObject& payload,
     if (!out.open(QIODevice::WriteOnly))
     {
         wipe(key);
-        setError(error, QStringLiteral("cannot open vault: ") + out.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot open vault: ") + out.errorString());
         return false;
     }
 
     if (out.write(file) != file.size() || !out.commit())
     {
         wipe(key);
-        setError(error, QStringLiteral("cannot write vault: ") + out.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot write vault: ") + out.errorString());
         return false;
     }
 
@@ -301,7 +302,7 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
 
     if (!file.open(QIODevice::ReadOnly))
     {
-        setError(error, QStringLiteral("cannot open vault: ") + file.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot open vault: ") + file.errorString());
         return std::nullopt;
     }
 
@@ -313,13 +314,13 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
 
     if (blob.size() < kHeaderMin || 0 != memcmp(blob.constData(), kMagic, 4))
     {
-        setError(error, QStringLiteral("vault is corrupt or not a pulseTrader vault"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "vault is corrupt or not a pulseTrader vault"));
         return std::nullopt;
     }
 
     if (static_cast<quint8>(blob.at(4)) != kVersion)
     {
-        setError(error, QStringLiteral("unsupported vault version"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "unsupported vault version"));
         return std::nullopt;
     }
 
@@ -327,7 +328,7 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
 
     if (!readU32(blob, 5, iterations) || iterations < 1000)
     {
-        setError(error, QStringLiteral("vault header is corrupt"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "vault header is corrupt"));
         return std::nullopt;
     }
 
@@ -345,7 +346,7 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
 
     if (!deriveKey(password, salt, static_cast<int>(iterations), key))
     {
-        setError(error, QStringLiteral("key derivation failed"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "key derivation failed"));
         return std::nullopt;
     }
 
@@ -354,7 +355,7 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
     if (!decryptGcm(key, iv, ciphertext, tag, plaintext))
     {
         wipe(key);
-        setError(error, QStringLiteral("wrong password or corrupted vault"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "wrong password or corrupted vault"));
         return std::nullopt;
     }
 
@@ -368,7 +369,7 @@ std::optional<QJsonObject> SecretStore::unlock(const QString& path,
 
     if (QJsonParseError::NoError != parseError.error || !document.isObject())
     {
-        setError(error, QStringLiteral("vault payload is not valid JSON"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "vault payload is not valid JSON"));
         return std::nullopt;
     }
 
@@ -383,7 +384,7 @@ bool SecretStore::save(const QString& path, const QJsonObject& payload,
 
     if (!file.open(QIODevice::ReadOnly))
     {
-        setError(error, QStringLiteral("cannot open vault: ") + file.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot open vault: ") + file.errorString());
         return false;
     }
 
@@ -392,7 +393,7 @@ bool SecretStore::save(const QString& path, const QJsonObject& payload,
 
     if (blob.size() < 9)
     {
-        setError(error, QStringLiteral("vault is corrupt"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "vault is corrupt"));
         return false;
     }
 
@@ -403,7 +404,7 @@ bool SecretStore::save(const QString& path, const QJsonObject& payload,
 
     if (1 != RAND_bytes(reinterpret_cast<unsigned char*>(iv.data()), iv.size()))
     {
-        setError(error, QStringLiteral("system random generator unavailable"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "system random generator unavailable"));
         return false;
     }
 
@@ -413,7 +414,7 @@ bool SecretStore::save(const QString& path, const QJsonObject& payload,
     if (!encryptGcm(key, iv, QJsonDocument(payload).toJson(QJsonDocument::Compact),
                     ciphertext, tag))
     {
-        setError(error, QStringLiteral("encryption failed"));
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "encryption failed"));
         return false;
     }
 
@@ -430,13 +431,13 @@ bool SecretStore::save(const QString& path, const QJsonObject& payload,
 
     if (!saveFile.open(QIODevice::WriteOnly))
     {
-        setError(error, QStringLiteral("cannot open vault: ") + saveFile.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot open vault: ") + saveFile.errorString());
         return false;
     }
 
     if (saveFile.write(out) != out.size() || !saveFile.commit())
     {
-        setError(error, QStringLiteral("cannot write vault: ") + saveFile.errorString());
+        setError(error, QCoreApplication::translate("pulse::client::SecretStore", "cannot write vault: ") + saveFile.errorString());
         return false;
     }
 

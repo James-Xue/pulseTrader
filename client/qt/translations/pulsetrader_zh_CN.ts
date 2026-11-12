@@ -660,4 +660,51 @@
         <translation>引擎已退出（代码 %1）。请查看运行日志。</translation>
     </message>
 </context>
+<context>
+    <name>pulse::client::SecretStore</name>
+    <message>
+        <source>system random generator unavailable</source>
+        <translation>系统随机数发生器不可用</translation>
+    </message>
+    <message>
+        <source>key derivation failed</source>
+        <translation>密钥派生失败</translation>
+    </message>
+    <message>
+        <source>encryption failed</source>
+        <translation>加密失败</translation>
+    </message>
+    <message>
+        <source>cannot open vault: </source>
+        <translation>无法打开档案库：</translation>
+    </message>
+    <message>
+        <source>cannot write vault: </source>
+        <translation>无法写入档案库：</translation>
+    </message>
+    <message>
+        <source>vault is corrupt or not a pulseTrader vault</source>
+        <translation>档案库已损坏或不是 pulseTrader 档案库</translation>
+    </message>
+    <message>
+        <source>unsupported vault version</source>
+        <translation>不支持的档案库版本</translation>
+    </message>
+    <message>
+        <source>vault header is corrupt</source>
+        <translation>档案库文件头已损坏</translation>
+    </message>
+    <message>
+        <source>wrong password or corrupted vault</source>
+        <translation>密码错误或档案库已损坏</translation>
+    </message>
+    <message>
+        <source>vault payload is not valid JSON</source>
+        <translation>档案库内容不是有效的 JSON</translation>
+    </message>
+    <message>
+        <source>vault is corrupt</source>
+        <translation>档案库已损坏</translation>
+    </message>
+</context>
 </TS>
