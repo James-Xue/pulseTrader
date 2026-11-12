@@ -103,6 +103,13 @@ void Translator::setLanguage(const QString& language)
     //    now on.
     applyLanguage(next);
 
+    // A missing catalogue leaves m_language on the previous value. Do not
+    // persist or announce a switch that did not happen.
+    if (m_language != next)
+    {
+        return;
+    }
+
     // 3. Persist the choice so the next launch starts in the same language.
     QSettings settings;
     settings.beginGroup(QString::fromLatin1(kSettingsGroup));
