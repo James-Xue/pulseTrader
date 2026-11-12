@@ -29,6 +29,7 @@ private slots:
     void splitFramesAreReassembled();
     void unknownReplyIdIsIgnored();
     void reconnectsAfterInitialRefusal();
+    void arrayResultIsDelivered();
 
 private:
     /// Read one newline-terminated request from `peer` and return it parsed.
@@ -57,6 +58,18 @@ private:
         {
             reply[QStringLiteral("result")] = payload.value(QStringLiteral("result"));
         }
+        peer->write(QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n');
+        peer->flush();
+    }
+
+    /// Write a reply whose `result` is any JSON value. The object-only
+    /// writeReply() above cannot express the array shape of list_strategies.
+    static void writeResultReply(QTcpSocket* peer, qint64 id, const QJsonValue& result)
+    {
+        QJsonObject reply;
+        reply[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        reply[QStringLiteral("id")] = id;
+        reply[QStringLiteral("result")] = result;
         peer->write(QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n');
         peer->flush();
     }
@@ -308,6 +321,62 @@ void TestRpcClient::reconnectsAfterInitialRefusal()
     QVERIFY(server.listen(QHostAddress::LocalHost, freePort));
 
     QTRY_VERIFY_WITH_TIMEOUT(RpcClient::State::Ready == client.state(), 8000);
+}
+
+void TestRpcClient::arrayResultIsDelivered()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    RpcClient client(QStringLiteral("test"));
+    QSignalSpy objects(&client, &RpcClient::callSucceeded);
+    QSignalSpy arrays(&client, &RpcClient::callSucceededArray);
+    QSignalSpy failed(&client, &RpcClient::callFailed);
+
+    QObject context;
+    QByteArray buffer;
+    connect(&server, &QTcpServer::newConnection, &context, [&server, &buffer, &context]()
+    {
+        QTcpSocket* peer = server.nextPendingConnection();
+        connect(peer, &QTcpSocket::readyRead, &context, [peer, &buffer]()
+        {
+            buffer.append(peer->readAll());
+            const QJsonObject request = TestRpcClient::takeRequest(buffer);
+            if (request.isEmpty())
+            {
+                return;
+            }
+
+            QJsonObject row;
+            row[QStringLiteral("id")] = QStringLiteral("momentum_scalper_XAUUSD");
+            row[QStringLiteral("symbol")] = QStringLiteral("XAUUSD");
+            QJsonArray result;
+            result.append(row);
+
+            TestRpcClient::writeResultReply(
+                peer, static_cast<qint64>(request.value(QStringLiteral("id")).toDouble()),
+                result);
+        });
+    });
+
+    client.setEndpoint(QStringLiteral("127.0.0.1"), server.serverPort(), false);
+    client.connectToEngine();
+    QTRY_VERIFY_WITH_TIMEOUT(RpcClient::State::Ready == client.state(), 3000);
+
+    client.call(QStringLiteral("list_strategies"), QJsonObject{}, 2000);
+    QTRY_VERIFY_WITH_TIMEOUT(1 == arrays.count(), 3000);
+
+    // Exactly one success signal: an array must not also be reported as an
+    // (empty) object, which is the silent failure this test guards against.
+    QCOMPARE(0, objects.count());
+    QCOMPARE(0, failed.count());
+
+    const QJsonArray delivered = arrays.takeFirst().at(1).toJsonArray();
+    QCOMPARE(1, delivered.size());
+    QCOMPARE(QStringLiteral("momentum_scalper_XAUUSD"),
+             delivered.at(0).toObject().value(QStringLiteral("id")).toString());
+
+    disconnect(&server, nullptr, &context, nullptr);
 }
 
 QTEST_MAIN(TestRpcClient)

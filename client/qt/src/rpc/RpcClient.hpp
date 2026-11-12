@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -77,7 +78,18 @@ public:
 
 signals:
     void stateChanged(pulse::client::RpcClient::State state);
+
+    /// Success carrying a JSON object. The engine's read-only methods return
+    /// objects; `list_strategies` is the documented exception and arrives
+    /// through callSucceededArray() instead. Exactly one of the two signals is
+    /// emitted per successful call.
     void callSucceeded(qint64 id, const QJsonObject& result);
+
+    /// Success carrying a top-level JSON array. Without this path
+    /// QJsonValue::toObject() would silently turn the array into an empty
+    /// object, so a caller would see a successful call with no rows.
+    void callSucceededArray(qint64 id, const QJsonArray& result);
+
     void callFailed(qint64 id, const pulse::client::RpcError& error);
 
     /// The engine rejected the configured token. Retrying is pointless, so the

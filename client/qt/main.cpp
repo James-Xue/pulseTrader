@@ -62,10 +62,25 @@ int main(int argc, char* argv[])
     const QCommandLineOption lightOption(
         QStringLiteral("light"),
         QStringLiteral("Force the light colour scheme for this run."));
+    const QCommandLineOption pageOption(
+        QStringLiteral("page"),
+        QStringLiteral("Open the shell on the 0-based sidebar page <index>."),
+        QStringLiteral("index"));
+    const QCommandLineOption selectOption(
+        QStringLiteral("select-strategy"),
+        QStringLiteral("Select a strategy instance by id after loading."),
+        QStringLiteral("id"));
+    const QCommandLineOption sizeOption(
+        QStringLiteral("window-size"),
+        QStringLiteral("Resize the window to <width>x<height> for this run."),
+        QStringLiteral("WxH"));
     parser.addOption(screenshotOption);
     parser.addOption(delayOption);
     parser.addOption(darkOption);
     parser.addOption(lightOption);
+    parser.addOption(pageOption);
+    parser.addOption(selectOption);
+    parser.addOption(sizeOption);
     parser.process(app);
 
     // 4. Basic is the neutral base style: it draws almost nothing, so the QML
@@ -104,6 +119,69 @@ int main(int argc, char* argv[])
                 QStringLiteral("Pulse.Client"), QStringLiteral("Style")))
         {
             style->setProperty("dark", parser.isSet(darkOption));
+        }
+    }
+
+    // 6b. Optional start page. Index 5 is Gold Traders in the current sidebar
+    //     order. The shell is built at load time even while hidden, so the
+    //     stack exists for a capture that runs before any user interaction.
+    if (parser.isSet(pageOption))
+    {
+        bool ok = false;
+        const int index = parser.value(pageOption).toInt(&ok);
+        if (ok && index >= 0)
+        {
+            for (QObject* rootObject : engine.rootObjects())
+            {
+                if (auto* stack = rootObject->findChild<QObject*>(
+                        QStringLiteral("pagesStack")))
+                {
+                    stack->setProperty("currentIndex", index);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 6c. Optional preselection for captures. The controller defers the
+    //     parameter fetch until the control socket is ready, so this is safe
+    //     before the first poll completes.
+    if (parser.isSet(selectOption))
+    {
+        const QString strategyId = parser.value(selectOption);
+        for (QObject* rootObject : engine.rootObjects())
+        {
+            if (auto* controller = rootObject->findChild<QObject*>(
+                    QStringLiteral("engineController")))
+            {
+                QMetaObject::invokeMethod(controller, "selectStrategy",
+                                          Q_ARG(QString, strategyId));
+                break;
+            }
+        }
+    }
+
+    // 6d. Optional capture size. The default window is 1100x720, which shows only
+    //     the top of a long page; a taller window lets a single grab include
+    //     every card.
+    if (parser.isSet(sizeOption))
+    {
+        const QStringList parts = parser.value(sizeOption).split(QLatin1Char('x'));
+        if (2 == parts.size())
+        {
+            const int width = parts.at(0).toInt();
+            const int height = parts.at(1).toInt();
+            if (width > 0 && height > 0)
+            {
+                for (QObject* rootObject : engine.rootObjects())
+                {
+                    if (auto* window = qobject_cast<QQuickWindow*>(rootObject))
+                    {
+                        window->resize(width, height);
+                        break;
+                    }
+                }
+            }
         }
     }
 

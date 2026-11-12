@@ -9,7 +9,8 @@ Rectangle {
 
     property int currentIndex: 0
     property var items: [qsTr("Dashboard"), qsTr("Positions"), qsTr("Orders"),
-                         qsTr("Signals"), qsTr("Market"), qsTr("Settings")]
+                         qsTr("Signals"), qsTr("Market"), qsTr("Gold Traders"),
+                         qsTr("Settings")]
 
     signal selected(int index)
 
