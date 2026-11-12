@@ -53,6 +53,7 @@ qt_add_qml_module(pulseTraderQt
         qml/components/Sidebar.qml
         qml/components/WindowResizer.qml
         qml/components/ThemeToggle.qml
+        qml/components/LanguageToggle.qml
         qml/components/MacTextField.qml
         qml/components/MacButton.qml
         qml/components/MacCheckBox.qml
@@ -67,6 +68,7 @@ qt_add_qml_module(pulseTraderQt
         src/account/AccountService.cpp src/account/AccountService.hpp
         src/engine/EngineController.cpp src/engine/EngineController.hpp
         src/engine/EngineLauncher.cpp  src/engine/EngineLauncher.hpp
+        src/i18n/Translator.cpp        src/i18n/Translator.hpp
         src/data/DataServerConfig.hpp
         src/data/IndicatorEngine.cpp   src/data/IndicatorEngine.hpp
         src/data/MarketDataService.cpp src/data/MarketDataService.hpp
@@ -91,6 +93,7 @@ target_include_directories(pulseTraderQt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/account
     ${CMAKE_CURRENT_SOURCE_DIR}/src/data
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/i18n
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security)
@@ -120,6 +123,26 @@ if(NOT ANDROID)
     install(TARGETS pulseTraderQt
         BUNDLE  DESTINATION .
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+# Interface translations. The .ts catalog is the source of truth; lrelease
+# compiles it into the .qm that Translator.cpp loads from :/i18n.
+#
+# LinguistTools is optional on purpose: a Qt installation without the Linguist
+# component (a slim Windows kit, for example) still builds by embedding the
+# committed .qm. Rebuild it from the .ts after editing translations:
+#   lrelease translations/pulsetrader_zh_CN.ts -qm translations/pulsetrader_zh_CN.qm
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
+if(TARGET Qt6::lrelease)
+    qt_add_translations(pulseTraderQt
+        TS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/translations/pulsetrader_zh_CN.ts
+        RESOURCE_PREFIX "/i18n")
+else()
+    message(STATUS "Qt LinguistTools not found - embedding the committed .qm")
+    qt_add_resources(pulseTraderQt "translations"
+        PREFIX "/i18n"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/translations"
+        FILES translations/pulsetrader_zh_CN.qm)
 endif()
 
 # Qt requires finalization immediately BEFORE the deploy script is generated.

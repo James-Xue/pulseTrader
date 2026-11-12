@@ -160,6 +160,10 @@ ApplicationWindow {
                     controller: engine
                 }
 
+                LanguageToggle {
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
                 ThemeToggle {
                     anchors.verticalCenter: parent.verticalCenter
                 }

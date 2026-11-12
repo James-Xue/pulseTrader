@@ -84,3 +84,25 @@ target_include_directories(tst_accountmodel PRIVATE
 target_link_libraries(tst_accountmodel PRIVATE Qt6::Test Qt6::Core)
 
 add_test(NAME accountmodel COMMAND tst_accountmodel)
+
+# Interface-language switching. The compiled catalog is embedded here exactly
+# as the client embeds it, so the assertions exercise the shipping
+# translations; QSettings is redirected to a temp directory inside the test.
+qt_add_executable(tst_translator
+    tst_translator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/i18n/Translator.cpp
+)
+
+set_target_properties(tst_translator PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_translator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_translator PRIVATE Qt6::Test Qt6::Core Qt6::Qml)
+
+qt_add_resources(tst_translator "translations"
+    PREFIX "/i18n"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../translations"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../translations/pulsetrader_zh_CN.qm")
+
+add_test(NAME translator COMMAND tst_translator)

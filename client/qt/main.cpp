@@ -11,6 +11,8 @@
 #include <QTimer>
 #include <QWindow>
 
+#include "i18n/Translator.hpp"
+
 /// Application entry point.
 ///
 /// The QML module `Pulse.Client` is compiled into the executable by
@@ -77,6 +79,12 @@ int main(int argc, char* argv[])
     QFont font(QStringLiteral("Noto Sans"), 13);
     QGuiApplication::setFont(font);
 
+    // 5. Interface language. The singleton must exist (and have installed its
+    //    catalogue) before the first QML binding runs: otherwise the first
+    //    frame would render English strings that only retranslate on click.
+    //    The QML singleton factory later returns this same instance.
+    pulse::client::Translator::instance();
+
     QQmlApplicationEngine engine;
 
     // A failed load is fatal: without this the process would sit with an empty
@@ -87,7 +95,7 @@ int main(int argc, char* argv[])
 
     engine.loadFromModule(QStringLiteral("Pulse.Client"), QStringLiteral("Main"));
 
-    // 5. Theme override for captures. Main.qml restores the saved preference in
+    // 6. Theme override for captures. Main.qml restores the saved preference in
     //    Component.onCompleted, which has already run by now, so an explicit
     //    flag wins without being overwritten.
     if (parser.isSet(darkOption) || parser.isSet(lightOption))
@@ -99,7 +107,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    // 6. Headless capture. The delay lets the first frame, the poll responses
+    // 7. Headless capture. The delay lets the first frame, the poll responses
     //    and any layout settle before the grab.
     if (parser.isSet(screenshotOption))
     {
