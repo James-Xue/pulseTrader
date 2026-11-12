@@ -8,7 +8,7 @@
 | UI stack | Qt 6.12.0 LTS / QML / Qt Quick (decided) |
 | Engine contract | L9 control socket: newline-delimited JSON-RPC 2.0 over TCP |
 | Location | `client/qt/`, standalone CMake project, not built by the top level by default |
-| Last updated | 2026-11-07 |
+| Last updated | 2026-11-12 |
 
 Contents: [1 Goals](#1-goals--non-goals) · [2 Wire contract](#2-wire-contract-summary) · [3 Methods](#3-method-contracts) · [4 Project and CMake](#4-qt-project-layout-and-cmake) · [5 TLS and token](#5-tls--token-design-for-the-control-socket) · [6 Client architecture](#6-client-architecture) · [7 Milestones](#7-milestones) · [8 Risks](#8-risks-and-open-questions)
 
@@ -22,7 +22,7 @@ Contents: [1 Goals](#1-goals--non-goals) · [2 Wire contract](#2-wire-contract-s
 | -- | ---- |
 | G-1 | One source tree produces a native client for Windows, macOS, Ubuntu and Android. |
 | G-2 | The client monitors a running pulseTrader engine over the existing L9 control socket — no new engine API in v1. |
-| G-3 | First release is **read-only**: `get_status`, `get_account`, `get_positions`, `get_orders`, `get_signals`, `get_market` only. |
+| G-3 | First release is **read-only**: `get_status`, `get_account`, `get_positions`, `get_orders`, `get_signals`, `get_market`, plus the Gold Traders page's `list_strategies`, `get_strategy_params`, `get_risk`. No write method is ever called. |
 | G-4 | Remote use is possible through an **optional** TLS + token layer on the control socket; default engine behavior (loopback, plaintext, no auth) is byte-for-byte unchanged. |
 | G-5 | The client is a standalone CMake project under `client/qt/`; the top-level build ignores it unless `-DPULSE_BUILD_QT_CLIENT=ON`. |
 | G-6 | The client degrades honestly: missing data is shown as unknown, never as zero; stale data is visibly stale; a dead engine never freezes the UI. |
@@ -32,7 +32,7 @@ Contents: [1 Goals](#1-goals--non-goals) · [2 Wire contract](#2-wire-contract-s
 
 | ID | Non-goal | Rationale |
 | -- | -------- | --------- |
-| N-1 | Order placement, cancellation, position close, `halt_trading`/`resume_trading`, strategy parameter writes, grid control, trigger orders. | Scope decision. The socket exposes all 32 methods (`src/control/JsonRpcServer.cpp:366-588`); the client deliberately implements six. |
+| N-1 | Order placement, cancellation, position close, `halt_trading`/`resume_trading`, strategy parameter writes, grid control, trigger orders. | Scope decision. The socket exposes all 33 methods (`src/control/JsonRpcServer.cpp`); the client deliberately implements only the nine read-only methods, three of which power the Gold Traders page. |
 | N-2 | Server-initiated push, subscriptions, streaming. | The engine has no such mechanism; the only server write is the direct reply to the line just read (`src/control/JsonRpcServer.cpp:341-345`). Adding push is an engine project, not a client project. |
 | N-3 | MCP transport. | MCP is a stdio adapter over the same registry (`src/control/McpServer.cpp:692-730`). The client speaks TCP JSON-RPC directly. |
 | N-4 | Reuse of `src/control/ControlClient`. | Blocking asio, per-call local read buffer, no id correlation (`src/control/ControlClient.cpp:156-181`), and it links the entire engine stack (`src/control/CMakeLists.txt:26-40`), which does not exist for Android ABIs. |
@@ -45,7 +45,7 @@ Contents: [1 Goals](#1-goals--non-goals) · [2 Wire contract](#2-wire-contract-s
 - UI stack is QML / Qt Quick on Qt 6.12.0 LTS (released 2026-09-30; last Qt release supporting Windows 10).
 - TLS + token are **optional additions** to the control socket; both defaults off.
 - `client/qt/` is a standalone CMake project, not built by the top level by default.
-- First release scope is the six read-only methods above.
+- First release scope is the read-only methods above; the Gold Traders page adds three more read-only queries (Section 3.7).
 
 ---
 
@@ -118,7 +118,7 @@ Exactly four JSON-RPC codes exist (`grep -c 32602 src/control/JsonRpcServer.cpp`
 
 `data.code` is **an open enum**, not a closed set: 91xx control/grid, 92xx grid service, 1xxx network, 2xxx exchange, 3xxx risk, 7xxx futures, 71xx CFD (`src/core/PulseError.hpp:98-121`; `src/control/EngineServices.cpp` order/trigger paths). A client must key user-facing text on `message` and only branch structurally on a small allow-list of codes.
 
-Two methods report logical failure **inside a successful result** rather than as an error object: `switch_direction` (`src/control/EngineServices.cpp:881-916`) and `get_market` (`src/control/EngineServices.cpp:517-539`). Of the six read-only methods, only `get_market` does this. The in-band value is a **string** at `result.error`, not the JSON-RPC `error` object. The reference `ControlClient` checks only the envelope and therefore passes these through as successes (`src/control/ControlClient.cpp:166-181`).
+Two methods report logical failure **inside a successful result** rather than as an error object: `switch_direction` (`src/control/EngineServices.cpp:881-916`) and `get_market` (`src/control/EngineServices.cpp:517-539`). Of the read-only methods, only `get_market` does this. The in-band value is a **string** at `result.error`, not the JSON-RPC `error` object. The reference `ControlClient` checks only the envelope and therefore passes these through as successes (`src/control/ControlClient.cpp:166-181`).
 
 ### 2.5 Concurrency and liveness
 
@@ -380,7 +380,19 @@ In-band failure:
 
 **Client notes:** always send an explicit lowercase `market_type`, because the response does not identify the feed. Validate `book_levels` in `[1, 50]` and `klines` in `[0, 1000]` before sending. There is no server-side ticker staleness check — `TickerCache::get` returns whatever is cached (`src/market/TickerCache.cpp:16-25`), so compute age from `ticker.timestamp` and show a stale badge past a threshold (suggest 5 s for display, 30 s for "do not trust").
 
-### 3.7 Cost and polling budget
+### 3.7 Gold Traders queries (read-only additions, 2026-11-12)
+
+The Gold Traders page adds three read-only queries. It never calls `set_strategy_param`, `set_strategy_trading`, `pause_strategy`, or any order method.
+
+- `list_strategies` → **bare JSON array**, one object per registered instance: `id`, `name`, `symbol`, `enabled`, `running`, `paused`, `auto_trade`, `poll_interval_ms`. The snapshot carries no `market_type`, so the page labels the market engine-wide from `get_status.active_market`.
+- `get_strategy_params {strategy_id}` → flat object of 14 numeric keys. An unknown id is a JSON-RPC error (`-32603`, `data.code` = 9101); the page shows it in the parameter panel instead of the shared error banner.
+- `get_risk` → object with `trading_halted`, `haltReason` (numeric ErrorCode), `dailyDrawdown`/`maxDrawdown` (fractions of equity), `rate_limiter_tokens`, `rate_limiter_exhausted`, `portfolio{openPositionCount,total_notional,total_unrealized_pnl,net_exposure}`, `openPositionCount`.
+
+Transport note: `RpcClient` routes success by payload shape — objects through `callSucceeded`, top-level arrays through `callSucceededArray`. A `toObject()`-only path would turn `list_strategies` into `{}` and show zero traders without an error.
+
+Gold identification is whole-string, case-insensitive equality on `XAUUSD`; XAGUSD (silver), XAU_USDT (futures gold) and XAUT_USDT (tokenized spot gold) are excluded.
+
+### 3.8 Cost and polling budget
 
 | Method | Cost | Client timeout | Poll interval | Connection |
 | ------ | ---- | -------------- | ------------- | ---------- |

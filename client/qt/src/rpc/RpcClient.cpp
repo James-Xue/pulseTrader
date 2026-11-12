@@ -459,9 +459,17 @@ void RpcClient::handleReply(const QJsonObject& reply)
         return;
     }
 
-    // 4. Success: every read-only method returns a JSON object.
-    const QJsonObject result = reply.value(QStringLiteral("result")).toObject();
-    emit callSucceeded(id, result);
+    // 4. Success: route by payload shape. Most read-only methods return a JSON
+    //    object, but `list_strategies` returns a top-level array. Dispatching
+    //    on the actual value keeps both callers correct; toObject() on an
+    //    array would yield an empty object and hide every row.
+    const QJsonValue result = reply.value(QStringLiteral("result"));
+    if (result.isArray())
+    {
+        emit callSucceededArray(id, result.toArray());
+        return;
+    }
+    emit callSucceeded(id, result.toObject());
 }
 
 } // namespace pulse::client

@@ -128,6 +128,102 @@ SIGNALS = {
     "aggregate": None,
 }
 
+# Strategy instances. Two gold CFD instances are visible on the Gold Traders
+# page; the silver and BTC rows exist to prove the exact-symbol filter.
+STRATEGIES = [
+    {
+        "id": "momentum_scalper_XAUUSD",
+        "name": "MomentumScalper",
+        "symbol": "XAUUSD",
+        "enabled": True,
+        "running": True,
+        "paused": False,
+        "auto_trade": False,
+        "poll_interval_ms": 500,
+    },
+    {
+        "id": "mean_reversion_scalper_XAUUSD",
+        "name": "MeanReversionScalper",
+        "symbol": "XAUUSD",
+        "enabled": True,
+        "running": True,
+        "paused": True,
+        "auto_trade": False,
+        "poll_interval_ms": 500,
+    },
+    {
+        "id": "momentum_scalper_XAGUSD",
+        "name": "MomentumScalper",
+        "symbol": "XAGUSD",
+        "enabled": True,
+        "running": True,
+        "paused": True,
+        "auto_trade": False,
+        "poll_interval_ms": 500,
+    },
+    {
+        "id": "momentum_scalper_BTC_USDT",
+        "name": "MomentumScalper",
+        "symbol": "BTC_USDT",
+        "enabled": True,
+        "running": True,
+        "paused": False,
+        "auto_trade": True,
+        "poll_interval_ms": 500,
+    },
+]
+
+STRATEGY_PARAMS = {
+    "momentum_scalper_XAUUSD": {
+        "order_quantity": 0.01,
+        "min_confidence": 0.6,
+        "ema_fast_period": 9.0,
+        "ema_slow_period": 21.0,
+        "bb_period": 20.0,
+        "bb_std_dev": 2.0,
+        "ob_imbalance_threshold": 0.65,
+        "ob_depth": 5.0,
+        "supertrend_period": 10.0,
+        "supertrend_multiplier": 3.0,
+        "cooldown_seconds": 60.0,
+        "stop_loss_pct": 0.5,
+        "take_profit_pct": 1.0,
+        "auto_trade": 0.0,
+    },
+    "mean_reversion_scalper_XAUUSD": {
+        "order_quantity": 0.01,
+        "min_confidence": 0.55,
+        "ema_fast_period": 7.0,
+        "ema_slow_period": 30.0,
+        "bb_period": 20.0,
+        "bb_std_dev": 2.2,
+        "ob_imbalance_threshold": 0.6,
+        "ob_depth": 5.0,
+        "supertrend_period": 10.0,
+        "supertrend_multiplier": 3.0,
+        "cooldown_seconds": 90.0,
+        "stop_loss_pct": 0.4,
+        "take_profit_pct": 0.8,
+        "auto_trade": 0.0,
+    },
+}
+
+RISK = {
+    "trading_halted": False,
+    "haltReason": 0,
+    "dailyDrawdown": 0.012,
+    "maxDrawdown": 0.034,
+    "rate_limiter_tokens": 8.0,
+    "rate_limiter_exhausted": False,
+    "portfolio": {
+        "openPositionCount": 1,
+        "total_notional": 4392.0,
+        "total_unrealized_pnl": 12.5,
+        "net_exposure": 4392.0,
+    },
+    "openPositionCount": 1,
+}
+
 
 def market(symbol):
     return {
@@ -166,6 +262,26 @@ class Handler(socketserver.StreamRequestHandler):
                 result = ORDERS
             elif method == "get_signals":
                 result = SIGNALS
+            elif method == "list_strategies":
+                result = STRATEGIES
+            elif method == "get_strategy_params":
+                strategy_id = (request.get("params") or {}).get("strategy_id", "")
+                result = STRATEGY_PARAMS.get(strategy_id)
+                if result is None:
+                    error = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "error": {
+                            "code": -32603,
+                            "message": f"strategy not found: {strategy_id}",
+                            "data": {"code": 9101},
+                        },
+                    }
+                    self.wfile.write(json.dumps(error).encode() + b"\n")
+                    self.wfile.flush()
+                    continue
+            elif method == "get_risk":
+                result = RISK
             elif method == "get_market":
                 symbol = (request.get("params") or {}).get("symbol", "BTC_USDT")
                 result = market(symbol)

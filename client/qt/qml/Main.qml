@@ -244,6 +244,10 @@ ApplicationWindow {
                         OrdersPage { controller: engine }
                         SignalsPage { controller: engine }
                         MarketPage { controller: engine }
+                        GoldTradersPage {
+                            controller: engine
+                            dataServer: dataServer
+                        }
                         SettingsPage {
                             controller: engine
                             account: accounts

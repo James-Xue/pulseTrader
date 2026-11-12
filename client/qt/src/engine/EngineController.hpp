@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include "rpc/RpcClient.hpp"
@@ -19,7 +21,11 @@
 #include "models/OrdersModel.hpp"
 #include "models/PositionsModel.hpp"
 #include "models/ReportsModel.hpp"
+#include "models/RiskModel.hpp"
 #include "models/SignalsModel.hpp"
+#include "models/StrategiesModel.hpp"
+#include "models/StrategyParamsModel.hpp"
+#include "models/SymbolFilterModel.hpp"
 
 namespace pulse::client
 {
@@ -31,7 +37,7 @@ namespace pulse::client
 ///    request at a time per connection and serialises REST calls behind a
 ///    global mutex. Separate sockets keep a slow `get_account` from delaying
 ///    `get_status`.
-/// 2. Poll the six read-only methods on independent timers, never stacking a
+/// 2. Poll the read-only methods on independent timers, never stacking a
 ///    second request while one of that kind is still in flight.
 /// 3. Map wire payloads onto models and scalar properties, preserving the
 ///    distinction between "absent" and "zero".
@@ -63,6 +69,17 @@ class EngineController : public QObject
     Q_PROPERTY(pulse::client::ReportsModel* reportsModel READ reportsModel CONSTANT)
     Q_PROPERTY(pulse::client::SignalsModel* signalsModel READ signalsModel CONSTANT)
     Q_PROPERTY(pulse::client::AccountModel* accountModel READ accountModel CONSTANT)
+
+    /// Read-only gold-trader surface. `strategiesModel` is the engine's full
+    /// instance list; `goldStrategies` narrows it to symbol XAUUSD. The
+    /// parameters model belongs to the currently selected instance and is
+    /// fetched on demand, not polled.
+    Q_PROPERTY(pulse::client::StrategiesModel* strategiesModel READ strategiesModel CONSTANT)
+    Q_PROPERTY(pulse::client::SymbolFilterModel* goldStrategies READ goldStrategies CONSTANT)
+    Q_PROPERTY(pulse::client::RiskModel* riskModel READ riskModel CONSTANT)
+    Q_PROPERTY(pulse::client::StrategyParamsModel* strategyParamsModel READ strategyParamsModel CONSTANT)
+    Q_PROPERTY(QString selectedStrategyId READ selectedStrategyId NOTIFY selectedStrategyChanged)
+    Q_PROPERTY(QVariantMap selectedStrategy READ selectedStrategy NOTIFY selectedStrategyChanged)
 
     /// One-symbol 1 Hz price stream used by the Market page. The stream owns
     /// its own control socket and stays idle until the page calls start(), so
@@ -103,6 +120,11 @@ public:
     Q_INVOKABLE void setPollingEnabled(bool enabled);
     Q_INVOKABLE void fetchMarket(const QString& symbol);
 
+    /// Select a gold instance and fetch its parameters on demand. An empty id
+    /// clears the selection. Calling it again with the same id re-fetches,
+    /// which is what the page's Retry button relies on.
+    Q_INVOKABLE void selectStrategy(const QString& strategyId);
+
     /// Request the per-currency spot breakdown from get_account. Disabled by
     /// default: pricing every unpriced coin costs public REST ticker calls on
     /// the engine's shared REST mutex, which delays the account snapshot and
@@ -133,6 +155,18 @@ public:
     [[nodiscard]] ReportsModel* reportsModel() const { return m_reportsModel; }
     [[nodiscard]] SignalsModel* signalsModel() const { return m_signalsModel; }
     [[nodiscard]] AccountModel* accountModel() const { return m_accountModel; }
+    [[nodiscard]] StrategiesModel* strategiesModel() const { return m_strategiesModel; }
+    [[nodiscard]] SymbolFilterModel* goldStrategies() const { return m_goldStrategies; }
+    [[nodiscard]] RiskModel* riskModel() const { return m_riskModel; }
+    [[nodiscard]] StrategyParamsModel* strategyParamsModel() const
+    {
+        return m_strategyParamsModel;
+    }
+    [[nodiscard]] QString selectedStrategyId() const { return m_selectedStrategyId; }
+
+    /// The selected row as a plain map (empty when nothing is selected), so
+    /// QML does not have to look a row up by index.
+    [[nodiscard]] QVariantMap selectedStrategy() const;
     [[nodiscard]] MarketStream* marketStream() const { return m_marketStream; }
 
     [[nodiscard]] MarketFilterModel* spotPositions() const { return m_spotPositions; }
@@ -151,6 +185,8 @@ signals:
     void lastErrorChanged();
     void pollingEnabledChanged();
     void spotHoldingsEnabledChanged();
+    /// Fires on select, on selection loss, and on every strategies refresh.
+    void selectedStrategyChanged();
     void errorOccurred(const QString& message);
     void marketReceived(const QVariantMap& market);
 
@@ -165,6 +201,9 @@ private:
         Signals,
         Account,
         Market,
+        Strategies,
+        Risk,
+        StrategyParams,
     };
 
     void startPolling();
@@ -174,7 +213,14 @@ private:
     void pollOrders();
     void pollSignals();
     void pollAccount();
+    void pollStrategies();
+    void pollRisk();
+    void issueStrategyParams(const QString& strategyId);
     void handleSuccess(qint64 id, const QJsonObject& result);
+    void handleArraySuccess(qint64 id, const QJsonArray& result);
+    void handleParamsFailure(const QString& strategyId, const RpcError& error);
+    void maybeReissueParams();
+    void clearStrategySelection();
     void handleFailure(const RpcError& error);
     void onConnectionStateChanged();
     void setLastError(const QString& message);
@@ -182,7 +228,7 @@ private:
 
     [[nodiscard]] bool isInFlight(PollKind kind) const;
 
-    RpcClient* m_fast = nullptr; ///< get_status, get_signals
+    RpcClient* m_fast = nullptr; ///< get_status, get_signals, list_strategies, get_risk
     RpcClient* m_rest = nullptr; ///< get_positions, get_orders
     RpcClient* m_slow = nullptr; ///< get_account
 
@@ -191,8 +237,13 @@ private:
     QTimer m_ordersTimer;
     QTimer m_signalsTimer;
     QTimer m_accountTimer;
+    QTimer m_strategiesTimer;
+    QTimer m_riskTimer;
 
     QHash<qint64, PollKind> m_inFlight;
+    /// Request id -> strategy id for in-flight get_strategy_params calls. The
+    /// reply never echoes the id, so this is the only way to attribute it.
+    QHash<qint64, QString> m_paramsRequests;
 
     PositionsModel* m_positionsModel = nullptr;
     OrdersModel* m_ordersModel = nullptr;
@@ -200,6 +251,10 @@ private:
     SignalsModel* m_signalsModel = nullptr;
     AccountModel* m_accountModel = nullptr;
     MarketStream* m_marketStream = nullptr;
+    StrategiesModel* m_strategiesModel = nullptr;
+    SymbolFilterModel* m_goldStrategies = nullptr;
+    RiskModel* m_riskModel = nullptr;
+    StrategyParamsModel* m_strategyParamsModel = nullptr;
 
     MarketFilterModel* m_spotPositions = nullptr;
     MarketFilterModel* m_cfdPositions = nullptr;
@@ -221,6 +276,10 @@ private:
     int m_openPositions = 0;
     int m_strategiesRunning = 0;
     int m_strategiesTotal = 0;
+    /// Last `list_strategies` payload, so selectedStrategy() can return the
+    /// row without a model-row lookup.
+    QJsonArray m_strategiesRaw;
+    QString m_selectedStrategyId;
     QString m_lastError;
     bool m_pollingEnabled = true;
     bool m_spotHoldingsEnabled = true;

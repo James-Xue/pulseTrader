@@ -42,6 +42,7 @@ qt_add_qml_module(pulseTraderQt
         qml/pages/OrdersPage.qml
         qml/pages/SignalsPage.qml
         qml/pages/MarketPage.qml
+        qml/pages/GoldTradersPage.qml
         qml/pages/SettingsPage.qml
         qml/components/StatusBar.qml
         qml/components/MetricTile.qml
@@ -82,6 +83,10 @@ qt_add_qml_module(pulseTraderQt
         src/models/OrdersModel.hpp
         src/models/ReportsModel.hpp
         src/models/SignalsModel.hpp
+        src/models/StrategiesModel.hpp
+        src/models/SymbolFilterModel.cpp src/models/SymbolFilterModel.hpp
+        src/models/RiskModel.cpp     src/models/RiskModel.hpp
+        src/models/StrategyParamsModel.cpp src/models/StrategyParamsModel.hpp
         src/models/AccountModel.cpp    src/models/AccountModel.hpp
     RESOURCES
         resources/icons/app.svg

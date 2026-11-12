@@ -31,6 +31,11 @@ constexpr int kPositionsIntervalMs = 500;
 constexpr int kOrdersIntervalMs = 500;
 constexpr int kSignalsIntervalMs = 10000;
 constexpr int kAccountIntervalMs = 5000;
+// Gold Traders page: both methods are pure in-memory engine reads, so they
+// never touch the shared REST mutex. The instance list changes only on a
+// config reload; the risk snapshot changes on trades and halts.
+constexpr int kStrategiesIntervalMs = 5000;
+constexpr int kRiskIntervalMs = 2000;
 
 // Per-call budgets. The account budget is large because the engine performs up
 // to three serialised REST calls behind a global mutex.
@@ -40,6 +45,9 @@ constexpr int kOrdersTimeoutMs = 30000;
 constexpr int kSignalsTimeoutMs = 10000;
 constexpr int kAccountTimeoutMs = 120000;
 constexpr int kMarketTimeoutMs = 15000;
+constexpr int kStrategiesTimeoutMs = 8000;
+constexpr int kRiskTimeoutMs = 8000;
+constexpr int kParamsTimeoutMs = 8000;
 } // namespace
 
 EngineController::EngineController(QObject* parent)
@@ -53,6 +61,10 @@ EngineController::EngineController(QObject* parent)
     , m_signalsModel(new SignalsModel(this))
     , m_accountModel(new AccountModel(this))
     , m_marketStream(new MarketStream(this))
+    , m_strategiesModel(new StrategiesModel(this))
+    , m_goldStrategies(new SymbolFilterModel(this))
+    , m_riskModel(new RiskModel(this))
+    , m_strategyParamsModel(new StrategyParamsModel(this))
     , m_spotPositions(new MarketFilterModel(this))
     , m_cfdPositions(new MarketFilterModel(this))
     , m_futuresPositions(new MarketFilterModel(this))
@@ -93,13 +105,34 @@ EngineController::EngineController(QObject* parent)
     bindMarket(m_cfdReports, m_reportsModel, QStringLiteral("cfd"));
     bindMarket(m_futuresReports, m_reportsModel, QStringLiteral("futures"));
 
+    // 1a-bis. Gold Traders view. XAUUSD is the Gate TradFi gold CFD. The
+    //         filter compares the whole symbol, so XAGUSD / XAU_USDT /
+    //         XAUT_USDT never leak in.
+    m_goldStrategies->setSourceModel(m_strategiesModel);
+    m_goldStrategies->setSymbol(QStringLiteral("XAUUSD"));
+
     for (RpcClient* client : { m_fast, m_rest, m_slow })
     {
         connect(client, &RpcClient::callSucceeded, this, &EngineController::handleSuccess);
+        // list_strategies is the one read-only method whose result is a
+        // top-level array. Without this connection its request id would stay
+        // in flight forever and the poll would freeze after one request.
+        connect(client, &RpcClient::callSucceededArray, this,
+                &EngineController::handleArraySuccess);
         connect(client, &RpcClient::callFailed, this,
                 [this](qint64 id, const RpcError& error)
         {
+            // get_strategy_params failures belong to the parameters panel.
+            // The shared lastError banner is cleared by any later successful
+            // poll, so a params error written there would vanish within ~2 s
+            // with no explanation.
+            const QString strategyId = m_paramsRequests.take(id);
             m_inFlight.remove(id);
+            if (!strategyId.isEmpty())
+            {
+                handleParamsFailure(strategyId, error);
+                return;
+            }
             handleFailure(error);
         });
         connect(client, &RpcClient::stateChanged, this,
@@ -121,6 +154,15 @@ EngineController::EngineController(QObject* parent)
         {
             pollStatus();
             pollSignals();
+            pollStrategies();
+            pollRisk();
+            // A selection made while disconnected (or whose request failed
+            // with the transport) is retried as soon as the socket is back.
+            if (!m_selectedStrategyId.isEmpty()
+                && !m_strategyParamsModel->present())
+            {
+                selectStrategy(m_selectedStrategyId);
+            }
         }
     });
     connect(m_rest, &RpcClient::stateChanged, this, [this](RpcClient::State state)
@@ -146,12 +188,16 @@ EngineController::EngineController(QObject* parent)
     m_ordersTimer.setInterval(kOrdersIntervalMs);
     m_signalsTimer.setInterval(kSignalsIntervalMs);
     m_accountTimer.setInterval(kAccountIntervalMs);
+    m_strategiesTimer.setInterval(kStrategiesIntervalMs);
+    m_riskTimer.setInterval(kRiskIntervalMs);
 
     connect(&m_statusTimer, &QTimer::timeout, this, &EngineController::pollStatus);
     connect(&m_positionsTimer, &QTimer::timeout, this, &EngineController::pollPositions);
     connect(&m_ordersTimer, &QTimer::timeout, this, &EngineController::pollOrders);
     connect(&m_signalsTimer, &QTimer::timeout, this, &EngineController::pollSignals);
     connect(&m_accountTimer, &QTimer::timeout, this, &EngineController::pollAccount);
+    connect(&m_strategiesTimer, &QTimer::timeout, this, &EngineController::pollStrategies);
+    connect(&m_riskTimer, &QTimer::timeout, this, &EngineController::pollRisk);
 
     // 2b. Dashboard preference, persisted across sessions under
     //     [dashboard] spotHoldings. Read here so the very first account poll
@@ -211,6 +257,7 @@ void EngineController::disconnectFromEngine()
         client->disconnectFromEngine();
     }
     m_inFlight.clear();
+    m_paramsRequests.clear();
 }
 
 void EngineController::setPollingEnabled(bool enabled)
@@ -264,6 +311,8 @@ void EngineController::refreshAll()
     pollOrders();
     pollSignals();
     pollAccount();
+    pollStrategies();
+    pollRisk();
 }
 
 void EngineController::startPolling()
@@ -273,6 +322,8 @@ void EngineController::startPolling()
     m_ordersTimer.start();
     m_signalsTimer.start();
     m_accountTimer.start();
+    m_strategiesTimer.start();
+    m_riskTimer.start();
 
     // First paint should not wait for the first tick.
     refreshAll();
@@ -285,6 +336,8 @@ void EngineController::stopPolling()
     m_ordersTimer.stop();
     m_signalsTimer.stop();
     m_accountTimer.stop();
+    m_strategiesTimer.stop();
+    m_riskTimer.stop();
 }
 
 bool EngineController::isInFlight(PollKind kind) const
@@ -371,6 +424,88 @@ void EngineController::fetchMarket(const QString& symbol)
     m_inFlight.insert(id, PollKind::Market);
 }
 
+void EngineController::pollStrategies()
+{
+    if (RpcClient::State::Ready != m_fast->state()
+        || isInFlight(PollKind::Strategies))
+    {
+        return;
+    }
+    // The result is a top-level array; it arrives through
+    // RpcClient::callSucceededArray, not handleSuccess.
+    const qint64 id = m_fast->call(methods::kListStrategies, QJsonObject{},
+                                   kStrategiesTimeoutMs);
+    m_inFlight.insert(id, PollKind::Strategies);
+}
+
+void EngineController::pollRisk()
+{
+    if (RpcClient::State::Ready != m_fast->state() || isInFlight(PollKind::Risk))
+    {
+        return;
+    }
+    const qint64 id = m_fast->call(methods::kGetRisk, QJsonObject{},
+                                   kRiskTimeoutMs);
+    m_inFlight.insert(id, PollKind::Risk);
+}
+
+void EngineController::issueStrategyParams(const QString& strategyId)
+{
+    if (RpcClient::State::Ready != m_fast->state() || strategyId.isEmpty())
+    {
+        return;
+    }
+    QJsonObject params;
+    params[QStringLiteral("strategy_id")] = strategyId;
+
+    const qint64 id = m_fast->call(methods::kGetStrategyParams, params,
+                                   kParamsTimeoutMs);
+    m_inFlight.insert(id, PollKind::StrategyParams);
+    m_paramsRequests.insert(id, strategyId);
+}
+
+void EngineController::selectStrategy(const QString& strategyId)
+{
+    // 1. Selection is a string id, never a model index: a model reset caused
+    //    by a config reload must not silently point at a different trader.
+    m_selectedStrategyId = strategyId;
+    emit selectedStrategyChanged();
+
+    // 2. Clearing the selection also clears the parameter panel.
+    if (strategyId.isEmpty())
+    {
+        m_strategyParamsModel->clear();
+        return;
+    }
+
+    // 3. Mark the panel as loading. If a request for a previous id is still
+    //    in flight this leaves it pending; maybeReissueParams() re-issues for
+    //    the new selection when that reply lands.
+    m_strategyParamsModel->setPending(strategyId);
+    if (isInFlight(PollKind::StrategyParams))
+    {
+        return;
+    }
+    issueStrategyParams(strategyId);
+}
+
+QVariantMap EngineController::selectedStrategy() const
+{
+    if (m_selectedStrategyId.isEmpty())
+    {
+        return {};
+    }
+    for (const QJsonValue& value : m_strategiesRaw)
+    {
+        const QJsonObject row = value.toObject();
+        if (row.value(QStringLiteral("id")).toString() == m_selectedStrategyId)
+        {
+            return row.toVariantMap();
+        }
+    }
+    return {};
+}
+
 void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
 {
     auto it = m_inFlight.find(id);
@@ -440,7 +575,99 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         emit marketReceived(result.toVariantMap());
         setLastError(QString());
         break;
+    case PollKind::Strategies:
+        // list_strategies normally arrives as a top-level array through
+        // handleArraySuccess(). If the engine ever answers with an object,
+        // keep the last known list instead of clearing the page.
+        break;
+    case PollKind::Risk:
+        m_riskModel->setFromJson(result);
+        setLastError(QString());
+        break;
+    case PollKind::StrategyParams:
+    {
+        // The reply never echoes the strategy id, so the request table is the
+        // only attribution. A reply for an instance the user already left is
+        // dropped inside setFromJson.
+        const QString strategyId = m_paramsRequests.take(id);
+        if (strategyId == m_selectedStrategyId)
+        {
+            m_strategyParamsModel->setFromJson(strategyId, result);
+        }
+        // A deferred selection (A in flight while B was clicked) issues B now.
+        maybeReissueParams();
+        break;
     }
+    }
+}
+
+void EngineController::handleArraySuccess(qint64 id, const QJsonArray& result)
+{
+    auto it = m_inFlight.find(id);
+    if (it == m_inFlight.end())
+    {
+        return;
+    }
+    const PollKind kind = it.value();
+    m_inFlight.erase(it);
+
+    // list_strategies is the only array-shaped read-only method. Anything
+    // else is a protocol surprise; dropping it is safer than guessing a route.
+    if (PollKind::Strategies != kind)
+    {
+        return;
+    }
+
+    m_strategiesRaw = result;
+    m_strategiesModel->setRows(result);
+    setLastError(QString());
+
+    // A selected instance that vanished (engine restart, config reload) must
+    // clear the panel instead of leaving stale parameters on screen.
+    if (!m_selectedStrategyId.isEmpty() && selectedStrategy().isEmpty())
+    {
+        clearStrategySelection();
+        return;
+    }
+    // The selected row itself may have changed (paused / auto_trade), so the
+    // identity card needs a refresh even when the selection is still valid.
+    emit selectedStrategyChanged();
+}
+
+void EngineController::handleParamsFailure(const QString& strategyId,
+                                           const RpcError& error)
+{
+    if (strategyId == m_selectedStrategyId)
+    {
+        m_strategyParamsModel->setError(strategyId, error.toString());
+    }
+    // A stale failure leaves the current selection pending; request it now.
+    maybeReissueParams();
+}
+
+void EngineController::maybeReissueParams()
+{
+    if (m_selectedStrategyId.isEmpty() || !m_strategyParamsModel->pending())
+    {
+        return;
+    }
+    if (isInFlight(PollKind::StrategyParams)
+        || RpcClient::State::Ready != m_fast->state())
+    {
+        return;
+    }
+    issueStrategyParams(m_selectedStrategyId);
+}
+
+void EngineController::clearStrategySelection()
+{
+    if (m_selectedStrategyId.isEmpty())
+    {
+        return;
+    }
+    m_selectedStrategyId.clear();
+    m_strategyParamsModel->clear();
+    emit selectedStrategyChanged();
 }
 
 void EngineController::handleFailure(const RpcError& error)

@@ -102,6 +102,61 @@ target_link_libraries(tst_marketfilter PRIVATE Qt6::Test Qt6::Core)
 
 add_test(NAME marketfilter COMMAND tst_marketfilter)
 
+# Gold Traders page models: strategy list, exact-symbol filter, risk flatten
+# and the selected instance's parameter order. Pure in-memory, no sockets.
+qt_add_executable(tst_goldtraders
+    tst_goldtraders.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/JsonListModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/SymbolFilterModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/RiskModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/StrategyParamsModel.cpp
+    # Header-only Q_OBJECT subclass: listed so AUTOMOC generates its vtable.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/StrategiesModel.hpp
+)
+
+set_target_properties(tst_goldtraders PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_goldtraders PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_goldtraders PRIVATE Qt6::Test Qt6::Core)
+
+add_test(NAME goldtraders COMMAND tst_goldtraders)
+
+# Gold Traders end to end: a scripted loopback server answers the polled
+# methods, so the array transport, selection and deferred parameter fetch are
+# exercised together. The controller pulls in the market stream and every
+# model it owns.
+qt_add_executable(tst_enginecontroller
+    tst_enginecontroller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/EngineController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/MarketStream.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/CandleAggregator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcError.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/JsonListModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/MarketFilterModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/AccountModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/RiskModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/SymbolFilterModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/StrategyParamsModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/PositionsModel.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/OrdersModel.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/ReportsModel.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/SignalsModel.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/StrategiesModel.hpp
+)
+
+set_target_properties(tst_enginecontroller PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_enginecontroller PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_enginecontroller PRIVATE
+    Qt6::Test Qt6::Core Qt6::Network Qt6::Qml)
+
+add_test(NAME enginecontroller COMMAND tst_enginecontroller)
+
 # Interface-language switching. The compiled catalog is embedded here exactly
 # as the client embeds it, so the assertions exercise the shipping
 # translations; QSettings is redirected to a temp directory inside the test.

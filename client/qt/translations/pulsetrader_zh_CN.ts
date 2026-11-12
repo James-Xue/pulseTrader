@@ -210,6 +210,378 @@
     </message>
 </context>
 <context>
+    <name>GoldTradersPage</name>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="42"/>
+        <source>None</source>
+        <translation>无</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="44"/>
+        <source>Drawdown limit</source>
+        <translation>回撤上限</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="46"/>
+        <source>Stop loss</source>
+        <translation>止损</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="48"/>
+        <source>Take profit</source>
+        <translation>止盈</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="50"/>
+        <source>Manual halt</source>
+        <translation>手动停机</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="52"/>
+        <source>Inactive market</source>
+        <translation>非活跃市场</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="54"/>
+        <source>Code %1</source>
+        <translation>代码 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="63"/>
+        <source>Order quantity</source>
+        <translation>下单数量</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="65"/>
+        <source>Min confidence</source>
+        <translation>最低置信度</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="67"/>
+        <source>EMA fast period</source>
+        <translation>EMA 快线周期</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="69"/>
+        <source>EMA slow period</source>
+        <translation>EMA 慢线周期</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="71"/>
+        <source>Bollinger period</source>
+        <translation>布林带周期</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="73"/>
+        <source>Bollinger std dev</source>
+        <translation>布林带标准差</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="75"/>
+        <source>Order-book imbalance</source>
+        <translation>盘口失衡度</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="77"/>
+        <source>Order-book depth</source>
+        <translation>盘口深度</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="79"/>
+        <source>Supertrend period</source>
+        <translation>Supertrend 周期</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="81"/>
+        <source>Supertrend multiplier</source>
+        <translation>Supertrend 倍数</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="83"/>
+        <source>Cooldown (s)</source>
+        <translation>冷却时间（秒）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="85"/>
+        <source>Stop loss (%)</source>
+        <translation>止损（%）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="87"/>
+        <source>Take profit (%)</source>
+        <translation>止盈（%）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="89"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="375"/>
+        <source>Auto trade</source>
+        <translation>自动交易</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="111"/>
+        <source>Yes</source>
+        <translation>是</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="111"/>
+        <source>No</source>
+        <translation>否</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="128"/>
+        <source>Gold Traders</source>
+        <translation>黄金交易员</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="135"/>
+        <source>%1 of %2 strategies</source>
+        <translation>%1 / %2 个策略</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="143"/>
+        <source>Refresh</source>
+        <translation>刷新</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="169"/>
+        <source>Traders</source>
+        <translation>交易员</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="178"/>
+        <source>%1 non-gold hidden</source>
+        <translation>已隐藏 %1 个非黄金实例</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="190"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="336"/>
+        <source>Instance</source>
+        <translation>实例</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="196"/>
+        <source>Strategy</source>
+        <translation>策略</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="202"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="342"/>
+        <source>Symbol</source>
+        <translation>交易对</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="208"/>
+        <source>Poll</source>
+        <translation>轮询</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="257"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="348"/>
+        <source>%1 ms</source>
+        <translation>%1 毫秒</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="266"/>
+        <source>paused</source>
+        <translation>已暂停</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="272"/>
+        <source>auto</source>
+        <translation>自动</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="290"/>
+        <source>No XAUUSD strategies on this engine.</source>
+        <translation>此引擎上没有 XAUUSD 策略。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="291"/>
+        <source>Waiting for the engine.</source>
+        <translation>正在等待引擎。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="299"/>
+        <source>A client-launched engine configures BTC_USDT instances only.</source>
+        <translation>由客户端启动的引擎只配置 BTC_USDT 实例。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="325"/>
+        <source>Identity &amp; connection</source>
+        <translation>身份与连接</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="339"/>
+        <source>Strategy class</source>
+        <translation>策略类</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="345"/>
+        <source>Poll interval</source>
+        <translation>轮询间隔</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="355"/>
+        <source>Market (engine-wide)</source>
+        <translation>市场（引擎级）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="362"/>
+        <source>Enabled</source>
+        <translation>已启用</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="365"/>
+        <source>Running</source>
+        <translation>运行中</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="368"/>
+        <source>Paused</source>
+        <translation>已暂停</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="382"/>
+        <source>Data server</source>
+        <translation>数据服务</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="385"/>
+        <source>%1 / %2</source>
+        <translation>%1 / %2</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="392"/>
+        <source>Data feed</source>
+        <translation>数据源</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="395"/>
+        <source>ready</source>
+        <translation>就绪</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="395"/>
+        <source>waiting</source>
+        <translation>等待中</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="404"/>
+        <source>Attached consumers</source>
+        <translation>已连接的消费端</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="432"/>
+        <source>(no strategy)</source>
+        <translation>（无策略）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="438"/>
+        <source>last seen %1</source>
+        <translation>最后活动 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="448"/>
+        <source>linked</source>
+        <translation>已关联</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="459"/>
+        <source>No consumers connected.</source>
+        <translation>没有已连接的消费端。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="483"/>
+        <source>Parameters</source>
+        <translation>参数</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="490"/>
+        <source>Select a trader to see its parameters.</source>
+        <translation>选择一个交易员以查看其参数。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="504"/>
+        <source>Parameters unavailable: %1</source>
+        <translation>参数不可用：%1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="512"/>
+        <source>Retry</source>
+        <translation>重试</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="522"/>
+        <source>Loading…</source>
+        <translation>加载中…</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="562"/>
+        <source>Read-only view. Changing parameters is not available in this version.</source>
+        <translation>只读视图。此版本不支持修改参数。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="587"/>
+        <source>Risk &amp; execution</source>
+        <translation>风险与执行</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="600"/>
+        <source>Trading halted</source>
+        <translation>交易已停机</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="611"/>
+        <source>Daily drawdown</source>
+        <translation>当日回撤</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="618"/>
+        <source>Max drawdown</source>
+        <translation>最大回撤</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="625"/>
+        <source>Rate limiter</source>
+        <translation>速率限制器</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="636"/>
+        <source>Order rate limiter exhausted</source>
+        <translation>下单速率限制器已耗尽</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="648"/>
+        <source>Open positions</source>
+        <translation>持仓数</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="655"/>
+        <source>Total notional</source>
+        <translation>总名义价值</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="662"/>
+        <source>Unrealized PnL</source>
+        <translation>未实现盈亏</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="670"/>
+        <source>Net exposure</source>
+        <translation>净敞口</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="677"/>
+        <source>Halt reason</source>
+        <translation>停机原因</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="690"/>
+        <source>Last known values — engine not connected.</source>
+        <translation>显示最后已知值 —— 引擎未连接。</translation>
+    </message>
+</context>
+<context>
     <name>LoginPage</name>
     <message>
         <location filename="../qml/pages/LoginPage.qml" line="80"/>
@@ -852,6 +1224,11 @@
     </message>
     <message>
         <location filename="../qml/components/Sidebar.qml" line="12"/>
+        <source>Gold Traders</source>
+        <translation>黄金交易员</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/Sidebar.qml" line="13"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
