@@ -1,7 +1,9 @@
 #include <QCoreApplication>
+#include <QFile>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QXmlStreamReader>
 #include <QtTest>
 
 #include <type_traits>
@@ -35,6 +37,7 @@ private slots:
     void switchingBackRevivesSourceStrings();
     void normalisesLanguageVariants();
     void noOpWriteDoesNotNotify();
+    void catalogMatchesTheTsFile();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -127,6 +130,111 @@ void TstTranslator::noOpWriteDoesNotNotify()
     translator->setLanguage(translator->language());
 
     QCOMPARE(spy.count(), 0);
+}
+
+void TstTranslator::catalogMatchesTheTsFile()
+{
+    // 1. Read the .ts catalog — the source of truth — into (context, source,
+    //    translation) triples. Entries still marked unfinished are skipped:
+    //    they are allowed to fall back to the source string at runtime.
+    QFile file(QStringLiteral(PULSE_TS_PATH));
+    QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+
+    struct Entry
+    {
+        QString context;
+        QString source;
+        QString translation;
+    };
+
+    QList<Entry> entries;
+    QString context;
+    QXmlStreamReader xml(&file);
+
+    while (!xml.atEnd())
+    {
+        xml.readNext();
+
+        if (!xml.isStartElement())
+        {
+            continue;
+        }
+
+        if (xml.name() == u"name")
+        {
+            context = xml.readElementText();
+            continue;
+        }
+
+        if (xml.name() != u"message")
+        {
+            continue;
+        }
+
+        QString source;
+        QString translation;
+
+        // readElementText() consumes the child's end tag, so this loop walks
+        // <source>, <translation> and <comment> one element at a time.
+        while (!xml.atEnd())
+        {
+            xml.readNext();
+
+            if (xml.isEndElement() && xml.name() == u"message")
+            {
+                break;
+            }
+
+            if (!xml.isStartElement())
+            {
+                continue;
+            }
+
+            if (xml.name() == u"source")
+            {
+                source = xml.readElementText();
+            }
+            else if (xml.name() == u"translation")
+            {
+                const bool unfinished = xml.attributes().value("type") == u"unfinished";
+                translation = xml.readElementText();
+
+                if (unfinished)
+                {
+                    translation.clear();
+                }
+            }
+        }
+
+        if (!source.isEmpty() && !translation.isEmpty())
+        {
+            entries.append({ context, source, translation });
+        }
+    }
+
+    QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
+
+    // 2. The catalog must be non-trivial; a truncated .ts would otherwise let
+    //    this test pass with nothing to check.
+    QVERIFY2(entries.size() >= 150,
+             qPrintable(QStringLiteral("catalog has only %1 entries").arg(entries.size())));
+
+    // 3. Every entry must come back from the committed .qm exactly as the .ts
+    //    says. That .qm is what the LinguistTools-less fallback build embeds,
+    //    and a stale one (edited .ts, forgotten lrelease) would otherwise ship
+    //    silently: the default build regenerates from the .ts and never
+    //    notices.
+    QTranslator catalog;
+    QVERIFY(catalog.load(QStringLiteral(":/i18n/pulsetrader_zh_CN.qm")));
+
+    for (const Entry& entry : entries)
+    {
+        const QByteArray contextBytes = entry.context.toUtf8();
+        const QByteArray sourceBytes = entry.source.toUtf8();
+
+        QCOMPARE(catalog.translate(contextBytes.constData(), sourceBytes.constData()),
+                 entry.translation);
+    }
 }
 
 QTEST_GUILESS_MAIN(TstTranslator)

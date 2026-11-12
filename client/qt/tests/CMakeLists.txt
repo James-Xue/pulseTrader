@@ -98,6 +98,12 @@ set_target_properties(tst_translator PROPERTIES AUTOMOC ON)
 target_include_directories(tst_translator PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+# The catalog-consistency test parses the .ts at run time and compares it with
+# the committed .qm; ctest runs from the build directory, so the source path is
+# baked in at configure time.
+target_compile_definitions(tst_translator PRIVATE
+    PULSE_TS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../translations/pulsetrader_zh_CN.ts")
+
 target_link_libraries(tst_translator PRIVATE Qt6::Test Qt6::Core Qt6::Qml)
 
 qt_add_resources(tst_translator "translations"
