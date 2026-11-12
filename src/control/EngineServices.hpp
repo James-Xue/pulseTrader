@@ -25,6 +25,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -88,8 +89,24 @@ class EngineServices
     /// OFF by default: a caller that only needs the aggregate USDT balance
     /// (the polling UI, the REPL, MCP) should not pay for it.
     [[nodiscard]] nlohmann::json account(bool include_spot_balances = false);
-    [[nodiscard]] nlohmann::json positions() const;
-    [[nodiscard]] nlohmann::json orders() const;
+
+    /// Snapshot the open positions, one entry per position with its
+    /// `market_type` ("spot" | "futures" | "cfd") already serialized.
+    ///
+    /// reconcile runs the per-tracker `reconcileAll()` safety net (one REST
+    /// status poll per tracked order) before snapshotting. It is throttled
+    /// internally to kReconcileIntervalMs, so a fast UI poll (2 Hz) still
+    /// produces at most one reconcile round per interval on the shared REST
+    /// mutex. Pass false to skip the safety net entirely (tests, and callers
+    /// that only need the in-memory view).
+    [[nodiscard]] nlohmann::json positions(bool reconcile = true) const;
+
+    /// Snapshot the active orders and recent fills.
+    ///
+    /// Every entry carries `market_type`; the three trackers are merged in
+    /// spot → futures → cfd order. `reconcile` has the same throttled
+    /// semantics as positions().
+    [[nodiscard]] nlohmann::json orders(bool reconcile = true) const;
     [[nodiscard]] nlohmann::json strategies() const;
 
     /// Latest per-strategy signals + indicator snapshots + aggregator
@@ -236,6 +253,25 @@ class EngineServices
     /// Feed pointer for a market type (nullptr if that market is not wired).
     [[nodiscard]] market::MarketFeed *feedFor(MarketType mt) const;
 
+    /// Run the `reconcileAll()` safety net on all three trackers, at most
+    /// once per kReconcileIntervalMs across every control connection.
+    ///
+    /// Why throttled: each reconcile issues one REST status poll per tracked
+    /// order while the UI, the CLI and MCP may poll get_positions/get_orders
+    /// independently. At the client's 2 Hz cadence, an unthrottled reconcile
+    /// would flood the exchange with status polls. A single-flight flag makes
+    /// a round that outlives the interval non-reentrant.
+    ///
+    /// The tracker holds m_restMutex around each individual status poll:
+    /// GateRestClient is not thread-safe, so reconcile traffic must not
+    /// overlap order placement or the account snapshot, but the critical
+    /// section stays one HTTP request long instead of one round (which grows
+    /// with the tracked-order count).
+    ///
+    /// The interval is measured from the END of the previous round, so a
+    /// round that takes longer than the interval does not run back-to-back.
+    void reconcileTrackersThrottled() const;
+
     std::string m_version;
     std::chrono::steady_clock::time_point m_engineStart;
     PulseConfig m_cfg;
@@ -277,6 +313,16 @@ class EngineServices
     /// Budget for REST lookups inside one account() call, so a wallet with
     /// many unpriced altcoins cannot turn one snapshot into dozens of calls.
     std::size_t m_spotPriceLookups{ 0 };
+
+    /// Epoch milliseconds when the last tracker reconcile round FINISHED.
+    /// Mutable because the snapshot methods are const while
+    /// reconcileTrackersThrottled() is a deliberate (bounded) side effect.
+    mutable std::atomic<std::int64_t> m_lastReconcileMs{ 0 };
+
+    /// True while a reconcile round is running. The interval check alone is a
+    /// start-time rate limiter; this flag makes the round single-flight so a
+    /// round slower than the interval cannot be re-entered by the next poll.
+    mutable std::atomic<bool> m_reconcileRunning{ false };
 
     /// Sync futures positions from the exchange (mirrors the old startup
     /// free function in main.cpp; consolidated here so startup, the ~10s

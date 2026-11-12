@@ -70,11 +70,22 @@ class EngineServicesTest : public ::testing::Test
         m_board = std::make_unique<SignalBoard>(
             m_strategyCfg.signal_aggregator_threshold);
 
+        // REST-poll-only trackers (no private WS) so the orders() merge can be
+        // exercised without a socket. They stay empty unless a test tracks an
+        // order, and reconcileAll() over an empty map performs no REST call.
+        m_spotTracker = std::make_unique<execution::OrderTracker>(
+            nullptr, *m_restClient, MarketType::Spot, false);
+        m_futuresTracker = std::make_unique<execution::OrderTracker>(
+            nullptr, *m_restClient, MarketType::Futures, false);
+        m_cfdTracker = std::make_unique<execution::OrderTracker>(
+            nullptr, *m_restClient, MarketType::Cfd, false);
+
         m_services = std::make_unique<EngineServices>(
             "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
             nullptr, nullptr, nullptr,
             m_restClient.get(), nullptr, nullptr,
-            nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
+            m_spotTracker.get(), m_futuresTracker.get(), m_cfdTracker.get(),
+            *m_flow, *m_board, m_restMutex);
     }
 
     ExchangeConfig m_config;
@@ -94,6 +105,9 @@ class EngineServicesTest : public ::testing::Test
     std::unique_ptr<FakePlacer> m_placer;
     std::unique_ptr<OrderFlowExecutor> m_flow;
     std::unique_ptr<SignalBoard> m_board;
+    std::unique_ptr<execution::OrderTracker> m_spotTracker;
+    std::unique_ptr<execution::OrderTracker> m_futuresTracker;
+    std::unique_ptr<execution::OrderTracker> m_cfdTracker;
     std::unique_ptr<EngineServices> m_services;
     std::mutex m_restMutex;
 };
@@ -113,6 +127,51 @@ TEST_F(EngineServicesTest, PositionsEmptyState)
     const auto j = m_services->positions();
     EXPECT_EQ(0, j["positions"].size());
     EXPECT_EQ(0, j["portfolio"]["openPositionCount"].get<int>());
+}
+
+TEST_F(EngineServicesTest, OrdersStampMarketType)
+{
+    // One order per tracker. The merge must preserve the market identity that
+    // each tracker knows and the merged snapshot would otherwise lose — the
+    // Qt client uses it to put an order on the spot / CFD / futures tab.
+    m_spotTracker->trackOrder("spot-1", "BTC_USDT", Side::Buy, OrderType::Limit,
+                              1.0, 100.0);
+    m_futuresTracker->trackOrder("fut-1", "BTC_USDT", Side::Sell,
+                                 OrderType::Limit, 2.0, 100.0);
+    m_cfdTracker->trackOrder("cfd-1", "XAUUSD", Side::Buy, OrderType::Market,
+                             3.0, 2000.0);
+
+    // reconcile=false keeps the test off the network; tagging happens on the
+    // merge regardless.
+    const auto j = m_services->orders(false);
+    const auto &active = j["activeOrders"];
+    ASSERT_EQ(3, active.size());
+
+    // Blocks are appended in spot → futures → cfd order.
+    EXPECT_EQ("spot", active[0]["market_type"]);
+    EXPECT_EQ("spot-1", active[0]["order_id"]);
+    EXPECT_EQ("futures", active[1]["market_type"]);
+    EXPECT_EQ("fut-1", active[1]["order_id"]);
+    EXPECT_EQ("cfd", active[2]["market_type"]);
+    EXPECT_EQ("cfd-1", active[2]["order_id"]);
+
+    // Recent fills go through the same merge and need the same tag.
+    execution::ExecutionReport fill;
+    fill.order_id = "spot-fill";
+    fill.symbol = "BTC_USDT";
+    fill.side = Side::Buy;
+    fill.type = OrderType::Market;
+    fill.requested_qty = 1.0;
+    fill.filled_qty = 1.0;
+    fill.avg_fill_price = 100.0;
+    fill.final_status = OrderStatus::Filled;
+    m_spotTracker->recordCompletedReport(fill);
+
+    const auto tagged = m_services->orders(false);
+    const auto &fills = tagged["recentReports"];
+    ASSERT_EQ(1, fills.size());
+    EXPECT_EQ("spot", fills[0]["market_type"]);
+    EXPECT_EQ("spot-fill", fills[0]["order_id"]);
 }
 
 TEST_F(EngineServicesTest, PositionsIncludeHumanReadableOpenTime)

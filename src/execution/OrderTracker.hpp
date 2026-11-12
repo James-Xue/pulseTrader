@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -121,6 +122,20 @@ class OrderTracker
     /// Individual failures are logged and tolerated; terminal orders emit
     /// completion reports through the normal path.
     void reconcileAll();
+
+    /// Reconcile every tracked order, holding `rest_mutex` around each
+    /// individual status poll.
+    ///
+    /// Same safety net as the unlocked overload, for callers that share one
+    /// GateRestClient across threads (the control plane does). The lock is
+    /// per order, not per round: holding it across the whole round would
+    /// block order placement for one HTTP timeout per tracked order, and the
+    /// whole point of the shared mutex is a short, bounded critical section.
+    ///
+    /// The caller must NOT already hold `rest_mutex` (std::mutex is not
+    /// recursive). Order placement calls pollOrderStatus() directly while
+    /// holding it and must keep using the unlocked overload.
+    void reconcileAll(std::mutex &rest_mutex);
 
     /// Check if an order status is terminal (Filled or Cancelled).
     [[nodiscard]] static bool isTerminalStatus(OrderStatus status);
@@ -263,6 +278,11 @@ class OrderTracker
 
     /// WS callback for spot.orders channel events.
     void onOrderUpdate(const nlohmann::json &event);
+
+    /// Snapshot the tracked order ids under the shared lock, so iterating
+    /// them cannot be invalidated by pollOrderStatus() erasing a terminal
+    /// order mid-round.
+    [[nodiscard]] std::vector<std::string> trackedOrderIds() const;
 
     /// Parse WS order update event and update tracked order state.
     void processOrderUpdate(const nlohmann::json &event);

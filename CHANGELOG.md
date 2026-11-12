@@ -23,6 +23,18 @@ All notable changes to this project are documented here. The format follows
   because pricing unpriced coins costs REST calls on the shared mutex. The Qt
   client exposes it as a Settings switch, so users who only need the balance
   can turn the extra work off.
+- The Qt dashboard separates spot, CFD and futures into tabs, the way the
+  Gate.io app does; each tab shows that market's balances, open positions and
+  open orders. The Positions and Orders pages gain the matching market filter.
+- `get_orders` stamps `market_type` on every active order and recent fill, so
+  the client can attribute an order to a market without guessing from the
+  symbol.
+- Positions and orders poll at 2 Hz (balances at 0.2 Hz, because
+  `get_account` holds the shared REST mutex that order placement needs). The
+  engine's tracker reconcile is single-flight, throttled to one round per 3 s
+  measured from completion, and holds the shared REST mutex only around each
+  individual status poll, so the higher UI cadence neither floods the exchange
+  nor lengthens the order-placement critical section.
 
 ### Fixed
 

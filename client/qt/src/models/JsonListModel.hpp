@@ -24,6 +24,10 @@ class JsonListModel : public QAbstractListModel
 {
     Q_OBJECT
 
+    /// Visible row count. QAbstractItemModel::rowCount() is not invokable from
+    /// QML, so header labels and tab counters bind to this property instead.
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
+
 public:
     /// keyField: the field that identifies a row (`position_id`, `order_id`, ...).
     explicit JsonListModel(QString keyField, QObject* parent = nullptr);
@@ -34,9 +38,15 @@ public:
     /// Drop all rows (called when the connection is lost).
     void clearRows();
 
+    [[nodiscard]] int count() const { return rowCount(); }
+
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
+
+signals:
+    /// Emitted after any operation that can change the row count.
+    void countChanged();
 
 private:
     void registerRoles(const QJsonObject& sample);

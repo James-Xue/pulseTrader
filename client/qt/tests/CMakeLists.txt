@@ -85,6 +85,23 @@ target_link_libraries(tst_accountmodel PRIVATE Qt6::Test Qt6::Core)
 
 add_test(NAME accountmodel COMMAND tst_accountmodel)
 
+# Per-market views: one polled source model, three filtered proxies. Pure
+# in-memory, no sockets.
+qt_add_executable(tst_marketfilter
+    tst_marketfilter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/JsonListModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/MarketFilterModel.cpp
+)
+
+set_target_properties(tst_marketfilter PROPERTIES AUTOMOC ON)
+
+target_include_directories(tst_marketfilter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+target_link_libraries(tst_marketfilter PRIVATE Qt6::Test Qt6::Core)
+
+add_test(NAME marketfilter COMMAND tst_marketfilter)
+
 # Interface-language switching. The compiled catalog is embedded here exactly
 # as the client embeds it, so the assertions exercise the shipping
 # translations; QSettings is redirected to a temp directory inside the test.

@@ -192,7 +192,7 @@ All six handlers ignore their `params` value except `get_market`; they are lambd
 {"jsonrpc":"2.0","id":1,"result":{"active_market":"futures","feed_futures":{"kline_count":4210,"orderbook_count":180042,"ticker_count":960010},"network":"mainnet","open_positions":1,"strategies_running":2,"strategies_total":2,"symbols":["BTC_USDT"],"trading_halted":false,"uptime_sec":3725,"version":"0.1.0"}}
 ```
 
-**Client notes:** cheapest method — pure in-memory reads. Poll at 1 s. `strategies_running` is not "unpaused"; label it "enabled" in the UI, not "active". Never derive fresh position state from `open_positions`; use `get_positions`.
+**Client notes:** cheapest method — pure in-memory reads. The client polls it at 2 s, the same cadence as the account snapshot that drives the dashboard tiles. `strategies_running` is not "unpaused"; label it "enabled" in the UI, not "active". Never derive fresh position state from `open_positions`; use `get_positions`.
 
 ### 3.2 `get_account`
 
@@ -265,7 +265,7 @@ Not serialized, although the structs carry them: `quanto_multiplier` on `Positio
 {"jsonrpc":"2.0","id":2,"result":{"portfolio":{"net_exposure":442.05,"openPositionCount":1,"total_notional":442.05,"total_unrealized_pnl":0.5215},"positions":[{"current_price":63150.0,"entry_price":63075.5,"exchange_position_id":"","leverage":10.0,"liquidation_price":56767.95,"margin_mode":"cross","margin_used":44.16,"market_type":"futures","notional_value":442.05,"open_time":1759872000000,"open_time_str":"2025-10-08T00:00:00.000+08:00","position_id":"BTC_USDT_Buy_1","quantity":70.0,"side":"buy","sl_price":0.0,"strategy_id":"s1","symbol":"BTC_USDT","tp_price":41938.0,"unrealized_pnl":0.5215}]}}
 ```
 
-**Client notes:** `get_positions` calls `reconcileAll()` on all three trackers before snapshotting, which polls each tracked order over REST (`src/control/EngineServices.cpp:268-279`; `src/execution/OrderTracker.cpp:441-464`). Latency grows with tracked-order count; poll at ≥2 s. Do not compute portfolio values yourself from the rows — display the engine's `portfolio` block, and treat a mismatch as an engine-view artifact.
+**Client notes:** `get_positions` runs `reconcileAll()` on all three trackers, which polls each tracked order over REST (`src/control/EngineServices.cpp`; `src/execution/OrderTracker.cpp:441-464`). That safety net is single-flight and throttled engine-side to one round per 3 s (measured from completion) across every control connection; each individual status poll holds the shared REST mutex briefly, because GateRestClient is not thread-safe. A 2 Hz UI poll therefore costs REST traffic only once per interval — the rest are in-memory snapshots. Do not compute portfolio values yourself from the rows — display the engine's `portfolio` block, and treat a mismatch as an engine-view artifact.
 
 ### 3.4 `get_orders`
 
@@ -273,7 +273,7 @@ Not serialized, although the structs carry them: `quanto_multiplier` on `Positio
 
 **Result:** exactly two keys, both always present: `activeOrders` (array) and `recentReports` (array). Spot + futures + CFD are merged into both (`src/control/EngineServices.cpp:295-336`).
 
-**`activeOrders[]`** — 11 keys. `OrderSnapshot::to_json` emits 9; the service adds 2 `*_str` companions (`src/core/snapshot_types.hpp:185-201`; `src/control/EngineServices.cpp:341-353`):
+**`activeOrders[]`** — 12 keys. `OrderSnapshot::to_json` emits 9; the service adds `market_type` plus 2 `*_str` companions (`src/core/snapshot_types.hpp:185-201`; `src/control/EngineServices.cpp`):
 
 | Key | Type | Notes |
 | --- | ---- | ----- |
@@ -284,6 +284,7 @@ Not serialized, although the structs carry them: `quanto_multiplier` on `Positio
 | `requested_qty` | number | — |
 | `filled_qty` | number | — |
 | `status` | string | `"pending"` \| `"open"` \| `"filled"` \| `"cancelled"`. `PartiallyFilled` serializes as `"open"`; `Rejected` serializes as `"cancelled"` (`src/core/snapshot_types.hpp:160-182`). |
+| `market_type` | string | `"spot"` \| `"futures"` \| `"cfd"`. Stamped at merge time, because the merged vector otherwise loses which tracker produced the order. |
 | `submit_time` | integer | Epoch **milliseconds**. |
 | `last_update_time` | integer | Epoch **milliseconds**. |
 | `submit_time_str` | string | Display timezone. |
@@ -291,9 +292,9 @@ Not serialized, although the structs carry them: `quanto_multiplier` on `Positio
 
 `client_order_id` exists on the struct (`src/execution/OrderTracker.hpp:32-43`) but is **not emitted** for active orders. It appears only in `recentReports`. A grid/order-correlation UI cannot join active orders by client id — see open question Q-8.
 
-**`recentReports[]`** — 17 keys: 15 from `ExecutionReport::to_json` (`src/execution/ExecutionReport.cpp:10-38`) plus `submit_time_str` and `fill_time_str` (`src/control/EngineServices.cpp:347-354`):
+**`recentReports[]`** — 18 keys: 15 from `ExecutionReport::to_json` (`src/execution/ExecutionReport.cpp:10-38`) plus `market_type` and the two `*_str` companions (`src/control/EngineServices.cpp`):
 
-`order_id`, `client_order_id`, `symbol`, `side`, `type` (`market`|`limit`|`post_only`|`maker_first`|`unknown`), `requested_qty`, `filled_qty`, `avg_fill_price`, `submit_mid_price`, `slippage_bps`, `fees`, `latency_ms`, `submit_time` (**nanoseconds**), `fill_time` (**nanoseconds**), `final_status` (`filled`|`cancelled`|`unknown`), `submit_time_str`, `fill_time_str`.
+`order_id`, `client_order_id`, `symbol`, `side`, `type` (`market`|`limit`|`post_only`|`maker_first`|`unknown`), `requested_qty`, `filled_qty`, `avg_fill_price`, `submit_mid_price`, `slippage_bps`, `fees`, `latency_ms`, `submit_time` (**nanoseconds**), `fill_time` (**nanoseconds**), `final_status` (`filled`|`cancelled`|`unknown`), `market_type`, `submit_time_str`, `fill_time_str`.
 
 **Critical unit mismatch:** `activeOrders` timestamps are epoch **milliseconds**, `recentReports` timestamps are epoch **nanoseconds**, in the same response. The `*_str` fields are already correct. The service divides reports by `1000000` when formatting, with an explicit comment about the mismatch (`src/control/EngineServices.cpp:338-355`).
 
@@ -305,7 +306,7 @@ At most 20 reports per tracker, so ≤60 entries, sorted by `fill_time` descendi
 {"jsonrpc":"2.0","id":7,"result":{"activeOrders":[{"filled_qty":0.0,"last_update_time":1789000000123,"last_update_time_str":"2026-08-19T20:26:40.123+08:00","order_id":"2345678901","requested_qty":0.01,"side":"sell","status":"open","submit_time":1789000000000,"submit_time_str":"2026-08-19T20:26:40.000+08:00","symbol":"ETH_USDT","type":"limit"}],"recentReports":[{"avg_fill_price":4401.2,"client_order_id":"","fees":0.0022,"filled_qty":0.01,"fill_time":1789000000000000000,"fill_time_str":"2026-08-19T20:26:40.000+08:00","final_status":"filled","latency_ms":842,"order_id":"2345678899","requested_qty":0.01,"side":"buy","slippage_bps":0.4544,"submit_mid_price":4401.0,"submit_time":1788999999100000000,"submit_time_str":"2026-08-19T20:26:39.100+08:00","symbol":"ETH_USDT","type":"market"}]}}
 ```
 
-**Client notes:** also calls `reconcileAll()` on all three trackers (`src/control/EngineServices.cpp:296-310`), so it is not side-effect free and generates exchange REST traffic. Poll at 3 s or slower; never in a tight loop. The list is the engine's local view: orders placed outside the engine do not appear; use `list_futures_orders` on the exchange side if that matters (out of v1 scope).
+**Client notes:** runs the same single-flight, 3 s-throttled `reconcileAll()` safety net as `get_positions`, with each status poll taking the shared REST mutex for its own duration, so the 2 Hz UI poll is cheap in steady state. Every entry now carries `market_type`; the client uses a `QSortFilterProxyModel` per market rather than filtering in QML. The list is the engine's local view: orders placed outside the engine do not appear; use `list_futures_orders` on the exchange side if that matters (out of v1 scope).
 
 ### 3.5 `get_signals`
 
@@ -383,12 +384,20 @@ In-band failure:
 
 | Method | Cost | Client timeout | Poll interval | Connection |
 | ------ | ---- | -------------- | ------------- | ---------- |
-| `get_status` | In-memory only | 5 s | 1 s | fast |
-| `get_signals` | In-memory only | 5 s | 2 s | fast |
-| `get_market` | Feed caches; cost scales with `book_levels` + `klines` | 10 s | 1 s per **visible** symbol | fast |
-| `get_positions` | REST reconcile of all tracked orders | 15 s | 2 s | rest |
-| `get_orders` | REST reconcile of all tracked orders | 30 s | 3 s | rest |
-| `get_account` | Global REST mutex + up to 3 REST calls with retries | 120 s | 30 s | slow |
+| `get_status` | In-memory only | 8 s | 2 s | fast |
+| `get_signals` | In-memory only | 10 s | 10 s | fast |
+| `get_market` | Feed caches; cost scales with `book_levels` + `klines` | 15 s | on demand, per **visible** symbol | rest |
+| `get_positions` | In-memory snapshot; REST reconcile throttled engine-side to one round / 3 s, under the shared REST mutex | 15 s | 500 ms (2 Hz) | rest |
+| `get_orders` | In-memory snapshot; same throttled reconcile | 30 s | 500 ms (2 Hz) | rest |
+| `get_account` | Global REST mutex + up to 3 REST calls with retries | 120 s | 5 s | slow |
+
+The two list snapshots are what the dashboard's per-market tabs read, so they poll
+at 2 Hz; the engine-side throttle (single-flight, 3 s floor) keeps exchange REST
+traffic at the documented floor regardless of how often the UI asks. Balances
+stay at 0.2 Hz on purpose: `get_account` holds the shared REST mutex for the
+duration of up to three HTTP requests, and that mutex is the one order placement
+needs — a faster balance poll would trade real order latency for numbers that
+only move when a fill lands.
 
 Never poll methods for pages that are not visible. Pause all polling when the window is minimized (desktop) or the app is backgrounded (Android) and refresh once on resume.
 
@@ -958,7 +967,7 @@ Rules:
 ### 6.5 QML layer
 
 - `Main.qml`: `ApplicationWindow` with an adaptive shell — a permanent side rail at width ≥ 900 dp, a bottom `NavigationBar`/`Drawer` below that. Android uses large touch targets (≥48 dp).
-- Pages: Dashboard (status tiles, connection state, halt badge, account summary), Positions, Orders (active + recent tabs), Signals (cards with confidence, age, stale badge), Market (symbol picker from `get_status.symbols` plus free text, ticker, depth, kline table or sparkline), Settings (endpoint, TLS, token, poll intervals, theme).
+- Pages: Dashboard (status tiles, connection state, halt badge, one tab per market — spot / CFD / futures — showing that market's balances, open positions and open orders), Positions (all + per-market filter), Orders (active + recent, per-market filter), Signals (cards with confidence, age, stale badge), Market (symbol picker from `get_status.symbols` plus free text, ticker, depth, kline table or sparkline), Settings (endpoint, TLS, token, poll intervals, theme).
 - `Style.qml` singleton holds colors, spacing, typography and dark/light tokens. Do not hard-code colors in pages.
 - `StatusBar` is always visible: connection state, engine version, uptime, `trading_halted` badge, active market.
 - `StaleBadge` appears when a section's last successful refresh is older than 2× its poll interval.

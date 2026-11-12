@@ -438,22 +438,43 @@ void OrderTracker::recordCompletedReport(const ExecutionReport &report)
         report.order_id, report.filled_qty, report.avg_fill_price);
 }
 
+std::vector<std::string> OrderTracker::trackedOrderIds() const
+{
+    // Snapshot under the shared lock: pollOrderStatus takes the write lock
+    // itself and may erase terminal orders mid-iteration.
+    std::shared_lock<std::shared_mutex> read_lock(m_mutex);
+    std::vector<std::string> order_ids;
+    order_ids.reserve(m_trackedOrders.size());
+    for (const auto &[id, order] : m_trackedOrders)
+    {
+        order_ids.push_back(id);
+    }
+    return order_ids;
+}
+
 void OrderTracker::reconcileAll()
 {
-    // Snapshot tracked ids under a shared lock, then poll each — pollOrderStatus
-    // takes the write lock itself and may erase terminal orders mid-iteration.
-    std::vector<std::string> order_ids;
+    for (const auto &order_id : trackedOrderIds())
     {
-        std::shared_lock<std::shared_mutex> read_lock(m_mutex);
-        order_ids.reserve(m_trackedOrders.size());
-        for (const auto &[id, order] : m_trackedOrders)
+        auto result = pollOrderStatus(order_id);
+        if (!ok(result))
         {
-            order_ids.push_back(id);
+            PULSE_LOG_DEBUG("execution", "reconcile order {} failed: {}",
+                order_id, error(result).message);
         }
     }
+}
 
-    for (const auto &order_id : order_ids)
+void OrderTracker::reconcileAll(std::mutex &rest_mutex)
+{
+    for (const auto &order_id : trackedOrderIds())
     {
+        // One REST round-trip at a time: the shared client is not thread-safe,
+        // but a single poll is the shortest critical section this path can
+        // offer. The completion callback (PositionManager, trades.db) runs
+        // inside this section, consistently with the immediate poll that
+        // order placement performs after a market fill.
+        std::lock_guard<std::mutex> lock(rest_mutex);
         auto result = pollOrderStatus(order_id);
         if (!ok(result))
         {

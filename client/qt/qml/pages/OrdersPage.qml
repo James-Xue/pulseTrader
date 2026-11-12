@@ -3,23 +3,43 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Pulse.Client
 
-/// Active orders and recent execution reports.
+/// Active orders and recent execution reports, filtered by market.
 ///
 /// Two views of the same subject, so they switch with a macOS segmented
-/// control rather than a tab bar. The two payloads carry different timestamp
-/// units (milliseconds for active orders, nanoseconds for reports), so each
-/// view renders its own `*_str` field instead of formatting the raw number.
+/// control rather than a tab bar. The market filter above applies to both:
+/// the engine stamps `market_type` on every active order and every fill, so
+/// a spot order is never read as a futures one. The two payloads carry
+/// different timestamp units (milliseconds for active orders, nanoseconds for
+/// reports), so each view renders its own `*_str` field instead of formatting
+/// the raw number.
 ColumnLayout {
     id: root
 
     property var controller
 
-    spacing: 0
+    /// 0 = all, 1 = spot, 2 = cfd, 3 = futures.
+    property int marketIndex: 0
 
-    readonly property int activeCount:
-        root.controller ? root.controller.ordersModel.rowCount() : 0
-    readonly property int reportCount:
-        root.controller ? root.controller.reportsModel.rowCount() : 0
+    readonly property var activeModels: root.controller
+        ? [root.controller.ordersModel,
+           root.controller.spotOrders,
+           root.controller.cfdOrders,
+           root.controller.futuresOrders]
+        : []
+    readonly property var reportModels: root.controller
+        ? [root.controller.reportsModel,
+           root.controller.spotReports,
+           root.controller.cfdReports,
+           root.controller.futuresReports]
+        : []
+
+    readonly property var activeModel: root.activeModels.length > root.marketIndex
+                                       ? root.activeModels[root.marketIndex] : null
+    readonly property var reportModel: root.reportModels.length > root.marketIndex
+                                       ? root.reportModels[root.marketIndex] : null
+
+    readonly property int activeCount: root.activeModel ? root.activeModel.count : 0
+    readonly property int reportCount: root.reportModel ? root.reportModel.count : 0
 
     /// Status colour shared by both views. Recognised terminal states get the
     /// semantic colour; anything else stays neutral rather than guessing.
@@ -37,38 +57,66 @@ ColumnLayout {
     }
 
     // -- Toolbar ------------------------------------------------------------
-    RowLayout {
+    //
+    // Two rows on purpose: the window's minimum content width (after the
+    // sidebar) cannot hold the title, the market filter, the view switch and
+    // the refresh button on one line.
+    ColumnLayout {
         Layout.fillWidth: true
         Layout.margins: Style.pad
-        spacing: Style.gap
+        spacing: Style.gapSmall
 
-        Text {
-            text: qsTr("Orders")
-            color: Style.text
-            font.pixelSize: Style.titleSize
-            font.weight: Font.DemiBold
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.gap
+
+            Text {
+                text: qsTr("Orders")
+                color: Style.text
+                font.pixelSize: Style.titleSize
+                font.weight: Font.DemiBold
+            }
+
+            Text {
+                text: qsTr("%1 active · %2 recent")
+                      .arg(root.activeCount).arg(root.reportCount)
+                color: Style.secondaryText
+                font.pixelSize: Style.fontSizeSmall
+            }
+
+            Item { Layout.fillWidth: true }
+
+            MacButton {
+                text: qsTr("Refresh")
+                onClicked: if (root.controller) root.controller.refreshAll()
+            }
         }
 
-        Text {
-            text: qsTr("%1 active · %2 recent")
-                  .arg(root.activeCount).arg(root.reportCount)
-            color: Style.secondaryText
-            font.pixelSize: Style.fontSizeSmall
-        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.gap
 
-        Item { Layout.fillWidth: true }
+            MacSegmentedControl {
+                Layout.preferredWidth: 320
+                items: [
+                    qsTr("All (%1)").arg(root.controller ? root.controller.ordersModel.count : 0),
+                    qsTr("Spot (%1)").arg(root.controller ? root.controller.spotOrders.count : 0),
+                    qsTr("CFD (%1)").arg(root.controller ? root.controller.cfdOrders.count : 0),
+                    qsTr("Futures (%1)").arg(root.controller ? root.controller.futuresOrders.count : 0)
+                ]
+                currentIndex: root.marketIndex
+                onActivated: function (index) { root.marketIndex = index }
+            }
 
-        MacSegmentedControl {
-            Layout.preferredWidth: 250
-            items: [qsTr("Active (%1)").arg(root.activeCount),
-                    qsTr("Recent (%1)").arg(root.reportCount)]
-            currentIndex: viewStack.currentIndex
-            onActivated: function (index) { viewStack.currentIndex = index }
-        }
+            Item { Layout.fillWidth: true }
 
-        MacButton {
-            text: qsTr("Refresh")
-            onClicked: if (root.controller) root.controller.refreshAll()
+            MacSegmentedControl {
+                Layout.preferredWidth: 240
+                items: [qsTr("Active (%1)").arg(root.activeCount),
+                        qsTr("Recent (%1)").arg(root.reportCount)]
+                currentIndex: viewStack.currentIndex
+                onActivated: function (index) { viewStack.currentIndex = index }
+            }
         }
     }
 
@@ -92,8 +140,9 @@ ColumnLayout {
                 Text { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
                 Text { text: qsTr("Side"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 60 }
                 Text { text: qsTr("Type"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 80 }
-                Text { text: qsTr("Price"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 100 }
-                Text { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
+                Text { text: qsTr("Filled / qty"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 120 }
+                Text { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
+                Text { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
             }
 
             ListView {
@@ -104,7 +153,7 @@ ColumnLayout {
                 Layout.margins: Style.pad
                 spacing: 6
                 clip: true
-                model: root.controller ? root.controller.ordersModel : null
+                model: root.activeModel
 
                 delegate: Rectangle {
                     width: activeList.width
@@ -132,25 +181,34 @@ ColumnLayout {
                         }
                         Text {
                             text: model.side === undefined ? "" : model.side
-                            color: model.side === "Buy" ? Style.success : Style.danger
+                            // The engine serializes lowercase "buy" / "sell".
+                            color: "buy" === model.side ? Style.success : Style.danger
                             font.pixelSize: 12
                             Layout.preferredWidth: 60
                         }
                         Text {
-                            text: model.order_type === undefined ? "" : model.order_type
+                            text: model.type === undefined ? "" : model.type
                             color: Style.secondaryText
                             font.pixelSize: 12
                             Layout.preferredWidth: 80
                         }
                         Text {
-                            text: model.price === undefined ? "" : String(model.price)
+                            text: model.filled_qty === undefined ? ""
+                                  : "%1 / %2".arg(Number(model.filled_qty))
+                                                   .arg(Number(model.requested_qty))
                             color: Style.text
                             font.pixelSize: 12
-                            Layout.preferredWidth: 100
+                            Layout.preferredWidth: 120
                         }
                         Text {
                             text: model.status === undefined ? "" : model.status
                             color: root.statusColor(model.status === undefined ? "" : model.status)
+                            font.pixelSize: 11
+                            Layout.preferredWidth: 90
+                        }
+                        Text {
+                            text: model.market_type === undefined ? "" : model.market_type
+                            color: Style.tertiaryText
                             font.pixelSize: 11
                             Layout.fillWidth: true
                             elide: Text.ElideRight
@@ -178,6 +236,7 @@ ColumnLayout {
                 Text { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
                 Text { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
                 Text { text: qsTr("Fill price"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 110 }
+                Text { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
                 Text { text: qsTr("Filled at"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
             }
 
@@ -189,7 +248,7 @@ ColumnLayout {
                 Layout.margins: Style.pad
                 spacing: 6
                 clip: true
-                model: root.controller ? root.controller.reportsModel : null
+                model: root.reportModel
 
                 delegate: Rectangle {
                     width: reportList.width
@@ -216,16 +275,26 @@ ColumnLayout {
                             elide: Text.ElideRight
                         }
                         Text {
-                            text: model.status === undefined ? "" : model.status
-                            color: root.statusColor(model.status === undefined ? "" : model.status)
+                            // ExecutionReport serializes `final_status`, not
+                            // `status`.
+                            text: model.final_status === undefined ? "" : model.final_status
+                            color: root.statusColor(model.final_status === undefined
+                                                    ? "" : model.final_status)
                             font.pixelSize: 12
                             Layout.preferredWidth: 90
                         }
                         Text {
-                            text: model.fill_price === undefined ? "" : String(model.fill_price)
+                            text: model.avg_fill_price === undefined ? ""
+                                  : String(model.avg_fill_price)
                             color: Style.text
                             font.pixelSize: 12
                             Layout.preferredWidth: 110
+                        }
+                        Text {
+                            text: model.market_type === undefined ? "" : model.market_type
+                            color: Style.tertiaryText
+                            font.pixelSize: 11
+                            Layout.preferredWidth: 90
                         }
                         Text {
                             text: model.fill_time_str === undefined ? ""

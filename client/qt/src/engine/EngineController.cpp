@@ -17,13 +17,20 @@ namespace pulse::client
 
 namespace
 {
-// Poll cadence. These follow the cost table in docs/qt-client-design.md §3.7:
-// cheap methods poll fast, methods that trigger exchange REST calls poll slowly.
-constexpr int kStatusIntervalMs = 5000;
-constexpr int kPositionsIntervalMs = 15000;
-constexpr int kOrdersIntervalMs = 10000;
+// Poll cadence. The market views (positions, orders) drive the dashboard's
+// per-market tabs, which the user asked to refresh at 2 Hz. Balances stay at
+// 0.2 Hz: get_account holds the engine's shared REST mutex across up to three
+// signed exchange calls (plus optional ticker lookups), and that is the same
+// mutex order placement waits on. Frequency is the only lever here — the hold
+// time per call does not shrink — so 5 s keeps the dashboard current without
+// turning every fill into a REST round-trip. Cheap in-memory methods keep
+// their own cadence; signals are slower because nothing on screen needs them
+// faster.
+constexpr int kStatusIntervalMs = 2000;
+constexpr int kPositionsIntervalMs = 500;
+constexpr int kOrdersIntervalMs = 500;
 constexpr int kSignalsIntervalMs = 10000;
-constexpr int kAccountIntervalMs = 30000;
+constexpr int kAccountIntervalMs = 5000;
 
 // Per-call budgets. The account budget is large because the engine performs up
 // to three serialised REST calls behind a global mutex.
@@ -45,13 +52,45 @@ EngineController::EngineController(QObject* parent)
     , m_reportsModel(new ReportsModel(this))
     , m_signalsModel(new SignalsModel(this))
     , m_accountModel(new AccountModel(this))
+    , m_spotPositions(new MarketFilterModel(this))
+    , m_cfdPositions(new MarketFilterModel(this))
+    , m_futuresPositions(new MarketFilterModel(this))
+    , m_spotOrders(new MarketFilterModel(this))
+    , m_cfdOrders(new MarketFilterModel(this))
+    , m_futuresOrders(new MarketFilterModel(this))
+    , m_spotReports(new MarketFilterModel(this))
+    , m_cfdReports(new MarketFilterModel(this))
+    , m_futuresReports(new MarketFilterModel(this))
 {
     // 1. Every socket feeds the same router; the request id decides which poll
     //    the reply belongs to. Each connection numbers from 1, so give them
-    //    disjoint ranges or the replies land on the wrong poll.
+    //    disjoint ranges or the replies land on the wrong poll. The ranges are
+    //    wide (1e9) because the market polls run at 2 Hz: a 1e6 range — the
+    //    original spacing — would be exhausted in about three days, after
+    //    which the rest socket's ids would collide with the slow socket's.
     m_fast->setIdBase(1);
-    m_rest->setIdBase(1000000);
-    m_slow->setIdBase(2000000);
+    m_rest->setIdBase(1'000'000'000);
+    m_slow->setIdBase(2'000'000'000);
+
+    // 1a. Per-market views. One source model per kind is polled once; each
+    //     proxy narrows that snapshot to a single market_type. Every proxy
+    //     gets an explicit market string — an empty filter would show every
+    //     row on every tab.
+    const auto bindMarket = [](MarketFilterModel* filter, QAbstractItemModel* source,
+                               const QString& market)
+    {
+        filter->setSourceModel(source);
+        filter->setMarketType(market);
+    };
+    bindMarket(m_spotPositions, m_positionsModel, QStringLiteral("spot"));
+    bindMarket(m_cfdPositions, m_positionsModel, QStringLiteral("cfd"));
+    bindMarket(m_futuresPositions, m_positionsModel, QStringLiteral("futures"));
+    bindMarket(m_spotOrders, m_ordersModel, QStringLiteral("spot"));
+    bindMarket(m_cfdOrders, m_ordersModel, QStringLiteral("cfd"));
+    bindMarket(m_futuresOrders, m_ordersModel, QStringLiteral("futures"));
+    bindMarket(m_spotReports, m_reportsModel, QStringLiteral("spot"));
+    bindMarket(m_cfdReports, m_reportsModel, QStringLiteral("cfd"));
+    bindMarket(m_futuresReports, m_reportsModel, QStringLiteral("futures"));
 
     for (RpcClient* client : { m_fast, m_rest, m_slow })
     {

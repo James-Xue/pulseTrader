@@ -27,6 +27,44 @@ namespace pulse::control
 namespace
 {
 
+/// Minimum spacing between two reconcile rounds on the three trackers.
+/// A control-plane snapshot is polled by the Qt client at 2 Hz; each
+/// reconcile round issues one REST status poll per tracked order on the
+/// shared REST mutex, so without this floor the UI would compete with order
+/// placement for the mutex. Three seconds is the design document's floor for
+/// get_orders and still far faster than the ~10 s background position sync.
+constexpr std::int64_t kReconcileIntervalMs = 3000;
+
+/// Clears a single-flight flag and stamps the round's completion time on
+/// scope exit, including when a reconcile throws (allocation failure inside a
+/// tracker). Stamping the END is deliberate: a round longer than the interval
+/// must not re-arm the next one the instant it finishes.
+class ReconcileGuard
+{
+  public:
+    ReconcileGuard(std::atomic<bool> &running, std::atomic<std::int64_t> &last)
+        : m_running{ running }
+        , m_last{ last }
+    {
+    }
+
+    ~ReconcileGuard()
+    {
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+        m_last.store(now, std::memory_order_relaxed);
+        m_running.store(false, std::memory_order_release);
+    }
+
+    ReconcileGuard(const ReconcileGuard &) = delete;
+    ReconcileGuard &operator=(const ReconcileGuard &) = delete;
+
+  private:
+    std::atomic<bool> &m_running;
+    std::atomic<std::int64_t> &m_last;
+};
+
 // ---------------------------------------------------------------------------
 // StrategyParams field dispatch tables
 // ---------------------------------------------------------------------------
@@ -442,22 +480,63 @@ nlohmann::json EngineServices::account(bool include_spot_balances)
     return j;
 }
 
-nlohmann::json EngineServices::positions() const
+void EngineServices::reconcileTrackersThrottled() const
 {
-    // Reconcile first so fills that missed the WS private channel (market
-    // orders fill instantly, before the subscription exists) surface as
-    // positions before the snapshot is taken.
+    // 1. Single-flight first. The interval check alone is a start-time rate
+    //    limiter: a round slower than the interval (a stalled REST call has a
+    //    10 s timeout with retries) would be re-entered by the next poll from
+    //    another control connection, doubling REST traffic on the shared
+    //    client exactly when the exchange is already slow.
+    if (m_reconcileRunning.exchange(true, std::memory_order_acquire))
+    {
+        return;
+    }
+    const ReconcileGuard guard(m_reconcileRunning, m_lastReconcileMs);
+
+    // 2. Rate limit, measured from the completion of the previous round (the
+    //    guard stamps it). This is the path almost every 2 Hz UI poll takes,
+    //    which is exactly the point — a snapshot poll must not turn into REST
+    //    traffic on every request. Measuring from completion also keeps a
+    //    round longer than the interval from running back-to-back.
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    const std::int64_t previous =
+        m_lastReconcileMs.load(std::memory_order_relaxed);
+    if (now - previous < kReconcileIntervalMs)
+    {
+        return;
+    }
+
+    // 3. The tracker holds the shared REST mutex around each individual
+    //    status poll, not for the whole round: GateRestClient is not
+    //    thread-safe, but a per-round lock would block order placement for
+    //    one HTTP timeout per tracked order. Lock order matches
+    //    OrderFlowExecutor: REST mutex first, executor state second (the
+    //    completion callback takes the executor mutex).
     if (m_spotTracker)
     {
-        m_spotTracker->reconcileAll();
+        m_spotTracker->reconcileAll(m_restMutex);
     }
     if (m_futuresTracker)
     {
-        m_futuresTracker->reconcileAll();
+        m_futuresTracker->reconcileAll(m_restMutex);
     }
     if (m_cfdTracker)
     {
-        m_cfdTracker->reconcileAll();
+        m_cfdTracker->reconcileAll(m_restMutex);
+    }
+}
+
+nlohmann::json EngineServices::positions(bool reconcile) const
+{
+    // Reconcile first so fills that missed the WS private channel (market
+    // orders fill instantly, before the subscription exists) surface as
+    // positions before the snapshot is taken. Throttled: see
+    // reconcileTrackersThrottled().
+    if (reconcile)
+    {
+        reconcileTrackersThrottled();
     }
     nlohmann::json j;
     j["positions"] = m_positionMgr.getAllPositions();
@@ -474,48 +553,56 @@ nlohmann::json EngineServices::positions() const
     return j;
 }
 
-nlohmann::json EngineServices::orders() const
+nlohmann::json EngineServices::orders(bool reconcile) const
 {
     // Same reconcile as positions(): present tracked orders' real state
     // instead of a stale Pending from before the WS subscription existed.
-    if (m_spotTracker)
+    // Throttled: see reconcileTrackersThrottled().
+    if (reconcile)
     {
-        m_spotTracker->reconcileAll();
-    }
-    if (m_futuresTracker)
-    {
-        m_futuresTracker->reconcileAll();
-    }
-    if (m_cfdTracker)
-    {
-        m_cfdTracker->reconcileAll();
+        reconcileTrackersThrottled();
     }
     nlohmann::json j;
-    std::vector<execution::OrderSnapshot> active;
-    std::vector<execution::ExecutionReport> reports;
-    if (m_spotTracker)
+
+    // The three trackers are merged here, so market identity is lost unless
+    // it is stamped while the source is still known. The UI needs it to put
+    // an order on the spot / CFD / futures tab; without it both lists are a
+    // single indistinguishable pool (the reported dashboard problem).
+    nlohmann::json active = nlohmann::json::array();
+    nlohmann::json reports = nlohmann::json::array();
+    const auto appendTracker = [&active, &reports](execution::OrderTracker *tracker,
+                                                   const char *market)
     {
-        auto a = m_spotTracker->activeOrders();
-        active.insert(active.end(), a.begin(), a.end());
-        auto r = m_spotTracker->recentReports(20);
-        reports.insert(reports.end(), r.begin(), r.end());
-    }
-    if (m_futuresTracker)
-    {
-        auto a = m_futuresTracker->activeOrders();
-        active.insert(active.end(), a.begin(), a.end());
-        auto r = m_futuresTracker->recentReports(20);
-        reports.insert(reports.end(), r.begin(), r.end());
-    }
-    if (m_cfdTracker)
-    {
-        auto a = m_cfdTracker->activeOrders();
-        active.insert(active.end(), a.begin(), a.end());
-        auto r = m_cfdTracker->recentReports(20);
-        reports.insert(reports.end(), r.begin(), r.end());
-    }
-    j["activeOrders"] = active;
-    j["recentReports"] = reports;
+        if (nullptr == tracker)
+        {
+            return;
+        }
+
+        // 1. Active orders: OrderSnapshot::to_json (ADL) plus market_type.
+        for (const auto &order : tracker->activeOrders())
+        {
+            nlohmann::json entry;
+            to_json(entry, order);
+            entry["market_type"] = market;
+            active.push_back(std::move(entry));
+        }
+
+        // 2. Recent fills: ExecutionReport::to_json (ADL) plus market_type.
+        //    The report struct is per-tracker too, so the tag is exact.
+        for (const auto &report : tracker->recentReports(20))
+        {
+            nlohmann::json entry;
+            to_json(entry, report);
+            entry["market_type"] = market;
+            reports.push_back(std::move(entry));
+        }
+    };
+    appendTracker(m_spotTracker, "spot");
+    appendTracker(m_futuresTracker, "futures");
+    appendTracker(m_cfdTracker, "cfd");
+
+    j["activeOrders"] = std::move(active);
+    j["recentReports"] = std::move(reports);
 
     // Human-readable timestamps in the configured display timezone (see
     // positions()). Note: OrderSnapshot timestamps are epoch MILLIseconds,

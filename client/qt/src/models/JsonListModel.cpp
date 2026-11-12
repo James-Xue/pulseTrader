@@ -77,6 +77,7 @@ void JsonListModel::setRows(const QJsonArray& rows)
             m_rows.append(value.toObject());
         }
         endResetModel();
+        emit countChanged();
         return;
     }
 
@@ -90,6 +91,7 @@ void JsonListModel::setRows(const QJsonArray& rows)
         m_rows[i] = rows.at(i).toObject();
     }
     emit dataChanged(index(0), index(m_rows.size() - 1));
+    emit countChanged();
 }
 
 void JsonListModel::clearRows()
@@ -101,6 +103,7 @@ void JsonListModel::clearRows()
     beginResetModel();
     m_rows.clear();
     endResetModel();
+    emit countChanged();
 }
 
 int JsonListModel::rowCount(const QModelIndex& parent) const

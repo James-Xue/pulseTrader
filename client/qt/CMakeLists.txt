@@ -75,6 +75,7 @@ qt_add_qml_module(pulseTraderQt
         src/data/DataSession.cpp       src/data/DataSession.hpp
         src/data/DataServer.cpp        src/data/DataServer.hpp
         src/models/JsonListModel.cpp   src/models/JsonListModel.hpp
+        src/models/MarketFilterModel.cpp src/models/MarketFilterModel.hpp
         src/models/PositionsModel.hpp
         src/models/OrdersModel.hpp
         src/models/ReportsModel.hpp

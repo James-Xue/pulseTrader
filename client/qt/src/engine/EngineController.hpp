@@ -14,6 +14,7 @@
 // definitions: a forward declaration trips the "Pointer Meta Types must either
 // point to fully-defined types" static assertion.
 #include "models/AccountModel.hpp"
+#include "models/MarketFilterModel.hpp"
 #include "models/OrdersModel.hpp"
 #include "models/PositionsModel.hpp"
 #include "models/ReportsModel.hpp"
@@ -61,6 +62,19 @@ class EngineController : public QObject
     Q_PROPERTY(pulse::client::ReportsModel* reportsModel READ reportsModel CONSTANT)
     Q_PROPERTY(pulse::client::SignalsModel* signalsModel READ signalsModel CONSTANT)
     Q_PROPERTY(pulse::client::AccountModel* accountModel READ accountModel CONSTANT)
+
+    // Per-market views over the three list models. The source models stay the
+    // single polled snapshot; these proxies only narrow it, so switching a
+    // dashboard tab costs no request. Empty marketType = all rows.
+    Q_PROPERTY(pulse::client::MarketFilterModel* spotPositions READ spotPositions CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* cfdPositions READ cfdPositions CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* futuresPositions READ futuresPositions CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* spotOrders READ spotOrders CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* cfdOrders READ cfdOrders CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* futuresOrders READ futuresOrders CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* spotReports READ spotReports CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* cfdReports READ cfdReports CONSTANT)
+    Q_PROPERTY(pulse::client::MarketFilterModel* futuresReports READ futuresReports CONSTANT)
 
 public:
     /// Connection state aggregated from the three sockets. The UI only needs
@@ -113,6 +127,16 @@ public:
     [[nodiscard]] ReportsModel* reportsModel() const { return m_reportsModel; }
     [[nodiscard]] SignalsModel* signalsModel() const { return m_signalsModel; }
     [[nodiscard]] AccountModel* accountModel() const { return m_accountModel; }
+
+    [[nodiscard]] MarketFilterModel* spotPositions() const { return m_spotPositions; }
+    [[nodiscard]] MarketFilterModel* cfdPositions() const { return m_cfdPositions; }
+    [[nodiscard]] MarketFilterModel* futuresPositions() const { return m_futuresPositions; }
+    [[nodiscard]] MarketFilterModel* spotOrders() const { return m_spotOrders; }
+    [[nodiscard]] MarketFilterModel* cfdOrders() const { return m_cfdOrders; }
+    [[nodiscard]] MarketFilterModel* futuresOrders() const { return m_futuresOrders; }
+    [[nodiscard]] MarketFilterModel* spotReports() const { return m_spotReports; }
+    [[nodiscard]] MarketFilterModel* cfdReports() const { return m_cfdReports; }
+    [[nodiscard]] MarketFilterModel* futuresReports() const { return m_futuresReports; }
 
 signals:
     void connectionStateChanged();
@@ -168,6 +192,16 @@ private:
     ReportsModel* m_reportsModel = nullptr;
     SignalsModel* m_signalsModel = nullptr;
     AccountModel* m_accountModel = nullptr;
+
+    MarketFilterModel* m_spotPositions = nullptr;
+    MarketFilterModel* m_cfdPositions = nullptr;
+    MarketFilterModel* m_futuresPositions = nullptr;
+    MarketFilterModel* m_spotOrders = nullptr;
+    MarketFilterModel* m_cfdOrders = nullptr;
+    MarketFilterModel* m_futuresOrders = nullptr;
+    MarketFilterModel* m_spotReports = nullptr;
+    MarketFilterModel* m_cfdReports = nullptr;
+    MarketFilterModel* m_futuresReports = nullptr;
 
     ConnectionState m_connectionState = ConnectionState::Disconnected;
     QString m_engineVersion;
