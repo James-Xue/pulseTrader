@@ -54,6 +54,7 @@ ApplicationWindow {
 
     EngineController {
         id: engine
+        objectName: "engineController"
     }
 
     /// Local account vault and the engine process the client owns. Both are
@@ -237,6 +238,7 @@ ApplicationWindow {
 
                     StackLayout {
                         id: pages
+                        objectName: "pagesStack"
                         anchors.fill: parent
 
                         DashboardPage { controller: engine }
