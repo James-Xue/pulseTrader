@@ -9,6 +9,7 @@
 #include "core/types.hpp"
 #include "execution/ExecutionReport.hpp"
 #include "execution/ExchangeStopPlan.hpp"
+#include "execution/OrderExecutor.hpp"
 #include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
 
@@ -1090,6 +1091,18 @@ EngineServices::closePosition(const nlohmann::json &params)
                                "CFD close failed for " + position_id + ": "
                                    + error(res).message };
         }
+
+        // A 2xx TradFi body can still be a business rejection
+        // ({"label","message"}). Treating it as a fill would erase the local
+        // position while the exchange still holds it — the gold trader's
+        // stop would then silently disappear.
+        if (auto business_error =
+                execution::OrderExecutor::cfdBusinessError(value(res)))
+        {
+            return PulseError{ business_error->code,
+                               "CFD close rejected for " + position_id + ": "
+                                   + business_error->message };
+        }
         // Local bookkeeping: exit at the latest known price (best effort).
         const double exit_price = pos.current_price > 0.0
                                       ? pos.current_price : pos.entry_price;
@@ -2050,18 +2063,82 @@ Result<nlohmann::json> EngineServices::modifySlTp(const nlohmann::json &params)
                            "modify_sl_tp: CFD infrastructure not configured" };
     }
 
-    // Omitted fields keep the currently attached value ("0" = no stop).
-    const double sl = has_sl ? params["sl_price"].get<double>()
-                             : pos.sl_price;
-    const double tp = has_tp ? params["tp_price"].get<double>()
-                             : pos.tp_price;
+    // The modify endpoint addresses the EXCHANGE position id, exactly like
+    // the close endpoint (close-id translation verified live on 2026-08-17).
+    // Passing the engine-local id ("XAUUSD_Buy_1") targets an id Gate never
+    // issued; this path previously did so. Every CFD position carries the
+    // exchange id after a fill or a sync, so a missing one means there is
+    // nothing the exchange could address.
+    if (pos.exchange_position_id.empty())
+    {
+        return PulseError{ ErrorCode::InternalError,
+                           "modify_sl_tp: position " + position_id
+                               + " has no exchange position id" };
+    }
+
+    // Omitted fields keep the currently attached value ("0" = no stop). The
+    // engine's copy can be up to one position-sync interval stale, and the
+    // PUT rewrites BOTH prices, so read the live position whenever a field is
+    // omitted. Otherwise a stop tightening could silently revert (or clear)
+    // a take-profit the user just changed in the Gate app.
+    double sl = has_sl ? params["sl_price"].get<double>() : pos.sl_price;
+    double tp = has_tp ? params["tp_price"].get<double>() : pos.tp_price;
 
     std::lock_guard<std::mutex> rest_lock(m_restMutex);
+
+    if (!has_sl || !has_tp)
+    {
+        auto live = m_cfdRest->getCfdPositions();
+        if (!ok(live))
+        {
+            return PulseError{ error(live).code,
+                               "modify_sl_tp: cannot read live protective "
+                               "prices for "
+                                   + position_id + ": " + error(live).message };
+        }
+
+        const auto &data = value(live).value("data", nlohmann::json::object());
+        const auto &list = data.value("list", nlohmann::json::array());
+        bool found = false;
+
+        if (list.is_array())
+        {
+            for (const auto &entry : list)
+            {
+                const std::string exchange_id = std::to_string(
+                    static_cast<std::int64_t>(syncJsonNumber(entry, "position_id")));
+                if (exchange_id != pos.exchange_position_id)
+                {
+                    continue;
+                }
+                sl = has_sl ? sl : syncJsonNumber(entry, "price_sl");
+                tp = has_tp ? tp : syncJsonNumber(entry, "price_tp");
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            return PulseError{ ErrorCode::InternalError,
+                               "modify_sl_tp: position " + position_id
+                                   + " is no longer on the exchange" };
+        }
+    }
+
     auto result = m_cfdRest->putCfdPositionModify(
-        position_id, std::to_string(sl), std::to_string(tp));
+        pos.exchange_position_id, std::to_string(sl), std::to_string(tp));
     if (!ok(result))
     {
         return error(result);
+    }
+
+    // TradFi reports business errors as a 2xx body {"label","message"}; the
+    // HTTP status alone would record a rejected stop as accepted.
+    if (auto business_error =
+            execution::OrderExecutor::cfdBusinessError(value(result)))
+    {
+        return *business_error;
     }
 
     // Refresh the local view immediately (the periodic sync would catch up
