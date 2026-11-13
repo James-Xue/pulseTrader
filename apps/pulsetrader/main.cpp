@@ -37,6 +37,7 @@
 #include "logging/Logger.hpp"
 #include "market/MarketFeed.hpp"
 #include "risk/DrawdownGuard.hpp"
+#include "risk/ProtectiveExitManager.hpp"
 #include "risk/OrderRateLimiter.hpp"
 #include "risk/PositionManager.hpp"
 #include "risk/RiskManager.hpp"
@@ -1170,9 +1171,16 @@ static int runTrade(int argc, char* argv[])
     // the aggregator output loses the originating strategy id, so a strategy
     // with auto_trade=0 (signals-only) must be stopped before aggregation.
     // It still publishes to the board (get_signals stays live for testing).
+    // Flat exits (B1): the aggregator ignores Flat by design, so the signal
+    // callback cannot route them. Strategy threads push them here and the
+    // main loop closes the matching positions, where the CFD close endpoint
+    // (which is not an order) is reachable.
+    std::mutex flat_mutex;
+    std::vector<pulse::strategy::TradingSignal> pending_flats;
+
     strategy_mgr.setSignalCallback(
         [&aggregator, board, &strategy_mgr,
-         signal_recorder_ptr](const pulse::strategy::TradingSignal& sig)
+         signal_recorder_ptr, &flat_mutex, &pending_flats](const pulse::strategy::TradingSignal& sig)
         {
             board->publish(sig);
             // M32 journal: raw stream is recorded BEFORE the auto_trade gate
@@ -1187,7 +1195,16 @@ static int runTrade(int argc, char* argv[])
             if (nullptr == params
                 || params->auto_trade.load(std::memory_order_acquire) != 0.0)
             {
-                aggregator.addSignal(sig);
+                if (pulse::strategy::SignalType::Flat == sig.type)
+                {
+                    // Exit intent — bypass the directional aggregator.
+                    std::lock_guard flat_lock(flat_mutex);
+                    pending_flats.push_back(sig);
+                }
+                else
+                {
+                    aggregator.addSignal(sig);
+                }
             }
         });
 
@@ -1420,6 +1437,53 @@ static int runTrade(int argc, char* argv[])
     // code path also runs every ~10s (position sync tick below) and on
     // demand via `sync_positions` / REPL `sync`.
     (void)services.syncPositions();
+
+    // L7 protective exits (audit B1): engine-side stop-loss / take-profit
+    // supervisor. Exchange-side SL/TP orders are not attached to futures
+    // entries yet, so this is the only backstop while the process is alive.
+    //
+    // Prices come from the per-market ticker caches; a missing quote keeps
+    // the previous mark (no fabricated triggers). Closes go through
+    // EngineServices so CFD uses its dedicated close endpoint while
+    // futures/spot go through the risk gate as reduce-only orders.
+    pulse::risk::ProtectiveExitManager protective_exits(
+        cfg.risk,
+        position_mgr,
+        [&spot_feed, &futures_feed, &cfd_feed](const pulse::Symbol &symbol,
+                                               pulse::MarketType market_type)
+            -> std::optional<pulse::Price>
+        {
+            pulse::market::MarketFeed *feed = nullptr;
+            switch (market_type)
+            {
+            case pulse::MarketType::Futures:
+                feed = futures_feed.get();
+                break;
+            case pulse::MarketType::Cfd:
+                feed = cfd_feed.get();
+                break;
+            default:
+                feed = spot_feed.get();
+                break;
+            }
+            if (nullptr == feed)
+            {
+                return std::nullopt;
+            }
+            const auto ticker = feed->tickerCache().get(symbol);
+            if (!ticker.has_value() || ticker->last <= 0.0)
+            {
+                return std::nullopt;
+            }
+            return ticker->last;
+        },
+        [&services](const pulse::risk::Position &pos, double quantity)
+        {
+            nlohmann::json close_params;
+            close_params["position_id"] = pos.position_id;
+            close_params["quantity"] = quantity;
+            return pulse::ok(services.closePosition(close_params));
+        });
 
     // The registry is copied into the server; the local copy is used by
     // the embedded REPL (both dispatch to the same EngineServices).
@@ -1791,6 +1855,41 @@ static int runTrade(int argc, char* argv[])
         {
             position_sync_counter = 0;
             (void)services.syncPositions();
+        }
+
+        // L7 protective exits: engine-side stop-loss / take-profit. Runs
+        // every tick; each position is throttled to one close attempt per
+        // kRetryCooldownSeconds inside the manager.
+        (void)protective_exits.tick(std::chrono::system_clock::now());
+
+        // Strategy Flat exits queued by the signal callback. Only positions
+        // owned by the signalling strategy (or untagged ones) on that symbol
+        // are closed — another strategy's book is not ours to touch.
+        {
+            std::vector<pulse::strategy::TradingSignal> flats;
+            {
+                std::lock_guard flat_lock(flat_mutex);
+                flats.swap(pending_flats);
+            }
+            for (const auto &sig : flats)
+            {
+                for (const auto &pos : position_mgr.getPositionsBySymbol(sig.symbol))
+                {
+                    if (!pos.strategy_id.empty() && pos.strategy_id != sig.strategy_id)
+                    {
+                        continue;
+                    }
+                    nlohmann::json close_params;
+                    close_params["position_id"] = pos.position_id;
+                    const auto close_result = services.closePosition(close_params);
+                    if (!pulse::ok(close_result))
+                    {
+                        log->warn("[L6] Flat exit failed for {}: {}",
+                                  pos.position_id,
+                                  pulse::error(close_result).message);
+                    }
+                }
+            }
         }
 
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)

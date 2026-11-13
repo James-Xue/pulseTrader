@@ -291,6 +291,11 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
     auto log_app = logging::Logger::get("app");
 
     // Skip Flat signals.
+    //
+    // Flat is an exit intent, not a directional signal. It is routed by
+    // main.cpp straight to EngineServices::closePosition (audit B1), because
+    // CFD closes use a dedicated endpoint that this class cannot reach.
+    // Nothing should arrive here with Flat; keep the guard as a backstop.
     if (strategy::SignalType::Flat == sig.type)
     {
         return;
