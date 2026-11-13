@@ -219,3 +219,61 @@ TEST(KlineBuffer, CapacityIsRespected)
     EXPECT_EQ(buffer.size(), 5u);
     EXPECT_EQ(buffer.capacity(), 5u);
 }
+
+// ---------------------------------------------------------------------------
+// updateOrPush — REST-polled feeds refresh the forming candle in place
+// ---------------------------------------------------------------------------
+
+TEST(KlineBuffer, UpdateOrPushRefreshesNewestCandle)
+{
+    KlineBuffer buffer(10);
+
+    Kline first;
+    first.open_time = 1000;
+    first.close = 1.0;
+    buffer.push(first);
+
+    Kline forming;
+    forming.open_time = 2000;
+    forming.close = 2.0;
+    EXPECT_TRUE(buffer.updateOrPush(forming));
+    EXPECT_EQ(2u, buffer.size());
+
+    // Same open_time: the exchange returned the same bar with its final OHLC.
+    forming.close = 20.0;
+    EXPECT_FALSE(buffer.updateOrPush(forming));
+    EXPECT_EQ(2u, buffer.size());
+
+    const auto latest = buffer.latest();
+    ASSERT_TRUE(latest.has_value());
+    EXPECT_EQ(2000, latest->open_time);
+    EXPECT_DOUBLE_EQ(20.0, latest->close);
+
+    // The older candle is untouched.
+    const auto snap = buffer.snapshot();
+    ASSERT_EQ(2u, snap.size());
+    EXPECT_DOUBLE_EQ(1.0, snap[0].close);
+}
+
+TEST(KlineBuffer, UpdateOrPushAppendsNewerAndIgnoresOlder)
+{
+    KlineBuffer buffer(10);
+
+    Kline bar;
+    bar.open_time = 1000;
+    buffer.updateOrPush(bar);
+
+    bar.open_time = 2000;
+    EXPECT_TRUE(buffer.updateOrPush(bar));
+    EXPECT_EQ(2u, buffer.size());
+
+    // Out-of-order (older than the newest): ignored.
+    bar.open_time = 1500;
+    EXPECT_FALSE(buffer.updateOrPush(bar));
+    EXPECT_EQ(2u, buffer.size());
+
+    const auto snap = buffer.snapshot();
+    ASSERT_EQ(2u, snap.size());
+    EXPECT_EQ(1000, snap[0].open_time);
+    EXPECT_EQ(2000, snap[1].open_time);
+}

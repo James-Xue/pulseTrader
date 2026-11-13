@@ -82,6 +82,28 @@ class KlineBuffer
     ///   1. kline — the candle to store (copied atomically)
     void push(const Kline &kline);
 
+    /// Append a newer candle or refresh the newest candle in place.
+    ///
+    /// Designed for REST-polled feeds (TradFi CFD), where the same 1-minute
+    /// candle is returned repeatedly while it forms. Semantics:
+    ///   1. Empty buffer        -> append
+    ///   2. same open_time      -> overwrite the newest slot (final OHLC)
+    ///   3. newer open_time     -> append (oldest overwritten when full)
+    ///   4. older open_time     -> ignored (out-of-order/backfill)
+    ///
+    /// Callers must still push candles in chronological order; the "older"
+    /// rule keeps a newest-first response from corrupting the buffer, but the
+    /// proper fix is sorting the batch before upserting.
+    ///
+    /// Single-writer contract: one feed thread owns the buffer, as with
+    /// push(). Readers see a consistent snapshot through the seqlock.
+    ///
+    /// Returns true when the candle was appended (a genuinely new bar), false
+    /// when it merely refreshed the newest bar or was ignored. Callers use
+    /// this to keep "new kline" counters and event sinks at one event per
+    /// bar instead of one per REST poll.
+    bool updateOrPush(const Kline &kline);
+
     /// Retrieve a snapshot of the last N candles (lock-free seqlock read).
     ///
     /// Returns a vector of N candles in chronological order (oldest first).

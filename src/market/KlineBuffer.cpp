@@ -37,6 +37,53 @@ void KlineBuffer::push(const Kline &kline)
     m_seqlock.fetch_add(1, std::memory_order_release);
 }
 
+bool KlineBuffer::updateOrPush(const Kline &kline)
+{
+    // Same seqlock write protocol as push(): odd during the write, even after.
+    const std::uint64_t seq = m_seqlock.fetch_add(1, std::memory_order_acq_rel);
+    (void)seq;
+
+    const std::size_t current_count = m_count.load(std::memory_order_relaxed);
+    bool should_append = false;
+
+    if (0 == current_count)
+    {
+        should_append = true;
+    }
+    else
+    {
+        const std::size_t latest_pos = logicalToPhysical(current_count - 1);
+        if (kline.open_time == m_buffer[latest_pos].open_time)
+        {
+            // The forming candle got its next (eventually final) OHLC revision.
+            m_buffer[latest_pos] = kline;
+        }
+        else if (kline.open_time > m_buffer[latest_pos].open_time)
+        {
+            should_append = true;
+        }
+        // Older than the newest candle: ignore. A newest-first REST batch is
+        // sorted by the caller before reaching here.
+    }
+
+    if (should_append)
+    {
+        const std::size_t write_pos = m_head.load(std::memory_order_relaxed);
+        m_buffer[write_pos] = kline;
+
+        const std::size_t new_head = (write_pos + 1) % m_capacity;
+        m_head.store(new_head, std::memory_order_release);
+
+        if (current_count < m_capacity)
+        {
+            m_count.store(current_count + 1, std::memory_order_release);
+        }
+    }
+
+    m_seqlock.fetch_add(1, std::memory_order_release);
+    return should_append;
+}
+
 std::vector<Kline> KlineBuffer::snapshot(std::size_t n) const
 {
     // Retry loop: seqlock ensures consistent snapshot.

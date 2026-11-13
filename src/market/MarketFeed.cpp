@@ -6,7 +6,9 @@
 #include "logging/Logger.hpp"
 #include "market/MarketDataSink.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <vector>
 
 namespace pulse::market
 {
@@ -169,6 +171,18 @@ KlineBuffer &MarketFeed::getKlineBuffer(const Symbol &symbol)
 OrderBookManager &MarketFeed::orderbookManager()
 {
     return m_orderbookManager;
+}
+
+std::optional<std::int64_t> MarketFeed::lastKlineFetchMs(
+    const Symbol &symbol) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_klineFetchMutex);
+    const auto it = m_lastKlineFetchMs.find(symbol);
+    if (m_lastKlineFetchMs.end() == it)
+    {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 FeedStats MarketFeed::stats() const
@@ -614,10 +628,12 @@ void MarketFeed::pollLoop(std::stop_token stoken)
 {
     PULSE_LOG_INFO("market", "CFD poll loop started");
 
-    // Poll the REST API exactly once per minute for klines; the first fetch
-    // happens immediately (backfill of up to 500 candles = KlineBuffer capacity).
-    const auto start_time = std::chrono::steady_clock::now();
-    auto last_kline_poll = start_time - std::chrono::minutes(1);
+    // Poll klines once per WALL-CLOCK minute, on the first loop iteration
+    // after the boundary. The alignment matters: the upsert refreshes the
+    // just-closed bar, so its final OHLC lands within ~1-2 s of the close
+    // instead of waiting for an arbitrary 60 s timer phase. The first
+    // iteration also backfills up to 500 candles (KlineBuffer capacity).
+    std::int64_t last_kline_minute = -1;
 
     const auto fetch_ticker = [this, &stoken](const Symbol &symbol)
     {
@@ -661,6 +677,11 @@ void MarketFeed::pollLoop(std::stop_token stoken)
 
     const auto fetch_klines = [this, &stoken](const Symbol &symbol)
     {
+        // Anchor chosen BEFORE the request: the response reflects server
+        // state at or after this instant, so any bar whose close_time is
+        // <= this value is guaranteed to be returned in its final form.
+        const std::int64_t fetch_start_ms = nowMs();
+
         Result<nlohmann::json> res;
         if (m_restMutex)
         {
@@ -687,27 +708,64 @@ void MarketFeed::pollLoop(std::stop_token stoken)
         {
             return;
         }
-        auto &buffer = getKlineBuffer(symbol);
-        const auto latest_opt = buffer.latest();
-        const std::int64_t newest_known = latest_opt ? latest_opt->open_time : 0;
+        // Parse the whole batch first, then upsert in chronological order.
+        //
+        // Why not "push only candles newer than the newest known": the CFD
+        // REST list includes the still-forming candle, and the old code
+        // stored that partial OHLC at first sight and never refreshed it.
+        // Every 1-minute bar was therefore frozen at a random offset inside
+        // its minute, which poisons ATR/SuperTrend and any close-based
+        // indicator. updateOrPush() refreshes the newest slot in place, so
+        // each bar converges to its final OHLC on the poll after it closes.
+        std::vector<Kline> parsed;
+        parsed.reserve(j["data"]["list"].size());
+
         for (const auto &candle : j["data"]["list"])
         {
             auto kline_opt = parseCfdKline(candle);
-            if (!kline_opt)
+            if (kline_opt)
             {
-                continue;
+                parsed.push_back(*kline_opt);
             }
-            // KlineBuffer::push does not dedupe — skip candles we already have.
-            if (kline_opt->open_time <= newest_known)
+        }
+
+        // The response order is not part of the API contract; sorting makes
+        // the upsert safe even if Gate switches to newest-first.
+        std::sort(parsed.begin(), parsed.end(),
+                  [](const Kline &lhs, const Kline &rhs)
+                  { return lhs.open_time < rhs.open_time; });
+
+        auto &buffer = getKlineBuffer(symbol);
+        for (const auto &kline : parsed)
+        {
+            if (!buffer.updateOrPush(kline))
             {
-                continue;
+                continue; // refreshed an existing bar or out-of-order
             }
-            buffer.push(*kline_opt);
             m_klineCount.fetch_add(1, std::memory_order_relaxed);
             if (m_dataSink)
             {
-                m_dataSink->onKline(symbol, m_marketType, *kline_opt);
+                m_dataSink->onKline(symbol, m_marketType, kline);
             }
+        }
+
+        // Record the anchor only when the response actually re-read the
+        // newest buffered bar. A 2xx with an empty or truncated batch (an
+        // exchange hiccup) must not advance the proof that a bar's OHLC is
+        // final — the SuperTrend leg relies on this anchor and would
+        // otherwise accept a partially formed bar.
+        bool batch_covers_newest = false;
+        if (!parsed.empty())
+        {
+            const auto newest = buffer.latest();
+            batch_covers_newest =
+                !newest.has_value() || parsed.back().open_time >= newest->open_time;
+        }
+
+        if (batch_covers_newest)
+        {
+            std::unique_lock<std::shared_mutex> lock(m_klineFetchMutex);
+            m_lastKlineFetchMs[symbol] = fetch_start_ms;
         }
     };
 
@@ -727,9 +785,10 @@ void MarketFeed::pollLoop(std::stop_token stoken)
             break;
         }
 
-        // Klines: ~60s cadence.
-        const auto now = std::chrono::steady_clock::now();
-        if (now - last_kline_poll >= std::chrono::minutes(1))
+        // Klines: once per wall-clock minute (see the alignment note above).
+        const auto wall_minute = std::chrono::duration_cast<std::chrono::minutes>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        if (wall_minute != last_kline_minute)
         {
             for (const auto &symbol : m_subscribedSymbols)
             {
@@ -739,7 +798,7 @@ void MarketFeed::pollLoop(std::stop_token stoken)
                     break;
                 }
             }
-            last_kline_poll = std::chrono::steady_clock::now();
+            last_kline_minute = wall_minute;
         }
 
         // Sleep in short chunks so stop() stays responsive; the mutex is held

@@ -256,3 +256,16 @@ TEST(MarketFeedCfd, ParseCfdKlineRejectsMissingFields)
                      nlohmann::json{ { "o", "1" }, { "h", "2" } })
                      .has_value());
 }
+
+// ---------------------------------------------------------------------------
+// Kline finality anchor
+// ---------------------------------------------------------------------------
+
+TEST(MarketFeedStats, LastKlineFetchStartsEmpty)
+{
+    // Consumers (the gold trader's SuperTrend leg) must not trust any bar
+    // until the first successful fetch has been recorded.
+    exchange::GateRestClient rest{ ExchangeConfig{}, MarketType::Cfd };
+    MarketFeed feed{ nullptr, rest, MarketType::Cfd };
+    EXPECT_FALSE(feed.lastKlineFetchMs("XAUUSD").has_value());
+}

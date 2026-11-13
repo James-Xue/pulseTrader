@@ -27,6 +27,8 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -100,6 +102,17 @@ class MarketFeed
     /// Access the order book manager (read-only for strategy threads).
     [[nodiscard]] OrderBookManager &orderbookManager();
 
+    /// Wall-clock time (Unix ms) at which the last SUCCESSFUL kline fetch for
+    /// `symbol` was issued. Nullopt when no fetch has succeeded yet.
+    ///
+    /// Why consumers need it: the CFD REST feed returns the still-forming
+    /// 1-minute bar and updates it in place. A bar must therefore be trusted
+    /// as final only when its close_time is <= this anchor — otherwise the
+    /// reader may consume the partial snapshot taken at the bar's first
+    /// appearance. The gold trader's SuperTrend leg uses exactly this rule.
+    [[nodiscard]] std::optional<std::int64_t> lastKlineFetchMs(
+        const Symbol &symbol) const;
+
     /// Return a snapshot of the event counters.
     ///
     /// Thread-safe (relaxed atomic loads). Suitable for periodic polling
@@ -168,6 +181,12 @@ class MarketFeed
     std::atomic<std::uint64_t> m_klineCount{ 0 };
 
     MarketDataSink *m_dataSink{ nullptr }; ///< Optional event consumer (not owned).
+
+    /// Last successful kline-fetch anchor per symbol (Unix ms, request start).
+    /// Guarded by a shared mutex: the poll thread writes, main-loop consumers
+    /// read once per second.
+    mutable std::shared_mutex m_klineFetchMutex;
+    std::unordered_map<Symbol, std::int64_t> m_lastKlineFetchMs;
 
     /// Parse an order book update JSON and apply to OrderBookManager.
     void onOrderbookUpdate(const nlohmann::json &result, const nlohmann::json &full_frame);
