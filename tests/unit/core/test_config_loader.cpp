@@ -1379,5 +1379,91 @@ exchange_stop_pct = 0.02
     EXPECT_DOUBLE_EQ(0.02, value(result).risk.exchange_stop.pct);
 }
 
+// ---------------------------------------------------------------------------
+// Gold trader dynamic stop supervisor (strategy 1, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, GoldTraderDefaultsDisabled)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &gt = value(result).gold_trader;
+    EXPECT_FALSE(gt.enabled);
+    EXPECT_EQ("XAUUSD", gt.symbol);
+    EXPECT_EQ(MarketType::Cfd, gt.market_type);
+    EXPECT_DOUBLE_EQ(8.0, gt.hard_stop_usd);
+    EXPECT_DOUBLE_EQ(2.0, gt.breakeven_trigger_usd);
+    EXPECT_DOUBLE_EQ(5.0, gt.peak_drawdown_usd);
+    EXPECT_DOUBLE_EQ(2.0, gt.peak_trail_arm_usd);
+    EXPECT_DOUBLE_EQ(1.0, gt.supertrend_buffer_usd);
+    EXPECT_DOUBLE_EQ(100.0, gt.contract_volume);
+    EXPECT_EQ(1000u, gt.poll_interval_ms);
+    EXPECT_TRUE(gt.exchange_stop);
+}
+
+TEST(ConfigLoader, GoldTraderParsesKeys)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+
+[gold_trader]
+enabled = true
+symbol = "XAUUSD"
+market_type = "cfd"
+hard_stop_usd = 10.0
+breakeven_trigger_usd = 3.0
+supertrend_buffer_usd = 1.5
+peak_drawdown_usd = 6.0
+peak_trail_arm_usd = 1.0
+supertrend_period = 14.0
+supertrend_multiplier = 2.5
+contract_volume = 100.0
+poll_interval_ms = 500
+retry_cooldown_sec = 5
+exchange_stop = false
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const auto &gt = value(result).gold_trader;
+    EXPECT_TRUE(gt.enabled);
+    EXPECT_DOUBLE_EQ(10.0, gt.hard_stop_usd);
+    EXPECT_DOUBLE_EQ(3.0, gt.breakeven_trigger_usd);
+    EXPECT_DOUBLE_EQ(1.5, gt.supertrend_buffer_usd);
+    EXPECT_DOUBLE_EQ(6.0, gt.peak_drawdown_usd);
+    EXPECT_DOUBLE_EQ(1.0, gt.peak_trail_arm_usd);
+    EXPECT_DOUBLE_EQ(14.0, gt.supertrend_period);
+    EXPECT_DOUBLE_EQ(2.5, gt.supertrend_multiplier);
+    EXPECT_DOUBLE_EQ(100.0, gt.contract_volume);
+    EXPECT_EQ(500u, gt.poll_interval_ms);
+    EXPECT_EQ(5u, gt.retry_cooldown_sec);
+    EXPECT_FALSE(gt.exchange_stop);
+}
+
+TEST(ConfigLoader, GoldTraderRejectsNonCfdMarket)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+
+[gold_trader]
+market_type = "futures"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    // Parsing accepts the enum; the validator is what rejects non-CFD.
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(MarketType::Futures, value(result).gold_trader.market_type);
+}
+
 } // namespace
 } // namespace pulse

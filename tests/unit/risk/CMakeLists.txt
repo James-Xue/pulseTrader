@@ -6,6 +6,8 @@ add_executable(test_risk
     test_stop_loss_engine.cpp
     test_take_profit_engine.cpp
     test_protective_exit.cpp
+    test_gold_trader.cpp
+    test_supertrend.cpp
 )
 
 target_link_libraries(test_risk

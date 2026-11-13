@@ -11,6 +11,7 @@
 | **MeanReversionScalper** | Mean reversion | Kline close price | Medium | ~20 kline bars | Ranging range |
 | **SuperTrendScalper** | Trend following | Kline H/L/C | Medium | ~11 kline bars | Trend / rising volatility |
 | **EmaResonanceScalper** | Five-period resonance | Kline close price | Very low | ~201 kline bars | Strong one-directional trend |
+| **GoldTrader** (L7, exit-only) | Dynamic stop ladder | Ticker + 1m klines | n/a (no entry) | ~period+1 bars for SuperTrend | XAUUSD CFD |
 
 ---
 
@@ -143,3 +144,4 @@ Detailed implementation documentation for each strategy:
 - [SuperTrendScalper — ATR trend flip](supertrend-scalper.md)
 - [EthScalper — ETH short-chasing EMA crossover (coin-specific)](eth-scalper.md)
 - [EmaResonanceScalper — five-period EMA resonance](ema-resonance-scalper.md)
+- [GoldTrader — USD dynamic stop ladder for XAUUSD CFD (exit-only, L7)](gold-trader.md)

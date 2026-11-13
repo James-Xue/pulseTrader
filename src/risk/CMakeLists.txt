@@ -8,6 +8,8 @@ add_library(pulse_risk STATIC
     ProtectiveExitManager.cpp
     StopLossEngine.cpp
     TakeProfitEngine.cpp
+    GoldTrader.cpp
+    SuperTrend.cpp
 )
 
 add_library(pulse::risk ALIAS pulse_risk)

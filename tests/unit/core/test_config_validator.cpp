@@ -244,6 +244,19 @@ TEST(ConfigValidator, RejectsEmptyStrategyList)
     EXPECT_NE(std::string::npos, err.message.find("strategy"));
 }
 
+TEST(ConfigValidator, AcceptsGoldTraderWithoutStrategies)
+{
+    // The gold trader is an L7 position supervisor, not a StrategyBase
+    // instance: a gold-only deployment is valid.
+    auto cfg = valid_config();
+    cfg.strategy.strategies.clear();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.symbol = "XAUUSD";
+    cfg.gold_trader.market_type = MarketType::Cfd;
+
+    EXPECT_EQ(ErrorCode::Ok, validateConfig(cfg).code);
+}
+
 TEST(ConfigValidator, RejectsStrategyWithEmptyName)
 {
     auto cfg = valid_config();
@@ -606,6 +619,78 @@ TEST(ConfigValidator, IgnoresExchangeStopPctWhenDisabled)
     auto cfg = valid_config();
     cfg.risk.exchange_stop.enabled = false;
     cfg.risk.exchange_stop.pct = 5.0;
+
+    EXPECT_EQ(ErrorCode::Ok, validateConfig(cfg).code);
+}
+
+// ---------------------------------------------------------------------------
+// Gold trader dynamic stop supervisor (strategy 1, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, AcceptsValidGoldTrader)
+{
+    auto cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.symbol = "XAUUSD";
+    cfg.gold_trader.market_type = MarketType::Cfd;
+
+    EXPECT_EQ(ErrorCode::Ok, validateConfig(cfg).code);
+}
+
+TEST(ConfigValidator, RejectsGoldTraderNonCfdMarket)
+{
+    auto cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.market_type = MarketType::Futures;
+
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("market_type"));
+}
+
+TEST(ConfigValidator, RejectsGoldTraderNonPositiveThresholds)
+{
+    auto cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+
+    cfg.gold_trader.hard_stop_usd = 0.0;
+    EXPECT_EQ(ErrorCode::ConfigValidationError, validateConfig(cfg).code);
+
+    cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.breakeven_trigger_usd = -1.0;
+    EXPECT_EQ(ErrorCode::ConfigValidationError, validateConfig(cfg).code);
+
+    cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.peak_drawdown_usd = 0.0;
+    EXPECT_EQ(ErrorCode::ConfigValidationError, validateConfig(cfg).code);
+}
+
+TEST(ConfigValidator, RejectsGoldTraderBadSupertrendSettings)
+{
+    auto cfg = valid_config();
+    cfg.gold_trader.enabled = true;
+    cfg.gold_trader.supertrend_period = 0.0;
+
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("supertrend_period"));
+
+    // The KlineBuffer capacity is 500, so a larger period can never produce
+    // a SuperTrend point; reject it instead of silently disabling the leg.
+    cfg.gold_trader.supertrend_period = 600.0;
+    err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("supertrend_period"));
+}
+
+TEST(ConfigValidator, IgnoresGoldTraderWhenDisabled)
+{
+    auto cfg = valid_config();
+    cfg.gold_trader.enabled = false;
+    cfg.gold_trader.hard_stop_usd = 0.0;
+    cfg.gold_trader.market_type = MarketType::Futures;
 
     EXPECT_EQ(ErrorCode::Ok, validateConfig(cfg).code);
 }

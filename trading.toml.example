@@ -184,6 +184,29 @@ poll_interval_ms = 500
 # poll_interval_ms = 500
 # custom_params  = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 
+# ── Gold trader: USD dynamic stop ladder (XAUUSD CFD) ────────────────
+# Optional L7 supervisor for every open XAUUSD CFD position. It never opens
+# a position; it only enforces the exit ladder:
+#   hard stop -8 USD, break-even after +2 USD peak profit, 1m SuperTrend
+#   stop with a 1 USD buffer, peak profit give-back of 5 USD, tighten-only.
+# Thresholds are account USD. The peak give-back closes at market; every
+# tightened stop is also mirrored to the exchange-native price_sl.
+[gold_trader]
+enabled                = false
+symbol                 = "XAUUSD"
+market_type            = "cfd"
+hard_stop_usd          = 8.0
+breakeven_trigger_usd  = 2.0
+supertrend_buffer_usd  = 1.0
+peak_drawdown_usd      = 5.0
+peak_trail_arm_usd     = 2.0
+supertrend_period      = 10.0
+supertrend_multiplier  = 3.0
+contract_volume        = 100.0
+poll_interval_ms       = 1000
+retry_cooldown_sec     = 10
+exchange_stop          = true
+
 # ── 风控 ─────────────────────────────────────────────────────────────
 [risk]
 maxPositionNotional = 500          # 最大总持仓（USDT）

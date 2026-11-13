@@ -196,3 +196,30 @@ TEST(ProtectiveExit, MissingQuoteDoesNotTrigger)
     EXPECT_EQ(0, r.stopped);
     EXPECT_EQ(0, r.took_profit);
 }
+TEST(ProtectiveExit, ManageFilterSkipsExcludedPositions)
+{
+    auto cfg = make_config();
+    cfg.stop_loss.mode = StopMode::Fixed;
+    cfg.stop_loss.fixed_pct = 0.01;
+    cfg.take_profit.enabled = false;
+
+    PositionManager positions(cfg);
+    auto opened = positions.openPosition("XAUUSD", Side::Buy, 0.01, 4000.0,
+                                         "gold", MarketType::Cfd, 500.0,
+                                         MarginMode::Cross, 100.0, 0.0);
+    ASSERT_TRUE(ok(opened)) << error(opened).message;
+
+    int closes = 0;
+    ProtectiveExitManager exits(
+        cfg, positions,
+        [](const Symbol &, MarketType) { return std::optional<Price>{ 3900.0 }; },
+        [&](const Position &, double) {
+            ++closes;
+            return true;
+        },
+        [](const Position &pos) { return pos.symbol != "XAUUSD"; });
+
+    EXPECT_EQ(0, exits.tick(at(10)).stopped);
+    EXPECT_EQ(0, closes);
+    EXPECT_EQ(0u, exits.trackedPositions());
+}

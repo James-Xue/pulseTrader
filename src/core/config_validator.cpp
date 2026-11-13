@@ -191,10 +191,14 @@ PulseError validateConfig(const PulseConfig &cfg)
     // -----------------------------------------------------------------------
     // 6. Strategy instances
     // -----------------------------------------------------------------------
-    if (cfg.strategy.strategies.empty())
+    // A strategy-free engine is valid only when the L7 gold trader is
+    // enabled: the supervisor manages positions that may have been opened
+    // manually, and it does not need a StrategyBase instance to run.
+    if (cfg.strategy.strategies.empty() && !cfg.gold_trader.enabled)
     {
         return PulseError{ErrorCode::ConfigValidationError,
-                          "at least one strategy instance must be defined"};
+                          "at least one strategy instance must be defined "
+                          "(or [gold_trader] enabled = true)"};
     }
 
     for (std::size_t i = 0; i < cfg.strategy.strategies.size(); ++i)
@@ -547,6 +551,93 @@ PulseError validateConfig(const PulseConfig &cfg)
                               "(got "
                                   + std::to_string(cfg.funding_watch.poll_sec)
                                   + ")"};
+        }
+    }
+
+    // [gold_trader] USD dynamic stop supervisor. Validated when enabled:
+    // the thresholds become real close orders, so a zero or negative value
+    // would either never fire or fire on every tick.
+    if (cfg.gold_trader.enabled)
+    {
+        if (cfg.gold_trader.symbol.empty())
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.symbol must not be empty"};
+        }
+
+        if (MarketType::Cfd != cfg.gold_trader.market_type)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.market_type must be \"cfd\" — the "
+                              "USD stop ladder is implemented for TradFi CFD "
+                              "positions only"};
+        }
+
+        if (cfg.gold_trader.hard_stop_usd <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.hard_stop_usd must be > 0 (got "
+                                  + std::to_string(cfg.gold_trader.hard_stop_usd)
+                                  + ")"};
+        }
+        if (cfg.gold_trader.breakeven_trigger_usd <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.breakeven_trigger_usd must be > 0 "
+                              "(got "
+                                  + std::to_string(
+                                        cfg.gold_trader.breakeven_trigger_usd)
+                                  + ")"};
+        }
+        if (cfg.gold_trader.peak_drawdown_usd <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.peak_drawdown_usd must be > 0 (got "
+                                  + std::to_string(
+                                        cfg.gold_trader.peak_drawdown_usd)
+                                  + ")"};
+        }
+        if (cfg.gold_trader.supertrend_buffer_usd < 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.supertrend_buffer_usd must be >= 0"};
+        }
+        if (cfg.gold_trader.peak_trail_arm_usd < 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.peak_trail_arm_usd must be >= 0"};
+        }
+        if (cfg.gold_trader.supertrend_period < 1.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.supertrend_period must be >= 1"};
+        }
+        if (cfg.gold_trader.supertrend_period > 499.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.supertrend_period must be <= 499 "
+                              "(KlineBuffer capacity is 500)"};
+        }
+        if (cfg.gold_trader.supertrend_multiplier <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.supertrend_multiplier must be > 0"};
+        }
+        if (cfg.gold_trader.contract_volume <= 0.0)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.contract_volume must be > 0 (XAUUSD "
+                              "is 100 oz per lot)"};
+        }
+        if (cfg.gold_trader.poll_interval_ms < 100)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.poll_interval_ms must be >= 100"};
+        }
+        if (0 == cfg.gold_trader.retry_cooldown_sec)
+        {
+            return PulseError{ErrorCode::ConfigValidationError,
+                              "gold_trader.retry_cooldown_sec must be > 0"};
         }
     }
 

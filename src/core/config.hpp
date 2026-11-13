@@ -82,6 +82,54 @@ struct ExchangeStopConfig
 };
 
 // ---------------------------------------------------------------------------
+// GoldTraderConfig — USD-based dynamic stop supervisor for XAUUSD CFD
+//
+// Layer 7 strategy-1 policy ("dynamic stop-loss"):
+//   1. Underwater position: hard stop at `hard_stop_usd` of unrealized loss.
+//   2. Once peak floating profit exceeds `breakeven_trigger_usd`, the stop is
+//      raised to break-even (entry price).
+//   3. The 1-minute SuperTrend level participates as another candidate, with
+//      `supertrend_buffer_usd` of extra distance (converted to price using the
+//      position's ounce size) so a wick does not stop the trade out early.
+//   4. Peak floating profit is sampled every `poll_interval_ms`; the stop
+//      `peak_pnl - peak_drawdown_usd` also participates. When price trades
+//      through it the position is closed at market immediately.
+//   5. Candidates only tighten: the effective stop never moves backwards.
+//
+// The thresholds are ACCOUNT USD, not price points. For the minimum 0.01-lot
+// XAUUSD contract (1 ounce) one USD of unrealized PnL equals a 1.00 price
+// move; larger positions divide the same USD amount by their ounce size.
+//
+// `exchange_stop` mirrors every tightened stop to the exchange-native
+// price_sl via modify_sl_tp, so the position remains protected if the engine
+// process dies. The peak-drawdown rule is engine-side only: it requires a
+// per-second mark and always closes at market.
+//
+// Loaded from the top-level `[gold_trader]` TOML section. `enabled = true`
+// means the supervisor starts with the engine (no strategy instance needed).
+// ---------------------------------------------------------------------------
+struct GoldTraderConfig
+{
+    bool enabled = false;                     ///< Start the supervisor with the engine.
+    std::string symbol = "XAUUSD";            ///< Managed symbol.
+    MarketType market_type = MarketType::Cfd; ///< Managed venue (gold CFD only).
+    double hard_stop_usd = 8.0;               ///< Hard loss stop (USD).
+    double breakeven_trigger_usd = 2.0;       ///< Peak profit that arms break-even.
+    double supertrend_buffer_usd = 1.0;       ///< Extra distance beyond the ST line.
+    double peak_drawdown_usd = 5.0;           ///< Give-back allowed from peak profit.
+    /// Peak PnL that arms the give-back candidate. 2.0 keeps the -8 USD hard
+    /// stop as the real floor before break-even; set 0 to arm on any positive
+    /// peak (the literal "peak - 5 USD always participates" reading).
+    double peak_trail_arm_usd = 2.0;
+    double supertrend_period = 10.0;          ///< 1m SuperTrend ATR period.
+    double supertrend_multiplier = 3.0;       ///< 1m SuperTrend ATR multiplier.
+    double contract_volume = 100.0;           ///< Expected oz per lot (XAUUSD = 100).
+    std::uint32_t poll_interval_ms = 1000;    ///< Peak sampling / evaluation cadence.
+    std::uint32_t retry_cooldown_sec = 10;    ///< Close / stop-push retry spacing.
+    bool exchange_stop = true;                ///< Mirror tightened stops to price_sl.
+};
+
+// ---------------------------------------------------------------------------
 // URL Constants — Gate.io mainnet and testnet endpoint addresses
 //
 // Centralised here to eliminate hardcoded URL strings across the codebase.
@@ -520,6 +568,7 @@ struct PulseConfig
     SqliteConfig sqlite;                ///< SQLite trade recorder config.
     GridConfig grid;                    ///< [grid] engine-native grid service (M27).
     FundingWatchConfig funding_watch;   ///< [funding_watch] funding-window monitor.
+    GoldTraderConfig gold_trader;       ///< [gold_trader] USD dynamic stop supervisor.
     BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     /// Extra symbols to stream in the ACTIVE market only (watchlist). They are

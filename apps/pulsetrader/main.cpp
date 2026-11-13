@@ -37,6 +37,7 @@
 #include "logging/Logger.hpp"
 #include "market/MarketFeed.hpp"
 #include "risk/DrawdownGuard.hpp"
+#include "risk/GoldTrader.hpp"
 #include "risk/ProtectiveExitManager.hpp"
 #include "risk/OrderRateLimiter.hpp"
 #include "risk/PositionManager.hpp"
@@ -81,6 +82,8 @@ class SignalRecorder;
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
@@ -764,6 +767,16 @@ static int runTrade(int argc, char* argv[])
         default:                  has_spot = true;    break;
         }
     }
+    // The gold trader (L7) is a position supervisor, not a strategy: it
+    // needs the CFD feed and executor even when no XAUUSD strategy instance
+    // exists. Forcing the market here keeps the startup contract
+    // "[gold_trader] enabled = true loads the gold trader" true for
+    // strategy-free configurations.
+    if (cfg.gold_trader.enabled)
+    {
+        has_cfd = true;
+    }
+
     // Default to spot if no strategies configured (backward compatibility).
     if (!has_spot && !has_futures && !has_cfd) has_spot = true;
 
@@ -800,6 +813,20 @@ static int runTrade(int argc, char* argv[])
                     syms.push_back(symbol);
                 }
             }
+        }
+
+        // The gold trader manages a CFD symbol outside the strategy list.
+        // Add it explicitly and do NOT fall back to the global symbol list
+        // (a futures-only name in the CFD feed fails the whole registry
+        // detail load and drops XAUUSD's contract multiplier).
+        if (MarketType::Cfd == mt && cfg.gold_trader.enabled)
+        {
+            if (std::find(syms.begin(), syms.end(), cfg.gold_trader.symbol)
+                == syms.end())
+            {
+                syms.push_back(cfg.gold_trader.symbol);
+            }
+            return syms;
         }
 
         return syms.empty() ? cfg.symbols : syms;
@@ -1151,7 +1178,9 @@ static int runTrade(int argc, char* argv[])
         strategy_mgr.registerStrategy(std::move(strat));
     }
 
-    if (0 == strategy_mgr.strategyCount())
+    // A strategy-free engine is valid when the gold trader is enabled: the
+    // supervisor manages positions that may have been opened manually.
+    if (0 == strategy_mgr.strategyCount() && !cfg.gold_trader.enabled)
     {
         log->error("No strategies registered. Exiting.");
         pulse::logging::Logger::shutdown();
@@ -1320,9 +1349,14 @@ static int runTrade(int argc, char* argv[])
     }
     if (cfd_rest)
     {
+        // Use the CFD feed's own symbol set, not the global cfg.symbols: the
+        // detail endpoint is queried per symbol and one foreign (futures-only)
+        // name can fail the whole load, which would leave the gold trader
+        // without XAUUSD's contract volume. symbols_for(Cfd) already includes
+        // the gold trader's symbol and the CFD watchlist.
         pulse::market::SymbolRegistry cfd_registry(*cfd_rest,
                                                    pulse::MarketType::Cfd);
-        if (cfd_registry.loadFromRest(cfg.symbols))
+        if (cfd_registry.loadFromRest(cfd_symbols))
         {
             log->info("[L1] CFD symbol metadata loaded ({} symbols)",
                       cfd_registry.size());
@@ -1446,6 +1480,14 @@ static int runTrade(int argc, char* argv[])
     // the previous mark (no fabricated triggers). Closes go through
     // EngineServices so CFD uses its dedicated close endpoint while
     // futures/spot go through the risk gate as reduce-only orders.
+    //
+    // When the gold trader arms, it becomes the SOLE exit authority for its
+    // symbol: the generic percentage trail/take-profit ladder below is not
+    // part of the USD dynamic-stop policy and would otherwise partially
+    // close a managed position (silently rescaling its USD thresholds).
+    // `gold_armed` is set right after a successful construction; both the
+    // filter and the manager run only on the main loop.
+    bool gold_armed = false;
     pulse::risk::ProtectiveExitManager protective_exits(
         cfg.risk,
         position_mgr,
@@ -1483,7 +1525,174 @@ static int runTrade(int argc, char* argv[])
             close_params["position_id"] = pos.position_id;
             close_params["quantity"] = quantity;
             return pulse::ok(services.closePosition(close_params));
+        },
+        [&gold_armed, &cfg](const pulse::risk::Position &pos)
+        {
+            return !(gold_armed && pos.symbol == cfg.gold_trader.symbol
+                     && pos.market_type == cfg.gold_trader.market_type);
         });
+
+    // L7 gold trader (strategy 1: USD dynamic stop ladder). This supervisor
+    // is deliberately separate from ProtectiveExitManager: it works in
+    // absolute USD thresholds (8 / 2 / 5) instead of percentage-of-price, it
+    // compares against the 1-minute SuperTrend, and it mirrors every
+    // tightened stop to the exchange-native price_sl so a process crash does
+    // not leave the position unprotected.
+    //
+    // It manages every open XAUUSD CFD position, including positions opened
+    // manually in the Gate app and imported by sync_positions. A missing
+    // quote or kline buffer skips the pass rather than fabricating a level.
+    // Fail closed: the USD ladder is meaningless without the symbol's
+    // contract volume. The registry lookup is the only place that can prove
+    // XAUUSD is 100 oz/lot before the supervisor starts pushing stops; a
+    // missing/mismatched entry disables the gold trader instead of silently
+    // placing stops 100x too tight.
+    bool gold_metadata_ok = true;
+    if (cfg.gold_trader.enabled)
+    {
+        gold_metadata_ok = false;
+
+        if (symbol_registry)
+        {
+            const auto gold_info =
+                symbol_registry->get(cfg.gold_trader.symbol);
+            if (gold_info.has_value()
+                && pulse::MarketType::Cfd == gold_info->market_type
+                && std::abs(gold_info->quanto_multiplier
+                            - cfg.gold_trader.contract_volume)
+                       <= cfg.gold_trader.contract_volume * 0.01)
+            {
+                gold_metadata_ok = true;
+            }
+            else
+            {
+                log->error("[L7] Gold trader disabled: {} metadata "
+                           "quanto_multiplier={} (expected {} oz/lot)",
+                           cfg.gold_trader.symbol,
+                           gold_info.has_value()
+                               ? gold_info->quanto_multiplier
+                               : 0.0,
+                           cfg.gold_trader.contract_volume);
+            }
+        }
+        else
+        {
+            log->error("[L7] Gold trader disabled: no CFD symbol registry "
+                       "for {}", cfg.gold_trader.symbol);
+        }
+    }
+
+    std::unique_ptr<pulse::risk::GoldTrader> gold_trader;
+    if (cfg.gold_trader.enabled && gold_metadata_ok)
+    {
+        const double st_period = cfg.gold_trader.supertrend_period;
+        const double st_multiplier = cfg.gold_trader.supertrend_multiplier;
+
+        gold_trader = std::make_unique<pulse::risk::GoldTrader>(
+            cfg.gold_trader,
+            position_mgr,
+            [&cfd_feed](const pulse::Symbol &symbol) -> std::optional<pulse::Price>
+            {
+                if (!cfd_feed)
+                {
+                    return std::nullopt;
+                }
+                const auto ticker = cfd_feed->tickerCache().get(symbol);
+                if (!ticker.has_value() || ticker->last <= 0.0)
+                {
+                    return std::nullopt;
+                }
+                return ticker->last;
+            },
+            [&cfd_feed, st_period, st_multiplier](const pulse::Symbol &symbol)
+                -> std::optional<pulse::risk::SuperTrendPoint>
+            {
+                if (!cfd_feed)
+                {
+                    return std::nullopt;
+                }
+
+                // The CFD feed returns the still-forming candle and marks it
+                // closed (audit B6). Trust a bar only when a successful kline
+                // fetch STARTED after its close_time: that fetch necessarily
+                // re-read and upserted the bar in its final form. A bar from
+                // the partial first sighting is never fed to SuperTrend —
+                // tighten-only would otherwise adopt a spuriously tight band
+                // permanently.
+                const auto last_fetch_ms =
+                    cfd_feed->lastKlineFetchMs(symbol);
+                if (!last_fetch_ms.has_value())
+                {
+                    return std::nullopt;
+                }
+
+                // The buffer capacity is 500; validating a period up to 499
+                // keeps the whole window available. A smaller window here
+                // would silently disable the SuperTrend leg for large
+                // configured periods.
+                const auto candles =
+                    cfd_feed->getKlineBuffer(symbol).snapshot(500);
+
+                std::vector<double> highs;
+                std::vector<double> lows;
+                std::vector<double> closes;
+                highs.reserve(candles.size());
+                lows.reserve(candles.size());
+                closes.reserve(candles.size());
+
+                for (const auto &candle : candles)
+                {
+                    if (!candle.closed || candle.open_time <= 0
+                        || candle.close_time > last_fetch_ms.value())
+                    {
+                        continue;
+                    }
+                    highs.push_back(candle.high);
+                    lows.push_back(candle.low);
+                    closes.push_back(candle.close);
+                }
+
+                return pulse::risk::SuperTrend::compute(
+                    highs, lows, closes,
+                    static_cast<std::size_t>(st_period), st_multiplier);
+            },
+            [&position_mgr, &services](const pulse::risk::Position &pos,
+                                       pulse::Price mark)
+            {
+                // Refresh the risk view first: the realized PnL recorded by
+                // the close uses Position::current_price, which otherwise only
+                // moves on the ~10 s exchange sync.
+                position_mgr.updatePrice(pos.position_id, mark);
+                nlohmann::json close_params;
+                close_params["position_id"] = pos.position_id;
+                return pulse::ok(services.closePosition(close_params));
+            },
+            [&services](const pulse::risk::Position &pos, pulse::Price sl_price)
+            {
+                nlohmann::json stop_params;
+                stop_params["position_id"] = pos.position_id;
+                stop_params["sl_price"] = sl_price;
+                return pulse::ok(services.modifySlTp(stop_params));
+            });
+
+        // The gold trader is now the sole exit authority for its symbol; the
+        // generic ProtectiveExitManager filter above starts skipping it.
+        gold_armed = true;
+
+        log->info("[L7] Gold trader armed: {} {} hard={:.2f}U breakeven={:.2f}U "
+                  "peak-drawdown={:.2f}U supertrend=1m(period {:.0f}, mult {:.1f}) "
+                  "buffer={:.2f}U poll={}ms exchange_sl={}",
+                  cfg.gold_trader.symbol,
+                  pulse::toString(cfg.gold_trader.market_type),
+                  cfg.gold_trader.hard_stop_usd,
+                  cfg.gold_trader.breakeven_trigger_usd,
+                  cfg.gold_trader.peak_drawdown_usd,
+                  cfg.gold_trader.supertrend_period,
+                  cfg.gold_trader.supertrend_multiplier,
+                  cfg.gold_trader.supertrend_buffer_usd,
+                  cfg.gold_trader.poll_interval_ms,
+                  cfg.gold_trader.exchange_stop ? "on" : "off");
+    }
 
     // The registry is copied into the server; the local copy is used by
     // the embedded REPL (both dispatch to the same EngineServices).
@@ -1847,6 +2056,19 @@ static int runTrade(int argc, char* argv[])
         {
             kline_sync->tick(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+
+        // L7 gold trader: USD dynamic stop ladder for XAUUSD CFD. The
+        // supervisor throttles itself to [gold_trader] poll_interval_ms (1 s
+        // by default), so the 5 Hz main loop adds no measurable cost.
+        //
+        // Deliberately ticked BEFORE the periodic position sync: sync is a
+        // synchronous REST call behind the shared mutex and can stall the
+        // loop for seconds, which would otherwise push the 1-second peak
+        // sample past its deadline.
+        if (gold_trader)
+        {
+            (void)gold_trader->tick(std::chrono::system_clock::now());
         }
 
         // Periodic position sync (every ~10s): imports exchange-side

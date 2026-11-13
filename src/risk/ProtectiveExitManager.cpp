@@ -30,11 +30,13 @@ std::int64_t secondsBetween(const Timestamp &newer, const Timestamp &older)
 ProtectiveExitManager::ProtectiveExitManager(const RiskConfig &config,
                                              PositionManager &positions,
                                              PriceLookup price_lookup,
-                                             CloseFn close)
+                                             CloseFn close,
+                                             ManageFilter should_manage)
     : m_config{ config }
     , m_positions{ positions }
     , m_priceLookup{ std::move(price_lookup) }
     , m_close{ std::move(close) }
+    , m_shouldManage{ std::move(should_manage) }
     , m_stops{ config.stop_loss }
     , m_takeProfits{ config.take_profit }
 {
@@ -77,6 +79,15 @@ ProtectiveExitManager::TickResult ProtectiveExitManager::tick(Timestamp now)
 
     for (auto &pos : positions)
     {
+        // Ownership filter: a position managed by a more specific supervisor
+        // (the gold trader) must not also be acted on by the generic
+        // percentage ladder. Excluded positions are absent from by_id below,
+        // so any previous registration is dropped in step 2b.
+        if (m_shouldManage && !m_shouldManage(pos))
+        {
+            continue;
+        }
+
         if (m_priceLookup)
         {
             auto price = m_priceLookup(pos.symbol, pos.market_type);

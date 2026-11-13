@@ -58,10 +58,21 @@ class ProtectiveExitManager
     /// endpoint called) and false on failure, which schedules a retry.
     using CloseFn = std::function<bool(const Position &pos, double quantity)>;
 
+    /// Optional ownership filter. A position for which this returns false is
+    /// not registered, not evaluated and not closed by this manager.
+    ///
+    /// The gold trader uses it to become the sole exit authority for XAUUSD
+    /// CFD: the percentage-based stop/take-profit ladder in this manager is
+    /// unrelated to the USD dynamic-stop policy, and running both would let
+    /// a 0.5% take-profit partially close a position the gold trader is
+    /// supervising (and silently rescale its USD thresholds).
+    using ManageFilter = std::function<bool(const Position &pos)>;
+
     ProtectiveExitManager(const RiskConfig &config,
                           PositionManager &positions,
                           PriceLookup price_lookup,
-                          CloseFn close);
+                          CloseFn close,
+                          ManageFilter should_manage = {});
 
     /// Outcome counters for one tick (used for logging and tests).
     struct TickResult
@@ -96,6 +107,7 @@ class ProtectiveExitManager
     PositionManager &m_positions;
     PriceLookup m_priceLookup;
     CloseFn m_close;
+    ManageFilter m_shouldManage; ///< Empty = manage every position.
 
     StopLossEngine m_stops;
     TakeProfitEngine m_takeProfits;

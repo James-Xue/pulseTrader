@@ -1064,6 +1064,58 @@ PulseError parseGrid(const toml::value &root, GridConfig &out)
     return {};
 }
 
+PulseError parseGoldTrader(const toml::value &root, GoldTraderConfig &out)
+{
+    if (!root.contains("gold_trader"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("gold_trader");
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.symbol = toml::find_or(sec, "symbol", out.symbol);
+    out.hard_stop_usd =
+        findDouble(sec, "hard_stop_usd", out.hard_stop_usd);
+    out.breakeven_trigger_usd =
+        findDouble(sec, "breakeven_trigger_usd", out.breakeven_trigger_usd);
+    out.supertrend_buffer_usd =
+        findDouble(sec, "supertrend_buffer_usd", out.supertrend_buffer_usd);
+    out.peak_drawdown_usd =
+        findDouble(sec, "peak_drawdown_usd", out.peak_drawdown_usd);
+    out.peak_trail_arm_usd =
+        findDouble(sec, "peak_trail_arm_usd", out.peak_trail_arm_usd);
+    out.supertrend_period =
+        findDouble(sec, "supertrend_period", out.supertrend_period);
+    out.supertrend_multiplier =
+        findDouble(sec, "supertrend_multiplier", out.supertrend_multiplier);
+    out.contract_volume =
+        findDouble(sec, "contract_volume", out.contract_volume);
+    out.poll_interval_ms =
+        static_cast<std::uint32_t>(
+            toml::find_or(sec, "poll_interval_ms",
+                          static_cast<int>(out.poll_interval_ms)));
+    out.retry_cooldown_sec =
+        static_cast<std::uint32_t>(
+            toml::find_or(sec, "retry_cooldown_sec",
+                          static_cast<int>(out.retry_cooldown_sec)));
+    out.exchange_stop =
+        toml::find_or(sec, "exchange_stop", out.exchange_stop);
+
+    if (sec.contains("market_type"))
+    {
+        const std::string mt_str = toml::find<std::string>(sec, "market_type");
+        auto err = parseMarketType(mt_str, out.market_type);
+
+        if (ErrorCode::Ok != err.code)
+        {
+            return err;
+        }
+    }
+
+    return {};
+}
+
 PulseError parseFundingWatch(const toml::value &root, FundingWatchConfig &out)
 {
     if (!root.contains("funding_watch"))
@@ -1217,6 +1269,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseFundingWatch(root, cfg.funding_watch);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseGoldTrader(root, cfg.gold_trader);
 
     if (ErrorCode::Ok != err.code)
     {

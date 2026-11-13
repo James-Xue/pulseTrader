@@ -344,17 +344,22 @@ Every order signal from the Strategy Engine (Layer 6) must pass through the Risk
 - **TakeProfitEngine** — Supports partial take-profit ladders: closes a configurable fraction of the position at each of N price targets, letting the remainder run until the stop.
 - **DrawdownGuard** — Monitors rolling PnL (per strategy and aggregate). Automatically halts new order signals when daily drawdown or peak-to-valley drawdown exceeds configured thresholds.
 - **OrderRateLimiter** — Implements a token-bucket algorithm to enforce Gate.io order submission rate limits and prevent API bans.
+- **ProtectiveExitManager** — Engine-side stop-loss / take-profit supervisor. Refreshes every open position with the live ticker, evaluates the percentage-based stop and take-profit engines, and closes through `EngineServices` (the CFD close endpoint included). This is the backstop while the process is alive.
+- **GoldTrader** — USD-based dynamic stop supervisor for XAUUSD CFD (strategy 1). Manages every open XAUUSD CFD position with a tighten-only ladder: hard stop at -8 USD, break-even after +2 USD of peak profit, a 1-minute SuperTrend candidate with a 1 USD buffer, and a peak-profit give-back of 5 USD that closes at market. Every tightened stop is mirrored to the exchange-native `price_sl`, so protection survives a process crash. Exit-only: it never opens positions.
 
 **Key files**
 
-| File                            | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `risk_manager.hpp / .cpp`       | Order gate and rule evaluation      |
-| `position_manager.hpp / .cpp`   | Cross-strategy position tracking    |
-| `stop_loss_engine.hpp / .cpp`   | Fixed / trailing / time-based stops |
-| `take_profit_engine.hpp / .cpp` | Partial take-profit ladder          |
-| `drawdown_guard.hpp / .cpp`     | Rolling drawdown circuit breaker    |
-| `order_rate_limiter.hpp / .cpp` | Token-bucket rate limiter           |
+| File                              | Description                                      |
+| --------------------------------- | ------------------------------------------------ |
+| `risk_manager.hpp / .cpp`         | Order gate and rule evaluation                   |
+| `position_manager.hpp / .cpp`     | Cross-strategy position tracking                 |
+| `stop_loss_engine.hpp / .cpp`     | Fixed / trailing / time-based stops              |
+| `take_profit_engine.hpp / .cpp`   | Partial take-profit ladder                       |
+| `protective_exit_manager.hpp/.cpp`| Engine-side stop / take-profit supervisor        |
+| `gold_trader.hpp / .cpp`          | XAUUSD USD dynamic stop ladder (exit-only)       |
+| `supertrend.hpp / .cpp`           | Stateless 1m SuperTrend used by the gold trader  |
+| `drawdown_guard.hpp / .cpp`       | Rolling drawdown circuit breaker                 |
+| `order_rate_limiter.hpp / .cpp`   | Token-bucket rate limiter                        |
 
 ---
 

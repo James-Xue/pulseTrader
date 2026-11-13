@@ -35,11 +35,38 @@ All notable changes to this project are documented here. The format follows
   measured from completion, and holds the shared REST mutex only around each
   individual status poll, so the higher UI cadence neither floods the exchange
   nor lengthens the order-placement critical section.
+- **GoldTrader (L7)** — an exit-only USD dynamic stop supervisor for every
+  open XAUUSD CFD position (including positions opened manually in the Gate
+  app and imported by `sync_positions`). Rule ladder: -8 USD hard stop,
+  break-even after +2 USD peak profit, a 1-minute SuperTrend candidate with a
+  1 USD buffer, and a 5 USD peak give-back that closes at market; stops only
+  tighten. Every tightened stop is mirrored to the exchange-native `price_sl`
+  so protection survives a process crash (the exchange's current stop is
+  reconciled every pass, so a removed or loosened stop is restored). While
+  armed it is the sole engine-side exit authority for XAUUSD: the
+  percentage-based `ProtectiveExitManager` skips the symbol, so its trailing
+  stop and partial take-profit ladder cannot act on the same position.
+  Loaded from the top-level `[gold_trader]` section (enabled in the live
+  config); no strategy instance is required. See
+  `docs/strategies/gold-trader.md`.
+- CFD 1-minute klines are polled on the wall-clock minute boundary and
+  `KlineBuffer::updateOrPush` refreshes the newest bar in place, so each bar
+  converges to its final OHLC instead of staying frozen at its first partial
+  snapshot. `MarketFeed::lastKlineFetchMs` gives consumers a finality anchor;
+  the gold trader's SuperTrend leg refuses bars that were never re-read after
+  their close.
 
 ### Fixed
 
 - Qt client retries the first control-socket connection when it is refused,
   which is the normal case while a newly spawned engine is binding its port.
+- `modify_sl_tp` now addresses the exchange position id instead of the
+  engine-local id (the PUT previously used an id Gate never issued). It also
+  reads the live position before composing the request when the caller omits
+  a field, so a stop tightening never reverts or clears a take-profit that was
+  changed in the app since the last sync. Both `modify_sl_tp` and the CFD
+  close path treat a 2xx TradFi business error (`{"label","message"}`) as a
+  failure instead of recording success.
 
 ## [0.1.0] - 2026-11-07
 
