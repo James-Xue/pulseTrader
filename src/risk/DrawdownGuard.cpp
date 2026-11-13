@@ -4,6 +4,8 @@
 
 #include "logging/Logger.hpp"
 
+#include <chrono>
+
 namespace pulse::risk
 {
 
@@ -46,7 +48,18 @@ void DrawdownGuard::recordPnl(double pnl, const std::string &strategy_id)
 
 void DrawdownGuard::updateEquity(double equity)
 {
+    // UTC day number (days since 1970-01-01). Integer hours/24 keeps the
+    // boundary DST-free and timezone-independent — the trading day is UTC.
+    const auto since_epoch = std::chrono::system_clock::now().time_since_epoch();
+    const auto utc_day = std::chrono::duration_cast<std::chrono::hours>(since_epoch).count() / 24;
+    updateEquity(equity, static_cast<std::int64_t>(utc_day));
+}
+
+void DrawdownGuard::updateEquity(double equity, std::int64_t utc_day)
+{
     // Update equity and check drawdown thresholds:
+    // 0. Roll the daily baseline when the UTC day changes (otherwise the
+    //    "daily" limit silently becomes an "since process start" limit)
     // 1. Acquire exclusive lock
     // 2. Update m_currentEquity
     // 3. If current > peak: update m_peakEquity
@@ -57,6 +70,18 @@ void DrawdownGuard::updateEquity(double equity)
     // 8. If peak-to-valley drawdown > threshold: set halt flag
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    // 0. New UTC day → rebase the daily start on the first snapshot of the day.
+    if (m_dayKey != utc_day)
+    {
+        m_dayKey = utc_day;
+        m_dailyStartEquity = equity;
+        m_dailyPnl = 0.0;
+        m_strategyPnl.clear();
+
+        PULSE_LOG_INFO("risk",
+            "New UTC day {} — daily baseline reset to {:.2f}", utc_day, equity);
+    }
 
     m_currentEquity = equity;
 
@@ -156,6 +181,11 @@ void DrawdownGuard::resetDaily()
     // 4. Clear per-strategy PnL map
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    // Keep the day key in sync so the next updateEquity() does not roll again
+    // (which would be harmless but would log a spurious baseline reset).
+    const auto since_epoch = std::chrono::system_clock::now().time_since_epoch();
+    m_dayKey = std::chrono::duration_cast<std::chrono::hours>(since_epoch).count() / 24;
 
     m_dailyStartEquity = m_currentEquity;
     m_dailyPnl = 0.0;

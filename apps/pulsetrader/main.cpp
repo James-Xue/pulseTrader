@@ -363,6 +363,7 @@ static void logSystemHeartbeat(
     pulse::exchange::GateRestClient* rest_client,
     pulse::exchange::GateRestClient* spot_rest_client,
     pulse::exchange::GateRestClient* cfd_rest_client,
+    pulse::risk::DrawdownGuard* drawdown_guard,
     std::mutex& rest_mutex)
 {
     // --- Uptime formatting ---
@@ -490,17 +491,33 @@ static void logSystemHeartbeat(
     // Account balance (fetched via REST, cached).
     // REST clients are not thread-safe — serialize with the control plane.
     std::lock_guard rest_lock(rest_mutex);
+
+    // Drawdown-guard equity aggregation.
+    //
+    // All configured accounts are summed in USDT-equivalent (USD≈USDT) so a
+    // transfer between accounts does not read as a drawdown. The snapshot is
+    // fed to the guard only when EVERY configured fetch succeeds: feeding a
+    // partial sum after a transient API failure would fake a huge drawdown
+    // and halt trading.
+    double equity_total = 0.0;
+    bool equity_complete = true;
+
     if (nullptr != rest_client)
     {
         auto bal_result = rest_client->getFuturesAccountBalance();
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
+            equity_total += bal.total;
             msg << " | futures " << std::fixed << std::setprecision(2)
                 << bal.total << " " << bal.currency
                 << " (avail " << bal.available
                 << ", pnl " << (bal.unrealised_pnl >= 0 ? "+" : "")
                 << bal.unrealised_pnl << ")";
+        }
+        else
+        {
+            equity_complete = false;
         }
     }
 
@@ -517,12 +534,17 @@ static void logSystemHeartbeat(
                 {
                     double avail = pulse::safeParseDouble(item.value("available", "0")).value_or(0.0);
                     double locked = pulse::safeParseDouble(item.value("locked", "0")).value_or(0.0);
+                    equity_total += avail + locked;
                     msg << " | spot " << std::fixed << std::setprecision(2)
                         << (avail + locked) << " USDT"
                         << " (avail " << avail << ")";
                     break;
                 }
             }
+        }
+        else
+        {
+            equity_complete = false;
         }
     }
 
@@ -535,8 +557,29 @@ static void logSystemHeartbeat(
             const auto &data = value(cfd_result).value("data", nlohmann::json::object());
             const double equity = pulse::safeParseDouble(data.value("equity", "0")).value_or(0.0);
             const double free   = pulse::safeParseDouble(data.value("margin_free", "0")).value_or(0.0);
+            equity_total += equity;
             msg << " | cfd " << std::fixed << std::setprecision(2)
                 << equity << " USD (avail " << free << ")";
+        }
+        else
+        {
+            equity_complete = false;
+        }
+    }
+
+    // Feed the circuit breaker once per heartbeat. updateEquity() also rolls
+    // the daily baseline at the UTC day boundary, so no separate reset call is
+    // needed. Skip the update entirely when any fetch failed — see above.
+    if (nullptr != drawdown_guard)
+    {
+        if (equity_complete)
+        {
+            drawdown_guard->updateEquity(equity_total);
+        }
+        else
+        {
+            PULSE_LOG_DEBUG("system",
+                "Skipping drawdown equity update — an account balance fetch failed");
         }
     }
 
@@ -1765,6 +1808,7 @@ static int runTrade(int argc, char* argv[])
                 futures_rest ? futures_rest.get() : spot_rest.get(),
                 spot_rest ? spot_rest.get() : nullptr,
                 cfd_rest ? cfd_rest.get() : nullptr,
+                &drawdownGuard,
                 rest_mutex);
         }
     }

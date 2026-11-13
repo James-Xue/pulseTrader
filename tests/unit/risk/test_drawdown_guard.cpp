@@ -247,3 +247,45 @@ TEST(DrawdownGuard, ManualHaltOverridesAfterClear)
     EXPECT_TRUE(guard.isHalted());
     EXPECT_EQ(ErrorCode::ManualHalt, guard.haltReason());
 }
+
+// ---------------------------------------------------------------------------
+// UTC day roll (audit B2, 2026-11-13): the daily baseline must reset at the
+// UTC day boundary, otherwise the "daily" limit becomes "since process start".
+// ---------------------------------------------------------------------------
+
+TEST(DrawdownGuard, NewUtcDayRebasesDailyBaseline)
+{
+    DrawdownGuard guard(make_config());
+
+    // Day 20000: a 3% drop breaches the 2% daily limit.
+    guard.updateEquity(10000.0, 20000);
+    guard.updateEquity(9700.0, 20000);
+    EXPECT_TRUE(guard.isHalted());
+    EXPECT_NEAR(0.03, guard.dailyDrawdown(), 1e-9);
+
+    // Operator clears the halt; the next UTC day starts from the new equity.
+    guard.clearHalt();
+    guard.updateEquity(9700.0, 20001);
+    EXPECT_DOUBLE_EQ(0.0, guard.dailyDrawdown());
+    EXPECT_FALSE(guard.isHalted());
+
+    // A further 1% drop on the new day is below the 2% daily limit.
+    // Peak-to-valley is 3.97%, still below the 5% limit.
+    guard.updateEquity(9603.0, 20001);
+    EXPECT_NEAR(0.01, guard.dailyDrawdown(), 1e-9);
+    EXPECT_FALSE(guard.isHalted());
+}
+
+TEST(DrawdownGuard, SameUtcDayDoesNotRebase)
+{
+    DrawdownGuard guard(make_config());
+
+    guard.updateEquity(10000.0, 20000);
+    guard.updateEquity(9900.0, 20000);
+    EXPECT_NEAR(0.01, guard.dailyDrawdown(), 1e-9);
+
+    // Another snapshot on the SAME day must keep the original baseline.
+    guard.updateEquity(9850.0, 20000);
+    EXPECT_NEAR(0.015, guard.dailyDrawdown(), 1e-9);
+    EXPECT_FALSE(guard.isHalted());
+}
