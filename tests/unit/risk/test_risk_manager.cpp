@@ -619,3 +619,44 @@ TEST(RiskManager, PerMarketBudget_FallbackMatchesLegacyBehavior)
     EXPECT_EQ(RiskDecision::Modified, r.decision);
     EXPECT_NEAR(1000.0 / (4392.0 * 100.0), r.approved_qty, 1e-9);
 }
+
+// ---------------------------------------------------------------------------
+// B4 (2026-11-13): a halt stops NEW exposure but must never trap a position.
+// ---------------------------------------------------------------------------
+
+TEST_F(RiskManagerTest, HaltRejectsNormalOrder)
+{
+    m_drawdownGuard.manualHalt();
+
+    const auto result = risk_manager_.evaluateOrder(make_order());
+    EXPECT_EQ(RiskDecision::Rejected, result.decision);
+    EXPECT_EQ(ErrorCode::ManualHalt, result.reason_code);
+}
+
+TEST_F(RiskManagerTest, HaltAllowsReduceOnlyOrder)
+{
+    m_drawdownGuard.manualHalt();
+
+    auto req = make_order();
+    req.reduce_only = true;
+
+    const auto result = risk_manager_.evaluateOrder(req);
+    EXPECT_NE(RiskDecision::Rejected, result.decision)
+        << "reason code: " << static_cast<int>(result.reason_code);
+    EXPECT_NE(ErrorCode::ManualHalt, result.reason_code);
+}
+
+TEST_F(RiskManagerTest, HaltAllowsFuturesReduceOnlyDespiteLeverage)
+{
+    m_drawdownGuard.manualHalt();
+
+    auto req = make_order("BTC_USDT", Side::Sell, 0.001, 50000.0);
+    req.reduce_only = true;
+    req.quanto_multiplier = 1.0;
+
+    // Opening-side leverage check (999x) must not apply to an exit.
+    const auto result = risk_manager_.evaluateFuturesOrder(req, 999.0, 100.0);
+    EXPECT_NE(RiskDecision::Rejected, result.decision)
+        << "reason code: " << static_cast<int>(result.reason_code);
+    EXPECT_NE(ErrorCode::FuturesLeverageExceeded, result.reason_code);
+}

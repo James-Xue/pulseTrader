@@ -1416,3 +1416,101 @@ TEST_F(OrderFlowTest, CfdMarketOrderTriggersImmediatePollNoCrash)
     ASSERT_EQ(1u, active.size());
     EXPECT_EQ(OrderStatus::Pending, active[0].status);
 }
+
+// ---------------------------------------------------------------------------
+// Exchange-side protective stops (audit B1, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, FuturesFillQueuesExchangeStop)
+{
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    completeOrder(value(result).order_id, Side::Buy, 1.0, 60000.0);
+
+    const auto pending = m_flow->drainPendingExchangeStops();
+    ASSERT_EQ(1u, pending.size());
+    EXPECT_EQ("BTC_USDT", pending[0].symbol);
+    EXPECT_EQ(Side::Buy, pending[0].side);
+    EXPECT_DOUBLE_EQ(60000.0, pending[0].entry_price);
+    EXPECT_DOUBLE_EQ(1.0, pending[0].quantity);
+
+    // The queue is drained, not copied.
+    EXPECT_TRUE(m_flow->drainPendingExchangeStops().empty());
+}
+
+TEST_F(OrderFlowTest, ClosingFillDoesNotQueueExchangeStop)
+{
+    // Open a long position directly (not via a fill).
+    const auto open_result = m_positionMgr->openPosition(
+        "BTC_USDT", Side::Buy, 1.0, 60000.0,
+        "test_strategy", MarketType::Futures,
+        10.0, MarginMode::Cross, 0.001, 0.005);
+    ASSERT_TRUE(ok(open_result));
+
+    // A sell that fully closes it leaves no remainder → no new stop.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Sell;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.reduce_only = true;
+
+    auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    completeOrder(value(result).order_id, Side::Sell, 1.0, 61000.0);
+
+    EXPECT_TRUE(m_flow->drainPendingExchangeStops().empty());
+}
+
+// ---------------------------------------------------------------------------
+// makeClientOrderId — automatic-path idempotency key (audit B7, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ClientOrderId, SanitizesAndFitsGateLimit)
+{
+    const auto id = makeClientOrderId("Momentum_Scalper_v2", 7, 1794536576883LL);
+
+    // Gate limits `text` to 26 bytes after OrderExecutor prepends "t-".
+    EXPECT_LE(id.size(), 26u);
+
+    // Only [a-z0-9-] is allowed in the key.
+    for (char c : id)
+    {
+        const bool legal = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || ('-' == c);
+        EXPECT_TRUE(legal) << "illegal char: " << c;
+    }
+
+    // Underscores are dropped; the prefix is capped at 8 chars.
+    EXPECT_EQ(0u, id.rfind("momentum-", 0)) << id;
+}
+
+TEST(ClientOrderId, UniqueAcrossSequence)
+{
+    const auto a = makeClientOrderId("eth", 1, 1794536576883LL);
+    const auto b = makeClientOrderId("eth", 2, 1794536576883LL);
+    EXPECT_NE(a, b);
+}
+
+TEST(ClientOrderId, UniqueAcrossMilliseconds)
+{
+    const auto a = makeClientOrderId("eth", 0, 1794536576883LL);
+    const auto b = makeClientOrderId("eth", 0, 1794536576884LL);
+    EXPECT_NE(a, b);
+}
+
+TEST(ClientOrderId, EmptyStrategyFallsBackToAuto)
+{
+    const auto id = makeClientOrderId("", 0, 0);
+    EXPECT_EQ(0u, id.rfind("auto-", 0)) << id;
+}

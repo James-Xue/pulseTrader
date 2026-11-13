@@ -15,6 +15,7 @@
 #include "core/PulseError.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -43,12 +44,17 @@ class DrawdownGuard
     /// Set current equity value (called periodically from portfolio snapshot).
     ///
     /// Updates:
+    ///   0. Rolls the daily baseline when the UTC day (days since epoch) changes
     ///   1. m_currentEquity
     ///   2. m_peakEquity (if new high)
     ///   3. Check daily drawdown: (daily_start - current) / daily_start
     ///   4. Check peak-to-valley: (peak - current) / peak
     ///   5. Set halt flag if either threshold is breached
     void updateEquity(double equity);
+
+    /// Deterministic overload used by tests: the caller supplies the UTC day
+    /// number (days since 1970-01-01) instead of reading the system clock.
+    void updateEquity(double equity, std::int64_t utc_day);
 
     // --- Circuit breaker queries ---
 
@@ -94,6 +100,7 @@ class DrawdownGuard
     double m_dailyStartEquity{ 0.0 };  ///< Equity at start of trading day.
     double m_currentEquity{ 0.0 };      ///< Latest equity snapshot.
     double m_dailyPnl{ 0.0 };           ///< Cumulative realized PnL today.
+    std::int64_t m_dayKey{ -1 };        ///< UTC day of the current daily baseline.
 
     std::atomic<bool> m_halted{ false };                ///< Circuit breaker flag (lock-free read).
     std::atomic<ErrorCode> m_haltReason{ ErrorCode::Ok }; ///< Reason for halt (lock-free read).

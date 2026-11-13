@@ -47,7 +47,12 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
     RiskEvalResult result;
 
     // 1. Check drawdown guard (atomic load — safe outside the reserve).
-    if (m_drawdownGuard.isHalted())
+    //
+    //    reduce_only orders are EXEMPT: a halt must stop new exposure, never
+    //    trap an existing position that needs to be closed (audit B4,
+    //    2026-11-13). Without this, a drawdown halt also blocks stop-loss
+    //    closes and the position can only exit via liquidation.
+    if (m_drawdownGuard.isHalted() && !order.reduce_only)
     {
         PULSE_LOG_WARN("risk",
             "Order rejected: trading halted (reason: {})",
@@ -58,6 +63,12 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
         result.reason_code = m_drawdownGuard.haltReason();
         result.reason_message = "Trading halted: drawdown limit breached";
         return result;
+    }
+
+    if (m_drawdownGuard.isHalted() && order.reduce_only)
+    {
+        PULSE_LOG_INFO("risk",
+            "Reduce-only order allowed while halted (closing exposure)");
     }
 
     // 2. Check rate limiter (atomic CAS — safe outside the reserve).
@@ -98,6 +109,13 @@ RiskEvalResult RiskManager::evaluateFuturesOrder(
     const execution::OrderRequest &order, double leverage, double equity)
 {
     RiskEvalResult result;
+
+    // reduce_only closes must never be blocked by opening-side checks:
+    // leverage and margin govern new exposure, not an exit (audit B4).
+    if (order.reduce_only)
+    {
+        return evaluateOrder(order);
+    }
 
     // 1. Check leverage limit.
     if (leverage > m_config.max_leverage)
@@ -147,6 +165,13 @@ RiskEvalResult RiskManager::evaluateCfdOrder(
     const execution::OrderRequest &order, double leverage, double equity)
 {
     RiskEvalResult result;
+
+    // reduce_only closes must never be blocked by opening-side checks:
+    // leverage and margin govern new exposure, not an exit (audit B4).
+    if (order.reduce_only)
+    {
+        return evaluateOrder(order);
+    }
 
     // 1. Check leverage limit (CFD ladder: 20 / 50 / 100 / 200 / 500).
     if (leverage > m_config.max_leverage)

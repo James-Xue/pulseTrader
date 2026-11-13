@@ -5,6 +5,7 @@ add_executable(test_risk
     test_risk_manager.cpp
     test_stop_loss_engine.cpp
     test_take_profit_engine.cpp
+    test_protective_exit.cpp
 )
 
 target_link_libraries(test_risk

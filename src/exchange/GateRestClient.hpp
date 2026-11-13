@@ -312,11 +312,17 @@ class GateRestClient
     ///
     /// Handles signing, timeout, retries, and JSON parsing.
     /// Returns the parsed JSON body on success, or PulseError on failure.
+    ///
+    /// retry=false disables the automatic retry loop (exactly one attempt).
+    /// REQUIRED for order-creating POSTs: a POST that timed out may already
+    /// have been accepted by the exchange, and re-sending the identical
+    /// signed body would create a second position (2026-11-13 audit, B7).
     [[nodiscard]] Result<nlohmann::json> request(
             const std::string &method,
             const std::string &path,
             const std::string &query = "",
-            const std::string &body = "");
+            const std::string &body = "",
+            bool retry = true);
 
   private:
     ExchangeConfig m_config;

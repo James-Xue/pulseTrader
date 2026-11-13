@@ -5,6 +5,7 @@ add_library(pulse_risk STATIC
     DrawdownGuard.cpp
     OrderRateLimiter.cpp
     RiskManager.cpp
+    ProtectiveExitManager.cpp
     StopLossEngine.cpp
     TakeProfitEngine.cpp
 )

@@ -262,7 +262,8 @@ Result<nlohmann::json> GateRestClient::request(
         const std::string &method,
         const std::string &path,
         const std::string &query,
-        const std::string &body)
+        const std::string &body,
+        bool retry)
 {
     // 1. Sign the request
     const std::string timestamp = unixSeconds();
@@ -279,10 +280,15 @@ Result<nlohmann::json> GateRestClient::request(
         url += "?" + query;
     }
 
-    PULSE_LOG_DEBUG("exchange", "{} {} (timeout={}ms, retries={})", method, url, m_config.restTimeoutMs, m_config.maxRetries);
+    PULSE_LOG_DEBUG("exchange", "{} {} (timeout={}ms, retries={})", method, url, m_config.restTimeoutMs, retry ? m_config.maxRetries : 0u);
 
-    // 3. Retry loop
-    const std::uint32_t max_attempts = m_config.maxRetries + 1;
+    // 3. Retry loop.
+    //
+    //    Order-creating POSTs pass retry=false. A POST that timed out may
+    //    already have been accepted by the exchange: re-sending the identical
+    //    signed body would create a second position (audit B7, 2026-11-13).
+    //    GET/DELETE keep retrying — they are safe to repeat.
+    const std::uint32_t max_attempts = retry ? (m_config.maxRetries + 1) : 1;
     HttpResponse response;
 
     for (std::uint32_t attempt = 1; attempt <= max_attempts; ++attempt)
@@ -453,7 +459,8 @@ Result<nlohmann::json> GateRestClient::postCfdTransfer(const std::string &asset,
     body["asset"]  = asset;
     body["change"] = change;
     body["type"]   = type;
-    return request("POST", "/api/v4/tradfi/transactions", "", body.dump());
+    // retry=false: a timed-out transfer may already have moved the funds.
+    return request("POST", "/api/v4/tradfi/transactions", "", body.dump(), /*retry=*/false);
 }
 
 Result<nlohmann::json> GateRestClient::postCfdPositionClose(const std::string &position_id,
@@ -470,7 +477,8 @@ Result<nlohmann::json> GateRestClient::postCfdPositionClose(const std::string &p
     {
         body["close_volume"] = std::to_string(close_volume);
     }
-    return request("POST", EndpointRouter::cfdPositionClosePath(position_id), "", body.dump());
+    // retry=false: a timed-out close may already have been executed.
+    return request("POST", EndpointRouter::cfdPositionClosePath(position_id), "", body.dump(), /*retry=*/false);
 }
 
 Result<nlohmann::json> GateRestClient::postCfdOrder(const nlohmann::json &body)
@@ -479,7 +487,8 @@ Result<nlohmann::json> GateRestClient::postCfdOrder(const nlohmann::json &body)
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place CFD order"};
     }
-    return request("POST", EndpointRouter::ordersPath(MarketType::Cfd), "", body.dump());
+    // retry=false: a timed-out POST may already have created the order.
+    return request("POST", EndpointRouter::ordersPath(MarketType::Cfd), "", body.dump(), /*retry=*/false);
 }
 
 Result<nlohmann::json> GateRestClient::getCfdOrder(const std::string &order_id)
@@ -635,7 +644,8 @@ Result<nlohmann::json> GateRestClient::postFuturesOrder(const nlohmann::json &bo
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures order"};
     }
-    return request("POST", EndpointRouter::ordersPath(MarketType::Futures), "", body.dump());
+    // retry=false: a timed-out POST may already have created the order.
+    return request("POST", EndpointRouter::ordersPath(MarketType::Futures), "", body.dump(), /*retry=*/false);
 }
 
 Result<nlohmann::json> GateRestClient::cancelFuturesOrder(const std::string &order_id)
@@ -675,7 +685,8 @@ Result<nlohmann::json> GateRestClient::postFuturesPriceOrder(const nlohmann::jso
     {
         return PulseError{ErrorCode::HttpError, "Missing API key/secret — cannot place futures trigger order"};
     }
-    return request("POST", EndpointRouter::priceOrdersPath(MarketType::Futures), "", body.dump());
+    // retry=false: a timed-out POST may already have created the trigger.
+    return request("POST", EndpointRouter::priceOrdersPath(MarketType::Futures), "", body.dump(), /*retry=*/false);
 }
 
 Result<nlohmann::json> GateRestClient::getFuturesPriceOrders(const std::string &contract)

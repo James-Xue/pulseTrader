@@ -37,6 +37,7 @@
 #include "logging/Logger.hpp"
 #include "market/MarketFeed.hpp"
 #include "risk/DrawdownGuard.hpp"
+#include "risk/ProtectiveExitManager.hpp"
 #include "risk/OrderRateLimiter.hpp"
 #include "risk/PositionManager.hpp"
 #include "risk/RiskManager.hpp"
@@ -363,6 +364,7 @@ static void logSystemHeartbeat(
     pulse::exchange::GateRestClient* rest_client,
     pulse::exchange::GateRestClient* spot_rest_client,
     pulse::exchange::GateRestClient* cfd_rest_client,
+    pulse::risk::DrawdownGuard* drawdown_guard,
     std::mutex& rest_mutex)
 {
     // --- Uptime formatting ---
@@ -490,17 +492,33 @@ static void logSystemHeartbeat(
     // Account balance (fetched via REST, cached).
     // REST clients are not thread-safe — serialize with the control plane.
     std::lock_guard rest_lock(rest_mutex);
+
+    // Drawdown-guard equity aggregation.
+    //
+    // All configured accounts are summed in USDT-equivalent (USD≈USDT) so a
+    // transfer between accounts does not read as a drawdown. The snapshot is
+    // fed to the guard only when EVERY configured fetch succeeds: feeding a
+    // partial sum after a transient API failure would fake a huge drawdown
+    // and halt trading.
+    double equity_total = 0.0;
+    bool equity_complete = true;
+
     if (nullptr != rest_client)
     {
         auto bal_result = rest_client->getFuturesAccountBalance();
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
+            equity_total += bal.total;
             msg << " | futures " << std::fixed << std::setprecision(2)
                 << bal.total << " " << bal.currency
                 << " (avail " << bal.available
                 << ", pnl " << (bal.unrealised_pnl >= 0 ? "+" : "")
                 << bal.unrealised_pnl << ")";
+        }
+        else
+        {
+            equity_complete = false;
         }
     }
 
@@ -517,12 +535,17 @@ static void logSystemHeartbeat(
                 {
                     double avail = pulse::safeParseDouble(item.value("available", "0")).value_or(0.0);
                     double locked = pulse::safeParseDouble(item.value("locked", "0")).value_or(0.0);
+                    equity_total += avail + locked;
                     msg << " | spot " << std::fixed << std::setprecision(2)
                         << (avail + locked) << " USDT"
                         << " (avail " << avail << ")";
                     break;
                 }
             }
+        }
+        else
+        {
+            equity_complete = false;
         }
     }
 
@@ -535,8 +558,29 @@ static void logSystemHeartbeat(
             const auto &data = value(cfd_result).value("data", nlohmann::json::object());
             const double equity = pulse::safeParseDouble(data.value("equity", "0")).value_or(0.0);
             const double free   = pulse::safeParseDouble(data.value("margin_free", "0")).value_or(0.0);
+            equity_total += equity;
             msg << " | cfd " << std::fixed << std::setprecision(2)
                 << equity << " USD (avail " << free << ")";
+        }
+        else
+        {
+            equity_complete = false;
+        }
+    }
+
+    // Feed the circuit breaker once per heartbeat. updateEquity() also rolls
+    // the daily baseline at the UTC day boundary, so no separate reset call is
+    // needed. Skip the update entirely when any fetch failed — see above.
+    if (nullptr != drawdown_guard)
+    {
+        if (equity_complete)
+        {
+            drawdown_guard->updateEquity(equity_total);
+        }
+        else
+        {
+            PULSE_LOG_DEBUG("system",
+                "Skipping drawdown equity update — an account balance fetch failed");
         }
     }
 
@@ -1127,9 +1171,16 @@ static int runTrade(int argc, char* argv[])
     // the aggregator output loses the originating strategy id, so a strategy
     // with auto_trade=0 (signals-only) must be stopped before aggregation.
     // It still publishes to the board (get_signals stays live for testing).
+    // Flat exits (B1): the aggregator ignores Flat by design, so the signal
+    // callback cannot route them. Strategy threads push them here and the
+    // main loop closes the matching positions, where the CFD close endpoint
+    // (which is not an order) is reachable.
+    std::mutex flat_mutex;
+    std::vector<pulse::strategy::TradingSignal> pending_flats;
+
     strategy_mgr.setSignalCallback(
         [&aggregator, board, &strategy_mgr,
-         signal_recorder_ptr](const pulse::strategy::TradingSignal& sig)
+         signal_recorder_ptr, &flat_mutex, &pending_flats](const pulse::strategy::TradingSignal& sig)
         {
             board->publish(sig);
             // M32 journal: raw stream is recorded BEFORE the auto_trade gate
@@ -1144,7 +1195,16 @@ static int runTrade(int argc, char* argv[])
             if (nullptr == params
                 || params->auto_trade.load(std::memory_order_acquire) != 0.0)
             {
-                aggregator.addSignal(sig);
+                if (pulse::strategy::SignalType::Flat == sig.type)
+                {
+                    // Exit intent — bypass the directional aggregator.
+                    std::lock_guard flat_lock(flat_mutex);
+                    pending_flats.push_back(sig);
+                }
+                else
+                {
+                    aggregator.addSignal(sig);
+                }
             }
         });
 
@@ -1377,6 +1437,53 @@ static int runTrade(int argc, char* argv[])
     // code path also runs every ~10s (position sync tick below) and on
     // demand via `sync_positions` / REPL `sync`.
     (void)services.syncPositions();
+
+    // L7 protective exits (audit B1): engine-side stop-loss / take-profit
+    // supervisor. Exchange-side SL/TP orders are not attached to futures
+    // entries yet, so this is the only backstop while the process is alive.
+    //
+    // Prices come from the per-market ticker caches; a missing quote keeps
+    // the previous mark (no fabricated triggers). Closes go through
+    // EngineServices so CFD uses its dedicated close endpoint while
+    // futures/spot go through the risk gate as reduce-only orders.
+    pulse::risk::ProtectiveExitManager protective_exits(
+        cfg.risk,
+        position_mgr,
+        [&spot_feed, &futures_feed, &cfd_feed](const pulse::Symbol &symbol,
+                                               pulse::MarketType market_type)
+            -> std::optional<pulse::Price>
+        {
+            pulse::market::MarketFeed *feed = nullptr;
+            switch (market_type)
+            {
+            case pulse::MarketType::Futures:
+                feed = futures_feed.get();
+                break;
+            case pulse::MarketType::Cfd:
+                feed = cfd_feed.get();
+                break;
+            default:
+                feed = spot_feed.get();
+                break;
+            }
+            if (nullptr == feed)
+            {
+                return std::nullopt;
+            }
+            const auto ticker = feed->tickerCache().get(symbol);
+            if (!ticker.has_value() || ticker->last <= 0.0)
+            {
+                return std::nullopt;
+            }
+            return ticker->last;
+        },
+        [&services](const pulse::risk::Position &pos, double quantity)
+        {
+            nlohmann::json close_params;
+            close_params["position_id"] = pos.position_id;
+            close_params["quantity"] = quantity;
+            return pulse::ok(services.closePosition(close_params));
+        });
 
     // The registry is copied into the server; the local copy is used by
     // the embedded REPL (both dispatch to the same EngineServices).
@@ -1750,6 +1857,135 @@ static int runTrade(int argc, char* argv[])
             (void)services.syncPositions();
         }
 
+        // L7 protective exits: engine-side stop-loss / take-profit. Runs
+        // every tick; each position is throttled to one close attempt per
+        // kRetryCooldownSeconds inside the manager.
+        (void)protective_exits.tick(std::chrono::system_clock::now());
+
+        // Strategy Flat exits queued by the signal callback. Only positions
+        // owned by the signalling strategy (or untagged ones) on that symbol
+        // are closed — another strategy's book is not ours to touch.
+        {
+            std::vector<pulse::strategy::TradingSignal> flats;
+            {
+                std::lock_guard flat_lock(flat_mutex);
+                flats.swap(pending_flats);
+            }
+            for (const auto &sig : flats)
+            {
+                for (const auto &pos : position_mgr.getPositionsBySymbol(sig.symbol))
+                {
+                    if (!pos.strategy_id.empty() && pos.strategy_id != sig.strategy_id)
+                    {
+                        continue;
+                    }
+                    nlohmann::json close_params;
+                    close_params["position_id"] = pos.position_id;
+                    const auto close_result = services.closePosition(close_params);
+                    if (!pulse::ok(close_result))
+                    {
+                        log->warn("[L6] Flat exit failed for {}: {}",
+                                  pos.position_id,
+                                  pulse::error(close_result).message);
+                    }
+                }
+            }
+        }
+
+        // Exchange-side protective stops for futures entries (audit B1).
+        // Off by default until validated on Gate testnet. Placed from the
+        // main loop so the tracker thread never blocks on REST; an existing
+        // open trigger on the contract suppresses a duplicate placement.
+        if (cfg.risk.exchange_stop.enabled && nullptr != futures_rest)
+        {
+            for (const auto &stop : order_flow.drainPendingExchangeStops())
+            {
+                const auto existing = services.listTriggerOrders(
+                    nlohmann::json{ { "contract", stop.symbol } });
+                if (!pulse::ok(existing))
+                {
+                    log->warn("[L7] Cannot list triggers for {}: {} — stop not placed",
+                              stop.symbol, pulse::error(existing).message);
+                    continue;
+                }
+                if (!pulse::value(existing).empty())
+                {
+                    log->info("[L7] Trigger already open for {} — skipping stop",
+                              stop.symbol);
+                    continue;
+                }
+
+                // Long → stop below entry (rule 2); short → above (rule 1).
+                const bool is_long = (pulse::Side::Buy == stop.side);
+                double trigger =
+                    is_long
+                        ? stop.entry_price * (1.0 - cfg.risk.exchange_stop.pct)
+                        : stop.entry_price * (1.0 + cfg.risk.exchange_stop.pct);
+
+                // Gate requires trigger.price to be an integer multiple of the
+                // contract's order_price_round — anything else is rejected with
+                // 1009 AUTO_INVALID_PARAM_TRIGGER_PRICE (testnet, 2026-11-13).
+                const double tick = services.futuresPriceTick(stop.symbol);
+                if (tick <= 0.0)
+                {
+                    log->warn("[L7] No price tick for {} — stop not placed",
+                              stop.symbol);
+                    continue;
+                }
+                trigger = std::round(trigger / tick) * tick;
+
+                // Gate rejects a long stop at/above the last price and a short
+                // stop at/below it (1029 AUTO_TRIGGER_PRICE_LESS_LAST). If the
+                // market already gapped past the stop, place nothing: the
+                // engine-side ProtectiveExitManager closes the position on its
+                // next tick anyway.
+                if (futures_feed)
+                {
+                    const auto quote = futures_feed->tickerCache().get(stop.symbol);
+                    if (quote.has_value() && quote->last > 0.0)
+                    {
+                        const bool breached =
+                            is_long ? (trigger >= quote->last)
+                                    : (trigger <= quote->last);
+                        if (breached)
+                        {
+                            log->warn("[L7] {} stop {:.2f} already breached "
+                                      "(last {:.2f}) — skipped",
+                                      stop.symbol, trigger, quote->last);
+                            continue;
+                        }
+                    }
+                }
+
+                nlohmann::json params{
+                    { "contract", stop.symbol },
+                    { "trigger_price", trigger },
+                    { "rule", is_long ? 2 : 1 },
+                    { "order_type", is_long ? "close-long-position"
+                                            : "close-short-position" },
+                    { "size", 0 },
+                    { "auto_size", "close" },
+                };
+
+                const auto placed = services.placeTriggerOrder(params);
+                if (pulse::ok(placed))
+                {
+                    log->info("[L7] Exchange stop placed for {} at {:.2f} ({})",
+                              stop.symbol, trigger, is_long ? "long" : "short");
+                }
+                else
+                {
+                    log->error("[L7] Exchange stop FAILED for {}: {}",
+                               stop.symbol, pulse::error(placed).message);
+                }
+            }
+        }
+        else
+        {
+            // Keep the queue bounded even when the feature is off.
+            (void)order_flow.drainPendingExchangeStops();
+        }
+
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)
         {
             heartbeat_counter = 0;
@@ -1765,6 +2001,7 @@ static int runTrade(int argc, char* argv[])
                 futures_rest ? futures_rest.get() : spot_rest.get(),
                 spot_rest ? spot_rest.get() : nullptr,
                 cfd_rest ? cfd_rest.get() : nullptr,
+                &drawdownGuard,
                 rest_mutex);
         }
     }

@@ -585,5 +585,29 @@ TEST(ConfigValidator, GridEnabledRejectsInvertedAtrClamps)
     EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
     EXPECT_NE(std::string::npos, err.message.find("step_min"));
 }
+
+// ---------------------------------------------------------------------------
+// Exchange-side protective stop (audit B1, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigValidator, RejectsExchangeStopPctOutOfRange)
+{
+    auto cfg = valid_config();
+    cfg.risk.exchange_stop.enabled = true;
+    cfg.risk.exchange_stop.pct = 1.5;
+
+    auto err = validateConfig(cfg);
+    EXPECT_EQ(ErrorCode::ConfigValidationError, err.code);
+    EXPECT_NE(std::string::npos, err.message.find("exchange_stop_pct"));
+}
+
+TEST(ConfigValidator, IgnoresExchangeStopPctWhenDisabled)
+{
+    auto cfg = valid_config();
+    cfg.risk.exchange_stop.enabled = false;
+    cfg.risk.exchange_stop.pct = 5.0;
+
+    EXPECT_EQ(ErrorCode::Ok, validateConfig(cfg).code);
+}
 } // namespace
 } // namespace pulse

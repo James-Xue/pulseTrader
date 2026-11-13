@@ -1307,6 +1307,50 @@ Result<nlohmann::json> EngineServices::listFuturesOrders(const nlohmann::json &p
     return m_futuresRest->getFuturesOrders(contract);
 }
 
+double EngineServices::futuresPriceTick(const std::string &contract)
+{
+    // 1. Cached? (main-thread only — no lock on the map by contract)
+    const auto cached = m_priceTicks.find(contract);
+    if (m_priceTicks.end() != cached)
+    {
+        return cached->second;
+    }
+
+    if (nullptr == m_futuresRest)
+    {
+        return 0.0;
+    }
+
+    // 2. Fetch the contract list under the shared REST mutex and pick the
+    //    contract's order_price_round. Gate rejects trigger prices that are
+    //    not an integer multiple of this unit (1009, testnet 2026-11-13).
+    Result<nlohmann::json> contracts;
+    {
+        std::lock_guard lock(m_restMutex);
+        contracts = m_futuresRest->getFuturesContracts();
+    }
+    if (!ok(contracts))
+    {
+        PULSE_LOG_WARN("control", "futuresPriceTick: contract list failed: {}",
+                       error(contracts).message);
+        return 0.0;
+    }
+
+    for (const auto &c : value(contracts))
+    {
+        if (contract != c.value("name", ""))
+        {
+            continue;
+        }
+        const double tick =
+            safeParseDouble(c.value("order_price_round", "0")).value_or(0.0);
+        m_priceTicks[contract] = tick;
+        return tick;
+    }
+
+    return 0.0;
+}
+
 Result<nlohmann::json> EngineServices::listTriggerOrders(const nlohmann::json &params)
 {
     const auto contract = params.value("contract", "");

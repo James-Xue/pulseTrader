@@ -78,6 +78,14 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.maxDrawdown must be in (0.0, 1.0]"};
     }
 
+    if (cfg.risk.exchange_stop.enabled
+        && (cfg.risk.exchange_stop.pct <= 0.0
+            || cfg.risk.exchange_stop.pct >= 1.0))
+    {
+        return PulseError{ErrorCode::ConfigValidationError,
+                          "risk.exchange_stop_pct must be in (0.0, 1.0)"};
+    }
+
     if (0 == cfg.risk.maxOrdersPerSec)
     {
         return PulseError{ErrorCode::ConfigValidationError,

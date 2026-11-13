@@ -121,6 +121,36 @@ TEST(OrderExecutor, BuildOrderBodyFuturesRegression)
     EXPECT_TRUE(body["reduce_only"].get<bool>());
 }
 
+TEST(OrderExecutor, BuildOrderBodyFuturesAttachesClientText)
+{
+    // Automatic-path client order ids are sent as Gate's `text` field with
+    // the mandatory "t-" prefix (audit B7, 2026-11-13).
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.contract_size = 1;
+    req.client_order_id = "momentum-1a2b3c-0";
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Futures, req);
+    ASSERT_TRUE(body.contains("text"));
+    EXPECT_EQ("t-momentum-1a2b3c-0", body["text"].get<std::string>());
+}
+
+TEST(OrderExecutor, BuildOrderBodyFuturesOmitsEmptyClientText)
+{
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.contract_size = 1;
+
+    const auto body = OrderExecutor::buildOrderBody(MarketType::Futures, req);
+    EXPECT_FALSE(body.contains("text"));
+}
+
 // ---------------------------------------------------------------------------
 // M17: CFD order-id resolution (POST /tradfi/orders does not echo the id)
 // ---------------------------------------------------------------------------
