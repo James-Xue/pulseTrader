@@ -699,6 +699,10 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.risk() };
     };
+    reg["get_gold_trader"] = [&services](const nlohmann::json &)
+    {
+        return RpcResult{ services.goldTraderStatus() };
+    };
     reg["get_signals"] = [&services](const nlohmann::json &)
     {
         return RpcResult{ services.signals() };

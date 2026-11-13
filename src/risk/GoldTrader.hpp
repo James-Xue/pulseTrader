@@ -52,8 +52,11 @@
 #include "risk/PositionManager.hpp"
 #include "risk/SuperTrend.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cstddef>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -112,6 +115,22 @@ class GoldTrader
     /// Number of positions currently tracked.
     [[nodiscard]] std::size_t trackedPositions() const;
 
+    /// Snapshot for the control plane / Qt status card.
+    ///
+    /// Shape:
+    ///   armed, symbol, market_type, config{}, tracked_positions[] with
+    ///   position_id, exchange_position_id, side, quantity, entry_price,
+    ///   mark_price, unrealized_pnl, peak_pnl, effective_stop, exchange_stop.
+    ///
+    /// Thread-safe: the JSON is rebuilt at the end of every tick and copied
+    /// under a small mutex, so a control-plane caller never waits on a REST
+    /// call held by the main loop.
+    [[nodiscard]] nlohmann::json status() const;
+
+    /// JSON view of the static configuration (also used when the supervisor
+    /// is disabled, so the UI can show the thresholds it would use).
+    [[nodiscard]] static nlohmann::json configJson(const GoldTraderConfig &config);
+
     /// Exchange price precision for XAUUSD (two decimals).
     static constexpr double kPriceScale = 100.0;
 
@@ -132,6 +151,14 @@ class GoldTrader
         Timestamp lastStopAttempt{};    ///< Last FAILED stop-push attempt.
         bool closing{ false };          ///< A close was fired; wait for it.
         bool quantoWarned{ false };     ///< Mismatched contract volume logged.
+
+        // Last evaluated snapshot (display only; never drives a decision).
+        Side side{ Side::Buy };
+        double quantity{ 0.0 };
+        double entryPrice{ 0.0 };
+        double lastMark{ 0.0 };
+        double lastPnl{ 0.0 };
+        double lastPeakPnl{ 0.0 };
     };
 
     /// Compute the tightest candidate stop for one position.
@@ -169,8 +196,17 @@ class GoldTrader
     CloseFn m_close;
     SetStopFn m_setStop;
 
+    /// Rebuild the control-plane snapshot from the current per-position state.
+    /// Called only from the main loop (end of tick / constructor).
+    void publishStatus();
+
     std::unordered_map<std::string, TrackedState> m_tracked;
     Timestamp m_lastPoll{};
+
+    /// Control-plane snapshot. The mutex is deliberately NOT held during
+    /// tick()'s REST work: status() only ever copies the last published JSON.
+    mutable std::mutex m_statusMutex;
+    nlohmann::json m_statusSnapshot;
 };
 
 } // namespace pulse::risk

@@ -181,8 +181,15 @@ Validation (`config_validator.cpp`):
 ## 6. Observability
 
 Startup log (`[L7] Gold trader armed: ...`) prints every configured
-threshold. Each stop tightening, push, failure, and close is logged on the
-`risk` logger:
+threshold. The control plane also exposes `get_gold_trader` (same name as the
+MCP tool): it returns the armed/disabled state, the thresholds, and every
+tracked position with mark, unrealized/peak PnL, effective stop and
+exchange-side stop. The Qt client renders that payload as the **L7 dynamic
+stop** card on the Gold Traders page; when the supervisor is disabled the
+card shows the configured thresholds plus the reason.
+
+Each stop tightening, push, failure, and close is logged on the `risk`
+logger:
 
 ```
 GoldTrader: XAUUSD_Buy_1 stop -> 4000.00 (breakeven, peak 3.00 USD, pnl 3.00)

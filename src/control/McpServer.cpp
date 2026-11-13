@@ -450,6 +450,12 @@ nlohmann::json McpServer::toolDefinitions()
         "Risk snapshot: halted flag, drawdown, rate limiter tokens, portfolio.",
         nlohmann::json::object(), {});
 
+    add("get_gold_trader",
+        "Gold trader (L7 USD dynamic-stop supervisor) status: armed/disabled, "
+        "configured thresholds, and every tracked XAUUSD CFD position with its "
+        "mark, peak PnL, effective stop and exchange-side stop.",
+        nlohmann::json::object(), {});
+
     add("get_market",
         "Live market data for a symbol: ticker, top-of-book, klines.",
         nlohmann::json{

@@ -412,7 +412,7 @@ The WebUI was removed on the `headless` branch — monitoring and control now go
 
 **Hot position sync (M21)** — the engine reconciles positions against the exchange at startup, every ~10 s, and on demand (`sync_positions` / REPL `sync`): exchange-side positions are imported and local ghosts (positions closed manually in the Gate app — the user's normal habit) are pruned without a restart. **Dynamic SL/TP (M21)** — `modify_sl_tp` (REPL `modify <id> --sl P --tp P`) adjusts an open CFD position's exchange-native `price_sl`/`price_tp` over `PUT /tradfi/positions/{id}`; the stops live on the exchange, so they fire even if the engine or sub-agent dies. `get_positions` now reports each position's attached `sl_price`/`tp_price`.
 
-**MCP usage** — the `mcp` subcommand exposes the 32 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
+**MCP usage** — the `mcp` subcommand exposes the 34 methods as MCP tools over stdio for LLM clients (Claude Desktop / Claude Code):
 
 ```bash
 claude mcp add pulsetrader -- /abs/path/build/apps/pulsetrader/pulsetrader mcp --config /abs/path/trading.toml

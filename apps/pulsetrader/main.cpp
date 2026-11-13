@@ -1694,6 +1694,21 @@ static int runTrade(int argc, char* argv[])
                   cfg.gold_trader.exchange_stop ? "on" : "off");
     }
 
+    // Expose the supervisor to the control plane (get_gold_trader / MCP /
+    // Qt status card). A null trader means it is disabled or failed the
+    // metadata check; the reason is reported so the UI can explain it.
+    std::string gold_disabled_reason;
+    if (!cfg.gold_trader.enabled)
+    {
+        gold_disabled_reason = "disabled by config";
+    }
+    else if (!gold_metadata_ok)
+    {
+        gold_disabled_reason = "XAUUSD contract metadata unavailable";
+    }
+    services.setGoldTrader(gold_trader.get(), cfg.gold_trader,
+                           std::move(gold_disabled_reason));
+
     // The registry is copied into the server; the local copy is used by
     // the embedded REPL (both dispatch to the same EngineServices).
     auto control_registry = pulse::control::makeMethodRegistry(services);

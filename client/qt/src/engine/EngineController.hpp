@@ -81,6 +81,11 @@ class EngineController : public QObject
     Q_PROPERTY(QString selectedStrategyId READ selectedStrategyId NOTIFY selectedStrategyChanged)
     Q_PROPERTY(QVariantMap selectedStrategy READ selectedStrategy NOTIFY selectedStrategyChanged)
 
+    /// L7 gold trader status (`get_gold_trader`): armed/disabled, thresholds,
+    /// and the tracked XAUUSD CFD positions with their peak PnL and stops.
+    /// Empty until the first reply lands.
+    Q_PROPERTY(QVariantMap goldTrader READ goldTrader NOTIFY goldTraderChanged)
+
     /// One-symbol 1 Hz price stream used by the Market page. The stream owns
     /// its own control socket and stays idle until the page calls start(), so
     /// the dashboard pays nothing for it.
@@ -163,6 +168,7 @@ public:
         return m_strategyParamsModel;
     }
     [[nodiscard]] QString selectedStrategyId() const { return m_selectedStrategyId; }
+    [[nodiscard]] QVariantMap goldTrader() const { return m_goldTrader; }
 
     /// The selected row as a plain map (empty when nothing is selected), so
     /// QML does not have to look a row up by index.
@@ -187,6 +193,8 @@ signals:
     void spotHoldingsEnabledChanged();
     /// Fires on select, on selection loss, and on every strategies refresh.
     void selectedStrategyChanged();
+    /// Fires on every successful `get_gold_trader` reply.
+    void goldTraderChanged();
     void errorOccurred(const QString& message);
     void marketReceived(const QVariantMap& market);
 
@@ -204,6 +212,7 @@ private:
         Strategies,
         Risk,
         StrategyParams,
+        GoldTrader,
     };
 
     void startPolling();
@@ -215,6 +224,7 @@ private:
     void pollAccount();
     void pollStrategies();
     void pollRisk();
+    void pollGoldTrader();
     void issueStrategyParams(const QString& strategyId);
     void handleSuccess(qint64 id, const QJsonObject& result);
     void handleArraySuccess(qint64 id, const QJsonArray& result);
@@ -239,6 +249,7 @@ private:
     QTimer m_accountTimer;
     QTimer m_strategiesTimer;
     QTimer m_riskTimer;
+    QTimer m_goldTraderTimer;
 
     QHash<qint64, PollKind> m_inFlight;
     /// Request id -> strategy id for in-flight get_strategy_params calls. The
@@ -279,6 +290,7 @@ private:
     /// Last `list_strategies` payload, so selectedStrategy() can return the
     /// row without a model-row lookup.
     QJsonArray m_strategiesRaw;
+    QVariantMap m_goldTrader;
     QString m_selectedStrategyId;
     QString m_lastError;
     bool m_pollingEnabled = true;

@@ -803,11 +803,34 @@ TEST_F(EngineServicesTest, SyncPositionsAndModifySlTpRegistered)
     const auto reg = makeMethodRegistry(*m_services);
     EXPECT_NE(reg.end(), reg.find("sync_positions"));
     EXPECT_NE(reg.end(), reg.find("modify_sl_tp"));
+    EXPECT_NE(reg.end(), reg.find("get_gold_trader"));
 
     // sync_positions is a no-arg query that must resolve without params.
     const auto sync_result = reg.at("sync_positions")(nlohmann::json::object());
     const auto payload = std::get<nlohmann::json>(sync_result);
     EXPECT_TRUE(payload.is_object());
+}
+
+TEST_F(EngineServicesTest, GoldTraderStatusDisabledReportsConfigAndReason)
+{
+    GoldTraderConfig cfg;
+    cfg.enabled = true;
+    cfg.symbol = "XAUUSD";
+    cfg.hard_stop_usd = 8.0;
+    cfg.contract_volume = 100.0;
+
+    m_services->setGoldTrader(nullptr, cfg, "XAUUSD contract metadata unavailable");
+    const auto status = m_services->goldTraderStatus();
+
+    EXPECT_FALSE(status.value("armed", true));
+    EXPECT_TRUE(status.value("enabled", false));
+    EXPECT_EQ("XAUUSD", status.value("symbol", ""));
+    EXPECT_EQ("cfd", status.value("market_type", ""));
+    EXPECT_EQ("XAUUSD contract metadata unavailable", status.value("reason", ""));
+    EXPECT_DOUBLE_EQ(8.0, status["config"].value("hard_stop_usd", 0.0));
+    EXPECT_DOUBLE_EQ(100.0, status["config"].value("contract_volume", 0.0));
+    EXPECT_TRUE(status["tracked_positions"].is_array());
+    EXPECT_TRUE(status["tracked_positions"].empty());
 }
 
 TEST_F(EngineServicesTest, ListFuturesOrdersRequiresContract)

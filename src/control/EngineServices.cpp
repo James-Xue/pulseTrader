@@ -12,6 +12,7 @@
 #include "execution/OrderExecutor.hpp"
 #include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
+#include "risk/GoldTrader.hpp"
 
 #ifdef PULSE_ENABLE_SQLITE
 #include "trade_recorder/TradeRecorder.hpp"
@@ -772,6 +773,35 @@ Result<nlohmann::json> EngineServices::strategyPerformance(int hours) const
 nlohmann::json EngineServices::risk() const
 {
     return m_riskMgr.riskSnapshot();
+}
+
+void EngineServices::setGoldTrader(const risk::GoldTrader *trader,
+                                   const GoldTraderConfig &config,
+                                   std::string disabled_reason)
+{
+    m_goldTrader = trader;
+    m_goldConfig = config;
+    m_goldDisabledReason = std::move(disabled_reason);
+}
+
+nlohmann::json EngineServices::goldTraderStatus() const
+{
+    if (nullptr != m_goldTrader)
+    {
+        return m_goldTrader->status();
+    }
+
+    // Disabled / failed-to-arm path: still report the configured thresholds
+    // so the card can explain what WOULD run and why it does not.
+    nlohmann::json status;
+    status["armed"] = false;
+    status["enabled"] = m_goldConfig.enabled;
+    status["symbol"] = m_goldConfig.symbol;
+    status["market_type"] = toString(m_goldConfig.market_type);
+    status["reason"] = m_goldDisabledReason;
+    status["config"] = risk::GoldTrader::configJson(m_goldConfig);
+    status["tracked_positions"] = nlohmann::json::array();
+    return status;
 }
 
 nlohmann::json EngineServices::market(const std::string &symbol,

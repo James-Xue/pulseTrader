@@ -42,6 +42,11 @@ namespace pulse::grid
 class GridManager;
 }
 
+namespace pulse::risk
+{
+class GoldTrader;
+}
+
 namespace pulse::trade_recorder
 {
 class TradeRecorder;
@@ -131,6 +136,21 @@ class EngineServices
                                         const std::string &param,
                                         double value);
     [[nodiscard]] nlohmann::json risk() const;
+
+    /// Attach (or detach) the L7 gold trader for the control-plane status
+    /// card. `trader` is null when the supervisor is disabled or failed its
+    /// metadata check; the configuration and reason are still reported so the
+    /// UI can explain why it is not armed.
+    ///
+    /// The pointer is read by control-session threads; call this during
+    /// startup before the control socket accepts connections. The trader
+    /// publishes a thread-safe JSON snapshot, so later calls are safe too.
+    void setGoldTrader(const risk::GoldTrader *trader,
+                       const GoldTraderConfig &config,
+                       std::string disabled_reason);
+
+    /// Snapshot for the Gold Traders page status card.
+    [[nodiscard]] nlohmann::json goldTraderStatus() const;
     [[nodiscard]] nlohmann::json market(const std::string &symbol,
                                         int book_levels,
                                         int klines,
@@ -320,6 +340,9 @@ class EngineServices
     execution::OrderTracker *m_cfdTracker;
     OrderFlowExecutor &m_orderFlow;
     grid::GridManager *m_grid{ nullptr }; ///< M27 grid service (nullable).
+    const risk::GoldTrader *m_goldTrader{ nullptr }; ///< L7 supervisor (nullable).
+    GoldTraderConfig m_goldConfig;                   ///< Last configured thresholds.
+    std::string m_goldDisabledReason;                ///< Why it is not armed (empty if armed).
     strategy::SignalBoard &m_signalBoard;
     std::mutex &m_restMutex;
     core::ParamChangeLog *m_paramChangeLog{ nullptr }; ///< Audit (nullable).

@@ -313,270 +313,395 @@
     </message>
     <message>
         <location filename="../qml/pages/GoldTradersPage.qml" line="89"/>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="375"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="620"/>
         <source>Auto trade</source>
         <translation>自动交易</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="111"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="135"/>
         <source>Yes</source>
         <translation>是</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="111"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="135"/>
         <source>No</source>
         <translation>否</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="128"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="152"/>
         <source>Gold Traders</source>
         <translation>黄金交易员</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="135"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="159"/>
         <source>%1 of %2 strategies</source>
         <translation>%1 / %2 个策略</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="143"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="167"/>
         <source>Refresh</source>
         <translation>刷新</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="169"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="207"/>
+        <source>L7 dynamic stop</source>
+        <translation>L7 动态止损</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="222"/>
+        <source>Armed</source>
+        <translation>已启用</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="222"/>
+        <source>Disabled</source>
+        <translation>未启用</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="230"/>
+        <source>XAUUSD CFD · USD thresholds</source>
+        <translation>XAUUSD CFD · 美元阈值</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="240"/>
+        <source>Not armed</source>
+        <translation>未启用</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="253"/>
+        <source>Hard stop</source>
+        <translation>硬止损</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="254"/>
+        <source>Break-even after</source>
+        <translation>保本触发</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="255"/>
+        <source>Peak give-back</source>
+        <translation>峰值回撤</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="256"/>
+        <source>Give-back arms</source>
+        <translation>回撤启用点</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="275"/>
+        <source>SuperTrend</source>
+        <translation>超级趋势</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="276"/>
+        <source>ST buffer</source>
+        <translation>趋势缓冲</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="277"/>
+        <source>Contract volume</source>
+        <translation>合约规模</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="278"/>
+        <source>Exchange stop</source>
+        <translation>交易所止损</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="281"/>
+        <source>%1 × %2</source>
+        <translation>%1 × %2</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="291"/>
+        <source>%1 oz/lot</source>
+        <translation>%1 盎司/手</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="295"/>
+        <source>On</source>
+        <translation>开</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="295"/>
+        <source>Off</source>
+        <translation>关</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="309"/>
+        <source>Managed positions (%1)</source>
+        <translation>管理中的持仓（%1）</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="318"/>
+        <source>No open XAUUSD CFD position. The supervisor arms when one appears.</source>
+        <translation>当前没有 XAUUSD CFD 持仓。出现持仓后会自动接管。</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="345"/>
+        <source>%1 · %2 lots</source>
+        <translation>%1 · %2 手</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="352"/>
+        <source>entry %1 → %2</source>
+        <translation>开仓 %1 → %2</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="365"/>
+        <source>PnL %1</source>
+        <translation>浮盈 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="371"/>
+        <source>peak %1</source>
+        <translation>峰值 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="376"/>
+        <source>stop %1</source>
+        <translation>止损 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="381"/>
+        <source>exchange %1</source>
+        <translation>交易所 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="412"/>
         <source>Traders</source>
         <translation>交易员</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="178"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="421"/>
         <source>%1 non-gold hidden</source>
         <translation>已隐藏 %1 个非黄金实例</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="190"/>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="336"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="433"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="581"/>
         <source>Instance</source>
         <translation>实例</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="196"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="439"/>
         <source>Strategy</source>
         <translation>策略</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="202"/>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="342"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="445"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="587"/>
         <source>Symbol</source>
         <translation>交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="208"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="451"/>
         <source>Poll</source>
         <translation>轮询</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="257"/>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="348"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="502"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="593"/>
         <source>%1 ms</source>
         <translation>%1 毫秒</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="266"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="511"/>
         <source>paused</source>
         <translation>已暂停</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="272"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="517"/>
         <source>auto</source>
         <translation>自动</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="290"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="535"/>
         <source>No XAUUSD strategies on this engine.</source>
         <translation>此引擎上没有 XAUUSD 策略。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="291"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="536"/>
         <source>Waiting for the engine.</source>
         <translation>正在等待引擎。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="299"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="544"/>
         <source>A client-launched engine configures BTC_USDT instances only.</source>
         <translation>由客户端启动的引擎只配置 BTC_USDT 实例。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="325"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="570"/>
         <source>Identity &amp; connection</source>
         <translation>身份与连接</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="339"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="584"/>
         <source>Strategy class</source>
         <translation>策略类</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="345"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="590"/>
         <source>Poll interval</source>
         <translation>轮询间隔</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="355"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="600"/>
         <source>Market (engine-wide)</source>
         <translation>市场（引擎级）</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="362"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="607"/>
         <source>Enabled</source>
         <translation>已启用</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="365"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="610"/>
         <source>Running</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="368"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="613"/>
         <source>Paused</source>
         <translation>已暂停</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="382"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="627"/>
         <source>Data server</source>
         <translation>数据服务</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="385"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="630"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="392"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="637"/>
         <source>Data feed</source>
         <translation>数据源</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="395"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="640"/>
         <source>ready</source>
         <translation>就绪</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="395"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="640"/>
         <source>waiting</source>
         <translation>等待中</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="404"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="649"/>
         <source>Attached consumers</source>
         <translation>已连接的消费端</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="432"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="677"/>
         <source>(no strategy)</source>
         <translation>（无策略）</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="438"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="683"/>
         <source>last seen %1</source>
         <translation>最后活动 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="448"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="693"/>
         <source>linked</source>
         <translation>已关联</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="459"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="704"/>
         <source>No consumers connected.</source>
         <translation>没有已连接的消费端。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="483"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="728"/>
         <source>Parameters</source>
         <translation>参数</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="490"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="735"/>
         <source>Select a trader to see its parameters.</source>
         <translation>选择一个交易员以查看其参数。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="504"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="749"/>
         <source>Parameters unavailable: %1</source>
         <translation>参数不可用：%1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="512"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="757"/>
         <source>Retry</source>
         <translation>重试</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="522"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="767"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="562"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="807"/>
         <source>Read-only view. Changing parameters is not available in this version.</source>
         <translation>只读视图。此版本不支持修改参数。</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="587"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="832"/>
         <source>Risk &amp; execution</source>
         <translation>风险与执行</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="600"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="845"/>
         <source>Trading halted</source>
         <translation>交易已停机</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="611"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="856"/>
         <source>Daily drawdown</source>
         <translation>当日回撤</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="618"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="863"/>
         <source>Max drawdown</source>
         <translation>最大回撤</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="625"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="870"/>
         <source>Rate limiter</source>
         <translation>速率限制器</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="636"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="881"/>
         <source>Order rate limiter exhausted</source>
         <translation>下单速率限制器已耗尽</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="648"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="893"/>
         <source>Open positions</source>
         <translation>持仓数</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="655"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="900"/>
         <source>Total notional</source>
         <translation>总名义价值</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="662"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="907"/>
         <source>Unrealized PnL</source>
         <translation>未实现盈亏</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="670"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="915"/>
         <source>Net exposure</source>
         <translation>净敞口</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="677"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="922"/>
         <source>Halt reason</source>
         <translation>停机原因</translation>
     </message>
     <message>
-        <location filename="../qml/pages/GoldTradersPage.qml" line="690"/>
+        <location filename="../qml/pages/GoldTradersPage.qml" line="935"/>
         <source>Last known values — engine not connected.</source>
         <translation>显示最后已知值 —— 引擎未连接。</translation>
     </message>
@@ -665,83 +790,83 @@
 <context>
     <name>MarketPage</name>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="190"/>
+        <location filename="../qml/pages/MarketPage.qml" line="191"/>
         <source>or type a symbol</source>
         <translation>或直接输入交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="203"/>
+        <location filename="../qml/pages/MarketPage.qml" line="204"/>
         <source>auto</source>
         <translation>自动</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="230"/>
+        <location filename="../qml/pages/MarketPage.qml" line="231"/>
         <source>Stop</source>
         <translation>停止</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="230"/>
+        <location filename="../qml/pages/MarketPage.qml" line="231"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="439"/>
+        <location filename="../qml/pages/MarketPage.qml" line="440"/>
         <source>bid %1</source>
         <translation>买一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="444"/>
+        <location filename="../qml/pages/MarketPage.qml" line="445"/>
         <source>ask %1</source>
         <translation>卖一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="471"/>
+        <location filename="../qml/pages/MarketPage.qml" line="472"/>
         <source>Collecting the first 1-second samples…</source>
         <translation>正在采集第一秒数据…</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="472"/>
+        <location filename="../qml/pages/MarketPage.qml" line="473"/>
         <source>Choose a symbol and press Start</source>
         <translation>选择交易对并点击开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="528"/>
+        <location filename="../qml/pages/MarketPage.qml" line="529"/>
         <source>Show chart</source>
         <translation>显示K线图</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="540"/>
-        <location filename="../qml/pages/MarketPage.qml" line="600"/>
+        <location filename="../qml/pages/MarketPage.qml" line="541"/>
+        <location filename="../qml/pages/MarketPage.qml" line="601"/>
         <source>Terminal</source>
         <translation>命令行</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="557"/>
+        <location filename="../qml/pages/MarketPage.qml" line="558"/>
         <source>Samples %1</source>
         <translation>采样 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="562"/>
+        <location filename="../qml/pages/MarketPage.qml" line="563"/>
         <source>Candles %1</source>
         <translation>K线 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="567"/>
+        <location filename="../qml/pages/MarketPage.qml" line="568"/>
         <source>Period %1s</source>
         <translation>周期 %1 秒</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="572"/>
+        <location filename="../qml/pages/MarketPage.qml" line="573"/>
         <source>Last %1</source>
         <translation>最近 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="592"/>
+        <location filename="../qml/pages/MarketPage.qml" line="593"/>
         <source>Raw</source>
         <translation>原始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="600"/>
+        <location filename="../qml/pages/MarketPage.qml" line="601"/>
         <source>Chart</source>
         <translation>K线图</translation>
     </message>
@@ -1286,6 +1411,9 @@
 <context>
     <name>StatusBar</name>
     <message>
+        <location filename="../tests/tst_translator.cpp" line="71"/>
+        <location filename="../tests/tst_translator.cpp" line="86"/>
+        <location filename="../tests/tst_translator.cpp" line="108"/>
         <location filename="../qml/components/StatusBar.qml" line="40"/>
         <source>connected</source>
         <translation>已连接</translation>
@@ -1329,6 +1457,7 @@
         <translation>密码至少需要 %1 个字符。</translation>
     </message>
     <message>
+        <location filename="../tests/tst_translator.cpp" line="87"/>
         <location filename="../src/account/AccountService.cpp" line="134"/>
         <source>The two passwords do not match.</source>
         <translation>两次输入的密码不一致。</translation>
@@ -1373,30 +1502,36 @@
     <name>pulse::client::EngineLauncher</name>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="274"/>
+        <location filename="../src/engine/EngineLauncher.cpp" line="274"/>
         <source>The engine is already running.</source>
         <translation>引擎已在运行。</translation>
     </message>
     <message>
+        <location filename="../src/engine/EngineLauncher.cpp" line="280"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="280"/>
         <source>Invalid control port.</source>
         <translation>控制端口无效。</translation>
     </message>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="288"/>
+        <location filename="../src/engine/EngineLauncher.cpp" line="288"/>
         <source>Engine binary not found. Set PULSE_ENGINE_BIN or build apps/pulsetrader.</source>
         <translation>找不到引擎可执行文件。请设置 PULSE_ENGINE_BIN 或构建 apps/pulsetrader。</translation>
     </message>
     <message>
+        <location filename="../src/engine/EngineLauncher.cpp" line="314"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="314"/>
         <source>Cannot write the engine config: </source>
         <translation>无法写入引擎配置：</translation>
     </message>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="363"/>
+        <location filename="../src/engine/EngineLauncher.cpp" line="363"/>
         <source>The engine failed to start: </source>
         <translation>引擎启动失败：</translation>
     </message>
     <message>
+        <location filename="../src/engine/EngineLauncher.cpp" line="421"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="421"/>
         <source>The engine exited (code %1). See the runtime log.</source>
         <translation>引擎已退出（代码 %1）。请查看运行日志。</translation>
@@ -1407,16 +1542,22 @@
     <message>
         <location filename="../src/security/SecretStore.cpp" line="240"/>
         <location filename="../src/security/SecretStore.cpp" line="407"/>
+        <location filename="../src/security/SecretStore.cpp" line="240"/>
+        <location filename="../src/security/SecretStore.cpp" line="407"/>
         <source>system random generator unavailable</source>
         <translation>系统随机数发生器不可用</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="249"/>
         <location filename="../src/security/SecretStore.cpp" line="349"/>
+        <location filename="../src/security/SecretStore.cpp" line="249"/>
+        <location filename="../src/security/SecretStore.cpp" line="349"/>
         <source>key derivation failed</source>
         <translation>密钥派生失败</translation>
     </message>
     <message>
+        <location filename="../src/security/SecretStore.cpp" line="260"/>
+        <location filename="../src/security/SecretStore.cpp" line="417"/>
         <location filename="../src/security/SecretStore.cpp" line="260"/>
         <location filename="../src/security/SecretStore.cpp" line="417"/>
         <source>encryption failed</source>
@@ -1427,10 +1568,16 @@
         <location filename="../src/security/SecretStore.cpp" line="305"/>
         <location filename="../src/security/SecretStore.cpp" line="387"/>
         <location filename="../src/security/SecretStore.cpp" line="434"/>
+        <location filename="../src/security/SecretStore.cpp" line="279"/>
+        <location filename="../src/security/SecretStore.cpp" line="305"/>
+        <location filename="../src/security/SecretStore.cpp" line="387"/>
+        <location filename="../src/security/SecretStore.cpp" line="434"/>
         <source>cannot open vault: </source>
         <translation>无法打开档案库：</translation>
     </message>
     <message>
+        <location filename="../src/security/SecretStore.cpp" line="286"/>
+        <location filename="../src/security/SecretStore.cpp" line="440"/>
         <location filename="../src/security/SecretStore.cpp" line="286"/>
         <location filename="../src/security/SecretStore.cpp" line="440"/>
         <source>cannot write vault: </source>
@@ -1438,30 +1585,36 @@
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="317"/>
+        <location filename="../src/security/SecretStore.cpp" line="317"/>
         <source>vault is corrupt or not a pulseTrader vault</source>
         <translation>档案库已损坏或不是 pulseTrader 档案库</translation>
     </message>
     <message>
+        <location filename="../src/security/SecretStore.cpp" line="323"/>
         <location filename="../src/security/SecretStore.cpp" line="323"/>
         <source>unsupported vault version</source>
         <translation>不支持的档案库版本</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="331"/>
+        <location filename="../src/security/SecretStore.cpp" line="331"/>
         <source>vault header is corrupt</source>
         <translation>档案库文件头已损坏</translation>
     </message>
     <message>
+        <location filename="../src/security/SecretStore.cpp" line="358"/>
         <location filename="../src/security/SecretStore.cpp" line="358"/>
         <source>wrong password or corrupted vault</source>
         <translation>密码错误或档案库已损坏</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="372"/>
+        <location filename="../src/security/SecretStore.cpp" line="372"/>
         <source>vault payload is not valid JSON</source>
         <translation>档案库内容不是有效的 JSON</translation>
     </message>
     <message>
+        <location filename="../src/security/SecretStore.cpp" line="396"/>
         <location filename="../src/security/SecretStore.cpp" line="396"/>
         <source>vault is corrupt</source>
         <translation>档案库已损坏</translation>

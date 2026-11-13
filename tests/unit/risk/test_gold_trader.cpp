@@ -704,3 +704,52 @@ TEST(GoldTrader, ConsecutiveTighteningsPushImmediately)
     ASSERT_EQ(2u, h.pushed_stops.size());
     EXPECT_DOUBLE_EQ(4000.0, h.pushed_stops.back());
 }
+
+// ---------------------------------------------------------------------------
+// Control-plane status
+// ---------------------------------------------------------------------------
+
+TEST(GoldTrader, StatusReportsArmedConfigAndTrackedPosition)
+{
+    Harness h;
+    const auto id = h.open(Side::Buy, 0.01, 4000.0);
+    h.price = 3999.0;
+    (void)h.tick(1); // publishes the status snapshot
+
+    const auto status = h.trader->status();
+    EXPECT_TRUE(status.value("armed", false));
+    EXPECT_EQ("XAUUSD", status.value("symbol", ""));
+    EXPECT_EQ("cfd", status.value("market_type", ""));
+    ASSERT_TRUE(status.contains("config"));
+    EXPECT_DOUBLE_EQ(8.0, status["config"].value("hard_stop_usd", 0.0));
+    EXPECT_DOUBLE_EQ(100.0, status["config"].value("contract_volume", 0.0));
+
+    const auto positions = status.value("tracked_positions", nlohmann::json::array());
+    ASSERT_EQ(1u, positions.size());
+    EXPECT_EQ(id, positions[0].value("position_id", ""));
+    EXPECT_EQ("Buy", positions[0].value("side", ""));
+    EXPECT_DOUBLE_EQ(0.01, positions[0].value("quantity", 0.0));
+    EXPECT_DOUBLE_EQ(3999.0, positions[0].value("mark_price", 0.0));
+    EXPECT_DOUBLE_EQ(-1.0, positions[0].value("unrealized_pnl", 0.0));
+    EXPECT_DOUBLE_EQ(0.0, positions[0].value("peak_pnl", 0.0));
+    EXPECT_DOUBLE_EQ(3992.0, positions[0].value("effective_stop", 0.0));
+    EXPECT_DOUBLE_EQ(3992.0, positions[0].value("exchange_stop", 0.0));
+}
+
+TEST(GoldTrader, StatusStartsEmptyAndDropsClosedPositions)
+{
+    Harness h;
+    const auto initial = h.trader->status();
+    EXPECT_TRUE(initial.value("armed", false));
+    EXPECT_TRUE(initial["tracked_positions"].empty());
+
+    const auto id = h.open(Side::Buy, 0.01, 4000.0);
+    h.price = 3999.0;
+    (void)h.tick(1);
+
+    auto closed = h.positions.closePosition(id, 0.01, 3999.0);
+    ASSERT_TRUE(closed.has_value());
+    (void)h.tick(2);
+
+    EXPECT_TRUE(h.trader->status()["tracked_positions"].empty());
+}

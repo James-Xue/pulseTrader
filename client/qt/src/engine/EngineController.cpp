@@ -36,6 +36,7 @@ constexpr int kAccountIntervalMs = 5000;
 // config reload; the risk snapshot changes on trades and halts.
 constexpr int kStrategiesIntervalMs = 5000;
 constexpr int kRiskIntervalMs = 2000;
+constexpr int kGoldTraderIntervalMs = 2000;
 
 // Per-call budgets. The account budget is large because the engine performs up
 // to three serialised REST calls behind a global mutex.
@@ -156,6 +157,7 @@ EngineController::EngineController(QObject* parent)
             pollSignals();
             pollStrategies();
             pollRisk();
+            pollGoldTrader();
             // A selection made while disconnected (or whose request failed
             // with the transport) is retried as soon as the socket is back.
             if (!m_selectedStrategyId.isEmpty()
@@ -190,6 +192,7 @@ EngineController::EngineController(QObject* parent)
     m_accountTimer.setInterval(kAccountIntervalMs);
     m_strategiesTimer.setInterval(kStrategiesIntervalMs);
     m_riskTimer.setInterval(kRiskIntervalMs);
+    m_goldTraderTimer.setInterval(kGoldTraderIntervalMs);
 
     connect(&m_statusTimer, &QTimer::timeout, this, &EngineController::pollStatus);
     connect(&m_positionsTimer, &QTimer::timeout, this, &EngineController::pollPositions);
@@ -198,6 +201,7 @@ EngineController::EngineController(QObject* parent)
     connect(&m_accountTimer, &QTimer::timeout, this, &EngineController::pollAccount);
     connect(&m_strategiesTimer, &QTimer::timeout, this, &EngineController::pollStrategies);
     connect(&m_riskTimer, &QTimer::timeout, this, &EngineController::pollRisk);
+    connect(&m_goldTraderTimer, &QTimer::timeout, this, &EngineController::pollGoldTrader);
 
     // 2b. Dashboard preference, persisted across sessions under
     //     [dashboard] spotHoldings. Read here so the very first account poll
@@ -313,6 +317,7 @@ void EngineController::refreshAll()
     pollAccount();
     pollStrategies();
     pollRisk();
+    pollGoldTrader();
 }
 
 void EngineController::startPolling()
@@ -324,6 +329,7 @@ void EngineController::startPolling()
     m_accountTimer.start();
     m_strategiesTimer.start();
     m_riskTimer.start();
+    m_goldTraderTimer.start();
 
     // First paint should not wait for the first tick.
     refreshAll();
@@ -338,6 +344,7 @@ void EngineController::stopPolling()
     m_accountTimer.stop();
     m_strategiesTimer.stop();
     m_riskTimer.stop();
+    m_goldTraderTimer.stop();
 }
 
 bool EngineController::isInFlight(PollKind kind) const
@@ -447,6 +454,17 @@ void EngineController::pollRisk()
     const qint64 id = m_fast->call(methods::kGetRisk, QJsonObject{},
                                    kRiskTimeoutMs);
     m_inFlight.insert(id, PollKind::Risk);
+}
+
+void EngineController::pollGoldTrader()
+{
+    if (RpcClient::State::Ready != m_fast->state() || isInFlight(PollKind::GoldTrader))
+    {
+        return;
+    }
+    const qint64 id = m_fast->call(methods::kGetGoldTrader, QJsonObject{},
+                                   kRiskTimeoutMs);
+    m_inFlight.insert(id, PollKind::GoldTrader);
 }
 
 void EngineController::issueStrategyParams(const QString& strategyId)
@@ -582,6 +600,11 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         break;
     case PollKind::Risk:
         m_riskModel->setFromJson(result);
+        setLastError(QString());
+        break;
+    case PollKind::GoldTrader:
+        m_goldTrader = result.toVariantMap();
+        emit goldTraderChanged();
         setLastError(QString());
         break;
     case PollKind::StrategyParams:

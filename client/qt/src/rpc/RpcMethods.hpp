@@ -23,5 +23,6 @@ inline const QString kGetMarket = QStringLiteral("get_market");
 inline const QString kListStrategies = QStringLiteral("list_strategies");
 inline const QString kGetStrategyParams = QStringLiteral("get_strategy_params");
 inline const QString kGetRisk = QStringLiteral("get_risk");
+inline const QString kGetGoldTrader = QStringLiteral("get_gold_trader");
 
 } // namespace pulse::client::methods

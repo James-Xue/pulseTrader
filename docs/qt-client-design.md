@@ -32,7 +32,7 @@ Contents: [1 Goals](#1-goals--non-goals) · [2 Wire contract](#2-wire-contract-s
 
 | ID | Non-goal | Rationale |
 | -- | -------- | --------- |
-| N-1 | Order placement, cancellation, position close, `halt_trading`/`resume_trading`, strategy parameter writes, grid control, trigger orders. | Scope decision. The socket exposes all 33 methods (`src/control/JsonRpcServer.cpp`); the client deliberately implements only the nine read-only methods, three of which power the Gold Traders page. |
+| N-1 | Order placement, cancellation, position close, `halt_trading`/`resume_trading`, strategy parameter writes, grid control, trigger orders. | Scope decision. The socket exposes all 34 methods (`src/control/JsonRpcServer.cpp`); the client deliberately implements only the ten read-only methods, four of which power the Gold Traders page (`list_strategies`, `get_strategy_params`, `get_risk`, `get_gold_trader`). |
 | N-2 | Server-initiated push, subscriptions, streaming. | The engine has no such mechanism; the only server write is the direct reply to the line just read (`src/control/JsonRpcServer.cpp:341-345`). Adding push is an engine project, not a client project. |
 | N-3 | MCP transport. | MCP is a stdio adapter over the same registry (`src/control/McpServer.cpp:692-730`). The client speaks TCP JSON-RPC directly. |
 | N-4 | Reuse of `src/control/ControlClient`. | Blocking asio, per-call local read buffer, no id correlation (`src/control/ControlClient.cpp:156-181`), and it links the entire engine stack (`src/control/CMakeLists.txt:26-40`), which does not exist for Android ABIs. |

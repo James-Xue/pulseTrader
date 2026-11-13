@@ -49,6 +49,11 @@ All notable changes to this project are documented here. The format follows
   Loaded from the top-level `[gold_trader]` section (enabled in the live
   config); no strategy instance is required. See
   `docs/strategies/gold-trader.md`.
+- `get_gold_trader` control-plane method / MCP tool (34 total) exposes the
+  L7 supervisor's armed state, thresholds and tracked positions. The Qt Gold
+  Traders page renders it as an "L7 dynamic stop" status card (Armed/Disabled,
+  USD thresholds, and per-position mark / PnL / peak / effective stop /
+  exchange stop).
 - CFD 1-minute klines are polled on the wall-clock minute boundary and
   `KlineBuffer::updateOrPush` refreshes the newest bar in place, so each bar
   converges to its final OHLC instead of staying frozen at its first partial

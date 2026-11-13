@@ -107,6 +107,30 @@ Flickable {
         return Number(value).toFixed(2)
     }
 
+    /// USD amount with the "U" unit used by the gold trader thresholds.
+    function fmtU(value) {
+        if (value === undefined || value === null || !isFinite(value)) {
+            return "—"
+        }
+        return Number(value).toFixed(2) + " U"
+    }
+
+    /// Plain number without forced decimals (periods, multipliers, lots).
+    function fmtNum(value) {
+        if (value === undefined || value === null || !isFinite(value)) {
+            return "—"
+        }
+        return Number(value).toString()
+    }
+
+    /// Price with XAUUSD's two-decimal quote precision.
+    function fmtPrice(value) {
+        if (value === undefined || value === null || !isFinite(value)) {
+            return "—"
+        }
+        return Number(value).toFixed(2)
+    }
+
     function yesNo(value) {
         return value ? qsTr("Yes") : qsTr("No")
     }
@@ -142,6 +166,225 @@ Flickable {
             MacButton {
                 text: qsTr("Refresh")
                 onClicked: if (root.controller) root.controller.refreshAll()
+            }
+        }
+
+        // -- L7 dynamic stop supervisor --------------------------------------
+        //
+        // The gold trader is an L7 exit supervisor, not a StrategyBase
+        // instance, so it does not appear in the trader list below. This
+        // card is its read-only status: armed/disabled, the configured USD
+        // thresholds, and every XAUUSD CFD position it currently manages
+        // (mark, peak PnL, effective stop, exchange-side stop).
+        Rectangle {
+            id: goldCard
+
+            Layout.fillWidth: true
+            implicitHeight: goldStatusColumn.implicitHeight + 2 * Style.pad
+            radius: Style.radius
+            color: Style.contentBackground
+            border.width: 1
+            border.color: Style.separator
+
+            readonly property var gold: root.controller ? root.controller.goldTrader : ({})
+            readonly property var goldConfig: gold && gold.config ? gold.config : ({})
+            readonly property var goldPositions:
+                gold && gold.tracked_positions ? gold.tracked_positions : []
+            readonly property bool armed: gold && gold.armed === true
+
+            ColumnLayout {
+                id: goldStatusColumn
+
+                anchors.fill: parent
+                anchors.margins: Style.pad
+                spacing: Style.gapSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gap
+
+                    Text {
+                        text: qsTr("L7 dynamic stop")
+                        color: Style.text
+                        font.pixelSize: Style.fontSize
+                        font.weight: Font.DemiBold
+                    }
+
+                    Rectangle {
+                        implicitWidth: armedLabel.implicitWidth + 14
+                        implicitHeight: 20
+                        radius: 4
+                        color: goldCard.armed ? Style.success : Style.tertiaryText
+
+                        Text {
+                            id: armedLabel
+                            anchors.centerIn: parent
+                            text: goldCard.armed ? qsTr("Armed") : qsTr("Disabled")
+                            color: "white"
+                            font.pixelSize: Style.fontSizeSmall
+                            font.weight: Font.DemiBold
+                        }
+                    }
+
+                    Text {
+                        text: qsTr("XAUUSD CFD · USD thresholds")
+                        color: Style.tertiaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        visible: !goldCard.armed
+                        text: goldCard.gold && goldCard.gold.reason
+                              ? goldCard.gold.reason : qsTr("Not armed")
+                        color: Style.warning
+                        font.pixelSize: Style.fontSizeSmall
+                        elide: Text.ElideRight
+                    }
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 4
+                    columnSpacing: Style.gap
+                    rowSpacing: Style.gapSmall
+
+                    Text { text: qsTr("Hard stop"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("Break-even after"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("Peak give-back"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("Give-back arms"); color: Style.secondaryText; font.pixelSize: 11 }
+
+                    Text {
+                        text: root.fmtU(goldCard.goldConfig.hard_stop_usd)
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: root.fmtU(goldCard.goldConfig.breakeven_trigger_usd)
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: root.fmtU(goldCard.goldConfig.peak_drawdown_usd)
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: root.fmtU(goldCard.goldConfig.peak_trail_arm_usd)
+                        color: Style.text; font.pixelSize: 13
+                    }
+
+                    Text { text: qsTr("SuperTrend"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("ST buffer"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("Contract volume"); color: Style.secondaryText; font.pixelSize: 11 }
+                    Text { text: qsTr("Exchange stop"); color: Style.secondaryText; font.pixelSize: 11 }
+
+                    Text {
+                        text: qsTr("%1 × %2")
+                                  .arg(root.fmtNum(goldCard.goldConfig.supertrend_period))
+                                  .arg(root.fmtNum(goldCard.goldConfig.supertrend_multiplier))
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: root.fmtU(goldCard.goldConfig.supertrend_buffer_usd)
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: qsTr("%1 oz/lot").arg(root.fmtNum(goldCard.goldConfig.contract_volume))
+                        color: Style.text; font.pixelSize: 13
+                    }
+                    Text {
+                        text: goldCard.goldConfig.exchange_stop ? qsTr("On") : qsTr("Off")
+                        color: goldCard.goldConfig.exchange_stop
+                               ? Style.success : Style.secondaryText
+                        font.pixelSize: 13
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 1
+                    color: Style.separator
+                }
+
+                Text {
+                    text: qsTr("Managed positions (%1)")
+                              .arg(goldCard.goldPositions.length)
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: 0 === goldCard.goldPositions.length
+                    text: qsTr("No open XAUUSD CFD position. The supervisor arms when one appears.")
+                    color: Style.tertiaryText
+                    font.pixelSize: Style.fontSizeSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                Repeater {
+                    model: goldCard.goldPositions
+
+                    delegate: ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Style.gap
+
+                            Text {
+                                text: modelData.position_id === undefined
+                                      ? "" : modelData.position_id
+                                color: Style.text
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: qsTr("%1 · %2 lots")
+                                          .arg(modelData.side === undefined ? "" : modelData.side)
+                                          .arg(root.fmtNum(modelData.quantity))
+                                color: Style.secondaryText
+                                font.pixelSize: 11
+                            }
+                            Text {
+                                text: qsTr("entry %1 → %2")
+                                          .arg(root.fmtPrice(modelData.entry_price))
+                                          .arg(root.fmtPrice(modelData.mark_price))
+                                color: Style.secondaryText
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Style.gap
+
+                            Text {
+                                text: qsTr("PnL %1").arg(root.fmtU(modelData.unrealized_pnl))
+                                color: Number(modelData.unrealized_pnl) >= 0
+                                       ? Style.success : Style.danger
+                                font.pixelSize: 11
+                            }
+                            Text {
+                                text: qsTr("peak %1").arg(root.fmtU(modelData.peak_pnl))
+                                color: Style.secondaryText
+                                font.pixelSize: 11
+                            }
+                            Text {
+                                text: qsTr("stop %1").arg(root.fmtPrice(modelData.effective_stop))
+                                color: Style.text
+                                font.pixelSize: 11
+                            }
+                            Text {
+                                text: qsTr("exchange %1").arg(root.fmtPrice(modelData.exchange_stop))
+                                color: Style.secondaryText
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
+                }
             }
         }
 

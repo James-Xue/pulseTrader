@@ -37,6 +37,9 @@ GoldTrader::GoldTrader(const GoldTraderConfig &config,
     : m_config{ config }, m_positions{ positions }, m_priceLookup{ std::move(price_lookup) },
       m_supertrendLookup{ std::move(supertrend_lookup) }, m_close{ std::move(close) }, m_setStop{ std::move(set_stop) }
 {
+    // Publish an initial snapshot so the control plane can answer before the
+    // first tick (the engine may be queried during startup).
+    publishStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +214,7 @@ GoldTrader::TickResult GoldTrader::tick(Timestamp now)
 
     if (live.empty())
     {
+        publishStatus();
         return result;
     }
 
@@ -307,7 +311,15 @@ GoldTrader::TickResult GoldTrader::tick(Timestamp now)
             state.peakPrice = std::min(state.peakPrice, mark);
         }
 
+        // Display snapshot for the status card (never used for decisions).
+        state.side = pos.side;
+        state.quantity = pos.quantity;
+        state.entryPrice = pos.entry_price;
+        state.lastMark = mark;
+        state.lastPnl = pnl;
+
         const double peak_pnl = std::max(0.0, (state.peakPrice - pos.entry_price) * ounce_size * sign);
+        state.lastPeakPnl = peak_pnl;
 
         // 5d. Reconcile the exchange-stop baseline with what the exchange
         //     actually holds. Adopting the CURRENT value (including 0 = no
@@ -430,7 +442,71 @@ GoldTrader::TickResult GoldTrader::tick(Timestamp now)
         }
     }
 
+    publishStatus();
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Control-plane status
+// ---------------------------------------------------------------------------
+nlohmann::json GoldTrader::configJson(const GoldTraderConfig &config)
+{
+    return {
+        { "hard_stop_usd", config.hard_stop_usd },
+        { "breakeven_trigger_usd", config.breakeven_trigger_usd },
+        { "peak_drawdown_usd", config.peak_drawdown_usd },
+        { "peak_trail_arm_usd", config.peak_trail_arm_usd },
+        { "supertrend_buffer_usd", config.supertrend_buffer_usd },
+        { "supertrend_period", config.supertrend_period },
+        { "supertrend_multiplier", config.supertrend_multiplier },
+        { "contract_volume", config.contract_volume },
+        { "poll_interval_ms", config.poll_interval_ms },
+        { "retry_cooldown_sec", config.retry_cooldown_sec },
+        { "exchange_stop", config.exchange_stop },
+    };
+}
+
+void GoldTrader::publishStatus()
+{
+    nlohmann::json snapshot;
+    snapshot["armed"] = true;
+    snapshot["symbol"] = m_config.symbol;
+    snapshot["market_type"] = toString(m_config.market_type);
+    snapshot["config"] = configJson(m_config);
+
+    nlohmann::json positions = nlohmann::json::array();
+
+    for (const auto &[position_id, state] : m_tracked)
+    {
+        if (!state.initialized)
+        {
+            continue;
+        }
+
+        positions.push_back({
+            { "position_id", position_id },
+            { "exchange_position_id", state.exchangePositionId },
+            { "side", (Side::Buy == state.side) ? "Buy" : "Sell" },
+            { "quantity", state.quantity },
+            { "entry_price", state.entryPrice },
+            { "mark_price", state.lastMark },
+            { "unrealized_pnl", state.lastPnl },
+            { "peak_pnl", state.lastPeakPnl },
+            { "effective_stop", state.effectiveStop },
+            { "exchange_stop", state.pushedStop },
+        });
+    }
+
+    snapshot["tracked_positions"] = std::move(positions);
+
+    std::lock_guard<std::mutex> lock(m_statusMutex);
+    m_statusSnapshot = std::move(snapshot);
+}
+
+nlohmann::json GoldTrader::status() const
+{
+    std::lock_guard<std::mutex> lock(m_statusMutex);
+    return m_statusSnapshot;
 }
 
 // ---------------------------------------------------------------------------

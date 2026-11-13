@@ -135,6 +135,23 @@ static bool resultFor(const QJsonObject& request, QJsonValue& result)
         result = risk;
         return true;
     }
+    if (QStringLiteral("get_gold_trader") == method)
+    {
+        result = QJsonObject{
+            { QStringLiteral("armed"), true },
+            { QStringLiteral("symbol"), QStringLiteral("XAUUSD") },
+            { QStringLiteral("market_type"), QStringLiteral("cfd") },
+            { QStringLiteral("config"),
+              QJsonObject{
+                  { QStringLiteral("hard_stop_usd"), 8.0 },
+                  { QStringLiteral("breakeven_trigger_usd"), 2.0 },
+                  { QStringLiteral("peak_drawdown_usd"), 5.0 },
+                  { QStringLiteral("contract_volume"), 100.0 },
+              } },
+            { QStringLiteral("tracked_positions"), QJsonArray{} },
+        };
+        return true;
+    }
     if (QStringLiteral("get_strategy_params") == method)
     {
         const QJsonObject params = request.value(QStringLiteral("params")).toObject();
@@ -217,6 +234,17 @@ void TestEngineController::goldTradersAndSelection()
     QCOMPARE(3, controller.strategiesModel()->count());
     QTRY_VERIFY_WITH_TIMEOUT(controller.riskModel()->present(), 5000);
     QCOMPARE(0.01, controller.riskModel()->dailyDrawdown());
+
+    // The L7 status card gets its data from get_gold_trader.
+    QTRY_VERIFY_WITH_TIMEOUT(controller.goldTrader().value(QStringLiteral("armed")).toBool(), 5000);
+    QCOMPARE(QStringLiteral("XAUUSD"),
+             controller.goldTrader().value(QStringLiteral("symbol")).toString());
+    QCOMPARE(8.0,
+             controller.goldTrader()
+                 .value(QStringLiteral("config"))
+                 .toMap()
+                 .value(QStringLiteral("hard_stop_usd"))
+                 .toDouble());
 
     // Selecting a trader fetches its parameters on demand.
     controller.selectStrategy(QStringLiteral("momentum_scalper_XAUUSD"));
