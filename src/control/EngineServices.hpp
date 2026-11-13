@@ -173,6 +173,17 @@ class EngineServices
     /// `orders()` view misses. Params: contract (required).
     [[nodiscard]] Result<nlohmann::json> listFuturesOrders(const nlohmann::json &params);
 
+    /// Price tick (Gate `order_price_round`) for a futures contract.
+    ///
+    /// Trigger prices must be an integer multiple of this unit — Gate rejects
+    /// anything else with 1009 AUTO_INVALID_PARAM_TRIGGER_PRICE (verified on
+    /// testnet 2026-11-13). Returns 0 when the tick cannot be resolved; the
+    /// caller must then skip placement rather than send a rejected price.
+    ///
+    /// The result is cached per contract. Main-thread only (the cache is not
+    /// synchronized; the REST call itself takes rest_mutex internally).
+    [[nodiscard]] double futuresPriceTick(const std::string &contract);
+
     /// Cancel a trigger order by ID — `cancel_trigger_order`.
     /// Params: order_id (required).
     [[nodiscard]] Result<nlohmann::json> cancelTriggerOrder(const nlohmann::json &params);
@@ -309,6 +320,7 @@ class EngineServices
         std::chrono::steady_clock::time_point fetched{};
     };
     std::unordered_map<std::string, SpotPrice> m_spotPrices;
+    std::unordered_map<std::string, double> m_priceTicks; ///< contract → order_price_round
 
     /// Budget for REST lookups inside one account() call, so a wallet with
     /// many unpriced altcoins cannot turn one snapshot into dozens of calls.

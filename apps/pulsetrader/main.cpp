@@ -1917,10 +1917,45 @@ static int runTrade(int argc, char* argv[])
 
                 // Long → stop below entry (rule 2); short → above (rule 1).
                 const bool is_long = (pulse::Side::Buy == stop.side);
-                const double trigger =
+                double trigger =
                     is_long
                         ? stop.entry_price * (1.0 - cfg.risk.exchange_stop.pct)
                         : stop.entry_price * (1.0 + cfg.risk.exchange_stop.pct);
+
+                // Gate requires trigger.price to be an integer multiple of the
+                // contract's order_price_round — anything else is rejected with
+                // 1009 AUTO_INVALID_PARAM_TRIGGER_PRICE (testnet, 2026-11-13).
+                const double tick = services.futuresPriceTick(stop.symbol);
+                if (tick <= 0.0)
+                {
+                    log->warn("[L7] No price tick for {} — stop not placed",
+                              stop.symbol);
+                    continue;
+                }
+                trigger = std::round(trigger / tick) * tick;
+
+                // Gate rejects a long stop at/above the last price and a short
+                // stop at/below it (1029 AUTO_TRIGGER_PRICE_LESS_LAST). If the
+                // market already gapped past the stop, place nothing: the
+                // engine-side ProtectiveExitManager closes the position on its
+                // next tick anyway.
+                if (futures_feed)
+                {
+                    const auto quote = futures_feed->tickerCache().get(stop.symbol);
+                    if (quote.has_value() && quote->last > 0.0)
+                    {
+                        const bool breached =
+                            is_long ? (trigger >= quote->last)
+                                    : (trigger <= quote->last);
+                        if (breached)
+                        {
+                            log->warn("[L7] {} stop {:.2f} already breached "
+                                      "(last {:.2f}) — skipped",
+                                      stop.symbol, trigger, quote->last);
+                            continue;
+                        }
+                    }
+                }
 
                 nlohmann::json params{
                     { "contract", stop.symbol },

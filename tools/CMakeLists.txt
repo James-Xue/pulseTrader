@@ -111,3 +111,14 @@ if(PULSE_ENABLE_SQLITE)
     target_link_libraries(backtest_data_check PRIVATE SQLiteCpp)
     target_compile_definitions(backtest_data_check PRIVATE PULSE_ENABLE_SQLITE)
 endif()
+
+# Exchange-side protective stop probe (audit B1) — testnet only.
+add_executable(test_exchange_stop
+    test_exchange_stop.cpp
+)
+
+target_link_libraries(test_exchange_stop
+    PRIVATE
+        pulse::exchange
+        pulse::logging
+)
