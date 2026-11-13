@@ -1416,3 +1416,45 @@ TEST_F(OrderFlowTest, CfdMarketOrderTriggersImmediatePollNoCrash)
     ASSERT_EQ(1u, active.size());
     EXPECT_EQ(OrderStatus::Pending, active[0].status);
 }
+
+// ---------------------------------------------------------------------------
+// makeClientOrderId — automatic-path idempotency key (audit B7, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ClientOrderId, SanitizesAndFitsGateLimit)
+{
+    const auto id = makeClientOrderId("Momentum_Scalper_v2", 7, 1794536576883LL);
+
+    // Gate limits `text` to 26 bytes after OrderExecutor prepends "t-".
+    EXPECT_LE(id.size(), 26u);
+
+    // Only [a-z0-9-] is allowed in the key.
+    for (char c : id)
+    {
+        const bool legal = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || ('-' == c);
+        EXPECT_TRUE(legal) << "illegal char: " << c;
+    }
+
+    // Underscores are dropped; the prefix is capped at 8 chars.
+    EXPECT_EQ(0u, id.rfind("momentum-", 0)) << id;
+}
+
+TEST(ClientOrderId, UniqueAcrossSequence)
+{
+    const auto a = makeClientOrderId("eth", 1, 1794536576883LL);
+    const auto b = makeClientOrderId("eth", 2, 1794536576883LL);
+    EXPECT_NE(a, b);
+}
+
+TEST(ClientOrderId, UniqueAcrossMilliseconds)
+{
+    const auto a = makeClientOrderId("eth", 0, 1794536576883LL);
+    const auto b = makeClientOrderId("eth", 0, 1794536576884LL);
+    EXPECT_NE(a, b);
+}
+
+TEST(ClientOrderId, EmptyStrategyFallsBackToAuto)
+{
+    const auto id = makeClientOrderId("", 0, 0);
+    EXPECT_EQ(0u, id.rfind("auto-", 0)) << id;
+}

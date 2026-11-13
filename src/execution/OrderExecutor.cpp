@@ -46,8 +46,14 @@ Result<OrderResponse> OrderExecutor::placeOrder(const OrderRequest &req)
     const nlohmann::json body_json = buildOrderBody(m_marketType, req);
     const std::string body = body_json.dump();
 
-    // Submit order via REST (retry logic is in GateRestClient::request)
-    auto result = m_restClient.request("POST", EndpointRouter::ordersPath(m_marketType), "", body);
+    // Submit the order with automatic retry DISABLED.
+    //
+    // A POST that timed out may already have been accepted by the exchange;
+    // re-sending the identical signed body would create a second position
+    // (audit B7, 2026-11-13). Reconciliation instead relies on the
+    // client_order_id carried as Gate's `text` field when present.
+    auto result = m_restClient.request(
+        "POST", EndpointRouter::ordersPath(m_marketType), "", body, /*retry=*/false);
 
     if (!ok(result))
     {

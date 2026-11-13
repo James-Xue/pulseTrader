@@ -29,6 +29,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #ifdef PULSE_ENABLE_SQLITE
@@ -37,6 +38,25 @@
 
 namespace pulse::control
 {
+
+// ---------------------------------------------------------------------------
+// makeClientOrderId — Gate-safe idempotency / reconciliation key
+// ---------------------------------------------------------------------------
+//
+// Gate.io requires the `text` field to start with "t-" (OrderExecutor adds
+// that prefix) and limits the remainder to 26 bytes, so this returns at most
+// 26 characters from [a-z0-9-].
+//
+// Shape: <sanitized strategy prefix>-<base36 epoch ms>-<base36 sequence>
+// The timestamp keeps keys unique across process restarts; the sequence
+// disambiguates orders placed within the same millisecond.
+//
+// NOTE: this key is NOT idempotency by itself — Gate does not guarantee that
+// a duplicate `text` is rejected. The retry loop is disabled separately for
+// order POSTs; the key exists so a lost response can be reconciled.
+[[nodiscard]] std::string makeClientOrderId(std::string_view strategy,
+                                            std::uint64_t seq,
+                                            std::int64_t now_ms);
 
 // ---------------------------------------------------------------------------
 // IOrderPlacer — thin interface so unit tests can fake order placement
@@ -307,6 +327,10 @@ class OrderFlowExecutor
     std::mutex m_mutex;   ///< Guards m_reservations AND m_makerAttempts.
     std::unordered_map<std::string, ReservationEntry> m_reservations;
     std::unordered_map<std::string, MakerAttempt> m_makerAttempts;
+
+    /// Monotonic sequence for automatic-path client order ids. Mutable
+    /// because buildRequestFromSignal() is const but must consume a unique id.
+    mutable std::atomic<std::uint64_t> m_orderSeq{ 0 };
 };
 
 } // namespace pulse::control

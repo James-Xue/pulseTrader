@@ -6,10 +6,71 @@
 #include "logging/Logger.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace pulse::control
 {
+
+namespace
+{
+// Base-36 encoding for compact [0-9a-z]-safe ids. Gate's `text` field is
+// limited to 26 bytes after the "t-" prefix, so every character counts.
+std::string toBase36(std::uint64_t value)
+{
+    static constexpr char kDigits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    if (0 == value)
+    {
+        return "0";
+    }
+    std::string out;
+    while (value > 0)
+    {
+        out.push_back(kDigits[value % 36]);
+        value /= 36;
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+} // namespace
+
+std::string makeClientOrderId(std::string_view strategy,
+                              std::uint64_t seq,
+                              std::int64_t now_ms)
+{
+    // 1. Sanitize the strategy name down to [a-z0-9] (max 8 chars). Names are
+    //    config-defined, so anything outside that set is dropped rather than
+    //    escaped — the key only needs to be recognizable, not reversible.
+    std::string prefix;
+    prefix.reserve(8);
+    for (char c : strategy)
+    {
+        if (prefix.size() >= 8)
+        {
+            break;
+        }
+        const auto uc = static_cast<unsigned char>(c);
+        if (0 != std::isalnum(uc))
+        {
+            prefix.push_back(static_cast<char>(std::tolower(uc)));
+        }
+    }
+    if (prefix.empty())
+    {
+        prefix = "auto";
+    }
+
+    // 2. Compose <prefix>-<base36 ms>-<base36 seq>.
+    const auto ms = static_cast<std::uint64_t>(now_ms < 0 ? 0 : now_ms);
+    std::string id = prefix + "-" + toBase36(ms) + "-" + toBase36(seq);
+
+    // 3. Hard cap at 26 chars — Gate rejects longer `text` values.
+    if (id.size() > 26)
+    {
+        id.resize(26);
+    }
+    return id;
+}
 
 // ---------------------------------------------------------------------------
 // ExecutorOrderPlacer
@@ -203,6 +264,23 @@ OrderFlowExecutor::buildRequestFromSignal(const strategy::TradingSignal &sig) co
                 return std::nullopt; // Signal dropped — never take liquidity.
             }
         }
+    }
+
+    // Idempotency / reconciliation key for the automatic path.
+    //
+    // Gate echoes it back as `text`, so a lost response can be matched against
+    // the exchange instead of blindly retried. The retry loop itself is
+    // disabled for order POSTs (audit B7); this key does not make the exchange
+    // reject duplicates on its own.
+    //
+    // CFD (MT5 schema) has no text field → deliberately left empty.
+    if (MarketType::Cfd != req.market_type)
+    {
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        const auto seq = m_orderSeq.fetch_add(1, std::memory_order_relaxed);
+        req.client_order_id = makeClientOrderId(sig.strategy_id, seq, now_ms);
     }
 
     return req;
