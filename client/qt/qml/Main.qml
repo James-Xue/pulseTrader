@@ -6,9 +6,10 @@ import Pulse.Client
 
 /// Root window in a macOS-like shape.
 ///
-/// The window is frameless so the traffic lights and the sidebar can sit in a
-/// single chrome band, the way a native macOS app looks. Everything the native
-/// title bar used to provide is reimplemented here: dragging
+/// The window is frameless so the sidebar, status toggles and window controls
+/// can share a single chrome band. The three window buttons sit at the
+/// top-right. Everything the native title bar used to provide is
+/// reimplemented here: dragging
 /// (startSystemMove), double-click to maximize, edge and corner resizing
 /// (WindowResizer), and the three window buttons.
 ///
@@ -135,13 +136,6 @@ ApplicationWindow {
                 }
             }
 
-            TrafficLights {
-                anchors.left: parent.left
-                anchors.leftMargin: 14
-                anchors.verticalCenter: parent.verticalCenter
-                target: root
-            }
-
             Text {
                 anchors.centerIn: parent
                 text: root.title
@@ -152,7 +146,7 @@ ApplicationWindow {
 
             Row {
                 anchors.right: parent.right
-                anchors.rightMargin: Style.pad
+                anchors.rightMargin: 14
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.gap
 
@@ -167,6 +161,14 @@ ApplicationWindow {
 
                 ThemeToggle {
                     anchors.verticalCenter: parent.verticalCenter
+                }
+
+                // Window controls live at the top-right. The group keeps the
+                // macOS close / minimize / maximize order and colours; only
+                // the corner changed from the original frameless-mac layout.
+                TrafficLights {
+                    anchors.verticalCenter: parent.verticalCenter
+                    target: root
                 }
             }
         }
