@@ -8,6 +8,7 @@
 #include "core/snapshot_types.hpp"
 #include "core/types.hpp"
 #include "execution/ExecutionReport.hpp"
+#include "execution/ExchangeStopPlan.hpp"
 #include "logging/Logger.hpp"
 #include "risk/DrawdownGuard.hpp"
 
@@ -1349,6 +1350,116 @@ double EngineServices::futuresPriceTick(const std::string &contract)
     }
 
     return 0.0;
+}
+
+int EngineServices::ensureFuturesStops()
+{
+    // 1. Feature gate: opt-in and requires a futures REST client.
+    if (!m_cfg.risk.exchange_stop.enabled || nullptr == m_futuresRest)
+    {
+        return 0;
+    }
+
+    const auto positions = m_positionMgr.getAllPositions();
+    std::unordered_set<std::string> live;
+    int placed = 0;
+
+    for (const auto &pos : positions)
+    {
+        if (MarketType::Futures != pos.market_type)
+        {
+            continue; // Spot and CFD have their own protection paths.
+        }
+        live.insert(pos.position_id);
+
+        // 2. Already handled in a previous call?
+        if (0 != m_exchangeStopPositions.count(pos.position_id))
+        {
+            continue;
+        }
+
+        // 3. Covered by an existing open trigger on the contract? Gate's
+        //    close-position trigger is whole-position, so one per contract
+        //    is enough.
+        auto triggers = listTriggerOrders(nlohmann::json{ { "contract", pos.symbol } });
+        if (!ok(triggers))
+        {
+            PULSE_LOG_WARN("control",
+                           "ensureFuturesStops: list triggers for {} failed: {}",
+                           pos.symbol, error(triggers).message);
+            continue;
+        }
+        if (!value(triggers).empty())
+        {
+            m_exchangeStopPositions.insert(pos.position_id);
+            continue;
+        }
+
+        // 4. Plan the stop: round to the contract tick and refuse a stop the
+        //    market has already gapped through.
+        const double tick = futuresPriceTick(pos.symbol);
+        double last = 0.0;
+        if (nullptr != m_futuresFeed)
+        {
+            const auto quote = m_futuresFeed->tickerCache().get(pos.symbol);
+            if (quote.has_value())
+            {
+                last = quote->last;
+            }
+        }
+
+        const auto plan = execution::planExchangeStop(
+            pos.side, pos.entry_price, m_cfg.risk.exchange_stop.pct, tick, last);
+        if (!plan.has_value())
+        {
+            PULSE_LOG_WARN("control",
+                           "ensureFuturesStops: no valid stop for {} "
+                           "(entry={:.2f} tick={:.4f} last={:.2f})",
+                           pos.position_id, pos.entry_price, tick, last);
+            continue;
+        }
+
+        // 5. Place the whole-position reduce-only trigger.
+        nlohmann::json params{
+            { "contract", pos.symbol },
+            { "trigger_price", plan->trigger_price },
+            { "rule", plan->rule },
+            { "order_type", plan->order_type },
+            { "size", 0 },
+            { "auto_size", "close" },
+        };
+
+        auto result = placeTriggerOrder(params);
+        if (!ok(result))
+        {
+            PULSE_LOG_ERROR("control",
+                            "ensureFuturesStops: placement failed for {}: {}",
+                            pos.position_id, error(result).message);
+            continue; // Retried on the next call.
+        }
+
+        m_exchangeStopPositions.insert(pos.position_id);
+        ++placed;
+        PULSE_LOG_INFO("control",
+                       "Exchange stop placed for {} at {:.2f} (entry {:.2f})",
+                       pos.position_id, plan->trigger_price, pos.entry_price);
+    }
+
+    // 6. Forget positions that are no longer open.
+    for (auto it = m_exchangeStopPositions.begin();
+         it != m_exchangeStopPositions.end();)
+    {
+        if (0 == live.count(*it))
+        {
+            it = m_exchangeStopPositions.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    return placed;
 }
 
 Result<nlohmann::json> EngineServices::listTriggerOrders(const nlohmann::json &params)
