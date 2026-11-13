@@ -1343,5 +1343,41 @@ symbol = "BTC_USDT"
     EXPECT_TRUE(inst.news_windows.empty());   // absent → gate off
 }
 
+// ---------------------------------------------------------------------------
+// Exchange-side protective stop (audit B1, 2026-11-13)
+// ---------------------------------------------------------------------------
+
+TEST(ConfigLoader, ExchangeStopDefaultsDisabled)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_FALSE(value(result).risk.exchange_stop.enabled);
+    EXPECT_DOUBLE_EQ(0.01, value(result).risk.exchange_stop.pct);
+}
+
+TEST(ConfigLoader, ExchangeStopParsesKeys)
+{
+    TempToml tmp(R"(
+[exchange]
+apiKey = "k"
+apiSecret = "s"
+
+[risk]
+exchange_stop_enabled = true
+exchange_stop_pct = 0.02
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).risk.exchange_stop.enabled);
+    EXPECT_DOUBLE_EQ(0.02, value(result).risk.exchange_stop.pct);
+}
+
 } // namespace
 } // namespace pulse

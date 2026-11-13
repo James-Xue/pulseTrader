@@ -62,6 +62,26 @@ struct TakeProfitConfig
 };
 
 // ---------------------------------------------------------------------------
+// ExchangeStopConfig — exchange-side protective stop for futures entries
+//
+// Fields:
+//   1. enabled — place a reduce-only close trigger order on the exchange
+//                immediately after a futures entry fills. Off by default
+//                until the Gate price_orders semantics are validated on
+//                testnet (audit B1, 2026-11-13).
+//   2. pct     — stop distance from the fill price (0.01 = 1%).
+//
+// Why it matters: this is the ONLY protection that survives the engine
+// process dying. The engine-side ProtectiveExitManager covers the live
+// process; the two layers are complementary.
+// ---------------------------------------------------------------------------
+struct ExchangeStopConfig
+{
+    bool enabled = false;
+    double pct = 0.01;
+};
+
+// ---------------------------------------------------------------------------
 // URL Constants — Gate.io mainnet and testnet endpoint addresses
 //
 // Centralised here to eliminate hardcoded URL strings across the codebase.
@@ -214,6 +234,7 @@ struct RiskConfig
     double max_margin_used = 0.5;         ///< Maximum fraction of equity used as margin (futures).
     StopLossConfig stop_loss;             ///< Default stop-loss configuration.
     TakeProfitConfig take_profit;         ///< Default take-profit configuration.
+    ExchangeStopConfig exchange_stop;     ///< Exchange-side stop for futures entries.
 };
 
 // ---------------------------------------------------------------------------

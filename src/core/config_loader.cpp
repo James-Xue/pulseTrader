@@ -595,6 +595,12 @@ PulseError parseRisk(const toml::value &root, RiskConfig &out)
     out.max_margin_used =
         findDouble(sec, "max_margin_used", out.max_margin_used);
 
+    // Exchange-side protective stop for futures entries (audit B1).
+    out.exchange_stop.enabled =
+        toml::find_or(sec, "exchange_stop_enabled", out.exchange_stop.enabled);
+    out.exchange_stop.pct =
+        findDouble(sec, "exchange_stop_pct", out.exchange_stop.pct);
+
     // Nested sub-tables.
     auto err = parseStopLoss(sec, out.stop_loss);
 

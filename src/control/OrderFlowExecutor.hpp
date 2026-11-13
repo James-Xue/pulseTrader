@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #ifdef PULSE_ENABLE_SQLITE
 #include "trade_recorder/TradeRecorder.hpp"
@@ -189,6 +190,21 @@ class OrderFlowExecutor
     /// Order-completion entry point (wired to both trackers).
     void onOrderComplete(const execution::ExecutionReport &report);
 
+    /// A futures entry that just filled and therefore still needs an
+    /// exchange-side protective stop (audit B1). Pushed from the tracker
+    /// thread, drained by the main loop, which owns the REST call.
+    struct PendingExchangeStop
+    {
+        std::string position_id;
+        Symbol symbol;
+        Side side;              ///< Position side (Buy = long).
+        Price entry_price;
+        double quantity;
+    };
+
+    /// Drain the pending exchange-stop queue. Main-loop only.
+    [[nodiscard]] std::vector<PendingExchangeStop> drainPendingExchangeStops();
+
     /// Record a TradFi CFD close into the shared record pipeline (completed
     /// reports, drawdown guard, SQLite). The dedicated close endpoint never
     /// emits an order fill, so close_position synthesizes the terminal report
@@ -327,6 +343,9 @@ class OrderFlowExecutor
     std::mutex m_mutex;   ///< Guards m_reservations AND m_makerAttempts.
     std::unordered_map<std::string, ReservationEntry> m_reservations;
     std::unordered_map<std::string, MakerAttempt> m_makerAttempts;
+
+    /// Futures entries awaiting an exchange-side stop (guarded by m_mutex).
+    std::vector<PendingExchangeStop> m_pendingExchangeStops;
 
     /// Monotonic sequence for automatic-path client order ids. Mutable
     /// because buildRequestFromSignal() is const but must consume a unique id.

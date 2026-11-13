@@ -1892,6 +1892,65 @@ static int runTrade(int argc, char* argv[])
             }
         }
 
+        // Exchange-side protective stops for futures entries (audit B1).
+        // Off by default until validated on Gate testnet. Placed from the
+        // main loop so the tracker thread never blocks on REST; an existing
+        // open trigger on the contract suppresses a duplicate placement.
+        if (cfg.risk.exchange_stop.enabled && nullptr != futures_rest)
+        {
+            for (const auto &stop : order_flow.drainPendingExchangeStops())
+            {
+                const auto existing = services.listTriggerOrders(
+                    nlohmann::json{ { "contract", stop.symbol } });
+                if (!pulse::ok(existing))
+                {
+                    log->warn("[L7] Cannot list triggers for {}: {} — stop not placed",
+                              stop.symbol, pulse::error(existing).message);
+                    continue;
+                }
+                if (!pulse::value(existing).empty())
+                {
+                    log->info("[L7] Trigger already open for {} — skipping stop",
+                              stop.symbol);
+                    continue;
+                }
+
+                // Long → stop below entry (rule 2); short → above (rule 1).
+                const bool is_long = (pulse::Side::Buy == stop.side);
+                const double trigger =
+                    is_long
+                        ? stop.entry_price * (1.0 - cfg.risk.exchange_stop.pct)
+                        : stop.entry_price * (1.0 + cfg.risk.exchange_stop.pct);
+
+                nlohmann::json params{
+                    { "contract", stop.symbol },
+                    { "trigger_price", trigger },
+                    { "rule", is_long ? 2 : 1 },
+                    { "order_type", is_long ? "close-long-position"
+                                            : "close-short-position" },
+                    { "size", 0 },
+                    { "auto_size", "close" },
+                };
+
+                const auto placed = services.placeTriggerOrder(params);
+                if (pulse::ok(placed))
+                {
+                    log->info("[L7] Exchange stop placed for {} at {:.2f} ({})",
+                              stop.symbol, trigger, is_long ? "long" : "short");
+                }
+                else
+                {
+                    log->error("[L7] Exchange stop FAILED for {}: {}",
+                               stop.symbol, pulse::error(placed).message);
+                }
+            }
+        }
+        else
+        {
+            // Keep the queue bounded even when the feature is off.
+            (void)order_flow.drainPendingExchangeStops();
+        }
+
         if (++heartbeat_counter >= kHeartbeatIntervalTicks)
         {
             heartbeat_counter = 0;
