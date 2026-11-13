@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pulse::grid
@@ -184,6 +185,25 @@ class EngineServices
     /// synchronized; the REST call itself takes rest_mutex internally).
     [[nodiscard]] double futuresPriceTick(const std::string &contract);
 
+    /// Ensure every open FUTURES position has an exchange-side protective
+    /// stop (audit B1 backfill).
+    ///
+    /// This is what covers positions the engine did not open itself — most
+    /// importantly the ones imported by sync_positions after a restart,
+    /// which never pass through the fill path.
+    ///
+    /// Behaviour:
+    ///   1. No-op unless [risk] exchange_stop_enabled and futures REST wired.
+    ///   2. Positions already handled (cache) are skipped without REST calls.
+    ///   3. A contract that already has an open trigger is treated as
+    ///      covered (Gate's close-position trigger is whole-position).
+    ///   4. The trigger is rounded to the contract price unit and skipped
+    ///      when the stop is already breached (see planExchangeStop).
+    ///
+    /// Returns the number of stops placed by this call.
+    /// Main-thread only (the position cache is not synchronized).
+    [[nodiscard]] int ensureFuturesStops();
+
     /// Cancel a trigger order by ID — `cancel_trigger_order`.
     /// Params: order_id (required).
     [[nodiscard]] Result<nlohmann::json> cancelTriggerOrder(const nlohmann::json &params);
@@ -321,6 +341,7 @@ class EngineServices
     };
     std::unordered_map<std::string, SpotPrice> m_spotPrices;
     std::unordered_map<std::string, double> m_priceTicks; ///< contract → order_price_round
+    std::unordered_set<std::string> m_exchangeStopPositions; ///< positions with a stop placed
 
     /// Budget for REST lookups inside one account() call, so a wallet with
     /// many unpriced altcoins cannot turn one snapshot into dozens of calls.

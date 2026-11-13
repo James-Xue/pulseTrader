@@ -2,6 +2,7 @@ add_executable(test_execution_unit
     test_execution_report.cpp
     test_order_executor.cpp
     test_order_tracker.cpp
+    test_exchange_stop_plan.cpp
 )
 
 target_link_libraries(test_execution_unit

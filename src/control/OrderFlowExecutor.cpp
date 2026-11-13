@@ -775,18 +775,6 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
         }
         else
         {
-            // Futures entries carry no exchange-side SL/TP (audit B1).
-            // Queue the position for the main loop, which owns the REST call
-            // — the tracker thread must never block on the network.
-            if (MarketType::Futures == mt)
-            {
-                std::lock_guard lock(m_mutex);
-                m_pendingExchangeStops.push_back(
-                    PendingExchangeStop{ value(open_result), report.symbol,
-                                         report.side, report.avg_fill_price,
-                                         remaining });
-            }
-
             if (!report.exchange_position_id.empty())
             {
                 // TradFi CFD: record the exchange position id on the engine
@@ -810,15 +798,6 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
 
     recordCompletedTrade(report, pnl, mt, lev,
                          reservation.request.quanto_multiplier);
-}
-
-std::vector<OrderFlowExecutor::PendingExchangeStop>
-OrderFlowExecutor::drainPendingExchangeStops()
-{
-    std::lock_guard lock(m_mutex);
-    std::vector<PendingExchangeStop> pending;
-    pending.swap(m_pendingExchangeStops);
-    return pending;
 }
 
 void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,
