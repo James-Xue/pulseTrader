@@ -3,6 +3,7 @@
 #include "control/EngineServices.hpp"
 
 #include "control/OrderFlowExecutor.hpp"
+#include "control/OrderIdempotency.hpp"
 #include "grid/GridManager.hpp"
 #include "ai/ParamBounds.hpp"
 #include "core/snapshot_types.hpp"
@@ -22,6 +23,10 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <iomanip>
+#include <optional>
+#include <sstream>
+#include <utility>
 #include <vector>
 
 namespace pulse::control
@@ -67,6 +72,182 @@ class ReconcileGuard
     std::atomic<bool> &m_running;
     std::atomic<std::int64_t> &m_last;
 };
+
+// ---------------------------------------------------------------------------
+// open_order idempotency helpers (see OrderIdempotency.hpp)
+// ---------------------------------------------------------------------------
+
+/// Render a price/quantity for the idempotency fingerprint at fixed precision.
+///
+/// Why fixed precision: a retry arrives as freshly parsed JSON, and default
+/// ostream formatting already gives the shortest round-tripping form — but
+/// nothing guarantees two different parsing paths produce byte-identical
+/// text for values that compare equal. Eight fixed decimals removes the
+/// question entirely: equal values always format identically, and 1e-8 covers
+/// every unit this engine sends (spot sizes, futures contracts, CFD lots,
+/// Gate prices are all coarser than 1e-8).
+std::string fingerprintNumber(double value)
+{
+    // Normalise -0.0 to +0.0. The two compare equal but format differently,
+    // so a retry carrying -0.0 must not look like a parameter change.
+    if (0.0 == value)
+    {
+        value = 0.0;
+    }
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(8) << value;
+    return out.str();
+}
+
+/// Stable fingerprint of everything that changes what the exchange receives.
+///
+/// Two open_order calls with the same fingerprint describe the SAME order, so
+/// a repeated client_order_id is replayed; any difference means the caller
+/// reused the key for a different order and must be refused. Fields:
+/// symbol, side, quantity, type, price, market_type, leverage, reduce_only,
+/// sl_price, tp_price. Derived values (quanto_multiplier) are excluded — they
+/// follow from the symbol.
+///
+/// Enum ordinals are used rather than toString(): the fingerprint never leaves
+/// this process, so only stability within one build matters.
+std::string orderFingerprint(const execution::OrderRequest &req)
+{
+    std::ostringstream out;
+    out << "symbol=" << req.symbol
+        << ";side=" << static_cast<int>(req.side)
+        << ";qty=" << fingerprintNumber(req.quantity)
+        << ";type=" << static_cast<int>(req.type)
+        << ";price=" << fingerprintNumber(req.price)
+        << ";market_type=" << static_cast<int>(req.market_type)
+        << ";leverage=" << fingerprintNumber(req.leverage)
+        << ";reduce_only=" << (req.reduce_only ? 1 : 0)
+        << ";sl="
+        << (req.sl_price.has_value() ? fingerprintNumber(*req.sl_price)
+                                     : std::string{ "none" })
+        << ";tp="
+        << (req.tp_price.has_value() ? fingerprintNumber(*req.tp_price)
+                                     : std::string{ "none" });
+    return out.str();
+}
+
+/// Terminal-outcome publisher for one idempotency entry.
+///
+/// Why RAII: after OrderIdempotency::begin() returns New, the entry MUST leave
+/// the in-flight state exactly once. Several returns sit between begin() and
+/// the order-flow call (the CFD free-margin gate is one), and each of them
+/// fails BEFORE anything reached the exchange — so each must abort() rather
+/// than cache a rejection. A guard keeps those paths from having to remember
+/// it, and covers future early returns too. The destructor also runs if the
+/// order flow ever throws, which keeps the key from being stuck in flight
+/// until the TTL expires.
+class InFlightGuard
+{
+  public:
+    InFlightGuard(OrderIdempotency &cache, std::string key)
+        : m_cache{ cache }
+        , m_key{ std::move(key) }
+    {
+    }
+
+    /// Exactly one guard owns the in-flight entry.
+    InFlightGuard(const InFlightGuard &) = delete;
+    InFlightGuard &operator=(const InFlightGuard &) = delete;
+
+    ~InFlightGuard()
+    {
+        if (!m_completed)
+        {
+            m_cache.abort(m_key);
+        }
+    }
+
+    /// Publish the terminal result (success or a definitive rejection) and
+    /// stop owning the entry. Both outcomes are cached: a deterministic
+    /// rejection must not be re-executed on a retry either.
+    void complete(const Result<execution::OrderResponse> &outcome)
+    {
+        m_cache.complete(m_key, outcome);
+        m_completed = true;
+    }
+
+    /// Release the key WITHOUT caching an outcome.
+    ///
+    /// Only for a request that failed before the order flow could send
+    /// anything (rate limiter, drawdown halt, notional/position limits,
+    /// missing executor). The key must stay retryable so the caller can
+    /// resubmit once the transient condition clears — caching that failure
+    /// would pin the key to a rejection that may no longer be true.
+    void abort()
+    {
+        m_cache.abort(m_key);
+        m_completed = true;
+    }
+
+  private:
+    OrderIdempotency &m_cache;
+    std::string m_key;
+    bool m_completed{ false };
+};
+
+/// Whether a failure from the order flow may have left a live order at the
+/// exchange.
+///
+/// Why this matters: an idempotency cache that stores such a failure as a
+/// plain rejection replays "definitely not placed" for the whole TTL, so the
+/// caller mints a new key and submits again — a second position while the
+/// first one is live and unknown to everyone. These failures are therefore
+/// cached as an explicit "outcome unknown — reconcile" result instead.
+///
+/// Classification is by the transport semantics of GateRestClient:
+///   - a curl timeout / connection loss means the POST was on the wire and
+///     Gate may have accepted it before the transport failed;
+///   - HTTP failures are rendered as "HTTP <status>: ..." and both 4xx and
+///     5xx map to HttpError, but only a 5xx can have created the order (a 4xx
+///     is a definitive exchange rejection).
+bool orderMayHaveReachedExchange(const PulseError &err)
+{
+    switch (err.code)
+    {
+    case ErrorCode::NetworkTimeout:
+    case ErrorCode::NetworkDisconnected:
+        return true;
+    case ErrorCode::HttpError:
+        return 0 == err.message.rfind("HTTP 5", 0);
+    default:
+        return false;
+    }
+}
+
+/// Whether a failure is guaranteed to have happened before any order could be
+/// sent, so the key must stay retryable rather than be pinned to it.
+///
+/// The list mirrors the pre-flight gates of the order flow: the risk manager
+/// (rate limiter, drawdown halt, notional/position limits, leverage/margin
+/// checks), the manual direction gate, and the executor lookup. OrderRejected
+/// is included because both of its sources are safe to observe again: a risk
+/// veto before the POST, and an exchange business rejection of a CFD order
+/// (which provably created nothing).
+bool isPreFlightRejection(ErrorCode code)
+{
+    switch (code)
+    {
+    case ErrorCode::RateLimitHit:
+    case ErrorCode::DrawdownLimitHit:
+    case ErrorCode::ManualHalt:
+    case ErrorCode::PositionLimitHit:
+    case ErrorCode::SymbolLimitHit:
+    case ErrorCode::InactiveMarket:
+    case ErrorCode::OrderRejected:
+    case ErrorCode::InternalError:
+    case ErrorCode::FuturesLeverageExceeded:
+    case ErrorCode::FuturesMarginInsufficient:
+    case ErrorCode::CfdLeverageExceeded:
+    case ErrorCode::CfdMarginInsufficient:
+        return true;
+    default:
+        return false;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // StrategyParams field dispatch tables
@@ -329,6 +510,7 @@ EngineServices::EngineServices(
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
     , m_cfg{ cfg }
+    , m_externalOrdersEnabled{ cfg.control.externalOrdersEnabled }
     , m_strategyMgr{ strategy_mgr }
     , m_riskMgr{ risk_mgr }
     , m_positionMgr{ position_mgr }
@@ -351,6 +533,16 @@ EngineServices::EngineServices(
                        .value_or(DisplayTimezone::local()) }
     , m_registry{ registry }
 {
+    // Emit the `submitted` push event from INSIDE the order flow. Emitting it
+    // after openOrder() returns would publish one event per order but in the
+    // wrong order: a market order can fill synchronously in the tracker's
+    // immediate poll, so `completed` would reach subscribers before
+    // `submitted`. The sink is installed here (not by main) because only this
+    // class knows how to serialize the event and reach the control socket.
+    m_orderFlow.setOrderSubmitCallback(
+        [this](const execution::OrderRequest &placed,
+               const execution::OrderResponse &resp)
+        { publishOrderSubmitted(placed, resp); });
 }
 
 market::MarketFeed *EngineServices::feedFor(MarketType mt) const
@@ -397,6 +589,10 @@ nlohmann::json EngineServices::status() const
     j["open_positions"] = m_positionMgr.openPositionCount();
     j["trading_halted"] = m_riskMgr.isTradingHalted();
     j["active_market"] = toString(m_orderFlow.activeMarket());
+    // Independent external-order gate state: a client should be able to tell
+    // why a caller-authoritative open is being refused without reading TOML.
+    j["external_orders_enabled"] =
+        m_externalOrdersEnabled.load(std::memory_order_relaxed);
 
     if (m_spotFeed)
     {
@@ -784,6 +980,72 @@ void EngineServices::setGoldTrader(const risk::GoldTrader *trader,
     m_goldDisabledReason = std::move(disabled_reason);
 }
 
+void EngineServices::setOrderEventSink(OrderEventSink sink)
+{
+    m_orderEventSink = std::move(sink);
+}
+
+void EngineServices::publishOrderSubmitted(
+    const execution::OrderRequest &req,
+    const execution::OrderResponse &resp)
+{
+    // Only a successful placement reaches this point: OrderFlowExecutor calls
+    // the sink after placer->place() returned an OrderResponse, and an
+    // idempotent replay returns before the order flow is entered — so one
+    // exchange order produces exactly one `submitted` event.
+    if (!m_orderEventSink)
+    {
+        return;
+    }
+
+    // The sink runs inside the order flow, which runs inside a control-session
+    // handler. A throwing sink must never turn a placed order into an error
+    // reply to the caller.
+    try
+    {
+        nlohmann::json event;
+        event["event"] = "submitted";
+        event["order_id"] = resp.order_id;
+        event["client_order_id"] = req.client_order_id;
+        event["symbol"] = req.symbol;
+        event["market_type"] = toString(req.market_type);
+        event["side"] = (Side::Buy == req.side) ? "buy" : "sell";
+        event["type"] = toString(req.type);
+        event["price"] = req.price;
+        // The request passed to the sink is the one the order flow actually
+        // sent: placeOrder() rewrites `quantity` when risk approves a smaller
+        // size, so this is the post-adjustment size — matching what the
+        // `completed` event reports as requested_quantity.
+        event["quantity"] = req.quantity;
+        // The submit event never carries a terminal status. A market order's
+        // POST reply can already be Filled (futures IOC / spot closed), but
+        // nothing may be reported as a completed fill here: the terminal
+        // report follows as `completed`, and a client treating this event as
+        // terminal would record a zero-size fill and re-arm the entry.
+        const auto status =
+            (OrderStatus::Filled == resp.status
+             || OrderStatus::Cancelled == resp.status)
+                ? OrderStatus::Open
+                : resp.status;
+        event["filled_quantity"] = 0.0;
+        event["status"] = execution::orderStatusToString(status);
+        event["ts"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now().time_since_epoch())
+                          .count();
+        m_orderEventSink(event);
+    }
+    catch (const std::exception &e)
+    {
+        PULSE_LOG_WARN("control",
+                       "open_order: order event sink threw: {}", e.what());
+    }
+    catch (...)
+    {
+        PULSE_LOG_WARN("control",
+                       "open_order: order event sink threw a non-std exception");
+    }
+}
+
 nlohmann::json EngineServices::goldTraderStatus() const
 {
     if (nullptr != m_goldTrader)
@@ -940,6 +1202,20 @@ EngineServices::openOrder(const nlohmann::json &params)
     {
         req.reduce_only = params["reduce_only"].get<bool>();
     }
+    // reduce_only is only meaningful where the exchange enforces it: the
+    // FUTURES order body carries the flag, the spot and CFD bodies do not
+    // (OrderExecutor::buildOrderBody). Accepting it on those markets would
+    // silently turn a claimed "close" into new exposure AND exempt the order
+    // from the risk layer's drawdown halt and position-count checks (both key
+    // off the same flag), while the exchange never sees it. Reject loudly —
+    // close_position is the close path for spot and CFD.
+    if (req.reduce_only && MarketType::Futures != req.market_type)
+    {
+        return PulseError{
+            ErrorCode::ControlInvalidRequest,
+            "open_order: reduce_only is futures-only; use close_position for "
+            "spot and CFD positions." };
+    }
     if (params.contains("client_order_id"))
     {
         req.client_order_id = params["client_order_id"].get<std::string>();
@@ -985,6 +1261,108 @@ EngineServices::openOrder(const nlohmann::json &params)
     {
         return PulseError{ ErrorCode::ControlInvalidRequest,
                            "open_order: sl_price/tp_price are CFD-only" };
+    }
+
+    // Independent external-order gate ([control] external_orders_enabled).
+    // It sits here because every request field is parsed (caller authority
+    // and reduce_only are known) and nothing has touched the risk gate, REST
+    // or the idempotency cache yet. Why:
+    //   1. Only caller-authoritative opens are gated — that is the path an
+    //      external strategy runtime (GT) uses because it sizes its own
+    //      positions. Engine-authority orders (REPL / MCP / UI one-shots)
+    //      stay live, so the manual path never depends on this flag.
+    //   2. reduce_only is exempt only where the EXCHANGE enforces it. The
+    //      futures order body carries `reduce_only`; the CFD and spot bodies
+    //      do not (OrderExecutor::buildOrderBody), and open_order now rejects
+    //      the flag for those markets outright — so the exemption below can
+    //      only ever apply to a futures close, which the exchange itself
+    //      bounds by the open position.
+    //   3. Failing BEFORE the idempotency cache matters: a refusal does not
+    //      consume the client_order_id, so after `set_external_orders true`
+    //      the caller can retry the same request and actually place it
+    //      instead of replaying a cached rejection.
+    const bool enforced_reduce_only =
+        req.reduce_only && MarketType::Futures == req.market_type;
+    if (req.size_authoritative && !enforced_reduce_only
+        && !m_externalOrdersEnabled.load(std::memory_order_relaxed))
+    {
+        return PulseError{
+            ErrorCode::ControlInvalidRequest,
+            "open_order: external orders are disabled ([control] "
+            "external_orders_enabled = false); caller-authoritative opens "
+            "are rejected, futures reduce_only closes and engine-sized "
+            "orders still work." };
+    }
+
+    // Idempotency gate — the full contract is documented on the declaration in
+    // EngineServices.hpp. It sits here because all fingerprint fields are now
+    // parsed and the cheap validation is done, while nothing has touched REST
+    // or the risk gate yet: a duplicate must be refused before either.
+    //
+    // 1. A caller-authoritative size without a key cannot be de-duplicated:
+    //    a retry after a timeout would place a second order of exactly the
+    //    size the caller insisted on. Only a FUTURES reduce_only close is
+    //    exempt — there the exchange enforces the flag, so the order is
+    //    bounded by the open position even without a key. spot/CFD
+    //    reduce_only requests were already rejected above.
+    if (req.size_authoritative && !enforced_reduce_only
+        && req.client_order_id.empty())
+    {
+        return PulseError{
+            ErrorCode::ControlInvalidRequest,
+            "open_order: client_order_id is required when size_authority is "
+            "\"caller\"." };
+    }
+
+    // 2. With a key, consult the cache. Keyless requests keep the historical
+    //    fire-and-forget behaviour (REPL / MCP / UI one-shots that have no
+    //    retry story of their own).
+    std::optional<InFlightGuard> guard;
+    if (!req.client_order_id.empty())
+    {
+        switch (m_orderIdempotency.begin(req.client_order_id,
+                                        orderFingerprint(req)))
+        {
+            case OrderIdempotency::Decision::InFlight:
+                return PulseError{
+                    ErrorCode::ControlInvalidRequest,
+                    "open_order: duplicate client_order_id is already in "
+                    "flight." };
+            case OrderIdempotency::Decision::Conflict:
+                return PulseError{
+                    ErrorCode::ControlInvalidRequest,
+                    "open_order: client_order_id reused with different order "
+                    "parameters." };
+            case OrderIdempotency::Decision::Replay:
+            {
+                // The first attempt reached a terminal outcome. Return it
+                // verbatim — the same order_id for a success, the same
+                // PulseError for a rejection — and send nothing.
+                auto cached =
+                    m_orderIdempotency.cachedOutcome(req.client_order_id);
+                if (cached.has_value())
+                {
+                    return *cached;
+                }
+                // Unreachable: begin() reports Replay only for a completed
+                // entry. Fail loudly instead of placing a possibly duplicate
+                // order if that invariant ever breaks.
+                return PulseError{
+                    ErrorCode::InternalError,
+                    "open_order: idempotency replay lost its cached outcome" };
+            }
+            case OrderIdempotency::Decision::New:
+                guard.emplace(m_orderIdempotency, req.client_order_id);
+                break;
+            case OrderIdempotency::Decision::Capacity:
+                // Fail closed: the cache holds 1024 live keys (guards and
+                // replayable outcomes) and dropping one would trade a
+                // guaranteed-safe refusal for a possible duplicate order.
+                // ControlBusy marks the refusal as retryable.
+                return PulseError{
+                    ErrorCode::ControlBusy,
+                    "open_order: idempotency cache is full; retry shortly." };
+        }
     }
 
     // Futures qty is in contracts — the risk gate needs the contract
@@ -1076,7 +1454,51 @@ EngineServices::openOrder(const nlohmann::json &params)
     }
 
     // Manual path: futures/CFD are executable in any active direction (M22).
-    return m_orderFlow.placeManualOrder(req);
+    // The "submitted" push event is emitted inside this call (see
+    // publishOrderSubmitted): it must precede the tracker's immediate fill
+    // poll, because an order that fills on submission completes synchronously
+    // there and would otherwise publish `completed` before `submitted`.
+    auto result = m_orderFlow.placeManualOrder(req);
+
+    // Publish the outcome under the client key so a retry replays it instead
+    // of re-sending the order. Three classes are distinguished:
+    //   1. Success, or a definitive exchange rejection — cache verbatim.
+    //   2. Transport failure that may have reached the exchange — cache an
+    //      explicit "outcome unknown" marker. Replaying the raw timeout as a
+    //      rejection would tell the caller "not placed", inviting a second
+    //      order while the first one is live.
+    //   3. Pre-flight failure (rate limit, halt, notional/position limits,
+    //      missing executor) — abort, leaving the key retryable. Caching it
+    //      would pin the key to a transient condition for the whole TTL.
+    // Every earlier return between begin() and here happened before any order
+    // could be sent and is covered by the guard's destructor.
+    if (guard.has_value())
+    {
+        if (!ok(result) && orderMayHaveReachedExchange(error(result)))
+        {
+            PULSE_LOG_WARN("control",
+                           "open_order: transport failure may have left order "
+                           "{} live: {}",
+                           req.client_order_id,
+                           error(result).message);
+            guard->complete(PulseError{
+                ErrorCode::ControlOrderOutcomeUnknown,
+                "open_order: the order may have reached the exchange before "
+                "the request failed (" + error(result).message
+                    + "); reconcile open orders by client_order_id before "
+                      "resubmitting." });
+        }
+        else if (!ok(result) && isPreFlightRejection(error(result).code))
+        {
+            guard->abort();
+        }
+        else
+        {
+            guard->complete(result);
+        }
+    }
+
+    return result;
 }
 
 Result<execution::OrderResponse>
@@ -1666,6 +2088,21 @@ bool EngineServices::pauseStrategy(const std::string &id)
 bool EngineServices::resumeStrategy(const std::string &id)
 {
     return m_strategyMgr.setPaused(id, false);
+}
+
+bool EngineServices::externalOrdersEnabled() const
+{
+    return m_externalOrdersEnabled.load(std::memory_order_relaxed);
+}
+
+void EngineServices::setExternalOrdersEnabled(bool enabled)
+{
+    m_externalOrdersEnabled.store(enabled, std::memory_order_relaxed);
+    // Audit trail: arming or killing the external runtime is an operationally
+    // significant event, so leave a line in the engine log even though the
+    // JSON reply already reports the new state.
+    PULSE_LOG_INFO("control", "external order gate {}",
+                   enabled ? "ENABLED" : "DISABLED");
 }
 
 bool EngineServices::setStrategyTrading(const std::string &id, bool enabled)

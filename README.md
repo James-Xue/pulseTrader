@@ -361,7 +361,7 @@ The service sources `.env` and execs the same binary (`build_headless/.../pulset
 
 ### MCP Client Configuration
 
-The `mcp` subcommand serves the control plane's 32 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
+The `mcp` subcommand serves the control plane's 35 methods as MCP tools over stdio — usable from LLM clients such as Claude Desktop or Claude Code. Use absolute paths:
 
 ```bash
 # Claude Code

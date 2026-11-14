@@ -114,6 +114,10 @@ inline void to_json(nlohmann::json &j, const Position &p)
     j["open_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
         p.open_time.time_since_epoch()).count();
     j["strategy_id"] = p.strategy_id;
+    // Provenance (additive): consumers that ignore unknown fields keep
+    // working; exit-owning clients use it to tell a caller-authoritative
+    // ("external") position from one the engine manages.
+    j["origin"] = p.origin;
     j["market_type"] = (MarketType::Futures == p.market_type)   ? "futures"
                      : (MarketType::Cfd == p.market_type) ? "cfd"
                                                           : "spot";

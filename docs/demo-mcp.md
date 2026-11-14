@@ -1,6 +1,6 @@
 # MCP demo — drive the engine from an LLM client
 
-The control plane exposes 34 methods, and **the method names are the MCP tool
+The control plane exposes 35 methods, and **the method names are the MCP tool
 names**. That means any MCP-capable client — Claude Code, Claude Desktop, or a
 custom agent — can read the engine's state and (on a live engine) place manual
 orders, without learning a second protocol.

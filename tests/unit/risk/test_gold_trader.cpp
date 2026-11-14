@@ -415,6 +415,73 @@ TEST(GoldTrader, ShortBreakEvenAndGiveBackTightenDownward)
 }
 
 // ---------------------------------------------------------------------------
+// Exit ownership (position origin)
+// ---------------------------------------------------------------------------
+
+TEST(GoldTrader, ExternalPositionWithExchangeStopIsNeverManaged)
+{
+    // A caller-authoritative CFD position carrying the exchange-native stop
+    // (sl_price) is owned by its caller: even a breached -8 USD hard stop must
+    // not close it, and no exchange stop may be pushed over the caller's own
+    // protection. The stop is what makes the ownership transfer safe — it
+    // fires even if the runtime and the engine are both down.
+    Harness h;
+    const auto id = h.open(Side::Buy, 0.01, 4000.0, /*sl_price=*/3900.0);
+    h.positions.setOrigin(id, "external");
+
+    h.price = 3991.9; // -8.10 USD would fire for a managed position
+    const auto result = h.tick(1);
+
+    EXPECT_EQ(0, result.evaluated);
+    EXPECT_EQ(0, result.closed);
+    EXPECT_EQ(0, result.stopPushed);
+    EXPECT_EQ(0, h.closes);
+    EXPECT_EQ(0, h.stop_attempts);
+    // Not even tracked: the status card must not present it as PT-managed.
+    EXPECT_EQ(0u, h.trader->trackedPositions());
+    EXPECT_EQ(1, h.positions.openPositionCount());
+}
+
+TEST(GoldTrader, ExternalPositionWithoutExchangeStopStaysManaged)
+{
+    // Futures/spot externals cannot carry a CFD stop, and a CFD entry may omit
+    // the optional sl_price. Skipping such a position would leave it with NO
+    // stop anywhere, so the USD ladder keeps managing it.
+    Harness h;
+    const auto id = h.open(Side::Buy, 0.01, 4000.0); // sl_price = 0
+    h.positions.setOrigin(id, "external");
+
+    h.price = 3991.9; // -8.10 USD hard-stop breach
+    const auto result = h.tick(1);
+
+    EXPECT_EQ(1, result.evaluated);
+    EXPECT_EQ(1, result.closed);
+    EXPECT_EQ(1, h.closes);
+}
+
+TEST(GoldTrader, ExternalSkipLeavesManualPositionManaged)
+{
+    // The skip is per position, not per symbol: a "manual" position on the
+    // same symbol keeps the full USD stop ladder and is closed on breach
+    // while the externally owned position (with its exchange stop) survives.
+    Harness h;
+    const auto external_id =
+        h.open(Side::Buy, 0.01, 4000.0, /*sl_price=*/3900.0);
+    const auto manual_id = h.open(Side::Buy, 0.01, 4000.0);
+    h.positions.setOrigin(external_id, "external");
+    h.positions.setOrigin(manual_id, "manual");
+
+    h.price = 3991.9;
+    const auto result = h.tick(1);
+
+    EXPECT_EQ(1, result.evaluated);
+    EXPECT_EQ(1, result.closed);
+    EXPECT_EQ(1, h.closes);
+    EXPECT_TRUE(h.positions.getPosition(external_id).has_value());
+    EXPECT_FALSE(h.positions.getPosition(manual_id).has_value());
+}
+
+// ---------------------------------------------------------------------------
 // Existing exchange stop
 // ---------------------------------------------------------------------------
 

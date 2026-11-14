@@ -195,6 +195,21 @@ GoldTrader::TickResult GoldTrader::tick(Timestamp now)
         {
             continue;
         }
+        // An external (caller-authoritative) CFD position is owned by its
+        // caller while the exchange-native stop attached at entry exists:
+        // that stop fires even if both the runtime and the engine are down,
+        // so driving the USD ladder over it would fight the caller's exit.
+        // The ownership only holds when the floor exists — a CFD entry that
+        // omitted sl_price (sl_price == 0) has no exchange-side stop, so
+        // skipping it here would leave the position unprotected. The same is
+        // true for external futures/spot positions, which cannot carry a CFD
+        // stop at all; this supervisor is CFD-only anyway (market_type filter
+        // above), so the guard below never hides an unprotected live position.
+        if ("external" == pos.origin && pos.sl_price > 0.0
+            && MarketType::Cfd == pos.market_type)
+        {
+            continue;
+        }
         live.emplace(pos.position_id, pos);
     }
 

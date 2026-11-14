@@ -105,6 +105,11 @@ enum class ErrorCode : std::uint32_t
     ControlEngineUnreachable = 9104, ///< Control socket cannot reach the engine.
     ControlTlsInitFailed = 9105,     ///< TLS context / certificate / key setup failed.
     ControlAuthFailed = 9106,        ///< Token authentication required or rejected.
+    ControlOrderOutcomeUnknown = 9107, ///< open_order transport failure after the POST
+                                       ///< may have reached the exchange: reconcile;
+                                       ///< the order is neither confirmed nor rejected.
+    ControlBusy = 9108,                ///< Transient backpressure (e.g. the idempotency
+                                       ///< cache is full): the request may be retried.
 
     // Grid service (92xx) — M27 engine-native grid execution service.
     GridNotStarted = 9200,         ///< grid_status/pause/stop before grid_start.

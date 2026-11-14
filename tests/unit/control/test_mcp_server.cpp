@@ -100,10 +100,11 @@ TEST(McpServer, ToolsListHasAllTools)
         should_exit);
     const auto resp = nlohmann::json::parse(line);
     const auto &tools = resp["result"]["tools"];
-    EXPECT_EQ(34, tools.size()); // +2: get_param_history / get_strategy_performance
+    EXPECT_EQ(35, tools.size()); // +2: get_param_history / get_strategy_performance
                                  // +1: set_strategy_trading
                                  // +1: submit_decision (gold decision intake)
                                  // +1: get_gold_trader (L7 status card)
+                                 // +1: set_external_orders (external-order gate)
     for (const auto &tool : tools)
     {
         EXPECT_TRUE(tool["name"].is_string());
@@ -182,10 +183,11 @@ TEST(McpServer, UnknownMethodReturns32601)
 TEST(McpServer, ToolDefinitionsAllHaveSchemas)
 {
     const auto tools = McpServer::toolDefinitions();
-    EXPECT_EQ(34, tools.size()); // +2: get_param_history / get_strategy_performance
+    EXPECT_EQ(35, tools.size()); // +2: get_param_history / get_strategy_performance
                                  // +1: set_strategy_trading
                                  // +1: submit_decision (gold decision intake)
                                  // +1: get_gold_trader (L7 status card)
+                                 // +1: set_external_orders (external-order gate)
     bool found_get_signals = false;
     for (const auto &tool : tools)
     {
@@ -216,6 +218,12 @@ TEST(McpServer, ToolDefinitionsAllHaveSchemas)
         {
             // One-click switch: strategy_id + boolean enabled.
             EXPECT_TRUE(schema["properties"].contains("strategy_id"));
+            EXPECT_TRUE(schema["properties"].contains("enabled"));
+            EXPECT_EQ("boolean", schema["properties"]["enabled"]["type"]);
+        }
+        if ("set_external_orders" == tool["name"])
+        {
+            // External-order gate: a single boolean, same name as the TOML key.
             EXPECT_TRUE(schema["properties"].contains("enabled"));
             EXPECT_EQ("boolean", schema["properties"]["enabled"]["type"]);
         }

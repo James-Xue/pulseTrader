@@ -446,6 +446,23 @@ nlohmann::json McpServer::toolDefinitions()
         "Resume trading after a halt. Returns risk snapshot.",
         nlohmann::json::object(), {});
 
+    add("set_external_orders",
+        "Independent external-order gate ([control] external_orders_enabled). "
+        "enabled=false (the fail-safe default): open_order rejects "
+        "caller-authoritative opens (size_authority=caller, non-reduce-only) "
+        "before the risk gate, so an external strategy runtime cannot trade "
+        "while PT strategies stay signal-only. Engine-authority orders and "
+        "reduce-only closes keep working. Toggle at runtime to arm or kill "
+        "the external runtime without restarting the engine. Returns the new "
+        "state.",
+        nlohmann::json{
+            { "enabled", nlohmann::json{
+                  { "type", "boolean" },
+                  { "description",
+                    "true = allow caller-sized opens; false = reject them" } } },
+        },
+        { "enabled" });
+
     add("get_risk",
         "Risk snapshot: halted flag, drawdown, rate limiter tokens, portfolio.",
         nlohmann::json::object(), {});

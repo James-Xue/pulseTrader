@@ -13,6 +13,14 @@
 //   - Errors: -32700 parse, -32600 invalid request, -32601 method not found,
 //             -32603 internal (data carries the PulseError code + message)
 //
+// Server push (connection-scoped, NOT part of the method registry):
+//   - subscribe_market / unsubscribe_market → channel "kline"  (market.kline)
+//   - subscribe_orders  / unsubscribe_orders → channel "order"  (order.update)
+//   Each connection keeps ONE subscription per channel, so a client can watch
+//   closed bars and order lifecycle events over the same socket. These methods
+//   are deliberately socket-only: MCP is request/response and has no
+//   server-push channel.
+//
 // dispatchLine() is a pure static function — unit-tested without sockets.
 
 #include "core/PulseError.hpp"
@@ -28,7 +36,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -85,21 +92,26 @@ class JsonRpcServer
 
     [[nodiscard]] std::uint16_t port() const { return m_port; }
 
-    /// A published market-data event, matched against per-session filters.
+    /// A published server-push event, matched against per-session filters.
     struct Topic
     {
-        std::string channel;     ///< "kline" (the only channel today).
+        std::string channel;     ///< "kline" | "order".
         std::string symbol;      ///< e.g. "BTC_USDT".
         std::string market_type; ///< "spot" | "futures" | "cfd".
     };
 
     /// Push a JSON-RPC notification to every session subscribed to `topic`.
     ///
+    /// A session is a target when ANY of its channel subscriptions matches the
+    /// topic's channel, market type and symbol set; a session subscribed to
+    /// several channels still receives each event exactly once.
+    ///
     /// Thread-safety: callable from any thread — the feed I/O thread calls it
-    /// once per closed bar. It ONLY enqueues into bounded per-subscriber
-    /// queues, so a slow or dead client can never block the market-data path.
-    /// When a subscriber's queue is full the oldest notification is dropped
-    /// and counted in that subscription's `dropped` field.
+    /// once per closed bar and the order path calls it per order event. It
+    /// ONLY enqueues into bounded per-subscriber queues, so a slow or dead
+    /// client can never block the market-data path. When a subscriber's queue
+    /// is full the oldest notification is dropped and counted in that
+    /// session's `dropped` counter.
     void publish(const Topic &topic, const std::string &method,
                  const nlohmann::json &params);
 
@@ -113,31 +125,38 @@ class JsonRpcServer
     /// translation units that only use the server's interface.
     struct TlsState;
 
-    /// Per-session market-data filter. An empty `market_type` or empty
-    /// `symbols` set is a wildcard.
+    /// Per-session push filter. An empty `market_type` or empty `symbols` set
+    /// is a wildcard. Sessions hold these in a map keyed by channel, so one
+    /// connection can subscribe to several channels independently.
     struct Subscription
     {
-        std::string channel;
         std::string market_type;
         std::unordered_set<std::string> symbols;
     };
 
     /// Per-connection state shared by the reader loop and the notification
-    /// writer. A session is registered with the server only while it has an
-    /// active subscription, so an idle client costs nothing on publish().
+    /// writer. A session is registered with the server only while it has at
+    /// least one active subscription, so an idle client costs nothing on
+    /// publish().
     struct Session
     {
-        std::mutex mutex; ///< Guards queue / stopped / subscription.
+        std::mutex mutex; ///< Guards queue / stopped / subscriptions.
         std::condition_variable cv;
         std::deque<std::string> queue; ///< Bounded outgoing notifications.
         bool stopped{ false };
         std::uint64_t dropped{ 0 };
-        std::optional<Subscription> subscription;
+
+        /// Active push filters, keyed by channel ("kline" | "order"). The key
+        /// IS the channel, so a subscribe replaces only that channel's filter
+        /// and unsubscribing one channel leaves the others intact.
+        std::unordered_map<std::string, Subscription> subscriptions;
 
         std::mutex writeMutex; ///< Serialises ALL writes to the socket.
     };
 
-    /// Handle subscribe_market / unsubscribe_market for one connection.
+    /// Handle the four connection-scoped push methods for one connection:
+    /// subscribe_market / unsubscribe_market (channel "kline") and
+    /// subscribe_orders / unsubscribe_orders (channel "order").
     /// Returns true when the line was a subscription request (and `response`
     /// holds the reply); false lets the caller fall through to dispatchLine.
     bool handleSubscriptionRequest(const std::string &line,

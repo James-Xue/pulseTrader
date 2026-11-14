@@ -38,6 +38,20 @@ target_link_libraries(test_control_command_parser
 include(GoogleTest)
 gtest_discover_tests(test_control_command_parser)
 
+add_executable(test_control_idempotency
+    test_order_idempotency.cpp
+)
+target_link_libraries(test_control_idempotency
+    PRIVATE
+        pulse::control
+        pulse::core
+        pulse::execution
+        pulse::logging
+        GTest::gtest_main
+)
+include(GoogleTest)
+gtest_discover_tests(test_control_idempotency)
+
 add_executable(test_control_order_flow
     test_order_flow_executor.cpp
 )

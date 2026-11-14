@@ -101,6 +101,16 @@ void OrderFlowExecutor::setSymbolRegistry(
     m_registry = std::move(registry);
 }
 
+void OrderFlowExecutor::setOrderUpdateCallback(OrderUpdateFn callback)
+{
+    m_orderUpdate = std::move(callback);
+}
+
+void OrderFlowExecutor::setOrderSubmitCallback(OrderSubmitFn callback)
+{
+    m_orderSubmit = std::move(callback);
+}
+
 double OrderFlowExecutor::quantoMultiplierFor(const Symbol &symbol) const
 {
     if (m_registry)
@@ -152,23 +162,27 @@ OrderFlowExecutor::OrderFlowExecutor(
 #endif
 {
     // Wire completion callbacks — the class owns the completion logic.
+    //
+    // Each tracker passes its OWN market type (fixed at construction) into
+    // onOrderComplete: the same symbol may trade on several markets, so the
+    // reporting tracker is the only reliable source for it.
     if (m_spotTracker)
     {
         m_spotTracker->setCompletionCallback(
             [this](const execution::ExecutionReport &report)
-            { onOrderComplete(report); });
+            { onOrderComplete(MarketType::Spot, report); });
     }
     if (m_futuresTracker)
     {
         m_futuresTracker->setCompletionCallback(
             [this](const execution::ExecutionReport &report)
-            { onOrderComplete(report); });
+            { onOrderComplete(MarketType::Futures, report); });
     }
     if (m_cfdTracker)
     {
         m_cfdTracker->setCompletionCallback(
             [this](const execution::ExecutionReport &report)
-            { onOrderComplete(report); });
+            { onOrderComplete(MarketType::Cfd, report); });
     }
 }
 
@@ -368,8 +382,9 @@ void OrderFlowExecutor::onSignal(const strategy::TradingSignal &sig)
 
     // Pass the evaluation down: placeOrder must NOT re-evaluate, or the
     // caller's own reservation (created above) is double-counted and every
-    // Modified order is rejected against its own budget.
-    auto result = placeOrder(req, eval);
+    // Modified order is rejected against its own budget. Signal orders are
+    // not part of the external push contract, so they announce nothing.
+    auto result = placeOrder(req, eval, /*announce_submit=*/false);
     if (!ok(result))
     {
         log_app->error("Signal order FAILED: {} (code={})",
@@ -415,7 +430,7 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req)
                                + " is not the active direction (active="
                                + toString(active) + ")" };
     }
-    return evaluateAndPlace(req);
+    return evaluateAndPlace(req, /*announce_submit=*/false);
 }
 
 Result<execution::OrderResponse>
@@ -434,11 +449,13 @@ OrderFlowExecutor::placeManualOrder(const execution::OrderRequest &req)
                            std::string("order market_type=spot is not the active direction (active=")
                                + toString(active) + ")" };
     }
-    return evaluateAndPlace(req);
+    // Manual path: announce the placement (open_order → subscribe_orders).
+    return evaluateAndPlace(req, /*announce_submit=*/true);
 }
 
 Result<execution::OrderResponse>
-OrderFlowExecutor::evaluateAndPlace(const execution::OrderRequest &req)
+OrderFlowExecutor::evaluateAndPlace(const execution::OrderRequest &req,
+                                    bool announce_submit)
 {
     // Evaluate exactly once, then place using that evaluation. Re-evaluating
     // after a Modified result double-counts the caller's own reservation and
@@ -452,12 +469,13 @@ OrderFlowExecutor::evaluateAndPlace(const execution::OrderRequest &req)
                               ? eval.reason_code : ErrorCode::OrderRejected;
         return PulseError{ code, eval.reason_message };
     }
-    return placeOrder(req, eval);
+    return placeOrder(req, eval, announce_submit);
 }
 
 Result<execution::OrderResponse>
 OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
-                              const risk::RiskEvalResult &eval)
+                              const risk::RiskEvalResult &eval,
+                              bool announce_submit)
 {
     auto log_app = logging::Logger::get("app");
 
@@ -546,6 +564,29 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
     log_app->info("Order PLACED: id={} status={}",
                   resp.order_id,
                   static_cast<int>(resp.status));
+
+    // 4b. Announce the placement BEFORE tracking starts (manual open_order
+    //     only). The tracker's immediate poll below can fill the order
+    //     synchronously and publish `completed` from onOrderComplete(); if
+    //     `submitted` were emitted after this call returned, a subscriber
+    //     applying events in receive order would see the terminal event
+    //     first. The request is the one actually sent (order_req), so the
+    //     announced quantity is post-risk-adjustment.
+    if (announce_submit && m_orderSubmit)
+    {
+        try
+        {
+            m_orderSubmit(order_req, resp);
+        }
+        catch (const std::exception &e)
+        {
+            log_app->warn("Order submit callback threw: {}", e.what());
+        }
+        catch (...)
+        {
+            log_app->warn("Order submit callback threw a non-std exception");
+        }
+    }
 
     // 5. Record reservation for the completion handler to consume.
     //    The placed request is stored too: on fill the position must open
@@ -685,7 +726,8 @@ int OrderFlowExecutor::cancelAllOpenOrders(MarketType mt)
     return cancelled;
 }
 
-void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report)
+void OrderFlowExecutor::onOrderComplete(
+    MarketType market_type, const execution::ExecutionReport &report)
 {
     auto log_app = logging::Logger::get("app");
 
@@ -785,6 +827,22 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
         }
         else
         {
+            // Label the new position with its provenance so the exit layers
+            // can honour ownership. In priority order:
+            //   1. size_authoritative → "external": an external runtime (GT)
+            //      sized the order itself and owns the exit. Exit ownership
+            //      is only honoured while the exchange-native floor exists
+            //      (CFD sl_price); futures/spot orders cannot carry one, and
+            //      a CFD entry may omit it — those stay PT-managed.
+            //   2. A client order id → "strategy": the signal path always
+            //      mints one, so the fill belongs to engine exit logic.
+            //   3. No client tag → "manual": an operator/API one-shot.
+            const std::string origin =
+                reservation.request.size_authoritative
+                    ? "external"
+                    : (report.client_order_id.empty() ? "manual" : "strategy");
+            m_positionMgr.setOrigin(value(open_result), origin);
+
             if (!report.exchange_position_id.empty())
             {
                 // TradFi CFD: record the exchange position id on the engine
@@ -808,6 +866,28 @@ void OrderFlowExecutor::onOrderComplete(const execution::ExecutionReport &report
 
     recordCompletedTrade(report, pnl, mt, lev,
                          reservation.request.quanto_multiplier);
+
+    // Announce the terminal report to push subscribers (subscribe_orders →
+    // order.update). This runs LAST and inside try/catch: the tracker has
+    // already committed the terminal state and everything above has consumed
+    // the reservation, opened/closed the position and recorded the trade. A
+    // throwing or slow consumer must never roll back or interrupt that
+    // bookkeeping, so a push failure is logged and swallowed.
+    if (m_orderUpdate)
+    {
+        try
+        {
+            m_orderUpdate(market_type, report);
+        }
+        catch (const std::exception &e)
+        {
+            log_app->warn("Order update callback threw: {}", e.what());
+        }
+        catch (...)
+        {
+            log_app->warn("Order update callback threw a non-std exception");
+        }
+    }
 }
 
 void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,

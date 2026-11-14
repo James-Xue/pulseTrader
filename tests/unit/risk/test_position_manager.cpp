@@ -75,6 +75,9 @@ TEST(PositionManager, OpenPositionSetsCorrectFields)
     EXPECT_DOUBLE_EQ(0.0, pos->unrealized_pnl);
     EXPECT_DOUBLE_EQ(500.0, pos->notional_value); // 0.01 * 50000
     EXPECT_EQ("strategy_1", pos->strategy_id);
+    // Provenance is unclassified until the fill path (or a sync) labels it:
+    // "" keeps the historical "engine-managed" behaviour.
+    EXPECT_TRUE(pos->origin.empty());
 }
 
 TEST(PositionManager, OpenPositionIncrementsCount)
@@ -524,6 +527,34 @@ TEST(PositionManager, PortfolioSummary_FuturesFields)
 }
 
 // ---------------------------------------------------------------------------
+// Position origin — exit ownership
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, SetOriginLabelsAnExistingPosition)
+{
+    PositionManager pm(make_config());
+    const auto opened = pm.openPosition("XAUUSD", Side::Buy, 0.01, 4000.0, "gt-1");
+    ASSERT_TRUE(ok(opened));
+
+    pm.setOrigin(value(opened), "external");
+
+    const auto pos = pm.getPosition(value(opened));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ("external", pos->origin);
+}
+
+TEST(PositionManager, SetOriginMissingPositionIsNoOp)
+{
+    // A fill whose position was already closed (or pruned by a sync) must not
+    // resurrect a ghost entry just to label it.
+    PositionManager pm(make_config());
+
+    pm.setOrigin("XAUUSD_Buy_1", "external");
+
+    EXPECT_EQ(0, pm.openPositionCount());
+}
+
+// ---------------------------------------------------------------------------
 // syncPositionFromExchange — startup reconciliation
 // ---------------------------------------------------------------------------
 
@@ -559,8 +590,11 @@ TEST(PositionManager, SyncImportsExchangePositionWithoutLimitChecks)
     // Short at a mark below entry → positive unrealized PnL. Leverage-free:
     // (entry - mark) * qty * quanto = 35.1 * 0.0006 = 0.02106.
     EXPECT_NEAR((63072.3 - 63037.2) * 6.0 * 0.0001, pos.unrealized_pnl, 1e-6);
-    // No owning strategy.
+    // No owning strategy, and imported positions are labelled "manual": the
+    // exchange payload carries no client tag, so origin cannot be rebuilt
+    // after a restart (documented limitation).
     EXPECT_TRUE(pos.strategy_id.empty());
+    EXPECT_EQ("manual", pos.origin);
 }
 
 TEST(PositionManager, SyncImportAboveLimitsStillVisible)
@@ -598,6 +632,30 @@ TEST(PositionManager, SyncIsIdempotentPerSymbolSide)
     EXPECT_NEAR(7.0, all[0].quantity, 1e-9);
     EXPECT_NEAR(63050.0, all[0].entry_price, 1e-9);
     EXPECT_NEAR(69100.0, all[0].liquidation_price, 1e-9);
+}
+
+TEST(PositionManager, SyncKeepsAnExplicitOrigin)
+{
+    // Re-syncing refreshes prices/quantity but never re-labels a position:
+    // an engine fill that the exchange sync updates in place (matched by
+    // exchange_position_id) keeps its caller-owned "external" origin.
+    PositionManager pm(make_config(100000.0, 100, 100000.0));
+
+    const auto opened = pm.openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4400.0, "gt-xau-1",
+        MarketType::Cfd, 500.0, MarginMode::Cross, 100.0, 0.0, 4380.0, 4440.0);
+    ASSERT_TRUE(ok(opened));
+    pm.setOrigin(value(opened), "external");
+    pm.setExchangePositionId(value(opened), "17679434");
+
+    pm.syncPositionFromExchange(
+        "XAUUSD", Side::Buy, 0.01, 4400.0, 4405.0, MarketType::Cfd, 500.0,
+        MarginMode::Cross, 100.0, 0.0, 0.0, Timestamp{}, 4381.0, 4441.0,
+        "17679434");
+
+    const auto pos = pm.getPosition(value(opened));
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ("external", pos->origin);
 }
 
 TEST(PositionManager, SyncDoesNotCollideWithEngineOpenedPositions)

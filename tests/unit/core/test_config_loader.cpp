@@ -541,6 +541,33 @@ port = 9091
     EXPECT_EQ(9091, ctrl.port);
 }
 
+TEST(ConfigLoader, ParseControl_ExternalOrdersGate)
+{
+    // Missing key keeps the fail-safe default: the independent external-order
+    // gate is OFF, so caller-authoritative opens are rejected until an
+    // operator explicitly arms them.
+    {
+        TempToml tmp(R"(
+[control]
+port = 9091
+)");
+
+        auto result = loadConfigFile(tmp.path());
+        ASSERT_TRUE(ok(result)) << error(result).message;
+        EXPECT_FALSE(value(result).control.externalOrdersEnabled);
+    }
+
+    // Explicit true arms the external (caller-sized) open path.
+    TempToml tmp(R"(
+[control]
+external_orders_enabled = true
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).control.externalOrdersEnabled);
+}
+
 TEST(ConfigLoader, ParseTwitter_AndNews)
 {
     TempToml tmp(R"(

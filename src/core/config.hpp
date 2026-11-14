@@ -347,6 +347,22 @@ struct ControlConfig
     /// token = "from_env:PULSE_CONTROL_TOKEN" so the secret stays out of the
     /// TOML file.
     std::string token;
+
+    /// Independent external-order gate: [control] external_orders_enabled.
+    ///
+    /// While false (the fail-safe default) `open_order` rejects
+    /// caller-authoritative opens — `size_authority = "caller"`, not
+    /// reduce_only — with ControlInvalidRequest before the risk gate or any
+    /// REST call. Engine-authority opens (the REPL / MCP / UI one-shots) and
+    /// every reduce-only close remain allowed, so the manual path and the
+    /// ability to close a position are never blocked by this flag.
+    ///
+    /// Why a control flag rather than another strategy parameter: an external
+    /// strategy runtime (GT) places orders through the same socket while its
+    /// PT strategies stay in signal-only mode, and the operator must be able
+    /// to kill that runtime instantly — `set_external_orders enabled=false`
+    /// — without restarting the engine.
+    bool externalOrdersEnabled = false;
 };
 
 // ---------------------------------------------------------------------------

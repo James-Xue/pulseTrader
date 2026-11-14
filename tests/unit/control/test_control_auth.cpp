@@ -391,3 +391,164 @@ TEST(ControlPush, UnknownChannelIsRejected)
     closeRaw(fd);
     server->stop();
 }
+
+// ---------------------------------------------------------------------------
+// Order-event push (subscribe_orders) and multi-channel sessions
+// ---------------------------------------------------------------------------
+
+TEST(ControlPush, TwoChannelsOnOneSessionBothDeliver)
+{
+    // One connection can watch closed klines AND order events: each channel
+    // has its own subscription entry, so subscribing the second does not
+    // replace the first (the old single-subscription design would have).
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":1,"method":"subscribe_market","params":{"symbols":["BTC_USDT"],"market_type":"futures"}})");
+    const auto klineReply = nlohmann::json::parse(readLineRaw(fd));
+    ASSERT_TRUE(klineReply["result"]["subscribed"].get<bool>());
+    EXPECT_EQ("kline", klineReply["result"]["channel"].get<std::string>());
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":2,"method":"subscribe_orders","params":{"market_type":"futures"}})");
+    const auto orderReply = nlohmann::json::parse(readLineRaw(fd));
+    ASSERT_TRUE(orderReply["result"]["subscribed"].get<bool>());
+    EXPECT_EQ("order", orderReply["result"]["channel"].get<std::string>());
+    EXPECT_TRUE(orderReply["result"]["symbols"].empty());
+
+    // Both channels deliver, in publish order (one FIFO queue per session).
+    server->publish({ "kline", "BTC_USDT", "futures" }, "market.kline",
+                    { { "symbol", "BTC_USDT" }, { "closed", true } });
+    server->publish({ "order", "BTC_USDT", "futures" }, "order.update",
+                    { { "event", "submitted" }, { "order_id", "42" } });
+
+    const auto klineNote = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("market.kline", klineNote["method"].get<std::string>());
+    const auto orderNote = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("order.update", orderNote["method"].get<std::string>());
+    EXPECT_EQ("42", orderNote["params"]["order_id"].get<std::string>());
+    EXPECT_FALSE(orderNote.contains("id")); // Notifications carry no id.
+
+    closeRaw(fd);
+    server->stop();
+}
+
+TEST(ControlPush, ReplyIsWrittenBeforeNotificationsPublishedDuringDispatch)
+{
+    // A handler can publish (the open_order path emits `submitted` from inside
+    // the order flow). The notification must not overtake the response to the
+    // request that caused it: a line-oriented client reading exactly one line
+    // per request would take it for the reply and be off by one forever.
+    JsonRpcServer *server_ptr = nullptr;
+    MethodRegistry registry;
+    registry["publish_then_reply"] = [&server_ptr](const nlohmann::json &params)
+    {
+        server_ptr->publish({ "order", "BTC_USDT", "futures" }, "order.update",
+                            { { "event", "submitted" },
+                              { "order_id", "77" } });
+        return RpcResult{ params };
+    };
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, registry);
+    server_ptr = server.get();
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":1,"method":"subscribe_orders"})");
+    ASSERT_TRUE(nlohmann::json::parse(readLineRaw(fd))["result"]["subscribed"].get<bool>());
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":2,"method":"publish_then_reply","params":{"ok":true}})");
+
+    // First line: the response to id 2, never the notification it published.
+    const auto first = nlohmann::json::parse(readLineRaw(fd));
+    ASSERT_TRUE(first.contains("id"));
+    EXPECT_EQ(2, first["id"].get<int>());
+    EXPECT_TRUE(first["result"]["ok"].get<bool>());
+
+    // Second line: the notification, still delivered afterwards.
+    const auto note = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("order.update", note["method"].get<std::string>());
+    EXPECT_EQ("77", note["params"]["order_id"].get<std::string>());
+
+    closeRaw(fd);
+    server->stop();
+}
+
+TEST(ControlPush, UnsubscribingOneChannelKeepsTheOther)
+{
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":1,"method":"subscribe_market","params":{"symbols":["BTC_USDT"]}})");
+    ASSERT_TRUE(nlohmann::json::parse(readLineRaw(fd))["result"]["subscribed"].get<bool>());
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":2,"method":"subscribe_orders"})");
+    ASSERT_TRUE(nlohmann::json::parse(readLineRaw(fd))["result"]["subscribed"].get<bool>());
+
+    // Clear ONLY the kline channel; the reply names the channel it cleared.
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":3,"method":"unsubscribe_market"})");
+    const auto unsubscribe = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ(3, unsubscribe["id"].get<int>());
+    EXPECT_FALSE(unsubscribe["result"]["subscribed"].get<bool>());
+    EXPECT_EQ("kline", unsubscribe["result"]["channel"].get<std::string>());
+
+    // The kline channel is silent…
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 300));
+    server->publish({ "kline", "BTC_USDT", "futures" }, "market.kline",
+                    { { "symbol", "BTC_USDT" } });
+    EXPECT_TRUE(readLineRaw(fd).empty());
+
+    // …while the order channel still delivers.
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+    server->publish({ "order", "BTC_USDT", "futures" }, "order.update",
+                    { { "event", "completed" }, { "order_id", "43" } });
+    const auto orderNote = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("order.update", orderNote["method"].get<std::string>());
+    EXPECT_EQ("43", orderNote["params"]["order_id"].get<std::string>());
+
+    // Clearing the last channel is idempotent as well.
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":4,"method":"unsubscribe_orders"})");
+    const auto last = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_FALSE(last["result"]["subscribed"].get<bool>());
+    EXPECT_EQ("order", last["result"]["channel"].get<std::string>());
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":5,"method":"unsubscribe_orders"})");
+    EXPECT_FALSE(nlohmann::json::parse(readLineRaw(fd))["result"]["subscribed"].get<bool>());
+
+    closeRaw(fd);
+    server->stop();
+}
+
+TEST(ControlPush, EachChannelRejectsTheOtherChannelsName)
+{
+    // The channel is a property of the method pair: naming the other channel
+    // is refused instead of silently subscribing the wrong stream.
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":1,"method":"subscribe_market","params":{"channel":"order"}})");
+    const auto marketReply = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ(-32602, marketReply["error"]["code"].get<int>());
+    EXPECT_NE(std::string::npos,
+              marketReply["error"]["message"].get<std::string>().find("kline"));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":2,"method":"subscribe_orders","params":{"channel":"kline"}})");
+    const auto ordersReply = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ(-32602, ordersReply["error"]["code"].get<int>());
+    EXPECT_NE(std::string::npos,
+              ordersReply["error"]["message"].get<std::string>().find("order"));
+
+    closeRaw(fd);
+    server->stop();
+}

@@ -106,7 +106,8 @@ void PositionManager::syncPositionFromExchange(
             return;
         }
         // Re-sync: refresh prices/quantity in place; keep the original
-        // position_id, strategy_id (may be an engine fill) and open_time.
+        // position_id, strategy_id, origin (may be an engine fill) and
+        // open_time.
         // entry_price stays the exchange average — the per-slice split
         // between external and engine-filled lots is unknowable from the
         // merged view (PnL of the external slice is an approximation).
@@ -153,6 +154,14 @@ void PositionManager::syncPositionFromExchange(
     pos.notional_value = synced_qty * mark_price * quanto_multiplier;
     pos.open_time = (Timestamp{} == open_time) ? now() : open_time;
     pos.strategy_id = ""; // Exchange-side position — no owning strategy.
+    // Restart limitation: an imported position is labelled "manual" because
+    // the exchange position payload (Gate CFD in particular) carries no
+    // client tag — an external (GT) position opened before an engine restart
+    // is indistinguishable from a hand-opened one. It therefore becomes
+    // PT-managed again until its owner re-establishes ownership. Persisting
+    // or rebuilding origin across restarts is deliberately out of scope; the
+    // exchange-native stop attached at entry remains the floor meanwhile.
+    pos.origin = "manual";
     pos.market_type = market_type;
     pos.leverage = leverage;
     pos.margin_mode = margin_mode;
@@ -335,6 +344,22 @@ void PositionManager::setExchangePositionId(
     {
         it->second.exchange_position_id = exchange_position_id;
     }
+}
+
+void PositionManager::setOrigin(const std::string &position_id,
+                                const std::string &origin)
+{
+    // Label a tracked position with its provenance so the exit-owning layers
+    // can honour caller ownership ("external"). No-op when the id is gone:
+    // the fill's position may already have been closed or pruned.
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    auto it = m_positions.find(position_id);
+    if (m_positions.end() == it)
+    {
+        return;
+    }
+    it->second.origin = origin;
 }
 
 std::optional<double> PositionManager::closePosition(const std::string &position_id, Quantity close_qty, Price exit_price)

@@ -616,14 +616,24 @@ void JsonRpcServer::runLoop(Stream &stream)
                 continue;
             }
 
+            // Reply-before-notification: hold the session's write mutex across
+            // DISPATCH as well as the reply write. A handler can publish
+            // (order.update / market.kline) from another thread, and the
+            // writer thread would otherwise be free to put that notification
+            // on the wire before this request's response. A line-oriented
+            // client that reads exactly one line per request would then take
+            // the notification for the reply and be off by one forever.
+            // Holding the mutex serialises this session's writes; it cannot
+            // deadlock, because publish() only takes the session queue mutex
+            // (never writeMutex) and the writer takes the two independently.
             std::string response;
+            std::lock_guard write_lock(session->writeMutex);
             if (!handleSubscriptionRequest(line, session, response))
             {
                 response = dispatchLine(line, m_registry);
             }
             if (!response.empty())
             {
-                std::lock_guard write_lock(session->writeMutex);
                 asio::write(stream, asio::buffer(response + "\n"));
             }
         }
@@ -639,16 +649,17 @@ void JsonRpcServer::runLoop(Stream &stream)
 }
 
 // ---------------------------------------------------------------------------
-// Market-data push (subscribe_market / unsubscribe_market)
+// Server push (subscribe_market / subscribe_orders and their unsubscribe pair)
 // ---------------------------------------------------------------------------
 
 namespace
 {
 
-/// Per-subscriber outgoing queue cap. At one closed 1-minute bar per symbol
-/// this is many hours of slack; when a client falls this far behind it has
-/// stopped reading, and dropping the OLDEST notification keeps the freshest
-/// bar rather than growing memory without bound.
+/// Per-subscriber outgoing queue cap. Closed 1-minute bars are a handful per
+/// minute and order events are a handful per order, so this is many hours of
+/// slack; when a client falls this far behind it has stopped reading. Dropping
+/// the OLDEST notification keeps the freshest state rather than growing memory
+/// without bound.
 constexpr std::size_t kMaxPendingNotifications = 1024;
 
 } // anonymous namespace
@@ -678,8 +689,9 @@ void JsonRpcServer::publish(const Topic &topic, const std::string &method,
                             const nlohmann::json &params)
 {
     // 1. Build the notification line ONCE. publish() runs on the market-data
-    //    thread once per closed bar, so one shared payload per event is both
-    //    cheaper and simpler than formatting per subscriber.
+    //    thread once per closed bar and on the order path once per order
+    //    event, so one shared payload per event is both cheaper and simpler
+    //    than formatting per subscriber.
     nlohmann::json notification;
     notification["jsonrpc"] = "2.0";
     notification["method"] = method;
@@ -696,19 +708,23 @@ void JsonRpcServer::publish(const Topic &topic, const std::string &method,
         targets = m_subscribers;
     }
 
+    // 3. Deliver to a session when ANY of its channel subscriptions matches.
+    //    The map is keyed by channel, so an unrelated channel costs one hash
+    //    lookup, and subscribing to two channels never duplicates an event.
     for (const auto &session : targets)
     {
         std::lock_guard lock(session->mutex);
-        if (session->stopped || !session->subscription.has_value())
+        if (session->stopped)
         {
             continue;
         }
 
-        const auto &sub = *session->subscription;
-        if (sub.channel != topic.channel)
+        const auto it = session->subscriptions.find(topic.channel);
+        if (session->subscriptions.end() == it)
         {
             continue;
         }
+        const auto &sub = it->second;
         if (!sub.market_type.empty() && sub.market_type != topic.market_type)
         {
             continue;
@@ -739,8 +755,24 @@ bool JsonRpcServer::handleSubscriptionRequest(
         return false;
     }
 
+    // 1. Resolve the method pair → (channel, subscribe/unsubscribe). The
+    //    channel is a property of the method, not of the params: a typo in
+    //    params.channel is refused instead of silently subscribing the wrong
+    //    stream, and each channel has exactly one documented method pair.
     const std::string method = request.value("method", std::string{});
-    if ("subscribe_market" != method && "unsubscribe_market" != method)
+    std::string channel;
+    bool subscribing = false;
+    if ("subscribe_market" == method || "unsubscribe_market" == method)
+    {
+        channel = "kline";
+        subscribing = ("subscribe_market" == method);
+    }
+    else if ("subscribe_orders" == method || "unsubscribe_orders" == method)
+    {
+        channel = "order";
+        subscribing = ("subscribe_orders" == method);
+    }
+    else
     {
         return false;
     }
@@ -750,21 +782,29 @@ bool JsonRpcServer::handleSubscriptionRequest(
     reply["id"] = request.contains("id") ? request["id"]
                                          : nlohmann::json(nullptr);
 
-    // Unsubscribe is idempotent: clearing an absent subscription succeeds.
-    if ("unsubscribe_market" == method)
+    // 2. Unsubscribe clears ONE channel and is idempotent: clearing an absent
+    //    subscription succeeds. Other channels on the same connection survive,
+    //    so the session stays registered while any subscription remains and
+    //    only leaves the subscriber list when the last one is gone.
+    if (!subscribing)
     {
+        bool any_left = false;
         {
             std::lock_guard lock(session->mutex);
-            session->subscription.reset();
+            session->subscriptions.erase(channel);
+            any_left = !session->subscriptions.empty();
         }
-        unregisterSession(session.get());
-        reply["result"] = { { "subscribed", false } };
+        if (!any_left)
+        {
+            unregisterSession(session.get());
+        }
+        reply["result"] = { { "subscribed", false }, { "channel", channel } };
         response = reply.dump();
         return true;
     }
 
-    // Validate params. channel is "kline" today; symbols is an optional array
-    // (absent = every symbol); market_type is optional (absent = any market).
+    // 3. Validate params. symbols is an optional array (absent = every
+    //    symbol); market_type is optional (absent = any market).
     Subscription sub;
     std::string error;
     const nlohmann::json params =
@@ -772,21 +812,22 @@ bool JsonRpcServer::handleSubscriptionRequest(
 
     if (!params.is_object())
     {
-        error = "subscribe_market: params must be an object";
+        error = method + ": params must be an object";
     }
     else
     {
-        sub.channel = params.value("channel", std::string("kline"));
-        sub.market_type = params.value("market_type", std::string{});
-        if ("kline" != sub.channel)
+        // The optional channel field must agree with the method's channel;
+        // omitting it (the documented form) uses the method's default.
+        if (params.value("channel", channel) != channel)
         {
-            error = "subscribe_market: channel must be \"kline\"";
+            error = method + ": channel must be \"" + channel + "\"";
         }
+        sub.market_type = params.value("market_type", std::string{});
         if (error.empty() && params.contains("symbols"))
         {
             if (!params["symbols"].is_array())
             {
-                error = "subscribe_market: symbols must be an array of strings";
+                error = method + ": symbols must be an array of strings";
             }
             else
             {
@@ -794,8 +835,8 @@ bool JsonRpcServer::handleSubscriptionRequest(
                 {
                     if (!symbol.is_string())
                     {
-                        error = "subscribe_market: symbols must be an array "
-                                "of strings";
+                        error = method + ": symbols must be an array "
+                                         "of strings";
                         break;
                     }
                     sub.symbols.insert(symbol.get<std::string>());
@@ -814,21 +855,24 @@ bool JsonRpcServer::handleSubscriptionRequest(
         return true;
     }
 
-    // Build the reply from the local copy BEFORE moving it into the session.
+    // 4. Build the reply from the local copy BEFORE moving it into the
+    //    session (the map key is the channel; the filter itself is the value).
     nlohmann::json result;
     result["subscribed"] = true;
-    result["channel"] = sub.channel;
+    result["channel"] = channel;
     result["market_type"] = sub.market_type;
     result["symbols"] = nlohmann::json::array();
     for (const auto &symbol : sub.symbols)
     {
         result["symbols"].push_back(symbol);
     }
-    result["note"] = "notifications are pushed only for CLOSED klines";
+    result["note"] = ("kline" == channel)
+        ? "notifications are pushed only for CLOSED klines"
+        : "notifications are pushed for submitted and completed order events";
 
     {
         std::lock_guard lock(session->mutex);
-        session->subscription = std::move(sub);
+        session->subscriptions[channel] = std::move(sub);
     }
     registerSession(session);
 
@@ -1098,6 +1142,23 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         services.resumeTrading();
         return RpcResult{ services.risk() };
+    };
+    // Independent external-order gate ([control] external_orders_enabled).
+    // The gate is separate from [strategy] signal_only: PT strategies can
+    // stay signals-only while an external runtime trades, and this call arms
+    // or kills that runtime without an engine restart.
+    reg["set_external_orders"] = [&services](const nlohmann::json &params)
+    {
+        if (!params.contains("enabled") || !params["enabled"].is_boolean())
+        {
+            return RpcResult{ PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "set_external_orders: enabled (boolean) is required" } };
+        }
+        const bool enabled = params["enabled"].get<bool>();
+        services.setExternalOrdersEnabled(enabled);
+        return RpcResult{ nlohmann::json{
+            { "external_orders_enabled", enabled } } };
     };
     reg["pause_strategy"] = [&services](const nlohmann::json &params)
     {

@@ -160,6 +160,17 @@ class PositionManager
     void setExchangePositionId(const std::string &position_id,
                                const std::string &exchange_position_id);
 
+    /// Record where a position came from ("strategy" / "manual" / "external")
+    /// so the exit-owning layers can tell a caller-authoritative position
+    /// (external runtime, GT — the caller owns the exit) from one the engine
+    /// manages itself.
+    ///
+    /// Called right after a fill opens a position (OrderFlowExecutor) and by
+    /// the sync-import path. Thread-safe: takes the exclusive lock. A missing
+    /// position id is a no-op — a fill that was already closed (or pruned by
+    /// a sync) must not resurrect a ghost entry just to label it.
+    void setOrigin(const std::string &position_id, const std::string &origin);
+
     [[nodiscard]] std::optional<double> closePosition(
         const std::string &position_id, Quantity close_qty, Price exit_price);
 

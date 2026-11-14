@@ -25,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -151,6 +152,45 @@ class OrderFlowExecutor
     /// Safe to call before any signal/manual order is processed.
     void setSymbolRegistry(std::shared_ptr<const market::SymbolRegistry> registry);
 
+    /// Terminal-report sink: (market type of the reporting tracker, report).
+    ///
+    /// The market type is the tracker's OWN type, fixed when the tracker was
+    /// constructed — never inferred from the symbol, which can exist on more
+    /// than one market (BTC_USDT is both spot and futures).
+    using OrderUpdateFn =
+        std::function<void(MarketType, const execution::ExecutionReport &)>;
+
+    /// Install the terminal-report sink (subscribe_orders → order.update over
+    /// the control socket).
+    ///
+    /// Call during startup, before any tracker can deliver a completion; the
+    /// sink is invoked from the WS/REST tracker threads. A throwing sink is
+    /// caught and logged, because the report has already been committed to the
+    /// position book, the drawdown guard and the trade recorder by then.
+    void setOrderUpdateCallback(OrderUpdateFn callback);
+
+    /// Sink for the `submitted` push event of the manual open_order path.
+    ///
+    /// Invoked synchronously inside placeManualOrder(), immediately after the
+    /// exchange accepted the order and BEFORE trackOrder() / the immediate
+    /// fill poll. That position is load-bearing: a market order can fill
+    /// inside the poll, which drives onOrderComplete() synchronously and
+    /// publishes `completed`; emitting `submitted` after the call returns
+    /// would put the terminal event first for exactly the orders a runtime
+    /// waits on.
+    ///
+    /// The request carries the quantity the order flow actually sent (risk
+    /// adjustments applied), and the response carries the exchange order id
+    /// and its initial status. Only the manual path announces — signals and
+    /// close flows are not part of the external push contract. A throwing
+    /// callback is caught and logged so it cannot fail a placed order.
+    using OrderSubmitFn = std::function<void(
+        const execution::OrderRequest &, const execution::OrderResponse &)>;
+
+    /// Install the submit sink. Call during startup, before any order can be
+    /// placed (same contract as setOrderUpdateCallback()).
+    void setOrderSubmitCallback(OrderSubmitFn callback);
+
     /// Contract multiplier for a symbol (1.0 if unknown or spot).
     [[nodiscard]] double quantoMultiplierFor(const Symbol &symbol) const;
 
@@ -187,8 +227,13 @@ class OrderFlowExecutor
     [[nodiscard]] Result<execution::OrderResponse>
     placeManualOrder(const execution::OrderRequest &req);
 
-    /// Order-completion entry point (wired to both trackers).
-    void onOrderComplete(const execution::ExecutionReport &report);
+    /// Order-completion entry point (wired to all three trackers).
+    ///
+    /// `market_type` is the reporting tracker's own market type, carried from
+    /// the constructor wiring (see OrderUpdateFn) — it identifies the tracker
+    /// that fired, not the reservation's market metadata.
+    void onOrderComplete(MarketType market_type,
+                         const execution::ExecutionReport &report);
 
     /// Record a TradFi CFD close into the shared record pipeline (completed
     /// reports, drawdown guard, SQLite). The dedicated close endpoint never
@@ -258,16 +303,22 @@ class OrderFlowExecutor
 
     /// Place an order using a pre-computed risk evaluation. Does NOT
     /// re-evaluate — the reservation from `eval` already holds the budget.
+    ///
+    /// `announce_submit` selects the manual open_order path, whose placement
+    /// is pushed to control-socket subscribers before tracking starts. Signal
+    /// and close flows pass false.
     [[nodiscard]] Result<execution::OrderResponse>
     placeOrder(const execution::OrderRequest &req,
-               const risk::RiskEvalResult &eval);
+               const risk::RiskEvalResult &eval,
+               bool announce_submit);
 
     /// Shared tail of the gated entry points: evaluate exactly once, then
     /// place using that evaluation. Re-evaluating after a Modified result
     /// double-counts the caller's own reservation and rejects orders whose
     /// quantity was capped to the notional budget.
     [[nodiscard]] Result<execution::OrderResponse>
-    evaluateAndPlace(const execution::OrderRequest &req);
+    evaluateAndPlace(const execution::OrderRequest &req,
+                     bool announce_submit);
 
     /// One in-flight maker-first attempt: the placed post-only request plus
     /// the deadline after which it falls back to a taker order.
@@ -321,6 +372,11 @@ class OrderFlowExecutor
     std::mutex &m_restMutex;
     std::atomic<MarketType> m_activeMarket{ MarketType::Futures };
     std::shared_ptr<const market::SymbolRegistry> m_registry;
+    /// Push sink for terminal reports (nullable; see setOrderUpdateCallback).
+    OrderUpdateFn m_orderUpdate;
+    /// Push sink for manual-path placements (nullable; see
+    /// setOrderSubmitCallback). Invoked before tracking begins.
+    OrderSubmitFn m_orderSubmit;
 #ifdef PULSE_ENABLE_SQLITE
     trade_recorder::TradeRecorder *m_tradeRecorder;
 #endif

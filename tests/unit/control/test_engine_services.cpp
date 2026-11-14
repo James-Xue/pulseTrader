@@ -17,8 +17,11 @@
 
 #include <gtest/gtest.h>
 
-#include <memory>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <optional>
+#include <vector>
 
 using namespace pulse;
 using namespace pulse::control;
@@ -34,6 +37,14 @@ class FakePlacer : public IOrderPlacer
   public:
     Result<execution::OrderResponse> place(const execution::OrderRequest &) override
     {
+        ++place_calls;
+        if (scripted_result.has_value())
+        {
+            // One-shot, like a real exchange response.
+            auto result = *scripted_result;
+            scripted_result.reset();
+            return result;
+        }
         execution::OrderResponse resp;
         resp.order_id = "fake";
         resp.status = OrderStatus::Open;
@@ -44,6 +55,14 @@ class FakePlacer : public IOrderPlacer
     {
         return nlohmann::json{ { "ok", true } };
     }
+
+    /// Number of orders that actually reached the placer. The idempotency
+    /// tests assert this stays at 1 for repeated client_order_ids.
+    int place_calls{ 0 };
+
+    /// Optional scripted outcome for the next place() call (success response
+    /// or an exchange/transport PulseError).
+    std::optional<Result<execution::OrderResponse>> scripted_result;
 };
 
 } // anonymous namespace
@@ -256,6 +275,528 @@ TEST_F(EngineServicesTest, OpenOrderRequiresValidParams)
     });
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("fake", value(result).order_id);
+}
+
+// ---------------------------------------------------------------------------
+// open_order idempotency (client_order_id)
+// ---------------------------------------------------------------------------
+TEST_F(EngineServicesTest, OpenOrderCallerSizeRequiresClientOrderId)
+{
+    // A caller-authoritative size with no key cannot be de-duplicated: a
+    // retry after a timeout would place a second order of exactly that size.
+    // The independent external-order gate sits BEFORE this check, so arm it
+    // here to keep this test focused on the idempotency contract.
+    m_services->setExternalOrdersEnabled(true);
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_EQ("open_order: client_order_id is required when size_authority is "
+              "\"caller\".",
+              error(result).message);
+    EXPECT_EQ(0, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, FuturesReduceOnlyCallerSizeNeedsNoKey)
+{
+    // A futures reduce_only close is exempt from the key requirement because
+    // Gate enforces the flag: the order cannot exceed the open position, so
+    // it is bounded even without de-duplication. The shared fixture wires
+    // only the spot placer, so build a futures-capable stack here.
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_futuresTracker.get(), nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_futuresTracker.get(), nullptr, flow, *m_board, m_restMutex);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "sell" },
+        { "quantity", 1.0 },
+        { "market_type", "futures" },
+        { "size_authority", "caller" },
+        { "reduce_only", true },
+    });
+
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+// ---------------------------------------------------------------------------
+// Independent external-order gate ([control] external_orders_enabled)
+// ---------------------------------------------------------------------------
+TEST_F(EngineServicesTest, CallerSizeRejectedWhileExternalOrdersDisabled)
+{
+    // Default OFF (fail-safe): the caller-sized path — what an external
+    // runtime uses — must be refused before anything reaches the placer.
+    // Assert the SPECIFIC gate error: a later stage could also fail for
+    // unrelated reasons (risk halt, missing executor), which would make a
+    // bare "some error" assertion pass for the wrong reason.
+    m_flow->setActiveMarket(MarketType::Spot);
+    ASSERT_FALSE(m_services->externalOrdersEnabled());
+    EXPECT_FALSE(m_services->status()["external_orders_enabled"].get<bool>());
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-ext-off-1" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("[control] external_orders_enabled"));
+    EXPECT_EQ(0, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, CallerSizeAllowedWhenExternalOrdersEnabled)
+{
+    m_services->setExternalOrdersEnabled(true);
+    m_flow->setActiveMarket(MarketType::Spot);
+    EXPECT_TRUE(m_services->externalOrdersEnabled());
+    EXPECT_TRUE(m_services->status()["external_orders_enabled"].get<bool>());
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-ext-on-1" },
+    });
+
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, CallerFuturesReduceOnlyBypassesExternalGate)
+{
+    // Disabled gate, caller authority, FUTURES reduce_only=true: a close must
+    // stay possible, or flipping the flag could trap an open position. The
+    // exemption is futures-only because the exchange is what enforces it.
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_futuresTracker.get(), nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_futuresTracker.get(), nullptr, flow, *m_board, m_restMutex);
+    ASSERT_FALSE(svc.externalOrdersEnabled());
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "sell" },
+        { "quantity", 1.0 },
+        { "market_type", "futures" },
+        { "size_authority", "caller" },
+        { "reduce_only", true },
+        { "client_order_id", "gt-ext-close-1" },
+    });
+
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, SpotReduceOnlyIsRejectedOutright)
+{
+    // The spot order body never carries reduce_only to Gate, so the flag is a
+    // caller claim that cannot bound the order. Accepting it would open new
+    // exposure while also exempting the order from the risk layer's drawdown
+    // halt and position-count checks. It is refused before the external gate
+    // and the idempotency cache are even consulted.
+    m_flow->setActiveMarket(MarketType::Spot);
+    ASSERT_FALSE(m_services->externalOrdersEnabled());
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+        { "reduce_only", true },
+        { "client_order_id", "gt-spot-close-1" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("reduce_only is futures-only"));
+    EXPECT_EQ(0, m_placer->place_calls);
+
+    // Engine-authority one-shots are refused the same way: the flag's meaning
+    // does not depend on who sized the order.
+    const auto engine_sized = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "sell" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "reduce_only", true },
+    });
+    ASSERT_FALSE(ok(engine_sized));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(engine_sized).code);
+    EXPECT_EQ(0, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, EngineAuthorityAllowedWhileExternalOrdersDisabled)
+{
+    // The manual path is engine-sized. The gate must not touch it even with
+    // the external flag off — otherwise disabling the external runtime would
+    // also disable the REPL / MCP / UI.
+    m_flow->setActiveMarket(MarketType::Spot);
+    ASSERT_FALSE(m_services->externalOrdersEnabled());
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+    });
+
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, ExternalGateTogglesAtRuntime)
+{
+    // The operational point of the flag: arm the external runtime, then kill
+    // it without an engine restart. Distinct client_order_ids keep idempotency
+    // replay out of the assertions; the first (rejected) request proves the
+    // gate does not consume the key, because the same request is placed once
+    // the gate opens.
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-ext-toggle-1" },
+    };
+
+    const auto disabled = m_services->openOrder(params);
+    ASSERT_FALSE(ok(disabled));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(disabled).code);
+    EXPECT_NE(std::string::npos,
+              error(disabled).message.find("[control] external_orders_enabled"));
+
+    m_services->setExternalOrdersEnabled(true);
+    const auto armed = m_services->openOrder(params);
+    ASSERT_TRUE(ok(armed)) << error(armed).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+
+    m_services->setExternalOrdersEnabled(false);
+    params["client_order_id"] = "gt-ext-toggle-2";
+    const auto killed = m_services->openOrder(params);
+    ASSERT_FALSE(ok(killed));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(killed).code);
+    EXPECT_NE(std::string::npos,
+              error(killed).message.find("[control] external_orders_enabled"));
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, SetExternalOrdersRegisteredInMethodRegistry)
+{
+    // Method names on the control socket ARE the MCP tool names, so the
+    // registry entry must exist and be a thin boolean setter.
+    const auto reg = makeMethodRegistry(*m_services);
+    const auto it = reg.find("set_external_orders");
+    ASSERT_NE(reg.end(), it);
+
+    const auto enabled = it->second(nlohmann::json{ { "enabled", true } });
+    ASSERT_TRUE(std::holds_alternative<nlohmann::json>(enabled));
+    EXPECT_TRUE(
+        std::get<nlohmann::json>(enabled)["external_orders_enabled"].get<bool>());
+    EXPECT_TRUE(m_services->externalOrdersEnabled());
+
+    const auto disabled = it->second(nlohmann::json{ { "enabled", false } });
+    ASSERT_TRUE(std::holds_alternative<nlohmann::json>(disabled));
+    EXPECT_FALSE(
+        std::get<nlohmann::json>(disabled)["external_orders_enabled"].get<bool>());
+    EXPECT_FALSE(m_services->externalOrdersEnabled());
+
+    // Non-boolean / missing enabled → invalid request, state untouched.
+    const auto wrong_type = it->second(nlohmann::json{ { "enabled", "yes" } });
+    EXPECT_TRUE(std::holds_alternative<PulseError>(wrong_type));
+    const auto missing = it->second(nlohmann::json::object());
+    EXPECT_TRUE(std::holds_alternative<PulseError>(missing));
+    EXPECT_FALSE(m_services->externalOrdersEnabled());
+}
+
+TEST_F(EngineServicesTest, OpenOrderReplaysSameClientOrderId)
+{
+    // The core guarantee: the retry returns the first attempt's OrderResponse
+    // and never reaches the order flow a second time.
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    const auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "gt-retry-1" },
+    };
+
+    const auto first = m_services->openOrder(params);
+    ASSERT_TRUE(ok(first)) << error(first).message;
+
+    const auto second = m_services->openOrder(params);
+    ASSERT_TRUE(ok(second)) << error(second).message;
+
+    EXPECT_EQ(value(first).order_id, value(second).order_id);
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, OpenOrderRejectsClientOrderIdReuseWithDifferentParams)
+{
+    // Same key, different quantity — the caller is describing a different
+    // order, so it must be refused rather than replayed.
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    nlohmann::json params{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "gt-reuse-1" },
+    };
+    const auto first = m_services->openOrder(params);
+    ASSERT_TRUE(ok(first)) << error(first).message;
+
+    params["quantity"] = 0.002;
+    const auto second = m_services->openOrder(params);
+    ASSERT_FALSE(ok(second));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(second).code);
+    EXPECT_EQ("open_order: client_order_id reused with different order "
+              "parameters.",
+              error(second).message);
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, OpenOrderEmitsSubmittedEventOncePerPlacedOrder)
+{
+    // The push channel announces a placed order exactly once. A replayed
+    // idempotent retry placed nothing new, so it must not announce a second
+    // order; a rejected request never reached the exchange, so it stays
+    // silent as well.
+    std::vector<nlohmann::json> events;
+    m_services->setOrderEventSink(
+        [&events](const nlohmann::json &event) { events.push_back(event); });
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    const auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "price", 65000.0 },
+        { "type", "limit" },
+        { "market_type", "spot" },
+        { "client_order_id", "evt-submit-1" },
+    };
+
+    const auto placed = m_services->openOrder(params);
+    ASSERT_TRUE(ok(placed)) << error(placed).message;
+
+    ASSERT_EQ(1u, events.size());
+    const auto &event = events[0];
+    EXPECT_EQ("submitted", event["event"].get<std::string>());
+    EXPECT_EQ(value(placed).order_id, event["order_id"].get<std::string>());
+    EXPECT_EQ("evt-submit-1", event["client_order_id"].get<std::string>());
+    EXPECT_EQ("BTC_USDT", event["symbol"].get<std::string>());
+    EXPECT_EQ("spot", event["market_type"].get<std::string>());
+    EXPECT_EQ("buy", event["side"].get<std::string>());
+    EXPECT_EQ("limit", event["type"].get<std::string>());
+    EXPECT_DOUBLE_EQ(65000.0, event["price"].get<double>());
+    EXPECT_DOUBLE_EQ(0.001, event["quantity"].get<double>());
+    EXPECT_DOUBLE_EQ(0.0, event["filled_quantity"].get<double>());
+    EXPECT_EQ("open", event["status"].get<std::string>());
+    EXPECT_GT(event["ts"].get<std::int64_t>(), 0);
+
+    // Replay of the same key: same order, no new event.
+    const auto replayed = m_services->openOrder(params);
+    ASSERT_TRUE(ok(replayed)) << error(replayed).message;
+    EXPECT_EQ(1u, events.size());
+
+    // Rejected request: nothing was placed, nothing is announced.
+    const auto rejected = m_services->openOrder(nlohmann::json{
+        { "symbol", "" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+    });
+    EXPECT_FALSE(ok(rejected));
+    EXPECT_EQ(1u, events.size());
+}
+
+TEST_F(EngineServicesTest, SubmittedEventNeverReportsATerminalStatus)
+{
+    // A market order's POST reply can already be Filled. The submit event
+    // must still describe a non-terminal state with no fill, or a client that
+    // treats `filled` as terminal records a zero-size fill and re-arms the
+    // entry before the `completed` report arrives.
+    std::vector<nlohmann::json> events;
+    m_services->setOrderEventSink(
+        [&events](const nlohmann::json &event) { events.push_back(event); });
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    execution::OrderResponse filled;
+    filled.order_id = "fake-filled";
+    filled.status = OrderStatus::Filled;
+    m_placer->scripted_result = filled;
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "evt-filled-1" },
+    });
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, events.size());
+    EXPECT_EQ("submitted", events[0]["event"].get<std::string>());
+    EXPECT_EQ("open", events[0]["status"].get<std::string>());
+    EXPECT_DOUBLE_EQ(0.0, events[0]["filled_quantity"].get<double>());
+}
+
+TEST_F(EngineServicesTest, OpenOrderPreFlightRiskRejectionKeepsKeyRetryable)
+{
+    // A halt is a pre-flight veto: nothing reached the exchange and the
+    // condition is transient. Caching it would pin the key to a rejection that
+    // is no longer true; instead the SAME client_order_id must place the order
+    // once trading resumes.
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    const auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "gt-halt-1" },
+    };
+
+    m_services->haltTrading();
+    const auto rejected = m_services->openOrder(params);
+    ASSERT_FALSE(ok(rejected)) << "a halted engine must reject the order";
+    EXPECT_EQ(0, m_placer->place_calls);
+
+    m_services->resumeTrading();
+    const auto retried = m_services->openOrder(params);
+    ASSERT_TRUE(ok(retried)) << "the key must stay retryable: "
+                             << error(retried).message;
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, OpenOrderTransportFailureReplaysAsOutcomeUnknown)
+{
+    // A POST that timed out may already be live at the exchange. Replaying
+    // the raw timeout would tell the caller "not placed" and invite a second
+    // order; the replay must instead mark the outcome unknown and ask for a
+    // reconcile. The original call still reports the real failure.
+    m_flow->setActiveMarket(MarketType::Spot);
+    m_placer->scripted_result =
+        PulseError{ ErrorCode::NetworkTimeout, "curl timeout" };
+
+    const auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "gt-unknown-1" },
+    };
+
+    const auto first = m_services->openOrder(params);
+    ASSERT_FALSE(ok(first));
+    EXPECT_EQ(ErrorCode::NetworkTimeout, error(first).code);
+    EXPECT_EQ(1, m_placer->place_calls);
+
+    const auto replay = m_services->openOrder(params);
+    ASSERT_FALSE(ok(replay));
+    EXPECT_EQ(ErrorCode::ControlOrderOutcomeUnknown, error(replay).code);
+    EXPECT_NE(std::string::npos,
+              error(replay).message.find("reconcile"));
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, OpenOrderDefinitiveRejectionIsReplayedVerbatim)
+{
+    // An exchange rejection is terminal: nothing was created, so replaying it
+    // is correct and the order must not be sent again.
+    m_flow->setActiveMarket(MarketType::Spot);
+    m_placer->scripted_result =
+        PulseError{ ErrorCode::InvalidOrder, "order size below minimum" };
+
+    const auto params = nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "client_order_id", "gt-reject-1" },
+    };
+
+    const auto first = m_services->openOrder(params);
+    ASSERT_FALSE(ok(first));
+    const auto replay = m_services->openOrder(params);
+    ASSERT_FALSE(ok(replay));
+    EXPECT_EQ(error(first).code, error(replay).code);
+    EXPECT_EQ(error(first).message, error(replay).message);
+    EXPECT_EQ(1, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, OpenOrderPreFlightFailureKeepsKeyRetryable)
+{
+    // A request that fails BEFORE the order flow (the CFD free-margin gate)
+    // must not poison the key: the guard aborts it, so the same
+    // client_order_id can be evaluated again on a later retry. A leaked
+    // in-flight entry would surface as the duplicate-in-flight rejection.
+    m_cfg.risk.minAvailableAfterStopUsd = 6.0;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_placer.get(), m_placer.get(), m_placer.get(),
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, flow, *m_board, m_restMutex);
+
+    const auto params = nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4395.0 },
+        { "sl_price", 4390.0 },
+        { "client_order_id", "gt-gate-1" },
+    };
+
+    const auto gated = svc.openOrder(params);
+    ASSERT_FALSE(ok(gated));
+    EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(gated).code);
+
+    const auto retried = svc.openOrder(params);
+    ASSERT_FALSE(ok(retried));
+    EXPECT_EQ(ErrorCode::InsufficientFreeMargin, error(retried).code);
+    EXPECT_EQ(0, m_placer->place_calls);
 }
 
 // ---------------------------------------------------------------------------
@@ -551,6 +1092,11 @@ TEST_F(EngineServicesTest, PositionsIncludeAttachedSlTp)
     const auto &p = j["positions"][0];
     EXPECT_DOUBLE_EQ(4391.33, p["sl_price"].get<double>());
     EXPECT_DOUBLE_EQ(4405.33, p["tp_price"].get<double>());
+    // Provenance travels with every position (additive field): a synced
+    // exchange position is "manual", and clients use it to distinguish
+    // caller-owned ("external") positions from engine-managed ones.
+    ASSERT_TRUE(p.contains("origin"));
+    EXPECT_EQ("manual", p["origin"].get<std::string>());
 }
 
 TEST_F(EngineServicesTest, SyncPositionsHandlesUnconfiguredRest)

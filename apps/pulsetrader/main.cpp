@@ -30,6 +30,7 @@
 #include "core/config.hpp"
 #include "core/config_loader.hpp"
 #include "core/config_validator.hpp"
+#include "core/snapshot_types.hpp"
 #include "core/types.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "market/SymbolRegistry.hpp"
@@ -1534,6 +1535,15 @@ static int runTrade(int argc, char* argv[])
     // symbol: the generic percentage trail/take-profit ladder below is not
     // part of the USD dynamic-stop policy and would otherwise partially
     // close a managed position (silently rescaling its USD thresholds).
+    // Positions opened by an external caller-authoritative runtime (GT) are
+    // excluded from the percentage trail/take-profit ladders ONLY while the
+    // exchange-native floor the design relies on actually exists: a CFD entry
+    // carrying sl_price. On futures/spot open_order rejects sl_price/tp_price,
+    // so an "external" position there has no exchange-side stop at all — if
+    // this filter skipped it, a live position would be left with no stop
+    // anywhere. The same holds for a CFD order that omitted the optional
+    // sl_price. Those positions fall through to the generic manager (the
+    // 0.5% trailing stop this engine had before external ownership existed).
     // `gold_armed` is set right after a successful construction; both the
     // filter and the manager run only on the main loop.
     bool gold_armed = false;
@@ -1577,6 +1587,17 @@ static int runTrade(int argc, char* argv[])
         },
         [&gold_armed, &cfg](const pulse::risk::Position &pos)
         {
+            // Caller exit-ownership wins over the gold gate only when the
+            // exchange-native stop is attached: a CFD position with sl_price
+            // > 0 is protected even if this process dies, so its owner's exit
+            // logic is authoritative. Without that floor (any futures/spot
+            // external position, or a CFD entry with no sl_price) skipping PT
+            // would leave the position unprotected, so PT keeps managing it.
+            if ("external" == pos.origin && pos.sl_price > 0.0
+                && pulse::MarketType::Cfd == pos.market_type)
+            {
+                return false;
+            }
             return !(gold_armed && pos.symbol == cfg.gold_trader.symbol
                      && pos.market_type == cfg.gold_trader.market_type);
         });
@@ -1840,6 +1861,59 @@ static int runTrade(int argc, char* argv[])
             futures_feed->setKlineListener(kline_listener);
         }
         if (cfd_feed)     { cfd_feed->setKlineListener(kline_listener); }
+
+        // Push order lifecycle events to sessions subscribed over the control
+        // socket (subscribe_orders → order.update). Socket-only by design: MCP
+        // is request/response and has no server-push channel, so an MCP client
+        // still polls get_orders.
+        //
+        // Two sources feed the same channel:
+        //   1. "submitted" — OrderFlowExecutor emits it from inside
+        //      placeManualOrder(), right after the exchange accepts the order
+        //      and BEFORE the tracker's immediate fill poll (EngineServices
+        //      serializes it). That ordering is what makes `submitted` precede
+        //      `completed` for market orders that fill on submission.
+        //   2. "completed" — OrderFlowExecutor forwards every terminal
+        //      ExecutionReport with the reporting tracker's OWN market type
+        //      (never inferred from the symbol: BTC_USDT trades on both spot
+        //      and futures, and the Topic filter is per market).
+        services.setOrderEventSink(
+            [server = control_server.get()](const nlohmann::json &event)
+            {
+                server->publish(
+                    { "order",
+                      event.value("symbol", std::string{}),
+                      event.value("market_type", std::string{}) },
+                    "order.update", event);
+            });
+        order_flow.setOrderUpdateCallback(
+            [server = control_server.get()](
+                pulse::MarketType market_type,
+                const pulse::execution::ExecutionReport &report)
+            {
+                nlohmann::json event;
+                event["event"] = "completed";
+                event["order_id"] = report.order_id;
+                event["client_order_id"] = report.client_order_id;
+                event["symbol"] = report.symbol;
+                event["market_type"] = pulse::toString(market_type);
+                event["side"] = (pulse::Side::Buy == report.side)
+                                    ? "buy" : "sell";
+                event["type"] = pulse::toString(report.type);
+                event["requested_quantity"] = report.requested_qty;
+                event["filled_quantity"] = report.filled_qty;
+                event["avg_fill_price"] = report.avg_fill_price;
+                event["fees"] = report.fees;
+                event["status"] = pulse::execution::orderStatusToString(
+                    report.final_status);
+                event["ts"] = std::chrono::duration_cast<
+                                  std::chrono::milliseconds>(
+                                  pulse::now().time_since_epoch())
+                                  .count();
+                server->publish(
+                    { "order", report.symbol, pulse::toString(market_type) },
+                    "order.update", event);
+            });
     }
 
     // ------------------------------------------------------------------

@@ -9,6 +9,7 @@
 // All component accessors are internally synchronized (shared_mutex /
 // atomics / seqlock), so concurrent control sessions are safe.
 
+#include "control/OrderIdempotency.hpp"
 #include "core/ParamChangeLog.hpp"
 #include "core/PulseError.hpp"
 #include "core/TimeUtil.hpp"
@@ -29,6 +30,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -60,6 +62,20 @@ class OrderFlowExecutor;
 class EngineServices
 {
   public:
+    /// Sink for order-lifecycle events pushed to control-socket sessions.
+    ///
+    /// `open_order` emits exactly one "submitted" event per order that
+    /// actually reached the exchange — never for a rejected request and never
+    /// for a replayed idempotent retry (nothing new was placed, so there is
+    /// nothing to announce). The event is emitted from inside
+    /// OrderFlowExecutor::placeManualOrder(), immediately after the exchange
+    /// accepted the order and before the tracker's immediate fill poll, so a
+    /// synchronously filled order always arrives as `submitted` → `completed`
+    /// in that order. The sink receives an already-serialized event object;
+    /// the transport-specific topic (symbol / market_type) is part of it, so
+    /// this class stays free of any socket types.
+    using OrderEventSink = std::function<void(const nlohmann::json &)>;
+
     EngineServices(std::string version,
                    std::chrono::steady_clock::time_point engine_start,
                    const PulseConfig &cfg,
@@ -149,6 +165,16 @@ class EngineServices
                        const GoldTraderConfig &config,
                        std::string disabled_reason);
 
+    /// Attach the sink that receives `open_order` lifecycle events
+    /// (subscribe_orders → order.update over the control socket).
+    ///
+    /// Call during startup, before the control socket accepts connections and
+    /// before any order can be placed; the sink is read by every control
+    /// session thread that calls openOrder(). A throwing sink is logged and
+    /// swallowed — a push failure must never turn an accepted order into an
+    /// error reply.
+    void setOrderEventSink(OrderEventSink sink);
+
     /// Snapshot for the Gold Traders page status card.
     [[nodiscard]] nlohmann::json goldTraderStatus() const;
     [[nodiscard]] nlohmann::json market(const std::string &symbol,
@@ -157,8 +183,59 @@ class EngineServices
                                         const std::string &market_type = "") const;
 
     // --- Commands ---
+
+    /// Place a manual order — `open_order`.
+    ///
+    /// Idempotency contract (why: an external strategy runtime retries after
+    /// a timeout, and a retry must never create a second exchange order):
+    ///   1. With a non-empty `client_order_id`, the pair (client_order_id,
+    ///      normalized order parameters) is the order identity. Repeating the
+    ///      same identity never reaches the exchange twice: a finished first
+    ///      attempt is replayed verbatim from the cache — the same
+    ///      OrderResponse on success, the same PulseError on rejection — and
+    ///      an attempt that is still running is rejected as duplicate.
+    ///   2. Reusing a client_order_id with DIFFERENT parameters is rejected
+    ///      (ControlInvalidRequest); it is never silently treated as the same
+    ///      order, because the caller would then act on a reply that belongs
+    ///      to a different order.
+    ///   3. `size_authority: "caller"` orders must carry a client_order_id
+    ///      (reduce_only closes are exempt: they are bounded by the open
+    ///      position and may legitimately outlive it). Without a key there is
+    ///      nothing to de-duplicate a retry against.
+    ///   4. The cache is in-memory with a 600 s TTL (OrderIdempotency), so
+    ///      the guarantee spans a client timeout, not an engine restart.
+    ///   5. Requests without a client_order_id keep the historical
+    ///      fire-and-forget behaviour: one call, one order.
+    ///   6. Caller-authoritative opens are additionally governed by the
+    ///      independent external-order gate ([control]
+    ///      external_orders_enabled, see externalOrdersEnabled()). A rejected
+    ///      request never reaches the idempotency cache, so enabling the gate
+    ///      later lets the caller retry the same client_order_id.
+    ///   7. A definitive rejection is replayed; a transport failure that may
+    ///      have reached the exchange is replayed as ControlOrderOutcomeUnknown
+    ///      (reconcile, never assume "not placed"); a pre-flight failure
+    ///      (rate limit, halt, notional/position limits) leaves the key
+    ///      retryable.
     [[nodiscard]] Result<execution::OrderResponse>
     openOrder(const nlohmann::json &params);
+
+    /// Independent external-order gate — [control] external_orders_enabled.
+    ///
+    /// While false (fail-safe default) open_order rejects caller-authoritative
+    /// opens (size_authority = "caller") with ControlInvalidRequest and the
+    /// message names the TOML key. Exempt are engine-authority opens (manual
+    /// REPL / MCP / UI one-shots) and FUTURES reduce_only closes, whose
+    /// exchange-enforced flag bounds them by the open position. open_order
+    /// rejects reduce_only for spot/CFD outright (the flag is never
+    /// transmitted there), so it can never be used to bypass this gate.
+    ///
+    /// The flag is intentionally separate from [strategy] signal_only: PT
+    /// strategies can stay signal-only while an external runtime trades, and
+    /// `set_external_orders enabled=false` kills that runtime without an
+    /// engine restart. Thread-safe (atomic); the store publishes nothing but
+    /// the flag itself, so relaxed ordering suffices.
+    [[nodiscard]] bool externalOrdersEnabled() const;
+    void setExternalOrdersEnabled(bool enabled);
 
     [[nodiscard]] Result<execution::OrderResponse>
     closePosition(const nlohmann::json &params);
@@ -299,6 +376,16 @@ class EngineServices
     [[nodiscard]] std::mutex &restMutex();
 
   private:
+    /// Serialize and push the `submitted` event for an order that
+    /// OrderFlowExecutor::placeManualOrder() just placed.
+    ///
+    /// Runs synchronously on the control-session thread, inside the order
+    /// flow and before the tracker's immediate fill poll. No-op without a
+    /// sink; a throwing sink is logged and swallowed (the order is already
+    /// placed on the exchange by then).
+    void publishOrderSubmitted(const execution::OrderRequest &req,
+                               const execution::OrderResponse &resp);
+
     [[nodiscard]] nlohmann::json strategyParamsJson(const strategy::StrategyParams &p) const;
 
     /// Feed pointer for a market type (nullptr if that market is not wired).
@@ -326,6 +413,13 @@ class EngineServices
     std::string m_version;
     std::chrono::steady_clock::time_point m_engineStart;
     PulseConfig m_cfg;
+
+    /// [control] external_orders_enabled — operator kill switch for the
+    /// external (caller-sized) open path. Atomic because control sessions
+    /// toggle it while order sessions read it; relaxed is enough because the
+    /// flag publishes no other state.
+    std::atomic<bool> m_externalOrdersEnabled;
+
     strategy::StrategyManager &m_strategyMgr;
     risk::RiskManager &m_riskMgr;
     risk::PositionManager &m_positionMgr;
@@ -343,6 +437,8 @@ class EngineServices
     const risk::GoldTrader *m_goldTrader{ nullptr }; ///< L7 supervisor (nullable).
     GoldTraderConfig m_goldConfig;                   ///< Last configured thresholds.
     std::string m_goldDisabledReason;                ///< Why it is not armed (empty if armed).
+    /// Push sink for `open_order` events (nullable; see setOrderEventSink).
+    OrderEventSink m_orderEventSink;
     strategy::SignalBoard &m_signalBoard;
     std::mutex &m_restMutex;
     core::ParamChangeLog *m_paramChangeLog{ nullptr }; ///< Audit (nullable).
@@ -365,6 +461,11 @@ class EngineServices
     std::unordered_map<std::string, SpotPrice> m_spotPrices;
     std::unordered_map<std::string, double> m_priceTicks; ///< contract → order_price_round
     std::unordered_set<std::string> m_exchangeStopPositions; ///< positions with a stop placed
+
+    /// open_order duplicate suppression keyed by client_order_id. Lives for
+    /// the engine's lifetime; see the contract on openOrder() and the state
+    /// machine in OrderIdempotency.hpp.
+    OrderIdempotency m_orderIdempotency;
 
     /// Budget for REST lookups inside one account() call, so a wallet with
     /// many unpriced altcoins cannot turn one snapshot into dozens of calls.

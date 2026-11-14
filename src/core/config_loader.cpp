@@ -915,6 +915,12 @@ PulseError parseControl(const toml::value &root, ControlConfig &out)
         sec, "tls_require_client_cert", out.tlsRequireClientCert);
     out.token = toml::find_or(sec, "token", out.token);
 
+    // Independent external-order gate. Default false is deliberately the
+    // restrictive side: a missing key means caller-authoritative opens are
+    // rejected (reduce-only closes and engine-authority orders still work).
+    out.externalOrdersEnabled = toml::find_or(
+        sec, "external_orders_enabled", out.externalOrdersEnabled);
+
     return {};
 }
 

@@ -18,6 +18,9 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 using namespace pulse;
 using namespace pulse::control;
@@ -433,6 +436,338 @@ TEST_F(OrderFlowTest, FillOpensPositionAndConsumesReservation)
     OrderRequest req2 = req;
     auto result2 = m_flow->placeOrder(req2);
     ASSERT_TRUE(ok(result2)) << error(result2).message;
+}
+
+// ---------------------------------------------------------------------------
+// Order event push — terminal-report callback (subscribe_orders → order.update)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, OrderUpdateCallbackFiresOncePerCompletedReport)
+{
+    // The push channel must announce each terminal report exactly once. A
+    // duplicate WS terminal update is ignored by the tracker (the order is
+    // erased on completion), so it must not re-fire the sink either.
+    std::vector<std::pair<MarketType, ExecutionReport>> updates;
+    m_flow->setOrderUpdateCallback(
+        [&updates](MarketType market_type, const ExecutionReport &report)
+        {
+            updates.emplace_back(market_type, report);
+        });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    const std::string order_id = value(result).order_id;
+
+    completeOrder(order_id, Side::Buy, 1.0, 65000.0);
+
+    ASSERT_EQ(1u, updates.size());
+    EXPECT_EQ(MarketType::Futures, updates[0].first);
+    EXPECT_EQ(order_id, updates[0].second.order_id);
+    EXPECT_DOUBLE_EQ(1.0, updates[0].second.filled_qty);
+    EXPECT_DOUBLE_EQ(65000.0, updates[0].second.avg_fill_price);
+    EXPECT_EQ(OrderStatus::Filled, updates[0].second.final_status);
+
+    // Duplicate terminal event: the tracker no longer knows the order.
+    completeOrder(order_id, Side::Buy, 1.0, 65000.0);
+    EXPECT_EQ(1u, updates.size());
+}
+
+// ---------------------------------------------------------------------------
+// Order event push — submitted callback (open_order → order.update)
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, ManualOrderAnnouncesSubmitBeforeTracking)
+{
+    // `submitted` must be published before the tracker starts watching the
+    // order: the tracker's immediate fill poll can complete a market order
+    // synchronously, and a client applying events in receive order must never
+    // see `completed` for an order it has not seen `submitted` for. The
+    // observable proxy for "before tracking" is that the tracker does not yet
+    // know the order id inside the callback.
+    std::vector<OrderRequest> announced;
+    bool tracker_knew_order = false;
+    m_flow->setOrderSubmitCallback(
+        [this, &announced, &tracker_knew_order](const OrderRequest &req,
+                                               const OrderResponse &resp)
+        {
+            announced.push_back(req);
+            tracker_knew_order |=
+                m_tracker->getStatus(resp.order_id).has_value();
+        });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+    m_flow->setActiveMarket(MarketType::Futures);
+
+    const auto result = m_flow->placeManualOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, announced.size());
+    EXPECT_FALSE(tracker_knew_order);
+    EXPECT_EQ(value(result).order_id, "fake_1");
+}
+
+TEST_F(OrderFlowTest, ManualOrderAnnouncesThePlacedQuantity)
+{
+    // The event carries the request the flow actually sent, i.e. the size
+    // after risk adjustment — not the caller's pre-adjustment number.
+    rebuildTightStack();
+    std::vector<OrderRequest> announced;
+    m_flow->setOrderSubmitCallback(
+        [&announced](const OrderRequest &req, const OrderResponse &)
+        { announced.push_back(req); });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Limit;
+    req.quantity = 1.0;
+    req.price = 65000.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+    m_flow->setActiveMarket(MarketType::Futures);
+
+    const auto result = m_flow->placeManualOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    ASSERT_EQ(1u, announced.size());
+    ASSERT_EQ(1u, m_placer->placed.size());
+
+    // Tight 300 USDT symbol budget at 65k → ~0.0046 contracts, not 1.0.
+    EXPECT_LT(announced[0].quantity, 1.0);
+    EXPECT_DOUBLE_EQ(m_placer->placed.back().quantity, announced[0].quantity);
+}
+
+TEST_F(OrderFlowTest, SignalPathDoesNotAnnounceSubmit)
+{
+    // Only the manual open_order path is part of the external push contract;
+    // strategy-originated placements must stay silent on this channel.
+    int submits = 0;
+    m_flow->setOrderSubmitCallback(
+        [&submits](const OrderRequest &, const OrderResponse &) { ++submits; });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+    m_flow->setActiveMarket(MarketType::Futures);
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(0, submits);
+}
+
+TEST_F(OrderFlowTest, ThrowingSubmitCallbackDoesNotFailAPlacedOrder)
+{
+    // The order is already live on the exchange when the sink runs; a broken
+    // consumer must not turn a success into an error reply.
+    m_flow->setOrderSubmitCallback(
+        [](const OrderRequest &, const OrderResponse &)
+        { throw std::runtime_error("push sink down"); });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+    m_flow->setActiveMarket(MarketType::Futures);
+
+    const auto result = m_flow->placeManualOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_EQ(1, m_placer->place_count);
+}
+
+TEST_F(OrderFlowTest, OrderUpdateCallbackReportsTheReportingTrackersMarket)
+{
+    // The market type comes from the tracker that fired, not from the symbol:
+    // the CFD tracker's report must be tagged "cfd" even for a symbol that
+    // could exist on another market.
+    MarketType seen = MarketType::Spot;
+    int calls = 0;
+
+    m_riskCfg.maxPositionNotionalCfd = 6000.0;
+    m_riskCfg.maxSymbolNotional = 6000.0;
+    m_riskCfg.maxOpenPositions = 5;
+    m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+    m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+    m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+    m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                              *m_drawdownGuard, *m_rateLimiter);
+    // Rebuild rewires the trackers, so the callback must be reinstalled on
+    // the new executor (each tracker gets a fresh completion callback).
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+        nullptr, m_tracker.get(), m_cfdTracker.get(),
+        nullptr, nullptr, m_restMutex, nullptr);
+    m_flow->setOrderUpdateCallback(
+        [&seen, &calls](MarketType market_type, const ExecutionReport &)
+        {
+            ++calls;
+            seen = market_type;
+        });
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    completeCfdOrder(value(result).order_id, 0.01, 4400.0);
+
+    EXPECT_EQ(1, calls);
+    EXPECT_EQ(MarketType::Cfd, seen);
+}
+
+TEST_F(OrderFlowTest, ThrowingOrderUpdateCallbackDoesNotBreakBookkeeping)
+{
+    // The sink runs after the reservation, position and drawdown updates are
+    // committed. A throwing consumer must be swallowed: the fill still opens
+    // the position and a later order still places.
+    m_flow->setOrderUpdateCallback(
+        [](MarketType, const ExecutionReport &)
+        {
+            throw std::runtime_error("push sink down");
+        });
+
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_NO_THROW(completeOrder(value(result).order_id, Side::Buy, 1.0, 65000.0));
+
+    EXPECT_EQ(1, m_positionMgr->openPositionCount());
+
+    OrderRequest req2 = req;
+    const auto result2 = m_flow->placeOrder(req2);
+    ASSERT_TRUE(ok(result2)) << error(result2).message;
+}
+
+// ---------------------------------------------------------------------------
+// Position origin — exit ownership
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, FillWithoutClientIdLabelsPositionManual)
+{
+    // A one-shot order with no client tag is operator-driven: PT exit logic
+    // keeps managing it.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    completeOrder(value(result).order_id, Side::Buy, 1.0, 65000.0);
+
+    const auto positions = m_positionMgr->getAllPositions();
+    ASSERT_EQ(1u, positions.size());
+    EXPECT_EQ("manual", positions[0].origin);
+}
+
+TEST_F(OrderFlowTest, FillWithClientIdLabelsPositionStrategy)
+{
+    // The signal path mints a client order id; such a fill belongs to the
+    // engine's own exit logic.
+    OrderRequest req;
+    req.symbol = "BTC_USDT";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 1.0;
+    req.market_type = MarketType::Futures;
+    req.leverage = 10.0;
+    req.contract_size = 1;
+    req.client_order_id = "t-sig-1";
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    completeOrder(value(result).order_id, Side::Buy, 1.0, 65000.0);
+
+    const auto positions = m_positionMgr->getAllPositions();
+    ASSERT_EQ(1u, positions.size());
+    EXPECT_EQ("strategy", positions[0].origin);
+    EXPECT_EQ("t-sig-1", positions[0].strategy_id);
+}
+
+TEST_F(OrderFlowTest, CallerAuthoritativeFillLabelsPositionExternal)
+{
+    // The GT path: caller-authoritative size plus a client order id. Size
+    // authority wins over the client tag — the caller owns the exit.
+    m_riskCfg.maxPositionNotionalCfd = 6000.0;
+    m_riskCfg.maxSymbolNotional = 6000.0;
+    m_riskCfg.maxOpenPositions = 5;
+
+    // Rebuild the stack AFTER setting caps (PositionManager copies the
+    // config) with the CFD placer/tracker wired in — same shape as SetUp.
+    m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+    m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+    m_rateLimiter = std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+    m_riskMgr = std::make_unique<RiskManager>(m_riskCfg, *m_positionMgr,
+                                              *m_drawdownGuard, *m_rateLimiter);
+    m_flow = std::make_unique<OrderFlowExecutor>(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        m_spotPlacer.get(), m_placer.get(), m_cfdPlacer.get(),
+        nullptr, m_tracker.get(), m_cfdTracker.get(),
+        nullptr, nullptr, m_restMutex, nullptr);
+
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 500.0;
+    req.quanto_multiplier = 100.0;
+    req.size_authoritative = true;
+    req.client_order_id = "gt-xau-1";
+
+    const auto result = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    completeCfdOrder(value(result).order_id, 0.01, 4400.0);
+
+    const auto positions = m_positionMgr->getPositionsBySymbol("XAUUSD");
+    ASSERT_EQ(1u, positions.size());
+    EXPECT_EQ("external", positions[0].origin);
 }
 
 TEST_F(OrderFlowTest, SellFillClosesPositionWithPnl)

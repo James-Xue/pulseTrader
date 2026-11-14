@@ -2,14 +2,16 @@
 # ---------------------------------------------------------------------------
 # Exposes the trading engine over:
 #   1. OrderFlowExecutor — extracted order execution flow (aggregator + manual)
-#   2. EngineServices    — thread-safe service bundle for all control methods
-#   3. JsonRpcServer     — TCP control socket (newline-delimited JSON-RPC 2.0)
-#   4. ControlClient     — blocking client for cli/mcp subcommands
-#   5. CommandParser     — REPL command grammar shared by embedded/remote CLI
-#   6. McpServer         — stdio MCP (Model Context Protocol) server
+#   2. OrderIdempotency  — open_order duplicate suppression (client_order_id)
+#   3. EngineServices    — thread-safe service bundle for all control methods
+#   4. JsonRpcServer     — TCP control socket (newline-delimited JSON-RPC 2.0)
+#   5. ControlClient     — blocking client for cli/mcp subcommands
+#   6. CommandParser     — REPL command grammar shared by embedded/remote CLI
+#   7. McpServer         — stdio MCP (Model Context Protocol) server
 # ---------------------------------------------------------------------------
 add_library(pulse_control STATIC
     OrderFlowExecutor.cpp
+    OrderIdempotency.cpp
     EngineServices.cpp
     JsonRpcServer.cpp
     ControlClient.cpp

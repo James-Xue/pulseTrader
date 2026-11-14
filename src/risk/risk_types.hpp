@@ -78,6 +78,7 @@ struct RiskEvalResult
 //   7. notional_value  — abs(quantity * current_price)
 //   8. open_time       — when the position was opened
 //   9. strategy_id     — owning strategy identifier for per-strategy queries
+//  10. origin          — who opened it, which decides who owns the exit
 // ---------------------------------------------------------------------------
 struct Position
 {
@@ -91,6 +92,22 @@ struct Position
     double notional_value;    ///< abs(quantity * current_price).
     Timestamp open_time;      ///< When the position was opened.
     std::string strategy_id;  ///< Owning strategy identifier.
+
+    /// Where the position came from — decides who owns the exit.
+    ///   "strategy" — a strategy/signal order placed by the engine
+    ///   "manual"   — an operator/API one-shot without a client tag, or an
+    ///                exchange position imported by startup/hot sync
+    ///   "external" — a caller-authoritative order (external runtime, GT):
+    ///                the CALLER owns the exit, so PT exit logic (L7
+    ///                GoldTrader, ProtectiveExitManager) leaves it alone —
+    ///                but only while the exchange-native floor exists (a CFD
+    ///                position with sl_price > 0). Futures/spot external
+    ///                positions cannot carry such a stop, and a CFD entry may
+    ///                omit it; those stay PT-managed or they would have no
+    ///                stop at all.
+    ///   ""         — unknown (not yet classified; PT exit logic keeps its
+    ///                historical behaviour, which is fail-safe)
+    std::string origin;
 
     // Futures-specific fields (defaults make spot positions work unchanged).
     MarketType market_type;      ///< Spot or Futures.
@@ -120,6 +137,7 @@ struct Position
         , notional_value{ 0.0 }
         , open_time{}
         , strategy_id{}
+        , origin{}
         , market_type{ MarketType::Spot }
         , leverage{ 1.0 }
         , margin_mode{ MarginMode::Cross }
