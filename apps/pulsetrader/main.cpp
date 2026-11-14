@@ -871,9 +871,18 @@ static int runTrade(int argc, char* argv[])
 
         return syms.empty() ? cfg.symbols : syms;
     };
-    const auto spot_symbols    = symbols_for(MarketType::Spot);
-    const auto futures_symbols = symbols_for(MarketType::Futures);
-    const auto cfd_symbols     = symbols_for(MarketType::Cfd);
+    // A market with no feed has no symbols to fetch. symbols_for() falls back
+    // to the mixed cfg.symbols list when a market has no enabled strategies
+    // (backward compatibility), which then hands the daily kline sync names
+    // that do not exist on that venue: a spot sync for the futures-only
+    // SNDK_USDT returned INVALID_CURRENCY_PAIR every day (2026-11-14).
+    // Gating on has_* makes an unwired market genuinely empty.
+    const auto spot_symbols = has_spot
+        ? symbols_for(MarketType::Spot) : std::vector<std::string>{};
+    const auto futures_symbols = has_futures
+        ? symbols_for(MarketType::Futures) : std::vector<std::string>{};
+    const auto cfd_symbols = has_cfd
+        ? symbols_for(MarketType::Cfd) : std::vector<std::string>{};
 
     // Spot infrastructure.
     std::unique_ptr<pulse::exchange::GateRestClient> spot_rest;
