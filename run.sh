@@ -23,9 +23,15 @@ else
     echo "   Create .env with GATE_API_KEY and GATE_API_SECRET"
 fi
 
-# Prefer the headless build if present (stale `build/` predates subcommand argv fix)
-BUILD_DIR="build_headless"
-[ -d "$BUILD_DIR" ] || BUILD_DIR="build"
+# Prefer the standard build/ tree. `build_headless` is a deprecated artifact
+# from before `main` absorbed the headless branch; its binaries are stale and
+# must never be picked up by accident (2026-11-14: an ad-hoc run served
+# 21-hour-old code because this script preferred it).
+BUILD_DIR="build"
+[ -d "$BUILD_DIR" ] || BUILD_DIR="build_headless"
+if [ "build" != "$BUILD_DIR" ]; then
+    echo "⚠️  build/ not found — falling back to the DEPRECATED build_headless/"
+fi
 
 usage() {
     echo "Usage: $0 {trade|cli|mcp|backtest|rest|ws|market|strategy|ai|test} [args...]"
