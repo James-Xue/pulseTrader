@@ -37,6 +37,13 @@ struct OrderRequest
     int contract_size;          ///< Order size in contracts (futures only, 0 = use quantity).
     double quanto_multiplier;   ///< Contract multiplier (e.g. 0.0001 = 1 contract = 0.0001 BTC).
 
+    /// When true, `quantity` is authoritative: the risk layer may reject the
+    /// order but must never shrink it. Set by an external strategy runtime
+    /// that computes its own size (its stop distance and R-multiple assume
+    /// exactly that quantity). Default false preserves the historical
+    /// reduce-to-fit behaviour for signal-driven and manual orders.
+    bool size_authoritative;
+
     /// Attached stop-loss / take-profit prices (CFD only — TradFi orders
     /// accept per-order price_sl / price_tp, the exchange-native protection).
     /// nullopt = no attached protection. Rejected on non-CFD paths.
@@ -56,6 +63,7 @@ struct OrderRequest
         , reduce_only{ false }
         , contract_size{ 0 }
         , quanto_multiplier{ 1.0 }
+        , size_authoritative{ false }
     {
     }
 };

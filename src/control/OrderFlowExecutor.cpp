@@ -465,6 +465,16 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
     auto order_req = req;
     if (risk::RiskDecision::Modified == eval.decision)
     {
+        // Defensive invariant: a caller-authoritative size must never be
+        // modified — reserveNotional() rejects instead of reducing when
+        // allow_shrink is false. Failing loudly here beats silently trading
+        // a size the caller did not choose.
+        if (req.size_authoritative)
+        {
+            return PulseError{ ErrorCode::OrderRejected,
+                               "caller-authoritative size was modified by risk "
+                               "(internal invariant violation)" };
+        }
         order_req.quantity = eval.approved_qty;
         log_app->info("Order MODIFIED: qty reduced to {:.6f}",
                       eval.approved_qty);

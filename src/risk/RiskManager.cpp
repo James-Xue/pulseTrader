@@ -90,7 +90,9 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
     //    unchanged for spot orders.
     const auto reservation = m_positionManager.reserveNotional(
         order.symbol, order.quantity, order.price, order.quanto_multiplier,
-        order.market_type, order.reduce_only, order.side);
+        order.market_type, order.reduce_only, order.side,
+        // A caller-authoritative size is never reduced: reject instead.
+        !order.size_authoritative);
 
     result.decision = reservation.decision;
     result.approved_qty = reservation.approved_qty;

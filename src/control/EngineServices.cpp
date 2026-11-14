@@ -944,6 +944,30 @@ EngineServices::openOrder(const nlohmann::json &params)
     {
         req.client_order_id = params["client_order_id"].get<std::string>();
     }
+    // Optional: size authority. "caller" marks `quantity` authoritative — the
+    // risk layer may reject the order but must never shrink it. An external
+    // strategy runtime (GT) derives its own position size from its own risk
+    // rules, and a silently reduced fill would invalidate its stop distance
+    // and R-multiple. "engine" (default) preserves the historical
+    // reduce-to-fit behaviour used by signal-driven and manual orders.
+    if (params.contains("size_authority"))
+    {
+        if (!params["size_authority"].is_string())
+        {
+            return PulseError{ ErrorCode::ControlInvalidRequest,
+                               "open_order: size_authority must be \"caller\" or \"engine\"" };
+        }
+        const auto authority = params["size_authority"].get<std::string>();
+        if ("caller" == authority)
+        {
+            req.size_authoritative = true;
+        }
+        else if ("engine" != authority)
+        {
+            return PulseError{ ErrorCode::ControlInvalidRequest,
+                               "open_order: size_authority must be \"caller\" or \"engine\"" };
+        }
+    }
 
     // Optional: attached stop-loss / take-profit (CFD only — TradFi orders
     // accept per-order price_sl / price_tp; futures/spot have no equivalent

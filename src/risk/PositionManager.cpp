@@ -645,7 +645,7 @@ int PositionManager::openPositionCount() const
 
 NotionalReservation PositionManager::reserveNotional(
     const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier,
-    MarketType market_type, bool reduce_only, Side side)
+    MarketType market_type, bool reduce_only, Side side, bool allow_shrink)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -771,6 +771,22 @@ NotionalReservation PositionManager::reserveNotional(
         res.reserved_notional = 0.0;
         res.reason_code = ErrorCode::PositionLimitHit;
         res.reason_message = "Maximum open positions reached";
+    }
+    else if (!allow_shrink)
+    {
+        // Caller-authoritative sizing (2026-11-14): the requested quantity
+        // does not fit the budget and must NOT be silently reduced. Reject
+        // with the same reason a hard limit produces, so the caller learns
+        // the order was vetoed rather than resized. This is the opposite of
+        // the historical behaviour, where a 0.01-lot CFD order was rewritten
+        // to a below-minimum quantity and rejected by the exchange instead.
+        res.approved = false;
+        res.decision = RiskDecision::Rejected;
+        res.approved_qty = 0.0;
+        res.reserved_notional = 0.0;
+        res.reason_code = ErrorCode::PositionLimitHit;
+        res.reason_message = "Requested quantity exceeds the notional limit "
+                             "and allow_shrink=false forbids reduction";
     }
     else
     {

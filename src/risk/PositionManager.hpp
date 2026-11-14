@@ -261,11 +261,19 @@ class PositionManager
     /// This is the 9103 root-cause fix (2026-08-21 ETH grid review): the old
     /// behavior counted reduce-only buy orders as fresh notional, freezing
     /// the grid's TP re-hang cycle when the futures budget filled up.
+    ///
+    /// allow_shrink (2026-11-14): when false, `qty` is AUTHORITATIVE — if the
+    /// full size does not fit the budget the call is REJECTED instead of
+    /// reduced. Used by the external strategy runtime (GT), which derives its
+    /// own position size and whose stop distance and R-multiple would be
+    /// wrong if the engine silently traded a smaller quantity. reduce_only
+    /// orders never shrink regardless of this flag.
     [[nodiscard]] NotionalReservation reserveNotional(
         const Symbol &symbol, Quantity qty, Price price,
         double quanto_multiplier = 1.0,
         MarketType market_type = MarketType::Spot,
-        bool reduce_only = false, Side side = Side::Buy);
+        bool reduce_only = false, Side side = Side::Buy,
+        bool allow_shrink = true);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.

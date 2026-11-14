@@ -799,6 +799,29 @@ TEST(PositionManager, PerMarketNotional_OverridesHonoredPerMarket)
                 1e-9);
 }
 
+TEST(PositionManager, CallerAuthoritativeSizeIsRejectedNotReduced)
+{
+    // allow_shrink=false must VETO an over-budget order instead of silently
+    // reducing it. An external strategy runtime sizes its own orders, and
+    // its stop distance / R-multiple assume exactly the requested quantity.
+    PositionManager pm(make_config(1000.0, 5, 500.0));
+
+    const auto vetoed = pm.reserveNotional("BTC_USDT", 2.0, 1000.0, 1.0,
+                                           MarketType::Futures, false,
+                                           Side::Buy, /*allow_shrink=*/false);
+    EXPECT_FALSE(vetoed.approved);
+    EXPECT_EQ(RiskDecision::Rejected, vetoed.decision);
+    EXPECT_DOUBLE_EQ(0.0, vetoed.approved_qty);
+    EXPECT_EQ(ErrorCode::PositionLimitHit, vetoed.reason_code);
+
+    // The identical order under the default (engine) authority is reduced.
+    const auto clamped = pm.reserveNotional("BTC_USDT", 2.0, 1000.0, 1.0,
+                                            MarketType::Futures);
+    EXPECT_TRUE(clamped.approved);
+    EXPECT_EQ(RiskDecision::Modified, clamped.decision);
+    EXPECT_LT(clamped.approved_qty, 2.0);
+}
+
 TEST(PositionManager, PerMarketNotional_FallbackWhenUnset)
 {
     // Only the global fallback set — the cap applies per market type with
