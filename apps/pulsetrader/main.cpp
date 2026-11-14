@@ -1757,6 +1757,42 @@ static int runTrade(int argc, char* argv[])
         }
     }
 
+    // Push CLOSED klines to external strategy runtimes subscribed over the
+    // control socket (subscribe_market). The listener runs on the feed I/O
+    // thread and only enqueues into bounded per-subscriber queues, so it can
+    // never block the market-data hot path. Feeds are stopped explicitly
+    // before the server is destroyed (see the shutdown section), so the raw
+    // server pointer captured here cannot dangle.
+    if (control_server)
+    {
+        const auto kline_listener = [server = control_server.get()](
+                                        const pulse::Symbol &symbol,
+                                        pulse::MarketType market_type,
+                                        const pulse::market::Kline &kline)
+        {
+            const std::string market_label = pulse::toString(market_type);
+            nlohmann::json params;
+            params["symbol"] = symbol;
+            params["market_type"] = market_label;
+            params["open_time"] = kline.open_time;
+            params["close_time"] = kline.close_time;
+            params["open"] = kline.open;
+            params["high"] = kline.high;
+            params["low"] = kline.low;
+            params["close"] = kline.close;
+            params["volume"] = kline.volume;
+            params["closed"] = kline.closed;
+            server->publish({ "kline", symbol, market_label },
+                            "market.kline", params);
+        };
+        if (spot_feed)    { spot_feed->setKlineListener(kline_listener); }
+        if (futures_feed)
+        {
+            futures_feed->setKlineListener(kline_listener);
+        }
+        if (cfd_feed)     { cfd_feed->setKlineListener(kline_listener); }
+    }
+
     // ------------------------------------------------------------------
     // 12. Signal handler — SIGINT / SIGTERM
     // ------------------------------------------------------------------

@@ -28,6 +28,7 @@
 #include <poll.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <iostream>
@@ -533,33 +534,307 @@ void JsonRpcServer::runLoop(Stream &stream)
 {
     // The line loop is identical for plaintext and TLS: asio::ssl::stream
     // satisfies the same sync-read/sync-write concept as tcp::socket.
-    asio::streambuf buffer;
-    while (m_running.load(std::memory_order_acquire))
+    //
+    // 1. Every connection gets a Session: the reader (this thread) and the
+    //    notification writer (below) share the socket. Reads happen only
+    //    here; ALL writes are serialised by Session::writeMutex.
+    auto session = std::make_shared<Session>();
+
+    std::jthread writer([session, &stream](std::stop_token)
     {
-        const std::size_t n = asio::read_until(stream, buffer, '\n');
-        if (0 == n)
+        for (;;)
         {
-            break;
+            std::string payload;
+            {
+                std::unique_lock lock(session->mutex);
+                session->cv.wait(lock, [&session]
+                {
+                    return session->stopped || !session->queue.empty();
+                });
+                if (session->queue.empty())
+                {
+                    return; // Stopped and fully drained.
+                }
+                payload = std::move(session->queue.front());
+                session->queue.pop_front();
+            }
+
+            std::lock_guard write_lock(session->writeMutex);
+            asio::error_code ec;
+            asio::write(stream, asio::buffer(payload), ec);
+            if (ec)
+            {
+                // Peer is gone. Mark the session stopped so publish() stops
+                // enqueueing, then let the reader unblock on its next read.
+                std::lock_guard lock(session->mutex);
+                session->stopped = true;
+                session->queue.clear();
+                return;
+            }
         }
+    });
 
-        std::string line{ asio::buffer_cast<const char *>(buffer.data()), n };
-        buffer.consume(n);
-
-        while (!line.empty() && ('\n' == line.back() || '\r' == line.back()))
+    // 2. Teardown must run on EVERY exit path, including the normal one where
+    //    asio::read_until throws on peer close. The writer waits on the
+    //    condition variable, so skipping the notify would make its join hang
+    //    forever (observed as a hung control test on 2026-11-14).
+    const auto teardown = [this, &session, &writer]()
+    {
         {
-            line.pop_back();
+            std::lock_guard lock(session->mutex);
+            session->stopped = true;
+            session->queue.clear();
         }
-        if (line.empty())
+        session->cv.notify_all();
+        writer.request_stop();
+        unregisterSession(session.get());
+    };
+
+    // 3. Request/response loop. Subscription methods are connection-scoped,
+    //    so they are handled here instead of in the pure (connection-agnostic)
+    //    registry; everything else goes through dispatchLine().
+    try
+    {
+        asio::streambuf buffer;
+        while (m_running.load(std::memory_order_acquire))
+        {
+            const std::size_t n = asio::read_until(stream, buffer, '\n');
+            if (0 == n)
+            {
+                break;
+            }
+
+            std::string line{ asio::buffer_cast<const char *>(buffer.data()), n };
+            buffer.consume(n);
+
+            while (!line.empty() && ('\n' == line.back() || '\r' == line.back()))
+            {
+                line.pop_back();
+            }
+            if (line.empty())
+            {
+                continue;
+            }
+
+            std::string response;
+            if (!handleSubscriptionRequest(line, session, response))
+            {
+                response = dispatchLine(line, m_registry);
+            }
+            if (!response.empty())
+            {
+                std::lock_guard write_lock(session->writeMutex);
+                asio::write(stream, asio::buffer(response + "\n"));
+            }
+        }
+    }
+    catch (const std::exception &)
+    {
+        // Peer closed / reset / socket shut down by stop(): the session ends.
+    }
+
+    // 4. Stop the writer before `stream` goes out of scope: the writer holds
+    //    a reference to it.
+    teardown();
+}
+
+// ---------------------------------------------------------------------------
+// Market-data push (subscribe_market / unsubscribe_market)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Per-subscriber outgoing queue cap. At one closed 1-minute bar per symbol
+/// this is many hours of slack; when a client falls this far behind it has
+/// stopped reading, and dropping the OLDEST notification keeps the freshest
+/// bar rather than growing memory without bound.
+constexpr std::size_t kMaxPendingNotifications = 1024;
+
+} // anonymous namespace
+
+void JsonRpcServer::registerSession(const std::shared_ptr<Session> &session)
+{
+    std::lock_guard lock(m_subscriberMutex);
+    for (const auto &existing : m_subscribers)
+    {
+        if (existing.get() == session.get())
+        {
+            return; // Re-subscribe on the same socket: already registered.
+        }
+    }
+    m_subscribers.push_back(session);
+}
+
+void JsonRpcServer::unregisterSession(const Session *session)
+{
+    std::lock_guard lock(m_subscriberMutex);
+    std::erase_if(m_subscribers,
+                  [session](const std::shared_ptr<Session> &candidate)
+                  { return candidate.get() == session; });
+}
+
+void JsonRpcServer::publish(const Topic &topic, const std::string &method,
+                            const nlohmann::json &params)
+{
+    // 1. Build the notification line ONCE. publish() runs on the market-data
+    //    thread once per closed bar, so one shared payload per event is both
+    //    cheaper and simpler than formatting per subscriber.
+    nlohmann::json notification;
+    notification["jsonrpc"] = "2.0";
+    notification["method"] = method;
+    notification["params"] = params;
+    const std::string line = notification.dump() + "\n";
+
+    // 2. Snapshot the subscriber list under the registry lock, then enqueue
+    //    per session under that session's own lock. Never hold both locks in
+    //    the opposite order anywhere — that would deadlock against
+    //    unregisterSession().
+    std::vector<std::shared_ptr<Session>> targets;
+    {
+        std::lock_guard lock(m_subscriberMutex);
+        targets = m_subscribers;
+    }
+
+    for (const auto &session : targets)
+    {
+        std::lock_guard lock(session->mutex);
+        if (session->stopped || !session->subscription.has_value())
         {
             continue;
         }
 
-        const std::string response = dispatchLine(line, m_registry);
-        if (!response.empty())
+        const auto &sub = *session->subscription;
+        if (sub.channel != topic.channel)
         {
-            asio::write(stream, asio::buffer(response + "\n"));
+            continue;
+        }
+        if (!sub.market_type.empty() && sub.market_type != topic.market_type)
+        {
+            continue;
+        }
+        // An empty symbol set subscribes to every symbol of the channel.
+        if (!sub.symbols.empty() && 0 == sub.symbols.count(topic.symbol))
+        {
+            continue;
+        }
+
+        if (session->queue.size() >= kMaxPendingNotifications)
+        {
+            session->queue.pop_front();
+            ++session->dropped;
+        }
+        session->queue.push_back(line);
+        session->cv.notify_one();
+    }
+}
+
+bool JsonRpcServer::handleSubscriptionRequest(
+    const std::string &line, const std::shared_ptr<Session> &session,
+    std::string &response)
+{
+    const nlohmann::json request = nlohmann::json::parse(line, nullptr, false);
+    if (request.is_discarded() || !request.is_object())
+    {
+        return false;
+    }
+
+    const std::string method = request.value("method", std::string{});
+    if ("subscribe_market" != method && "unsubscribe_market" != method)
+    {
+        return false;
+    }
+
+    nlohmann::json reply;
+    reply["jsonrpc"] = "2.0";
+    reply["id"] = request.contains("id") ? request["id"]
+                                         : nlohmann::json(nullptr);
+
+    // Unsubscribe is idempotent: clearing an absent subscription succeeds.
+    if ("unsubscribe_market" == method)
+    {
+        {
+            std::lock_guard lock(session->mutex);
+            session->subscription.reset();
+        }
+        unregisterSession(session.get());
+        reply["result"] = { { "subscribed", false } };
+        response = reply.dump();
+        return true;
+    }
+
+    // Validate params. channel is "kline" today; symbols is an optional array
+    // (absent = every symbol); market_type is optional (absent = any market).
+    Subscription sub;
+    std::string error;
+    const nlohmann::json params =
+        request.contains("params") ? request["params"] : nlohmann::json::object();
+
+    if (!params.is_object())
+    {
+        error = "subscribe_market: params must be an object";
+    }
+    else
+    {
+        sub.channel = params.value("channel", std::string("kline"));
+        sub.market_type = params.value("market_type", std::string{});
+        if ("kline" != sub.channel)
+        {
+            error = "subscribe_market: channel must be \"kline\"";
+        }
+        if (error.empty() && params.contains("symbols"))
+        {
+            if (!params["symbols"].is_array())
+            {
+                error = "subscribe_market: symbols must be an array of strings";
+            }
+            else
+            {
+                for (const auto &symbol : params["symbols"])
+                {
+                    if (!symbol.is_string())
+                    {
+                        error = "subscribe_market: symbols must be an array "
+                                "of strings";
+                        break;
+                    }
+                    sub.symbols.insert(symbol.get<std::string>());
+                }
+            }
         }
     }
+
+    if (!error.empty())
+    {
+        reply["error"] = {
+            { "code", -32602 },
+            { "message", error },
+        };
+        response = reply.dump();
+        return true;
+    }
+
+    // Build the reply from the local copy BEFORE moving it into the session.
+    nlohmann::json result;
+    result["subscribed"] = true;
+    result["channel"] = sub.channel;
+    result["market_type"] = sub.market_type;
+    result["symbols"] = nlohmann::json::array();
+    for (const auto &symbol : sub.symbols)
+    {
+        result["symbols"].push_back(symbol);
+    }
+    result["note"] = "notifications are pushed only for CLOSED klines";
+
+    {
+        std::lock_guard lock(session->mutex);
+        session->subscription = std::move(sub);
+    }
+    registerSession(session);
+
+    reply["result"] = std::move(result);
+    response = reply.dump();
+    return true;
 }
 
 void JsonRpcServer::handleSessionPlain(std::shared_ptr<asio::ip::tcp::socket> sock)

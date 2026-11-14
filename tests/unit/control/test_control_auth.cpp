@@ -23,6 +23,7 @@
 #else
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -143,6 +144,23 @@ void sendLineRaw(RawSocket fd, const std::string &line)
     // Winsock's send() takes an int length; POSIX takes size_t. The cast is a
     // no-op on POSIX and keeps /W4 quiet on Windows.
     ::send(fd, payload.data(), static_cast<int>(payload.size()), 0);
+}
+
+/// Bound recv() so a negative assertion ("nothing was pushed") cannot hang
+/// the test suite: readLineRaw() returns "" on timeout as well as on close.
+bool setRecvTimeoutRaw(RawSocket fd, int timeout_ms)
+{
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(timeout_ms);
+    return 0 == ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,
+                             reinterpret_cast<const char *>(&value),
+                             sizeof(value));
+#else
+    timeval value{};
+    value.tv_sec = timeout_ms / 1000;
+    value.tv_usec = (timeout_ms % 1000) * 1000;
+    return 0 == ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
+#endif
 }
 
 } // anonymous namespace
@@ -284,5 +302,92 @@ TEST(ControlAuth, AuthReplyEchoesIdAndOpensTheSession)
     EXPECT_EQ(4, parsedEcho["id"].get<int>());
     EXPECT_TRUE(parsedEcho["result"].value("after", false));
 
+    server->stop();
+}
+
+// ---------------------------------------------------------------------------
+// Market-data push (subscribe_market) — transport level
+//
+// These cover the wire behaviour an external strategy runtime relies on:
+// a subscription reply, server-initiated notifications with no `id`, symbol
+// filtering, and parameter validation.
+// ---------------------------------------------------------------------------
+
+TEST(ControlPush, SubscribeThenPublishDeliversClosedKline)
+{
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":1,"method":"subscribe_market","params":{"channel":"kline","symbols":["BTC_USDT"],"market_type":"futures"}})");
+    const auto reply = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ(1, reply["id"].get<int>());
+    EXPECT_TRUE(reply["result"]["subscribed"].get<bool>());
+    EXPECT_EQ("kline", reply["result"]["channel"].get<std::string>());
+
+    server->publish({ "kline", "BTC_USDT", "futures" }, "market.kline",
+                    { { "symbol", "BTC_USDT" },
+                      { "market_type", "futures" },
+                      { "close", 50000.0 },
+                      { "closed", true } });
+
+    const auto note = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("market.kline", note["method"].get<std::string>());
+    EXPECT_FALSE(note.contains("id")); // Notifications carry no id.
+    EXPECT_EQ("BTC_USDT", note["params"]["symbol"].get<std::string>());
+    EXPECT_DOUBLE_EQ(50000.0, note["params"]["close"].get<double>());
+    EXPECT_TRUE(note["params"]["closed"].get<bool>());
+
+    closeRaw(fd);
+    server->stop();
+}
+
+TEST(ControlPush, SymbolFilterSuppressesOtherSymbols)
+{
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":2,"method":"subscribe_market","params":{"channel":"kline","symbols":["BTC_USDT"]}})");
+    const auto reply = nlohmann::json::parse(readLineRaw(fd));
+    ASSERT_TRUE(reply["result"]["subscribed"].get<bool>());
+
+    // A symbol the session did not subscribe to must not arrive.
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 300));
+    server->publish({ "kline", "ETH_USDT", "futures" }, "market.kline",
+                    { { "symbol", "ETH_USDT" } });
+    EXPECT_TRUE(readLineRaw(fd).empty());
+
+    // The subscribed symbol still does.
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+    server->publish({ "kline", "BTC_USDT", "futures" }, "market.kline",
+                    { { "symbol", "BTC_USDT" } });
+    const auto note = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ("BTC_USDT", note["params"]["symbol"].get<std::string>());
+
+    closeRaw(fd);
+    server->stop();
+}
+
+TEST(ControlPush, UnknownChannelIsRejected)
+{
+    auto server = std::make_unique<JsonRpcServer>("127.0.0.1", 0, makeRegistry());
+    ASSERT_TRUE(server->start());
+
+    const RawSocket fd = connectRaw(server->port());
+    ASSERT_NE(kInvalidRawSocket, fd);
+    ASSERT_TRUE(setRecvTimeoutRaw(fd, 2000));
+
+    sendLineRaw(fd, R"({"jsonrpc":"2.0","id":3,"method":"subscribe_market","params":{"channel":"ticker"}})");
+    const auto reply = nlohmann::json::parse(readLineRaw(fd));
+    EXPECT_EQ(-32602, reply["error"]["code"].get<int>());
+
+    closeRaw(fd);
     server->stop();
 }
