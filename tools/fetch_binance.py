@@ -30,6 +30,7 @@ import concurrent.futures
 import datetime
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -161,9 +162,118 @@ def pull(market: str, sym: str, interval: str, out: Path):
     return rows
 
 
-def one_series(interval: str, market: str, sym: str, out_dir: Path, resume: bool):
+def last_ts_of(path: Path) -> int | None:
+    """Last (largest) ts in an existing mirror CSV, or None when absent.
+
+    The files are written in ascending ts order, so the final parsable line is
+    the cutoff. Scanning rather than seeking keeps this correct even if a
+    trailing newline is missing.
+    """
+    if not path.exists() or path.stat().st_size <= len(HEADER):
+        return None
+    last: int | None = None
+    with path.open("r", encoding="utf-8") as handle:
+        next(handle, None)  # header
+        for line in handle:
+            head = line.split(",", 1)[0].strip()
+            if not head:
+                continue
+            try:
+                last = int(head)
+            except ValueError:
+                continue
+    return last
+
+
+def update_series(interval: str, market: str, sym: str, out_dir: Path):
+    """Append the bars after the file's last one, atomically.
+
+    Returns (added, first_ts, last_ts) or None when the fetch aborted
+    transiently (the file is then left untouched).
+    """
     lo = sym[:-5].lower() if sym.endswith("_USDT") else sym.lower()
     fname = out_dir / f"{lo}_{market}_{interval}.csv"
+    last_ts = last_ts_of(fname)
+    if last_ts is None:
+        return None
+
+    iv_ms = IV_MS[interval]
+    iv_s = iv_ms // 1000
+    now_ms = int(time.time() * 1000)
+    cursor = (last_ts + iv_s) * 1000
+    if cursor > now_ms - iv_ms:
+        return (0, last_ts, last_ts)  # already current
+
+    collected: dict = {}
+    while cursor < now_ms:
+        d = get(market, {"symbol": api_symbol(sym), "interval": interval,
+                         "startTime": cursor, "limit": PAGE[market]})
+        if d is INVALID:
+            print(f"  stop: invalid/missing symbol or rejected request", file=sys.stderr)
+            break
+        if d is EXHAUSTED:
+            print("  abort (transient network): file left untouched", file=sys.stderr)
+            return None
+        if not d:
+            break
+        for r in d:
+            open_ms = int(r[0])
+            close_ms = int(r[6])
+            if close_ms >= now_ms:
+                continue  # forming bar — never persist it as final
+            opened = open_ms // 1000
+            if opened > last_ts and opened not in collected:
+                collected[opened] = (r[1], r[2], r[3], r[4], r[5])
+        if len(d) < PAGE[market]:
+            break
+        cursor = int(d[-1][0]) + iv_ms
+        time.sleep(0.10)
+
+    if not collected:
+        return (0, last_ts, last_ts)
+
+    ordered = sorted(collected.items())
+    # Continuity: the first appended bar must follow the old cutoff exactly,
+    # otherwise the series has a hole and the replayer would silently bridge it.
+    if ordered[0][0] != last_ts + iv_s:
+        print(f"  WARN: gap after ts={last_ts} — first new bar is "
+              f"{ordered[0][0]} (expected {last_ts + iv_s})", file=sys.stderr)
+
+    part = fname.with_suffix(".csv.part")
+    with fname.open("rb") as src, part.open("w+b") as dst:
+        shutil.copyfileobj(src, dst, length=1 << 20)
+        dst.seek(0, os.SEEK_END)
+        if dst.tell() > 0:
+            dst.seek(-1, os.SEEK_END)
+            if dst.read(1) != b"\n":
+                dst.write(b"\n")
+        for ts, (o, h, l, c, v) in ordered:
+            dst.write(f"{ts},{o},{h},{l},{c},{v}\n".encode())
+    os.replace(part, fname)
+    return (len(ordered), ordered[0][0], ordered[-1][0])
+
+
+def one_series(interval: str, market: str, sym: str, out_dir: Path, resume: bool,
+               update: bool = False):
+    lo = sym[:-5].lower() if sym.endswith("_USDT") else sym.lower()
+    fname = out_dir / f"{lo}_{market}_{interval}.csv"
+    if update and fname.exists() and fname.stat().st_size > len(HEADER):
+        with _log_lock:
+            print(f"== {sym} {market} {interval} -> {fname}  [update]", flush=True)
+        result = update_series(interval, market, sym, out_dir)
+        with _log_lock:
+            if result is None:
+                print("   aborted, nothing written", file=sys.stderr)
+            else:
+                added, first, last = result
+                if added:
+                    print(f"   +{added} bars, now "
+                          f"{datetime.datetime.fromtimestamp(first, datetime.UTC):%Y-%m-%d %H:%M}Z .. "
+                          f"{datetime.datetime.fromtimestamp(last, datetime.UTC):%Y-%m-%d %H:%M}Z",
+                          flush=True)
+                else:
+                    print("   already current", flush=True)
+        return
     if resume and fname.exists() and fname.stat().st_size > len(HEADER):
         with _log_lock:
             print(f"== {sym} {market} {interval} -> {fname}  [skip: exists]", flush=True)
@@ -249,6 +359,9 @@ def main():
     ap.add_argument("--rate", type=float, default=5.0,
                     help="global request cap per second (Binance IP 429 guard)")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--update", action="store_true",
+                    help="append the bars after each existing file's last one "
+                         "(missing files are pulled in full)")
     ap.add_argument("--no-probe", action="store_true")
     ap.add_argument("--funding", action="store_true",
                     help="pull perp funding-rate full history into <dir>/funding/")
@@ -272,18 +385,22 @@ def main():
             for sym in symbols:
                 lo = sym[:-5].lower() if sym.endswith("_USDT") else sym.lower()
                 fname = out_dir / f"{lo}_{market}_{interval}.csv"
-                if args.resume and fname.exists() and fname.stat().st_size > len(HEADER):
+                if (args.resume and not args.update
+                        and fname.exists()
+                        and fname.stat().st_size > len(HEADER)):
                     continue  # not even queued
                 if not args.no_probe and not probe(market, sym):
                     with _log_lock:
                         print(f"-- {sym} not on Binance {market}; skipped", flush=True)
                     continue
                 jobs.append((interval, market, sym))
-    print(f"series: {len(jobs)} (workers={args.workers}, resume={args.resume})", flush=True)
+    print(f"series: {len(jobs)} (workers={args.workers}, resume={args.resume}, "
+          f"update={args.update})", flush=True)
 
     done = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(one_series, iv, m, s, out_dir, args.resume) for iv, m, s in jobs]
+        futs = [ex.submit(one_series, iv, m, s, out_dir, args.resume, args.update)
+                for iv, m, s in jobs]
         for fut in concurrent.futures.as_completed(futs):
             fut.result()
             done += 1
