@@ -918,6 +918,34 @@ PulseError parseControl(const toml::value &root, ControlConfig &out)
     return {};
 }
 
+PulseError parseExecution(const toml::value &root, ExecutionConfig &out)
+{
+    if (!root.contains("execution"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("execution");
+
+    out.markets = toml::find_or(sec, "markets", out.markets);
+    out.symbols = toml::find_or(sec, "symbols", out.symbols);
+
+    // Validate eagerly. A typo would otherwise silently wire nothing, and the
+    // external client's first order would fail with "No executor for
+    // market_type" — a failure that looks like a runtime bug, not a config one.
+    for (const auto &market : out.markets)
+    {
+        if ("spot" != market && "futures" != market && "cfd" != market)
+        {
+            return PulseError{ ErrorCode::ConfigInvalidValue,
+                               "[execution] markets: unknown market '" + market
+                                   + "' (expected spot|futures|cfd)" };
+        }
+    }
+
+    return {};
+}
+
 PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
 {
     if (!root.contains("sqlite"))
@@ -1248,6 +1276,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseControl(root, cfg.control);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parseExecution(root, cfg.execution);
 
     if (ErrorCode::Ok != err.code)
     {

@@ -555,6 +555,28 @@ struct FundingWatchConfig
 // ---------------------------------------------------------------------------
 // PulseConfig — Top-level aggregate: one instance drives the entire system
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ExecutionConfig — markets the engine must own even without a strategy
+//
+// An external strategy runtime drives PT over the control socket: it sends
+// open_order and consumes pushed klines. PT only builds a market's feed,
+// executor and tracker for markets it considers active, which historically
+// meant "has at least one enabled strategy instance". Listing a market here
+// decouples the two: the full execution path is wired at startup so an
+// external client can trade that market without a matching TOML strategy.
+// ---------------------------------------------------------------------------
+struct ExecutionConfig
+{
+    /// Markets to wire for execution: "spot", "futures", "cfd".
+    std::vector<std::string> markets;
+
+    /// Symbols to stream for those markets when no strategy instance supplies
+    /// them. Only list names that exist on the listed venues: a foreign
+    /// symbol makes that market's registry detail load fail and can leave a
+    /// contract multiplier unresolved.
+    std::vector<std::string> symbols;
+};
+
 struct PulseConfig
 {
     ExchangeConfig exchange;
@@ -570,6 +592,7 @@ struct PulseConfig
     FundingWatchConfig funding_watch;   ///< [funding_watch] funding-window monitor.
     GoldTraderConfig gold_trader;       ///< [gold_trader] USD dynamic stop supervisor.
     BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
+    ExecutionConfig execution;          ///< [execution] markets wired without a strategy.
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     /// Extra symbols to stream in the ACTIVE market only (watchlist). They are
     /// unioned into that market's feed subscriptions but create no strategy

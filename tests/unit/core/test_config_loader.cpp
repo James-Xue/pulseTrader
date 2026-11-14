@@ -1465,5 +1465,53 @@ market_type = "futures"
     EXPECT_EQ(MarketType::Futures, value(result).gold_trader.market_type);
 }
 
+TEST(ConfigLoader, ParseExecution_MarketsAndSymbols)
+{
+    TempToml tmp(R"(
+[execution]
+markets = ["futures"]
+symbols = ["BTC_USDT"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &execution = value(result).execution;
+    ASSERT_EQ(1u, execution.markets.size());
+    EXPECT_EQ("futures", execution.markets[0]);
+    ASSERT_EQ(1u, execution.symbols.size());
+    EXPECT_EQ("BTC_USDT", execution.symbols[0]);
+}
+
+TEST(ConfigLoader, ParseExecution_AbsentSectionKeepsEmpty)
+{
+    // Omitting [execution] must preserve the historical behaviour: markets are
+    // only wired by strategy instances (and the gold trader).
+    TempToml tmp(R"(
+[log]
+level = "info"
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    EXPECT_TRUE(value(result).execution.markets.empty());
+    EXPECT_TRUE(value(result).execution.symbols.empty());
+}
+
+TEST(ConfigLoader, ParseExecution_UnknownMarketRejected)
+{
+    // A typo must fail loudly at load time: silently wiring nothing would
+    // surface later as "No executor for market_type" on the first order.
+    TempToml tmp(R"(
+[execution]
+markets = ["futures", "options"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("unknown market"));
+}
+
 } // namespace
 } // namespace pulse

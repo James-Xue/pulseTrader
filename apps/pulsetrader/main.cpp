@@ -777,6 +777,33 @@ static int runTrade(int argc, char* argv[])
         has_cfd = true;
     }
 
+    // [execution] markets: wire the feed + executor + tracker for a market
+    // even when no enabled strategy instance targets it. An external strategy
+    // runtime drives PT through the control socket and needs that path to
+    // exist before its first open_order ("No executor for market_type"
+    // otherwise). Same contract as the gold-trader block above.
+    for (const auto &market : cfg.execution.markets)
+    {
+        if ("spot" == market)
+        {
+            has_spot = true;
+        }
+        else if ("futures" == market)
+        {
+            has_futures = true;
+        }
+        else if ("cfd" == market)
+        {
+            has_cfd = true;
+        }
+    }
+
+    if (!cfg.execution.markets.empty())
+    {
+        log->info("[L1] Execution markets requested by [execution]: {}",
+                  cfg.execution.markets.size());
+    }
+
     // Default to spot if no strategies configured (backward compatibility).
     if (!has_spot && !has_futures && !has_cfd) has_spot = true;
 
@@ -813,6 +840,19 @@ static int runTrade(int argc, char* argv[])
                     syms.push_back(symbol);
                 }
             }
+        }
+
+        // A market wired by [execution] with no strategy instance needs its
+        // symbols from somewhere: [execution].symbols wins over the global
+        // symbol list, because the global list may contain names that do not
+        // exist on this venue (the same hazard the CFD note below describes).
+        const bool execution_market =
+            std::find(cfg.execution.markets.begin(),
+                      cfg.execution.markets.end(),
+                      std::string{ toString(mt) }) != cfg.execution.markets.end();
+        if (syms.empty() && execution_market && !cfg.execution.symbols.empty())
+        {
+            return cfg.execution.symbols;
         }
 
         // The gold trader manages a CFD symbol outside the strategy list.
