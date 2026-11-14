@@ -277,3 +277,31 @@ TEST(KlineBuffer, UpdateOrPushAppendsNewerAndIgnoresOlder)
     EXPECT_EQ(1000, snap[0].open_time);
     EXPECT_EQ(2000, snap[1].open_time);
 }
+
+TEST(KlineBuffer, UpdateOrPushMarksPreviousBarClosed)
+{
+    // A newer bar proves the previous one is final. Without this, a lost
+    // final push (WS gap or reconnect) would leave that bar marked
+    // closed=false for the rest of its life in the ring, and every consumer
+    // that filters on `closed` would skip it forever.
+    KlineBuffer buffer(4);
+
+    Kline forming;
+    forming.open_time = 60'000;
+    forming.close_time = 120'000;
+    forming.open = forming.high = forming.low = forming.close = 100.0;
+    forming.closed = false;
+    ASSERT_TRUE(buffer.updateOrPush(forming));
+
+    Kline next;
+    next.open_time = 120'000;
+    next.close_time = 180'000;
+    next.open = next.high = next.low = next.close = 101.0;
+    next.closed = false;
+    ASSERT_TRUE(buffer.updateOrPush(next));
+
+    const auto snap = buffer.snapshot(2);
+    ASSERT_EQ(2u, snap.size());
+    EXPECT_TRUE(snap[0].closed);  // Finalised by the append.
+    EXPECT_FALSE(snap[1].closed); // Newest bar is still forming.
+}

@@ -68,6 +68,16 @@ bool KlineBuffer::updateOrPush(const Kline &kline)
 
     if (should_append)
     {
+        // A newer bar proves the previous newest bar is final. If its own
+        // final push was lost (WS gap, reconnect), it would otherwise stay
+        // marked closed=false for the rest of its life in the ring and every
+        // consumer that filters on `closed` would skip it forever.
+        if (current_count > 0)
+        {
+            const std::size_t prev_pos = logicalToPhysical(current_count - 1);
+            m_buffer[prev_pos].closed = true;
+        }
+
         const std::size_t write_pos = m_head.load(std::memory_order_relaxed);
         m_buffer[write_pos] = kline;
 

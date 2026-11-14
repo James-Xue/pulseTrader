@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -126,6 +127,18 @@ class MarketFeed
     /// or while the feed is stopped; the pointer is not owned by the feed.
     void setMarketDataSink(MarketDataSink *sink);
 
+    /// Optional listener invoked ONCE per finished kline bar, on the feed I/O
+    /// thread. Used by the control plane to push market data to external
+    /// strategy runtimes.
+    ///
+    /// Thread-safety: called from the feed thread; the implementation MUST NOT
+    /// block (the publisher only enqueues into bounded per-subscriber queues).
+    /// Bars are emitted only when `closed` is true, so a consumer never sees a
+    /// half-formed candle.
+    using KlineListener =
+        std::function<void(const Symbol &, MarketType, const Kline &)>;
+    void setKlineListener(KlineListener listener);
+
     /// Parse a ticker update JSON (WS spot/futures ticker channel).
     ///
     /// Test/diagnostic seam: kept public so sink dispatch can be unit-tested
@@ -181,6 +194,13 @@ class MarketFeed
     std::atomic<std::uint64_t> m_klineCount{ 0 };
 
     MarketDataSink *m_dataSink{ nullptr }; ///< Optional event consumer (not owned).
+
+    KlineListener m_klineListener; ///< Optional closed-bar consumer (not owned).
+
+    /// Last kline open_time emitted to the sink/listener per symbol. Keeps
+    /// "one event per bar" even when Gate re-pushes a final bar. Only touched
+    /// by the owning feed thread (WS I/O thread or the CFD poll thread).
+    std::unordered_map<Symbol, std::int64_t> m_lastEmittedKline;
 
     /// Last successful kline-fetch anchor per symbol (Unix ms, request start).
     /// Guarded by a shared mutex: the poll thread writes, main-loop consumers

@@ -199,6 +199,11 @@ void MarketFeed::setMarketDataSink(MarketDataSink *sink)
     m_dataSink = sink;
 }
 
+void MarketFeed::setKlineListener(KlineListener listener)
+{
+    m_klineListener = std::move(listener);
+}
+
 void MarketFeed::onTickerUpdate(const nlohmann::json &result, const nlohmann::json &full_frame)
 {
     // Gate.io ticker format:
@@ -528,14 +533,54 @@ void MarketFeed::onKlineUpdate(const nlohmann::json &result,
         // Spot volume is already in base currency (multiplier defaults to 1.0).
         auto info = m_symbolRegistry.get(symbol);
         kline.volume = vol.value() * (info ? info->quanto_multiplier : 1.0);
-        kline.closed = true;
 
-        auto &buffer = getKlineBuffer(symbol);
-        buffer.push(kline);
-        m_klineCount.fetch_add(1, std::memory_order_relaxed);
-        if (m_dataSink)
+        // 4. Decide whether this bar is final.
+        //    Futures pushes carry "w" (true = candle closed). Spot pushes have
+        //    no flag, so the bar is final once its close_time has passed on the
+        //    local clock. Never assume closed: the pre-2026-11-14 code marked
+        //    every push closed=true, which let strategies act on a forming
+        //    candle (the B6 risk in the 10-04 gap analysis).
+        bool is_closed = false;
+        if (candle.contains("w") && candle["w"].is_boolean())
         {
-            m_dataSink->onKline(symbol, m_marketType, kline);
+            is_closed = candle["w"].get<bool>();
+        }
+        else
+        {
+            is_closed = nowMs() >= kline.close_time;
+        }
+        kline.closed = is_closed;
+
+        // 5. Upsert instead of append. Gate re-pushes the same 1-minute bar
+        //    every couple of seconds while it forms; the old unconditional
+        //    append filled the 500-slot ring with duplicates (measured
+        //    2026-11-14: 500 slots covering only 17 distinct minutes).
+        auto &buffer = getKlineBuffer(symbol);
+        const bool appended = buffer.updateOrPush(kline);
+        if (appended)
+        {
+            m_klineCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        // 6. Emit exactly one event per bar, and only once it is final.
+        //    A forming bar would otherwise be persisted with a half-formed
+        //    OHLC and pushed to strategy runtimes as if it were tradeable.
+        if (is_closed)
+        {
+            auto emitted = m_lastEmittedKline.find(symbol);
+            if (emitted == m_lastEmittedKline.end()
+                || emitted->second < kline.open_time)
+            {
+                m_lastEmittedKline[symbol] = kline.open_time;
+                if (m_dataSink)
+                {
+                    m_dataSink->onKline(symbol, m_marketType, kline);
+                }
+                if (m_klineListener)
+                {
+                    m_klineListener(symbol, m_marketType, kline);
+                }
+            }
         }
     };
 
