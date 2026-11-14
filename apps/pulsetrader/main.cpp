@@ -1535,15 +1535,36 @@ static int runTrade(int argc, char* argv[])
     // symbol: the generic percentage trail/take-profit ladder below is not
     // part of the USD dynamic-stop policy and would otherwise partially
     // close a managed position (silently rescaling its USD thresholds).
-    // Positions opened by an external caller-authoritative runtime (GT) are
-    // excluded from the percentage trail/take-profit ladders ONLY while the
-    // exchange-native floor the design relies on actually exists: a CFD entry
-    // carrying sl_price. On futures/spot open_order rejects sl_price/tp_price,
-    // so an "external" position there has no exchange-side stop at all — if
-    // this filter skipped it, a live position would be left with no stop
-    // anywhere. The same holds for a CFD order that omitted the optional
-    // sl_price. Those positions fall through to the generic manager (the
-    // 0.5% trailing stop this engine had before external ownership existed).
+    //
+    // Exit ownership is exclusive. An "external" position belongs to the
+    // caller-authoritative runtime (GT) that opened it: this manager
+    // implements PT STRATEGY exits (percentage trailing stop, the
+    // take-profit ladder, and the time stop that only fires in
+    // StopMode::TimeBased), not risk custody, and applying that logic to a
+    // caller-owned position would fight the caller's exit policy.
+    //
+    // The exchange-native protection floor replaces this manager for that
+    // position — but the floor can be absent even after entry:
+    // ensureFuturesStops() cannot place the trigger when the market has
+    // already gapped through the level, when the contract price unit is
+    // unknown, or when placement is rejected, and a CFD stop can be cleared
+    // on the exchange later. The filter below therefore skips an external
+    // position only while the floor is actually proven (CFD: sl_price > 0;
+    // futures: a verified ensureFuturesStops() record) and manages it
+    // otherwise. That fallback is the pre-existing percentage manager, and it
+    // is what keeps a leveraged position from having no exit anywhere when
+    // the exchange-side order is missing or impossible to place.
+    //
+    // Restart caveat: `origin` is in memory only. After an engine restart,
+    // sync_positions re-imports every exchange position as "manual", so a
+    // position that was "external" is PT-managed again until its owner
+    // re-establishes ownership. With the shipped trading.toml
+    // ([risk.stop_loss] mode = "Trailing") the mechanisms acting on it are the
+    // 0.5% trailing stop and the [risk.take_profit] ladder's partial closes;
+    // GoldTrader's USD ladder adds its -8 USD hard stop when armed.
+    // max_hold_seconds does NOT act there — it only fires in
+    // StopMode::TimeBased, and the shipped config uses Trailing.
+    //
     // `gold_armed` is set right after a successful construction; both the
     // filter and the manager run only on the main loop.
     bool gold_armed = false;
@@ -1585,18 +1606,20 @@ static int runTrade(int argc, char* argv[])
             close_params["quantity"] = quantity;
             return pulse::ok(services.closePosition(close_params));
         },
-        [&gold_armed, &cfg](const pulse::risk::Position &pos)
+        [&gold_armed, &cfg, &services](const pulse::risk::Position &pos)
         {
-            // Caller exit-ownership wins over the gold gate only when the
-            // exchange-native stop is attached: a CFD position with sl_price
-            // > 0 is protected even if this process dies, so its owner's exit
-            // logic is authoritative. Without that floor (any futures/spot
-            // external position, or a CFD entry with no sl_price) skipping PT
-            // would leave the position unprotected, so PT keeps managing it.
-            if ("external" == pos.origin && pos.sl_price > 0.0
-                && pulse::MarketType::Cfd == pos.market_type)
+            // External position: the caller owns the exit, but only while the
+            // exchange-side floor is proven. A missing floor means this
+            // manager is the last exit left, so it takes custody (return
+            // true) instead of leaving the position naked.
+            if ("external" == pos.origin)
             {
-                return false;
+                const bool floor_proven =
+                    (pulse::MarketType::Cfd == pos.market_type
+                     && pos.sl_price > 0.0)
+                    || (pulse::MarketType::Futures == pos.market_type
+                        && services.hasExchangeStop(pos.position_id));
+                return !floor_proven;
             }
             return !(gold_armed && pos.symbol == cfg.gold_trader.symbol
                      && pos.market_type == cfg.gold_trader.market_type);

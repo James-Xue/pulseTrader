@@ -98,13 +98,16 @@ struct Position
     ///   "manual"   — an operator/API one-shot without a client tag, or an
     ///                exchange position imported by startup/hot sync
     ///   "external" — a caller-authoritative order (external runtime, GT):
-    ///                the CALLER owns the exit, so PT exit logic (L7
-    ///                GoldTrader, ProtectiveExitManager) leaves it alone —
-    ///                but only while the exchange-native floor exists (a CFD
-    ///                position with sl_price > 0). Futures/spot external
-    ///                positions cannot carry such a stop, and a CFD entry may
-    ///                omit it; those stay PT-managed or they would have no
-    ///                stop at all.
+    ///                the CALLER owns the exit while the exchange-native
+    ///                protection floor exists — a CFD entry's price_sl, or the
+    ///                futures catastrophe trigger ensureFuturesStops() has
+    ///                verified. open_order enforces the floor at entry
+    ///                (external CFD requires sl_price > 0, external futures
+    ///                require [risk] exchange_stop_enabled, external spot is
+    ///                refused). The L7 GoldTrader never runs on it, and the
+    ///                generic ProtectiveExitManager keeps custody only while
+    ///                the floor is missing or unproven, so the position is
+    ///                never left with no exit at all.
     ///   ""         — unknown (not yet classified; PT exit logic keeps its
     ///                historical behaviour, which is fail-safe)
     std::string origin;

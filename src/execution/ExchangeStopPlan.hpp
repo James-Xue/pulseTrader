@@ -12,6 +12,8 @@
 
 #include "core/types.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cmath>
 #include <optional>
 #include <string>
@@ -82,6 +84,131 @@ planExchangeStop(Side position_side, Price entry_price, double pct, double tick,
     }
 
     return plan;
+}
+
+// ---------------------------------------------------------------------------
+// Existing trigger detection — is an open price_orders object the floor?
+// ---------------------------------------------------------------------------
+// The raw /futures/usdt/price_orders listing carries EVERY open trigger on
+// the contract, not just this position's stop: take-profits, triggers left
+// behind by an earlier position on the same contract, and orders the engine
+// never placed. Treating any of them as the protection floor would mark a
+// naked position as covered, so the floor test has to look at what the
+// trigger actually does.
+
+/// True when `trigger` is an open Gate price_orders object that protects the
+/// position identified by `position_side` and its `entry_price`.
+///
+/// Checks, in order:
+///   1. `order_type` is the WHOLE-position close for that side
+///      (close-long-position for a long, close-short-position for a short).
+///      A trigger that opens exposure or closes the other side cannot be the
+///      floor.
+///   2. `trigger.rule` selects the loss-side crossing: 2 (price falls to or
+///      below the trigger) for a long, 1 (price rises to or above it) for a
+///      short. The other rule turns the same order_type into a take-profit.
+///   3. `trigger.price` sits strictly on the loss side of `entry_price` AND
+///      no farther from it than the configured catastrophe distance
+///      (`pct`, plus half a tick of rounding slack). A stop priced off an
+///      earlier entry — a 59,400 trigger while the current long entered at
+///      70,000 — is therefore rejected: it would let the position lose far
+///      more than the floor this engine has to guarantee.
+///
+/// Parameters:
+///   trigger       — one element of the price_orders array
+///   position_side — Buy for a long, Sell for a short
+///   entry_price   — the position's entry price the stop must protect
+///   pct           — configured catastrophe distance (0.01 = 1%); out of
+///                   (0, 1) disables the distance bound
+///   tick          — contract order_price_round; <= 0 disables the rounding
+///                   slack and the distance bound (the level cannot be
+///                   verified, so any loss-side stop is better than none)
+[[nodiscard]] inline bool isProtectiveStopTrigger(
+    const nlohmann::json &trigger, Side position_side, Price entry_price,
+    double pct, double tick)
+{
+    // 1. Whole-position close in the position's own direction.
+    if (!trigger.is_object())
+    {
+        return false;
+    }
+    const bool is_long = (Side::Buy == position_side);
+    const std::string expected_order_type =
+        is_long ? "close-long-position" : "close-short-position";
+    const auto order_type_it = trigger.find("order_type");
+    if (trigger.end() == order_type_it || !order_type_it->is_string())
+    {
+        return false;
+    }
+    if (expected_order_type != order_type_it->get<std::string>())
+    {
+        return false;
+    }
+
+    // 2. Loss-side trigger direction.
+    const auto trigger_it = trigger.find("trigger");
+    if (trigger.end() == trigger_it || !trigger_it->is_object())
+    {
+        return false;
+    }
+    const auto rule_it = trigger_it->find("rule");
+    if (trigger_it->end() == rule_it || !rule_it->is_number())
+    {
+        return false;
+    }
+    const int rule = rule_it->get<int>();
+    const int expected_rule = is_long ? 2 : 1;
+    if (expected_rule != rule)
+    {
+        return false;
+    }
+
+    // 3. Strictly on the loss side of the entry price. Gate serializes the
+    //    price as a string; accept a JSON number as well so a locally built
+    //    object is classified the same way.
+    const auto price_it = trigger_it->find("price");
+    if (trigger_it->end() == price_it)
+    {
+        return false;
+    }
+    double price = 0.0;
+    if (price_it->is_string())
+    {
+        price = safeParseDouble(price_it->get<std::string>()).value_or(0.0);
+    }
+    else if (price_it->is_number())
+    {
+        price = price_it->get<double>();
+    }
+    else
+    {
+        return false;
+    }
+    if (price <= 0.0)
+    {
+        return false;
+    }
+    // 3a. Strictly on the loss side of THIS entry.
+    if (is_long ? (price >= entry_price) : (price <= entry_price))
+    {
+        return false;
+    }
+
+    // 3b. Distance bound: the adopted trigger must be at least as protective
+    //     as the level this engine would place itself. The plan rounds to the
+    //     nearest tick, which can land half a tick beyond the raw level, so
+    //     allow that much slack or the engine would reject its own trigger on
+    //     the next listing and place a duplicate every revalidation pass.
+    const bool level_verifiable =
+        entry_price > 0.0 && tick > 0.0 && pct > 0.0 && pct < 1.0;
+    if (!level_verifiable)
+    {
+        return true; // Any loss-side stop beats no stop when levels are unknown.
+    }
+    const double raw = is_long ? entry_price * (1.0 - pct)
+                               : entry_price * (1.0 + pct);
+    const double slack = tick * 0.5;
+    return is_long ? (price >= raw - slack) : (price <= raw + slack);
 }
 
 } // namespace pulse::execution

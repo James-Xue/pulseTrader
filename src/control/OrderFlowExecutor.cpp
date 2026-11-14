@@ -830,10 +830,11 @@ void OrderFlowExecutor::onOrderComplete(
             // Label the new position with its provenance so the exit layers
             // can honour ownership. In priority order:
             //   1. size_authoritative → "external": an external runtime (GT)
-            //      sized the order itself and owns the exit. Exit ownership
-            //      is only honoured while the exchange-native floor exists
-            //      (CFD sl_price); futures/spot orders cannot carry one, and
-            //      a CFD entry may omit it — those stay PT-managed.
+            //      sized the order itself and owns the exit. PT exit logic
+            //      then never touches the position; open_order already
+            //      enforced the exchange-native protection floor before this
+            //      order was accepted (CFD sl_price, futures exchange_stop,
+            //      spot rejected), so no PT-side management is needed.
             //   2. A client order id → "strategy": the signal path always
             //      mints one, so the fill belongs to engine exit logic.
             //   3. No client tag → "manual": an operator/API one-shot.

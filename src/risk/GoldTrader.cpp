@@ -195,18 +195,20 @@ GoldTrader::TickResult GoldTrader::tick(Timestamp now)
         {
             continue;
         }
-        // An external (caller-authoritative) CFD position is owned by its
-        // caller while the exchange-native stop attached at entry exists:
-        // that stop fires even if both the runtime and the engine are down,
-        // so driving the USD ladder over it would fight the caller's exit.
-        // The ownership only holds when the floor exists — a CFD entry that
-        // omitted sl_price (sl_price == 0) has no exchange-side stop, so
-        // skipping it here would leave the position unprotected. The same is
-        // true for external futures/spot positions, which cannot carry a CFD
-        // stop at all; this supervisor is CFD-only anyway (market_type filter
-        // above), so the guard below never hides an unprotected live position.
-        if ("external" == pos.origin && pos.sl_price > 0.0
-            && MarketType::Cfd == pos.market_type)
+        // An external (caller-authoritative) position is owned by its caller
+        // while the exchange-native floor exists: this supervisor drives PT's
+        // USD dynamic-stop strategy, not risk custody, so applying it here
+        // would fight the caller's exit policy (the -8 USD hard stop would
+        // close a 1-hour GT strategy within minutes). Skip unconditionally —
+        // sl_price does not matter. The floor is required at entry
+        // (EngineServices::openOrder() rejects an external CFD entry without
+        // sl_price > 0, external futures without [risk] exchange_stop_enabled,
+        // and external spot outright), and when it is missing later (a CFD
+        // stop cleared on the exchange, a futures trigger that could not be
+        // placed) ProtectiveExitManager's generic percentage exits take
+        // custody via the main-loop manage filter. Skipping here therefore
+        // never leaves a live position without an exit owner.
+        if ("external" == pos.origin)
         {
             continue;
         }

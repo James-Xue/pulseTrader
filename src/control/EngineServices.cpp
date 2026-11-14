@@ -1294,6 +1294,55 @@ EngineServices::openOrder(const nlohmann::json &params)
             "orders still work." };
     }
 
+    // Exchange-native protection floor for external opens. PT's software exits
+    // leave an "external" position alone only while this floor exists (the L7
+    // GoldTrader never touches one; ProtectiveExitManager falls back to
+    // managing it when the floor is missing), so the exchange is the primary
+    // exit custodian — and it keeps working when the caller's process dies. An
+    // external open that cannot carry an exchange-native stop is therefore
+    // refused: accepting it would create a position that NOTHING manages.
+    //   1. CFD — the TradFi order body carries per-order price_sl/price_tp,
+    //      so require sl_price. A price of 0 is the documented "clear the
+    //      stop" value rather than a level, so it does not count as a floor.
+    //   2. Futures — open_order rejects sl_price/tp_price for them; the floor
+    //      is the whole-position reduce-only trigger that
+    //      ensureFuturesStops() attaches, and that method is gated on
+    //      [risk] exchange_stop_enabled. With the feature disabled the
+    //      caller would hold a naked futures position.
+    //   3. Spot — there is no exchange-native stop path at all.
+    // Futures reduce_only closes reuse the gate's predicate: the exchange
+    // enforces the flag, which bounds the order by the open position, and a
+    // close must stay possible even when the stop feature is disabled.
+    // This block sits BEFORE the idempotency cache for the same reason as the
+    // gate above: a refused open must not consume its client_order_id.
+    if (req.size_authoritative && !enforced_reduce_only)
+    {
+        if (MarketType::Cfd == req.market_type
+            && (!req.sl_price.has_value() || req.sl_price.value() <= 0.0))
+        {
+            return PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "open_order: external CFD orders must attach sl_price (the "
+                "exchange-native stop is the protection floor)." };
+        }
+        if (MarketType::Futures == req.market_type
+            && !m_cfg.risk.exchange_stop.enabled)
+        {
+            return PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "open_order: external futures orders require [risk] "
+                "exchange_stop_enabled = true so ensureFuturesStops() can "
+                "attach a catastrophe stop." };
+        }
+        if (MarketType::Spot == req.market_type)
+        {
+            return PulseError{
+                ErrorCode::ControlInvalidRequest,
+                "open_order: external spot orders are not supported (no "
+                "exchange-native stop path)." };
+        }
+    }
+
     // Idempotency gate — the full contract is documented on the declaration in
     // EngineServices.hpp. It sits here because all fingerprint fields are now
     // parsed and the cheap validation is done, while nothing has touched REST
@@ -1850,7 +1899,13 @@ int EngineServices::ensureFuturesStops()
     }
 
     const auto positions = m_positionMgr.getAllPositions();
+    const auto now_tp = std::chrono::steady_clock::now();
     std::unordered_set<std::string> live;
+    // One trigger listing per contract per call, shared by every position on
+    // it. A failed listing is remembered too, so the failure costs one REST
+    // call per contract instead of one per position.
+    std::unordered_map<std::string, nlohmann::json> triggers_by_contract;
+    std::unordered_set<std::string> trigger_list_failed;
     int placed = 0;
 
     for (const auto &pos : positions)
@@ -1861,32 +1916,99 @@ int EngineServices::ensureFuturesStops()
         }
         live.insert(pos.position_id);
 
-        // 2. Already handled in a previous call?
-        if (0 != m_exchangeStopPositions.count(pos.position_id))
+        // 2. Verified recently? Skip without REST. Re-verification is what
+        //    catches a trigger cancelled out-of-band (cancel_trigger_order,
+        //    the Gate app), which would otherwise leave the cache claiming a
+        //    protection that no longer exists.
+        const auto cached = m_exchangeStops.find(pos.position_id);
+        if (m_exchangeStops.end() != cached
+            && now_tp < cached->second.next_reverify)
         {
             continue;
         }
 
-        // 3. Covered by an existing open trigger on the contract? Gate's
-        //    close-position trigger is whole-position, so one per contract
-        //    is enough.
-        auto triggers = listTriggerOrders(nlohmann::json{ { "contract", pos.symbol } });
-        if (!ok(triggers))
+        // Price unit for the contract (cached after the first call). Needed
+        // twice: to judge whether an existing trigger sits at the configured
+        // distance, and to build the new trigger price.
+        const double tick = futuresPriceTick(pos.symbol);
+
+        // 3. List the contract's open triggers. Gate's close-position trigger
+        //    is whole-position, so one matching order per contract is enough.
+        auto listed = triggers_by_contract.find(pos.symbol);
+        if (triggers_by_contract.end() == listed)
         {
-            PULSE_LOG_WARN("control",
-                           "ensureFuturesStops: list triggers for {} failed: {}",
-                           pos.symbol, error(triggers).message);
+            if (0 != trigger_list_failed.count(pos.symbol))
+            {
+                continue; // Retried on the next call.
+            }
+            auto response =
+                listTriggerOrders(nlohmann::json{ { "contract", pos.symbol } });
+            if (!ok(response))
+            {
+                trigger_list_failed.insert(pos.symbol);
+                PULSE_LOG_WARN(
+                    "control",
+                    "ensureFuturesStops: list triggers for {} failed: {}",
+                    pos.symbol, error(response).message);
+                // A previously verified stop stays trusted; only its next
+                // re-listing is pushed out, so a REST outage does not turn the
+                // per-tick loop into a 5 Hz retry storm on the shared mutex.
+                if (m_exchangeStops.end() != cached)
+                {
+                    cached->second.next_reverify =
+                        now_tp + kExchangeStopReverifyInterval;
+                }
+                continue;
+            }
+            listed = triggers_by_contract.emplace(pos.symbol, value(response))
+                         .first;
+        }
+
+        // 3a. Adopt an existing trigger only when it is a protective stop for
+        //     THIS position: a take-profit (profit-side rule), a trigger for
+        //     the other side, or a leftover stop priced off an earlier entry
+        //     (too far from this entry) must not suppress the catastrophe
+        //     stop.
+        bool covered = false;
+        std::string found_id;
+        for (const auto &trigger : listed->second)
+        {
+            if (!execution::isProtectiveStopTrigger(
+                    trigger, pos.side, pos.entry_price,
+                    m_cfg.risk.exchange_stop.pct, tick))
+            {
+                continue;
+            }
+            const auto id_it = trigger.find("id");
+            if (trigger.end() != id_it && id_it->is_string())
+            {
+                found_id = id_it->get<std::string>();
+            }
+            covered = true;
+            break;
+        }
+        if (covered)
+        {
+            m_exchangeStops[pos.position_id] = ExchangeStopRecord{
+                std::move(found_id), now_tp + kExchangeStopReverifyInterval };
             continue;
         }
-        if (!value(triggers).empty())
+
+        // 3b. A previously verified stop is no longer on the exchange: it was
+        //     cancelled (or consumed by a fill). The position is unprotected
+        //     from now on, so drop the record and re-plan at once.
+        if (m_exchangeStops.end() != cached)
         {
-            m_exchangeStopPositions.insert(pos.position_id);
-            continue;
+            PULSE_LOG_ERROR(
+                "control",
+                "ensureFuturesStops: recorded exchange stop {} for {} is no "
+                "longer open — re-planning the catastrophe stop",
+                cached->second.trigger_order_id, pos.position_id);
+            m_exchangeStops.erase(cached);
         }
 
         // 4. Plan the stop: round to the contract tick and refuse a stop the
         //    market has already gapped through.
-        const double tick = futuresPriceTick(pos.symbol);
         double last = 0.0;
         if (nullptr != m_futuresFeed)
         {
@@ -1901,10 +2023,17 @@ int EngineServices::ensureFuturesStops()
             pos.side, pos.entry_price, m_cfg.risk.exchange_stop.pct, tick, last);
         if (!plan.has_value())
         {
-            PULSE_LOG_WARN("control",
-                           "ensureFuturesStops: no valid stop for {} "
-                           "(entry={:.2f} tick={:.4f} last={:.2f})",
-                           pos.position_id, pos.entry_price, tick, last);
+            // An emergency, not a skipped tick: no exchange-native floor
+            // exists for a live leveraged position. The position stays OUT of
+            // the verified set, so the generic exit manager keeps custody
+            // (hasExchangeStop() is false); placement is retried every call.
+            PULSE_LOG_ERROR(
+                "control",
+                "ensureFuturesStops: cannot express an exchange stop for {} "
+                "(entry={:.2f} tick={:.4f} last={:.2f}) — the position is "
+                "unprotected on the exchange; the software exit manager "
+                "remains in charge",
+                pos.position_id, pos.entry_price, tick, last);
             continue;
         }
 
@@ -1927,7 +2056,18 @@ int EngineServices::ensureFuturesStops()
             continue; // Retried on the next call.
         }
 
-        m_exchangeStopPositions.insert(pos.position_id);
+        // The reply carries the created trigger object; its id is what a
+        // later revalidation reports when the stop disappears. A reply
+        // without an id still means the trigger exists — the classifier finds
+        // it on the next listing.
+        std::string trigger_id;
+        const auto placed_it = value(result).find("id");
+        if (value(result).end() != placed_it && placed_it->is_string())
+        {
+            trigger_id = placed_it->get<std::string>();
+        }
+        m_exchangeStops[pos.position_id] = ExchangeStopRecord{
+            std::move(trigger_id), now_tp + kExchangeStopReverifyInterval };
         ++placed;
         PULSE_LOG_INFO("control",
                        "Exchange stop placed for {} at {:.2f} (entry {:.2f})",
@@ -1935,12 +2075,11 @@ int EngineServices::ensureFuturesStops()
     }
 
     // 6. Forget positions that are no longer open.
-    for (auto it = m_exchangeStopPositions.begin();
-         it != m_exchangeStopPositions.end();)
+    for (auto it = m_exchangeStops.begin(); it != m_exchangeStops.end();)
     {
-        if (0 == live.count(*it))
+        if (0 == live.count(it->first))
         {
-            it = m_exchangeStopPositions.erase(it);
+            it = m_exchangeStops.erase(it);
         }
         else
         {
@@ -1949,6 +2088,14 @@ int EngineServices::ensureFuturesStops()
     }
 
     return placed;
+}
+
+bool EngineServices::hasExchangeStop(const std::string &position_id) const
+{
+    // A position is covered only while a trigger this engine has seen on the
+    // exchange is recorded for it. Absence is the fail-safe answer: callers
+    // then keep their own exit in charge instead of assuming protection.
+    return 0 != m_exchangeStops.count(position_id);
 }
 
 Result<nlohmann::json> EngineServices::listTriggerOrders(const nlohmann::json &params)
@@ -2552,6 +2699,22 @@ Result<nlohmann::json> EngineServices::modifySlTp(const nlohmann::json &params)
     {
         return PulseError{ ErrorCode::InternalError,
                            "modify_sl_tp: CFD infrastructure not configured" };
+    }
+
+    // An external (caller-authoritative) position's exchange-native stop is
+    // the protection floor that replaces PT's software exits. The caller may
+    // tighten it, but clearing it ("0" is the documented clear value) would
+    // leave the position with no exit custodian at all — PT's managers skip
+    // external positions while the floor exists, and the caller just removed
+    // the floor. Flatten through close_position instead.
+    if (has_sl && "external" == pos.origin
+        && 0.0 >= params["sl_price"].get<double>())
+    {
+        return PulseError{
+            ErrorCode::ControlInvalidRequest,
+            "modify_sl_tp: cannot clear the exchange stop of an external "
+            "position — it is the protection floor replacing PT's software "
+            "exits; close the position instead." };
     }
 
     // The modify endpoint addresses the EXCHANGE position id, exactly like

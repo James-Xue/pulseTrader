@@ -442,11 +442,15 @@ TEST(GoldTrader, ExternalPositionWithExchangeStopIsNeverManaged)
     EXPECT_EQ(1, h.positions.openPositionCount());
 }
 
-TEST(GoldTrader, ExternalPositionWithoutExchangeStopStaysManaged)
+TEST(GoldTrader, ExternalPositionWithoutExchangeStopIsNeverManaged)
 {
-    // Futures/spot externals cannot carry a CFD stop, and a CFD entry may omit
-    // the optional sl_price. Skipping such a position would leave it with NO
-    // stop anywhere, so the USD ladder keeps managing it.
+    // Exit ownership is absolute, not conditional on sl_price: an external
+    // position belongs to its caller for its whole life, so even a breach of
+    // the -8 USD hard stop must not close it. An external CFD entry without
+    // sl_price cannot exist through the control API any more — open_order
+    // rejects it on the protection floor — but a position recorded this way
+    // (legacy state, direct PositionManager use) must still never be driven
+    // by PT's USD ladder.
     Harness h;
     const auto id = h.open(Side::Buy, 0.01, 4000.0); // sl_price = 0
     h.positions.setOrigin(id, "external");
@@ -454,9 +458,13 @@ TEST(GoldTrader, ExternalPositionWithoutExchangeStopStaysManaged)
     h.price = 3991.9; // -8.10 USD hard-stop breach
     const auto result = h.tick(1);
 
-    EXPECT_EQ(1, result.evaluated);
-    EXPECT_EQ(1, result.closed);
-    EXPECT_EQ(1, h.closes);
+    EXPECT_EQ(0, result.evaluated);
+    EXPECT_EQ(0, result.closed);
+    EXPECT_EQ(0, result.stopPushed);
+    EXPECT_EQ(0, h.closes);
+    EXPECT_EQ(0, h.stop_attempts);
+    EXPECT_EQ(0u, h.trader->trackedPositions());
+    EXPECT_EQ(1, h.positions.openPositionCount());
 }
 
 TEST(GoldTrader, ExternalSkipLeavesManualPositionManaged)

@@ -81,9 +81,12 @@ class EngineServicesTest : public ::testing::Test
                                                   *m_drawdownGuard,
                                                   *m_rateLimiter);
         m_placer = std::make_unique<FakePlacer>();
+        // The same fake placer serves spot and CFD: the external protection
+        // floor tests need a CFD request that passes the floor and actually
+        // reaches the order flow, and futures tests build their own stack.
         m_flow = std::make_unique<OrderFlowExecutor>(
             m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
-            m_placer.get(), nullptr, nullptr,
+            m_placer.get(), nullptr, m_placer.get(),
             nullptr, nullptr, nullptr,
             nullptr, nullptr, m_restMutex, nullptr);
         m_board = std::make_unique<SignalBoard>(
@@ -284,16 +287,20 @@ TEST_F(EngineServicesTest, OpenOrderCallerSizeRequiresClientOrderId)
 {
     // A caller-authoritative size with no key cannot be de-duplicated: a
     // retry after a timeout would place a second order of exactly that size.
-    // The independent external-order gate sits BEFORE this check, so arm it
-    // here to keep this test focused on the idempotency contract.
+    // The external-order gate and the exchange-native protection floor sit
+    // BEFORE this check, so arm the gate and use a CFD order that satisfies
+    // the floor (sl_price) to keep this test focused on the idempotency
+    // contract.
     m_services->setExternalOrdersEnabled(true);
-    m_flow->setActiveMarket(MarketType::Spot);
 
     const auto result = m_services->openOrder(nlohmann::json{
-        { "symbol", "BTC_USDT" },
+        { "symbol", "XAUUSD" },
         { "side", "buy" },
-        { "quantity", 0.001 },
-        { "market_type", "spot" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4000.0 },
+        { "sl_price", 3900.0 },
         { "size_authority", "caller" },
     });
 
@@ -368,15 +375,18 @@ TEST_F(EngineServicesTest, CallerSizeRejectedWhileExternalOrdersDisabled)
 TEST_F(EngineServicesTest, CallerSizeAllowedWhenExternalOrdersEnabled)
 {
     m_services->setExternalOrdersEnabled(true);
-    m_flow->setActiveMarket(MarketType::Spot);
     EXPECT_TRUE(m_services->externalOrdersEnabled());
     EXPECT_TRUE(m_services->status()["external_orders_enabled"].get<bool>());
 
+    // CFD with an attached stop: the floor every external open must satisfy.
     const auto result = m_services->openOrder(nlohmann::json{
-        { "symbol", "BTC_USDT" },
+        { "symbol", "XAUUSD" },
         { "side", "buy" },
-        { "quantity", 0.001 },
-        { "market_type", "spot" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4000.0 },
+        { "sl_price", 3900.0 },
         { "size_authority", "caller" },
         { "client_order_id", "gt-ext-on-1" },
     });
@@ -482,13 +492,14 @@ TEST_F(EngineServicesTest, ExternalGateTogglesAtRuntime)
     // replay out of the assertions; the first (rejected) request proves the
     // gate does not consume the key, because the same request is placed once
     // the gate opens.
-    m_flow->setActiveMarket(MarketType::Spot);
-
     auto params = nlohmann::json{
-        { "symbol", "BTC_USDT" },
+        { "symbol", "XAUUSD" },
         { "side", "buy" },
-        { "quantity", 0.001 },
-        { "market_type", "spot" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4000.0 },
+        { "sl_price", 3900.0 },
         { "size_authority", "caller" },
         { "client_order_id", "gt-ext-toggle-1" },
     };
@@ -512,6 +523,175 @@ TEST_F(EngineServicesTest, ExternalGateTogglesAtRuntime)
     EXPECT_NE(std::string::npos,
               error(killed).message.find("[control] external_orders_enabled"));
     EXPECT_EQ(1, m_placer->place_calls);
+}
+
+// ---------------------------------------------------------------------------
+// Exchange-native protection floor for external opens
+//
+// PT software exits never manage an "external" position (ProtectiveExitManager
+// and the L7 GoldTrader skip them unconditionally, in every market), so a
+// caller-authoritative open must carry an exchange-native stop or it would
+// have no exit custodian at all. The floor sits after the external gate and
+// before the idempotency cache; the tests below pin each market's requirement.
+// ---------------------------------------------------------------------------
+TEST_F(EngineServicesTest, ExternalCfdWithoutSlPriceIsRejectedByProtectionFloor)
+{
+    m_services->setExternalOrdersEnabled(true);
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-cfd-1" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("must attach sl_price"));
+    EXPECT_EQ(0, m_placer->place_calls);
+
+    // sl_price = 0 is the documented "clear the stop" value (modify_sl_tp),
+    // not a level: it must not satisfy the floor either.
+    const auto zero_stop = nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "sl_price", 0.0 },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-cfd-zero" },
+    };
+    const auto zero_result = m_services->openOrder(zero_stop);
+    ASSERT_FALSE(ok(zero_result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(zero_result).code);
+    EXPECT_NE(std::string::npos,
+              error(zero_result).message.find("must attach sl_price"));
+    EXPECT_EQ(0, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, ExternalCfdWithSlPricePassesProtectionFloor)
+{
+    m_services->setExternalOrdersEnabled(true);
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "XAUUSD" },
+        { "side", "buy" },
+        { "quantity", 0.01 },
+        { "market_type", "cfd" },
+        { "type", "limit" },
+        { "price", 4000.0 },
+        { "sl_price", 3900.0 },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-cfd-2" },
+    });
+
+    // The floor must accept this order. Any failure from here on belongs to an
+    // unrelated stage (risk limits, placer wiring) — assert only that the
+    // floor's own message is absent.
+    if (ok(result))
+    {
+        EXPECT_EQ(1, m_placer->place_calls);
+    }
+    else
+    {
+        EXPECT_EQ(std::string::npos,
+                  error(result).message.find("must attach sl_price"))
+            << error(result).message;
+    }
+}
+
+TEST_F(EngineServicesTest, ExternalFuturesWithoutExchangeStopIsRejectedByProtectionFloor)
+{
+    // ExchangeStopConfig defaults to disabled in the fixture; without it
+    // ensureFuturesStops() never attaches the catastrophe trigger, so an
+    // external futures position would have no floor anywhere.
+    ASSERT_FALSE(m_cfg.risk.exchange_stop.enabled);
+    m_services->setExternalOrdersEnabled(true);
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "futures" },
+        { "type", "limit" },
+        { "price", 65000.0 },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-fut-1" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("exchange_stop_enabled = true"));
+    EXPECT_EQ(0, m_placer->place_calls);
+}
+
+TEST_F(EngineServicesTest, ExternalFuturesWithExchangeStopPassesProtectionFloor)
+{
+    // Enable the feature before constructing the service: EngineServices
+    // copies the config, so mutating m_cfg afterwards would not reach it.
+    m_cfg.risk.exchange_stop.enabled = true;
+    OrderFlowExecutor flow(
+        m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+        nullptr, m_placer.get(), nullptr,
+        nullptr, m_futuresTracker.get(), nullptr,
+        nullptr, nullptr, m_restMutex, nullptr);
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr,
+        nullptr, m_futuresTracker.get(), nullptr, flow, *m_board, m_restMutex);
+    svc.setExternalOrdersEnabled(true);
+
+    const auto result = svc.openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "futures" },
+        { "type", "limit" },
+        { "price", 65000.0 },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-fut-2" },
+    });
+
+    // As above: only the floor's own refusal is this test's subject.
+    if (ok(result))
+    {
+        EXPECT_EQ(1, m_placer->place_calls);
+    }
+    else
+    {
+        EXPECT_EQ(std::string::npos,
+                  error(result).message.find("exchange_stop_enabled"))
+            << error(result).message;
+    }
+}
+
+TEST_F(EngineServicesTest, ExternalSpotIsRejectedByProtectionFloor)
+{
+    // Spot has no exchange-native stop path (no price_sl, and the futures
+    // trigger orders do not exist there), so an external spot position could
+    // never be protected. Refuse it rather than open it unmanaged.
+    m_services->setExternalOrdersEnabled(true);
+    m_flow->setActiveMarket(MarketType::Spot);
+
+    const auto result = m_services->openOrder(nlohmann::json{
+        { "symbol", "BTC_USDT" },
+        { "side", "buy" },
+        { "quantity", 0.001 },
+        { "market_type", "spot" },
+        { "size_authority", "caller" },
+        { "client_order_id", "gt-floor-spot-1" },
+    });
+
+    ASSERT_FALSE(ok(result));
+    EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(result).code);
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("external spot orders are not supported"));
+    EXPECT_EQ(0, m_placer->place_calls);
 }
 
 TEST_F(EngineServicesTest, SetExternalOrdersRegisteredInMethodRegistry)
@@ -1076,6 +1256,56 @@ TEST_F(EngineServicesTest, ModifySlTpOnCfdPositionRequiresInfrastructure)
     ASSERT_FALSE(ok(result));
     EXPECT_NE(std::string::npos,
               error(result).message.find("infrastructure"));
+}
+
+TEST_F(EngineServicesTest, ModifySlTpRejectsClearingAnExternalStop)
+{
+    // An external position's exchange-native sl_price is the protection floor
+    // that replaces PT's software exits. Clearing it ("0" is the documented
+    // clear value) would leave the position with no exit custodian at all, so
+    // the runtime may tighten it but not remove it.
+    const auto opened = m_positionMgr->openPosition(
+        "XAUUSD", Side::Buy, 0.01, 4400.0, "s1", MarketType::Cfd, 100.0,
+        MarginMode::Cross, 1.0, 0.0, 4390.0, 0.0);
+    ASSERT_TRUE(ok(opened));
+    m_positionMgr->setOrigin(value(opened), "external");
+
+    // Wire the fixture's REST client onto the CFD slot: the guard sits after
+    // the infrastructure check, so without it the request would go on to REST.
+    EngineServices svc(
+        "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+        nullptr, nullptr, nullptr,
+        nullptr, nullptr, m_restClient.get(),
+        nullptr, nullptr, nullptr, *m_flow, *m_board, m_restMutex);
+
+    for (const double clear_value : { 0.0, -1.0 })
+    {
+        const auto cleared = svc.modifySlTp(nlohmann::json{
+            { "position_id", value(opened) }, { "sl_price", clear_value } });
+        ASSERT_FALSE(ok(cleared)) << clear_value;
+        EXPECT_EQ(ErrorCode::ControlInvalidRequest, error(cleared).code);
+        EXPECT_NE(std::string::npos,
+                  error(cleared).message.find("cannot clear the exchange stop"))
+            << error(cleared).message;
+    }
+
+    // Control: the same request on a PT-managed position is NOT blocked by
+    // the floor guard — it proceeds to the REST layer (which fails here for
+    // lack of credentials, a different error).
+    m_positionMgr->setOrigin(value(opened), "manual");
+    const auto manual_clear = svc.modifySlTp(nlohmann::json{
+        { "position_id", value(opened) }, { "sl_price", 0.0 } });
+    ASSERT_FALSE(ok(manual_clear));
+    EXPECT_EQ(std::string::npos,
+              error(manual_clear).message.find("cannot clear the exchange stop"))
+        << error(manual_clear).message;
+}
+
+TEST_F(EngineServicesTest, HasExchangeStopDefaultsToUnverified)
+{
+    // Absence is the fail-safe answer: with no verified record the caller's
+    // exit stays in charge instead of trusting a protection nobody placed.
+    EXPECT_FALSE(m_services->hasExchangeStop("BTC_USDT_Buy_1"));
 }
 
 TEST_F(EngineServicesTest, PositionsIncludeAttachedSlTp)

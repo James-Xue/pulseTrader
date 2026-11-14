@@ -211,7 +211,16 @@ class EngineServices
     ///      external_orders_enabled, see externalOrdersEnabled()). A rejected
     ///      request never reaches the idempotency cache, so enabling the gate
     ///      later lets the caller retry the same client_order_id.
-    ///   7. A definitive rejection is replayed; a transport failure that may
+    ///   7. Caller-authoritative non-reduce-only opens must also satisfy the
+    ///      exchange-native protection floor, because PT software exits keep
+    ///      out of an "external" position only while that floor exists: CFD
+    ///      requires sl_price > 0, futures requires
+    ///      [risk] exchange_stop_enabled = true (ensureFuturesStops()
+    ///      attaches the catastrophe stop), and spot is refused outright.
+    ///      Futures reduce_only closes are exempt (the exchange bounds them
+    ///      by the open position). Like the gate, this check precedes the
+    ///      cache, so a refusal does not consume the client_order_id.
+    ///   8. A definitive rejection is replayed; a transport failure that may
     ///      have reached the exchange is replayed as ControlOrderOutcomeUnknown
     ///      (reconcile, never assume "not placed"); a pre-flight failure
     ///      (rate limit, halt, notional/position limits) leaves the key
@@ -291,15 +300,37 @@ class EngineServices
     ///
     /// Behaviour:
     ///   1. No-op unless [risk] exchange_stop_enabled and futures REST wired.
-    ///   2. Positions already handled (cache) are skipped without REST calls.
-    ///   3. A contract that already has an open trigger is treated as
-    ///      covered (Gate's close-position trigger is whole-position).
-    ///   4. The trigger is rounded to the contract price unit and skipped
-    ///      when the stop is already breached (see planExchangeStop).
+    ///   2. A record whose next re-listing is not yet due is skipped without
+    ///      REST calls.
+    ///   3. An existing open trigger counts as the floor only when it closes
+    ///      THIS position side on the loss side of THIS entry
+    ///      (see execution::isProtectiveStopTrigger) — a take-profit or a
+    ///      leftover stop from an earlier entry does not.
+    ///   4. A recorded stop that vanished from the exchange listing is
+    ///      dropped (logged at ERROR) and re-planned, so a cancelled
+    ///      catastrophe trigger is not trusted forever.
+    ///   5. The new trigger is rounded to the contract price unit. When no
+    ///      safe stop can be expressed (the market already gapped through
+    ///      the level, or the price unit is unknown) the position is left
+    ///      OUT of the verified set and an ERROR is logged: the generic exit
+    ///      manager keeps custody instead of the position being considered
+    ///      covered.
     ///
     /// Returns the number of stops placed by this call.
-    /// Main-thread only (the position cache is not synchronized).
+    /// Main-thread only (the verified-stop cache is not synchronized).
     [[nodiscard]] int ensureFuturesStops();
+
+    /// True when ensureFuturesStops() holds a verified exchange-side stop for
+    /// this position id.
+    ///
+    /// This is the exit-ownership hand-off used by the ProtectiveExitManager
+    /// filter in runTrade(): PT's software exits skip an external futures
+    /// position only while this returns true, because the exchange is then
+    /// the exit custodian. When no stop is proven — never placed, impossible
+    /// to plan, or revalidation showed it cancelled — the generic exit
+    /// manager keeps custody rather than leaving the position naked.
+    /// Main-thread only (reads the ensureFuturesStops() cache).
+    [[nodiscard]] bool hasExchangeStop(const std::string &position_id) const;
 
     /// Cancel a trigger order by ID — `cancel_trigger_order`.
     /// Params: order_id (required).
@@ -460,7 +491,27 @@ class EngineServices
     };
     std::unordered_map<std::string, SpotPrice> m_spotPrices;
     std::unordered_map<std::string, double> m_priceTicks; ///< contract → order_price_round
-    std::unordered_set<std::string> m_exchangeStopPositions; ///< positions with a stop placed
+
+    /// One exchange-native catastrophe stop this engine has verified on the
+    /// exchange: the trigger order id (for diagnostics when it disappears)
+    /// and when the next re-listing is due.
+    struct ExchangeStopRecord
+    {
+        std::string trigger_order_id;
+        std::chrono::steady_clock::time_point next_reverify;
+    };
+
+    /// position_id → verified catastrophe stop. Grows when ensureFuturesStops()
+    /// places or adopts a trigger; re-listed when next_reverify falls due, so
+    /// a cancelled stop drops out instead of being trusted forever.
+    /// Main-thread only.
+    std::unordered_map<std::string, ExchangeStopRecord> m_exchangeStops;
+
+    /// How long a recorded stop is trusted without re-listing the contract.
+    /// 30 s bounds the exposure of a stop cancelled out-of-band (operator in
+    /// the Gate app, another tool) while keeping the REST cost at two listings
+    /// per contract per minute.
+    static constexpr std::chrono::seconds kExchangeStopReverifyInterval{ 30 };
 
     /// open_order duplicate suppression keyed by client_order_id. Lives for
     /// the engine's lifetime; see the contract on openOrder() and the state

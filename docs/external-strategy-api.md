@@ -88,22 +88,67 @@ live, so a position can always be flattened (spot/CFD closes use
 the same request succeeds once the gate is enabled. `get_status` reports the
 live value; a restart returns to the TOML value.
 
-### 4. Origin and exit ownership — including the restart caveat
+### 4. Origin and exit ownership — including the protection floor
 
 Each position carries an in-memory `origin` that decides who owns the exit:
 
 | Origin | Meaning | Exit owner |
 |---|---|---|
-| `"external"` | Filled from a `size_authority: "caller"` order | The caller (GT/runtime) **while the exchange-native floor exists** — a CFD position with `sl_price` > 0. PT's L7 GoldTrader USD ladder and ProtectiveExitManager skip exactly that case. A CFD entry without `sl_price`, or any futures/spot external position, has no exchange-side stop, so PT's exit managers keep managing it rather than leave it unprotected. |
+| `"external"` | Filled from a `size_authority: "caller"` order | The caller (GT/runtime) — **while the exchange-native floor is proven**. The L7 GoldTrader USD ladder never runs on an external position. ProtectiveExitManager skips it only when the CFD `sl_price > 0` or the futures catastrophe trigger has been verified by `ensureFuturesStops()`; when no floor exists (or it cannot be placed), the generic percentage manager keeps custody as a fail-safe. |
 | `"strategy"` | Any non-caller-authoritative order carrying a `client_order_id` (the signal path always mints one) | PT |
 | `"manual"` | Keyless one-shot, or an exchange position imported by sync | PT |
 
-The runtime's safety floor is the exchange-native stop attached at entry (CFD
-`sl_price` / `tp_price`), which fires even if both the runtime and the engine
-are down. Attach `sl_price` to every caller-authoritative CFD entry — without
-it the position is treated as unprotected and PT applies its own exit logic.
-Futures and spot orders cannot carry that stop (`open_order` rejects
-`sl_price`/`tp_price` for them), so their external positions stay PT-managed.
+Exit ownership is exclusive: one position has exactly one exit owner. PT's
+software exits are strategy logic (percentage trailing stop,
+`[risk.stop_loss] max_hold_seconds`, the take-profit ladder, the USD dynamic
+stop), not risk custody, so GT is the sole exit owner of its positions while
+the exchange-native floor is in place.
+
+The floor is enforced at two moments, because entry alone is not enough:
+
+- `open_order` rejects a caller-authoritative, non-reduce-only open without a
+  floor (see below).
+- At runtime, `ensureFuturesStops()` re-lists each futures contract's open
+  triggers every 30 s. A catastrophe trigger cancelled out-of-band (the Gate
+  app, `cancel_trigger_order`) is detected, logged at ERROR, and re-placed;
+  until it is back, PT's generic exit manager keeps custody rather than
+  trusting a stop that no longer exists. An existing trigger only counts as
+  the floor when it closes the position's own side, triggers on the loss side
+  of its entry price, and sits no farther from that entry than
+  `exchange_stop_pct` — a take-profit, or a leftover stop from an earlier
+  entry at a very different price, does not.
+
+A CFD stop cannot be removed through `modify_sl_tp`: `sl_price = 0` is
+rejected for an `"external"` position. Tighten the stop as needed, or flatten
+the position through `close_position`.
+
+Because PT is not their primary exit owner, **every external open must carry
+an exchange-native protection floor at entry time**. `open_order` enforces this
+and rejects a caller-authoritative, non-reduce-only open without one:
+
+| Market | Floor requirement | Rejection message |
+|---|---|---|
+| CFD | `sl_price` > 0 on the entry order (`price_sl` on the TradFi order body) | `external CFD orders must attach sl_price (the exchange-native stop is the protection floor).` |
+| Futures | `[risk] exchange_stop_enabled = true`, so `ensureFuturesStops()` attaches a whole-position reduce-only trigger at `[risk] exchange_stop_pct` from entry | `external futures orders require [risk] exchange_stop_enabled = true so ensureFuturesStops() can attach a catastrophe stop.` |
+| Spot | No exchange-native stop path exists | `external spot orders are not supported (no exchange-native stop path).` |
+
+Exact TOML keys:
+
+```toml
+[risk]
+exchange_stop_enabled = true
+exchange_stop_pct     = 0.05
+```
+
+The stop fires even if both the runtime and the engine are down — that is what
+makes caller exit ownership safe. `exchange_stop_pct` should be wider than the
+runtime's own stop distance (5 % in this example) so the catastrophe trigger
+never competes with the caller's exit; it is a dead-man floor, not a strategy
+exit. A futures `reduce_only` close is exempt from the floor: the exchange
+enforces the flag, which bounds the order by the open position, and a close
+must stay possible even while the stop feature is disabled. A refused external
+open does not consume its `client_order_id`, so the same request can be
+retried once `sl_price` or the TOML key is in place.
 
 **Restart caveat.** `origin` is not persisted. After an engine restart,
 `sync_positions` re-imports the exchange position as `"manual"` — the exchange
