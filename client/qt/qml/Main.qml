@@ -164,9 +164,8 @@ ApplicationWindow {
                 }
 
                 // Window controls live at the top-right. The group keeps the
-                // macOS colours but uses the Windows order at the operator's
-                // request (2026-11-16): minimize, maximize, then close at the
-                // far right.
+                // macOS colours but uses the operator's order (2026-11-16):
+                // maximize, minimize, then close at the far right.
                 TrafficLights {
                     anchors.verticalCenter: parent.verticalCenter
                     target: root
