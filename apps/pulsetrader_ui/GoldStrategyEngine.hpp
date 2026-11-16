@@ -63,10 +63,6 @@ class GoldStrategyEngine
         std::atomic<double> openVolumeLots{ 0.01 };      ///< Open size (lots) per signal.
         std::atomic<double> openLeverage{ 1.0 };         ///< Simulated margin leverage (real-CFD model).
         std::atomic<int> openProtectMin{ 10 };           ///< Minutes after market open with entries blocked.
-        // Real-position auto-follow (throttled PUT of live CFD stops).
-        std::atomic<bool> autoFollowReal{ false };       ///< Master switch (default OFF — real writes).
-        std::atomic<int> followIntervalSec{ 30 };        ///< Min seconds between follow PUTs.
-        std::atomic<double> followThresholdPoints{ 2.0 };///< Min price move to trigger a follow.
     };
 
     explicit GoldStrategyEngine(

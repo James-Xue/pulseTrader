@@ -16,12 +16,20 @@
 
 #include "ui_MainWindow.h"
 
+#include <QColor>
 #include <QDateTime>
+#include <QHeaderView>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPointer>
 #include <QMetaObject>
+#include <QPushButton>
+#include <QSignalBlocker>
 #include <QStringList>
+#include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QVariant>
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +48,13 @@ namespace
 constexpr auto kPollInterval = std::chrono::seconds(1);
 // How often a persistent failure is reported to the log pane.
 constexpr auto kErrorReportInterval = std::chrono::seconds(10);
+
+// Trailing column of the 真实持仓 table — one 平仓 button per row.
+constexpr int kRealPositionCloseColumn = 8;
+// The two editable price columns: double-clicking a cell and committing a
+// value writes it back to the real Gate position.
+constexpr int kTakeProfitColumn = 5;
+constexpr int kStopLossColumn = 6;
 
 // Current Beijing time as "YYYY-MM-DD HH:MM:SS", stamped onto every price
 // the panes print.
@@ -65,6 +80,59 @@ double safeField(const nlohmann::json &obj, const char *key)
         return pulse::ui::VerifyWorker::jsonToDouble(obj[key]);
     }
     return 0.0;
+}
+
+// Format a CFD quote for the 真实持仓 table. The position payload carries no
+// price precision and the roster mixes 2-decimal metals/indices with 3-5
+// decimal forex pairs, so print up to 5 decimals and trim the noise, keeping
+// at least the two decimals the rest of the window uses.
+QString formatPositionPrice(double price)
+{
+    if (0.0 >= price)
+    {
+        return QStringLiteral("-");
+    }
+    QString text = QString::number(price, 'f', 5);
+    int decimals = 5;
+    while (2 < decimals && text.endsWith(QLatin1Char('0')))
+    {
+        text.chop(1);
+        --decimals;
+    }
+    return text;
+}
+
+// "+1.23" / "-0.45" — the sign is part of the value so a profit is never
+// mistaken for a loss at a glance. Values that round to 0.00 are shown as
+// "+0.00" rather than the misleading "-0.00".
+QString formatSignedUsd(double amount)
+{
+    if (0.0 > amount && -0.005 < amount)
+    {
+        amount = 0.0;
+    }
+    const QString sign = (0.0 <= amount) ? QStringLiteral("+") : QString();
+    return sign + QString::number(amount, 'f', 2);
+}
+
+// Payload for PUT /tradfi/positions/{id}: Gate takes the protective prices as
+// decimal strings, and "0" clears one of them.
+QString stopPricePayload(double price)
+{
+    if (0.0 >= price)
+    {
+        return QStringLiteral("0");
+    }
+    return QString::number(price, 'f', 6);
+}
+
+// XAUUSD quotes with two decimals (symbol detail: price_precision = 2).
+// Rounding a computed stop here keeps the manager's comparison against the
+// exchange snapshot stable: an unrounded 8U distance would be resubmitted
+// forever because Gate stores the rounded value the next refresh reads back.
+double roundXauPrice(double price)
+{
+    return std::round(price * 100.0) / 100.0;
 }
 
 // Pearson correlation of two aligned price-change series. Returns nullopt
@@ -108,77 +176,63 @@ std::optional<double> pearsonCorrelation(const std::deque<double> &x,
     return covariance / std::sqrt(varianceX * varianceY);
 }
 
-// Query the live XAUUSD CFD positions and apply the strategy stops
-// (price ± points, side-aware) via putCfdPositionModify. Runs on the poll
-// thread — throttled by the caller. Returns the per-position results.
-std::vector<pulse::ui::RealStopsResult> followRealStopsOnce(
-    pulse::exchange::GateRestClient &cfd, double tpPoints, double slPoints,
-    double tolerance)
+} // namespace
+
+// ---------------------------------------------------------------------------
+// 黄金交易员 strategy roster
+// ---------------------------------------------------------------------------
+
+const std::vector<SimGateSystem::GoldTraderStrategyInfo> &
+SimGateSystem::goldTraderStrategies()
 {
-    std::vector<pulse::ui::RealStopsResult> results;
-    const auto res = cfd.getCfdPositions();
-    if (false == pulse::ok(res))
-    {
-        pulse::ui::RealStopsResult failure;
-        failure.ok = false;
-        failure.error = QString::fromStdString(pulse::error(res).message);
-        results.push_back(failure);
-        return results;
-    }
-    const nlohmann::json *obj = pulse::ui::VerifyWorker::unwrapData(
-        pulse::ui::VerifyWorker::firstObject(pulse::value(res)));
-    if (nullptr == obj || false == obj->contains("list") || false == (*obj)["list"].is_array())
-    {
-        pulse::ui::RealStopsResult failure;
-        failure.ok = false;
-        failure.error = QStringLiteral("持仓响应格式异常");
-        results.push_back(failure);
-        return results;
-    }
-    for (const auto &p : (*obj)["list"])
-    {
-        if (false == p.is_object() || "XAUUSD" != p.value("symbol", ""))
-        {
-            continue;
-        }
-        const double volume = safeField(p, "volume");
-        const double entry = safeField(p, "price_open");
-        if (volume <= 0.0 || entry <= 0.0)
-        {
-            continue;
-        }
-        const QString id = QString::number(
-            static_cast<std::int64_t>(safeField(p, "position_id")));
-        const bool isLong = ("Long" == p.value("position_dir", ""));
-        // Strategy stops anchored on the ENTRY price (fixed point targets).
-        const double tp = isLong ? entry + tpPoints : entry - tpPoints;
-        const double sl = isLong ? entry - slPoints : entry + slPoints;
-
-        // Skip when the exchange already carries the target stops (within
-        // tolerance) — avoids pointless writes every poll cycle.
-        const double curSl = safeField(p, "price_sl");
-        const double curTp = safeField(p, "price_tp");
-        if (tolerance > 0.0 && curSl > 0.0 && curTp > 0.0
-            && std::abs(curSl - sl) <= tolerance && std::abs(curTp - tp) <= tolerance)
-        {
-            continue;
-        }
-
-        const auto modify = cfd.putCfdPositionModify(
-            id.toStdString(), std::to_string(sl), std::to_string(tp));
-        pulse::ui::RealStopsResult r;
-        r.id = id;
-        r.ok = pulse::ok(modify);
-        if (false == r.ok)
-        {
-            r.error = QString::fromStdString(pulse::error(modify).message);
-        }
-        results.push_back(r);
-    }
-    return results;
+    // Numbered from 1 in display order. To add a strategy, append its entry
+    // here and add the matching dispatch in autoManageRealStops(); the
+    // strategy-number combo box and the startup log follow automatically.
+    static const std::vector<GoldTraderStrategyInfo> strategies = {
+        GoldTraderStrategyInfo{
+            1,
+            QStringLiteral("动态止损"),
+            QStringLiteral("亏损 → 8U 止损；盈利 > 2U → 保本损；再与 1 分钟超级趋势"
+                           "（多留 1U 缓冲，避免插针）比较取更优；每秒记录峰值浮盈，"
+                           "最大浮盈 − 峰值回撤（默认 5U）参与比较，回撤达到该值"
+                           "立即市价平仓；只收紧不放宽。")},
+    };
+    return strategies;
 }
 
-} // namespace
+int SimGateSystem::selectedGoldTraderStrategy() const
+{
+    const int number = ui->combo_goldTraderStrategy->currentData().toInt();
+    return (0 < number) ? number : 0;
+}
+
+void SimGateSystem::logGoldTraderRoster()
+{
+    const auto &strategies = goldTraderStrategies();
+    appendLog(QStringLiteral("[黄金交易员] 已加载策略清单（共 %1 个，下拉框可切换）：")
+                  .arg(strategies.size()));
+    for (const GoldTraderStrategyInfo &strategy : strategies)
+    {
+        appendLog(QStringLiteral("[黄金交易员]   策略 %1：%2 — %3")
+                      .arg(strategy.number)
+                      .arg(strategy.name, strategy.summary));
+    }
+    const int selected = selectedGoldTraderStrategy();
+    QString selectedName;
+    for (const GoldTraderStrategyInfo &strategy : strategies)
+    {
+        if (strategy.number == selected)
+        {
+            selectedName = strategy.name;
+            break;
+        }
+    }
+    appendLog(QStringLiteral("[黄金交易员] 当前选择：策略 %1（%2）"
+                             "（点击“启动黄金交易员”后生效）")
+                  .arg(selected)
+                  .arg(selectedName.isEmpty() ? QStringLiteral("未选择")
+                                              : selectedName));
+}
 
 SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
                              const QString &apiKey,
@@ -191,6 +245,31 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
     , m_strategyParams(std::make_shared<pulse::ui::GoldStrategyEngine::Params>())
 {
     ui->setupUi(this);
+
+    // 真实持仓 table: the symbol column takes the spare width, the numeric
+    // columns size to their headers. Row content is filled by
+    // onRealPositionsUpdated() from the background position refresh.
+    QHeaderView *positionsHeader = ui->table_realPositions->horizontalHeader();
+    positionsHeader->setSectionResizeMode(0, QHeaderView::Stretch);
+    positionsHeader->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(kTakeProfitColumn,
+                                          QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(kStopLossColumn,
+                                          QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(7, QHeaderView::ResizeToContents);
+    positionsHeader->setSectionResizeMode(kRealPositionCloseColumn,
+                                          QHeaderView::ResizeToContents);
+    // A little taller than the text-only rows so the 平仓 button fits.
+    ui->table_realPositions->verticalHeader()->setDefaultSectionSize(28);
+    // Only the TP/SL cells keep Qt::ItemIsEditable (set per item below), and
+    // a committed edit is synced to the real position.
+    ui->table_realPositions->setEditTriggers(QAbstractItemView::DoubleClicked
+                                             | QAbstractItemView::EditKeyPressed);
+    connect(ui->table_realPositions, &QTableWidget::itemChanged, this,
+            &SimGateSystem::onRealPositionItemChanged);
 
     // Cap the trade pane so a long run cannot grow memory without bound
     // (QTextEdit has no block cap of its own — the document has). The log and
@@ -232,6 +311,19 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
     refreshSimBalance(0.0);
     refreshSimPositions(0.0);
 
+    // Real account holdings: fetch once immediately (before the engine is
+    // started) and keep the table current with a 1 s refresh. A read-only key
+    // can display positions even though it cannot modify them. The fetch is
+    // attempted even when the login's CFD probe failed — that probe may have
+    // lost a transient network round trip, and a genuine permission error is
+    // shown in the table instead.
+    showRealPositionsMessage(QStringLiteral("读取中..."));
+    m_realPositionsTimer.setInterval(1'000);
+    connect(&m_realPositionsTimer, &QTimer::timeout, this,
+            &SimGateSystem::refreshRealPositions);
+    m_realPositionsTimer.start();
+    refreshRealPositions();
+
     // Open the SQLite order store (schema is idempotent). A failure only
     // disables the order history — paper trading keeps running.
     if (pulse::ui::SimOrderDb::init())
@@ -246,6 +338,21 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
     }
 
     appendLog(QStringLiteral("[引擎] 就绪：点击“启动引擎”开始轮询 XAUUSD 行情并运行策略。"));
+
+    // Populate the 策略号 combo from the same roster that feeds the startup
+    // log. itemData carries the strategy number, the text is "策略 N：名称".
+    // Signals are blocked while filling: the initial selection must not be
+    // reported as a user switch.
+    {
+        const QSignalBlocker blocker(ui->combo_goldTraderStrategy);
+        for (const GoldTraderStrategyInfo &strategy : goldTraderStrategies())
+        {
+            ui->combo_goldTraderStrategy->addItem(
+                QStringLiteral("策略 %1：%2").arg(strategy.number).arg(strategy.name),
+                strategy.number);
+        }
+    }
+    logGoldTraderRoster();
 
     // Once-per-minute XAU/USIDX/XBRUSD relation report. The timer is started
     // and stopped with the engine polling (see start/stopEnginePolling), so
@@ -279,9 +386,9 @@ void SimGateSystem::applyParamsFromUi()
     m_strategyParams->openLeverage.store(static_cast<double>(ui->spin_leverage->value()));
     m_strategyParams->cooldownMs.store(static_cast<std::int64_t>(ui->spin_cooldown->value()) * 1000);
     m_strategyParams->openProtectMin.store(ui->spin_protectMin->value());
-    m_strategyParams->autoFollowReal.store(ui->check_autoFollow->isChecked());
-    m_strategyParams->followIntervalSec.store(ui->spin_followInterval->value());
-    m_strategyParams->followThresholdPoints.store(ui->spin_followThreshold->value());
+    // The real-position automatic stops are managed by autoManageRealStops()
+    // on the UI thread and read the 自动止损 controls directly; they do not go
+    // through the engine's Params.
 }
 
 SimGateSystem::~SimGateSystem()
@@ -440,6 +547,902 @@ void SimGateSystem::refreshSimBalance(double price)
 }
 
 // ---------------------------------------------------------------------------
+// 真实持仓 — live CFD positions shown in the table right after login.
+// The refresh timer is independent of the engine poll: holdings and their
+// floating PnL must be visible even while the strategy is stopped.
+// ---------------------------------------------------------------------------
+
+void SimGateSystem::refreshRealPositions()
+{
+    // Skip a tick when the previous request is still in flight (the proxy can
+    // take several seconds); overlapping detached threads would only queue
+    // identical reads.
+    if (true == m_realPositionsFetching.exchange(true, std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+    const pulse::ExchangeConfig cfg =
+        pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
+    QPointer<SimGateSystem> self(this);
+    std::thread([self, cfg]() {
+        std::vector<pulse::ui::CfdPosition> positions;
+        QString error;
+        pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
+        const auto res = cfd.getCfdPositions();
+        if (pulse::ok(res))
+        {
+            const auto parsed =
+                pulse::ui::VerifyWorker::parseCfdPositions(pulse::value(res));
+            if (parsed.has_value())
+            {
+                positions = *parsed;
+            }
+            else
+            {
+                error = QStringLiteral("持仓响应格式异常");
+            }
+        }
+        else
+        {
+            const QString message = QString::fromStdString(pulse::error(res).message);
+            // Translate the two credential/permission classes the user can
+            // act on; transport errors keep Gate's own message.
+            if (message.contains("403"))
+            {
+                error = QStringLiteral("权限不足（HTTP 403），该 Key 未开通 CFD 持仓读取权限");
+            }
+            else if (message.contains("401"))
+            {
+                error = QStringLiteral("API Key 或 Secret 无效（HTTP 401）");
+            }
+            else
+            {
+                error = message;
+            }
+        }
+        QMetaObject::invokeMethod(
+            self, [self, positions, error]() {
+                if (self)
+                {
+                    self->onRealPositionsUpdated(positions, error);
+                }
+            },
+            Qt::QueuedConnection);
+    }).detach();
+}
+
+void SimGateSystem::onRealPositionsUpdated(
+    const std::vector<pulse::ui::CfdPosition> &positions, const QString &error)
+{
+    // The request is finished as soon as its result reaches the UI thread, so
+    // the next timer tick may start a fresh one.
+    m_realPositionsFetching.store(false, std::memory_order_release);
+
+    // Feed the automatic stop manager even when the table repaint below is
+    // paused by an open editor: the exchange values are still fresh. A
+    // failed fetch keeps the last snapshot but marks it stale, so the
+    // manager never writes a stop based on values it cannot re-confirm.
+    if (error.isEmpty())
+    {
+        m_realPositions = positions;
+        m_realPositionsUpdatedMs = QDateTime::currentMSecsSinceEpoch();
+        // Drop throttle state for positions that no longer exist.
+        for (auto it = m_autoStopStates.begin(); it != m_autoStopStates.end();)
+        {
+            const bool stillOpen =
+                std::any_of(positions.begin(), positions.end(),
+                            [&it](const pulse::ui::CfdPosition &position) {
+                                return position.id == it->first;
+                            });
+            if (stillOpen)
+            {
+                ++it;
+            }
+            else
+            {
+                it = m_autoStopStates.erase(it);
+            }
+        }
+    }
+    else
+    {
+        m_realPositionsUpdatedMs = 0;
+    }
+
+    QTableWidget *table = ui->table_realPositions;
+
+    // Never rewrite the table while an in-cell editor is open. Qt's delegate
+    // pushes changed model data back into the editor, so the 1 s refresh would
+    // erase whatever the user is typing in a 止盈/止损 cell. Skip this tick;
+    // the next one runs as soon as the editor closes.
+    const QLineEdit *editor = table->findChild<QLineEdit *>();
+    if (nullptr != editor && editor->isVisible())
+    {
+        return;
+    }
+
+    if (false == error.isEmpty())
+    {
+        showRealPositionsMessage(QStringLiteral("读取失败：%1").arg(error));
+        return;
+    }
+    if (positions.empty())
+    {
+        showRealPositionsMessage(QStringLiteral("无持仓"));
+        return;
+    }
+
+    // Programmatic text updates must not look like user edits.
+    m_updatingRealPositionsTable = true;
+    table->clearSpans();
+
+    // Rebuild the rows only when the position set changes. The per-row 平仓
+    // buttons must survive the 1 s refresh — recreating them each tick would
+    // swallow a click whose press and release straddle the timer.
+    const int rowCount = static_cast<int>(positions.size());
+    bool rebuild = (table->rowCount() != rowCount);
+    if (false == rebuild)
+    {
+        for (int row = 0; row < rowCount; ++row)
+        {
+            const QTableWidgetItem *nameItem = table->item(row, 0);
+            if (nullptr == nameItem
+                || nameItem->data(Qt::UserRole).toString()
+                       != positions[static_cast<std::size_t>(row)].id)
+            {
+                rebuild = true;
+                break;
+            }
+        }
+    }
+    if (rebuild)
+    {
+        // Dropping to zero rows also removes the old cell widgets.
+        table->setRowCount(0);
+        table->setRowCount(rowCount);
+    }
+
+    for (int row = 0; row < rowCount; ++row)
+    {
+        const pulse::ui::CfdPosition &position =
+            positions[static_cast<std::size_t>(row)];
+        const bool isLong = (QStringLiteral("short") != position.side);
+
+        // Text cells: created on a rebuild, updated in place otherwise. Only
+        // the TP/SL cells accept editing.
+        const auto setCell = [table, row, rebuild](int column, const QString &text,
+                                                   Qt::Alignment alignment,
+                                                   bool editable) {
+            QTableWidgetItem *item = rebuild ? nullptr : table->item(row, column);
+            if (nullptr == item)
+            {
+                item = new QTableWidgetItem();
+                item->setTextAlignment(alignment);
+                table->setItem(row, column, item);
+            }
+            item->setText(text);
+            if (editable)
+            {
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
+            }
+            else
+            {
+                item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            }
+            return item;
+        };
+
+        // The symbol alone keeps the name column short; the direction has its
+        // own column because a hedged account can hold the same symbol both
+        // ways.
+        QTableWidgetItem *nameItem =
+            setCell(0, position.symbol, Qt::AlignLeft | Qt::AlignVCenter, false);
+        nameItem->setData(Qt::UserRole, position.id);
+        nameItem->setToolTip(QStringLiteral("持仓 ID：%1").arg(position.id));
+
+        setCell(1, isLong ? QStringLiteral("多仓") : QStringLiteral("空仓"),
+                Qt::AlignCenter, false);
+        setCell(2, QString::number(position.volumeLots, 'f', 2),
+                Qt::AlignRight | Qt::AlignVCenter, false);
+        setCell(3, formatPositionPrice(position.entryPrice),
+                Qt::AlignRight | Qt::AlignVCenter, false);
+        setCell(4, formatPositionPrice(position.markPrice),
+                Qt::AlignRight | Qt::AlignVCenter, false);
+        // Exchange-native protective stops; a position without a TP/SL keeps
+        // these cells empty rather than showing a misleading 0.00. Both cells
+        // are editable: a committed value is PUT to the real position.
+        //
+        // While this position's PUT is in flight, leave the cells showing the
+        // values the user just committed instead of snapping back to the
+        // exchange's pre-modify snapshot.
+        const bool modifying =
+            (m_modifyingPositionIds.end() != m_modifyingPositionIds.find(position.id));
+        if (rebuild || false == modifying)
+        {
+            QTableWidgetItem *tpItem =
+                setCell(kTakeProfitColumn,
+                        (0.0 < position.priceTp)
+                            ? formatPositionPrice(position.priceTp)
+                            : QString(),
+                        Qt::AlignRight | Qt::AlignVCenter, true);
+            tpItem->setData(Qt::UserRole, position.priceTp);
+            QTableWidgetItem *slItem =
+                setCell(kStopLossColumn,
+                        (0.0 < position.priceSl)
+                            ? formatPositionPrice(position.priceSl)
+                            : QString(),
+                        Qt::AlignRight | Qt::AlignVCenter, true);
+            slItem->setData(Qt::UserRole, position.priceSl);
+        }
+        QTableWidgetItem *pnlItem =
+            setCell(7, formatSignedUsd(position.unrealizedPnl),
+                    Qt::AlignRight | Qt::AlignVCenter, false);
+        // Chinese market convention: profit red, loss green. Clearing the
+        // role restores the default text colour when the PnL is exactly zero.
+        if (0.0 < position.unrealizedPnl)
+        {
+            pnlItem->setForeground(QColor(QStringLiteral("#c62828")));
+        }
+        else if (0.0 > position.unrealizedPnl)
+        {
+            pnlItem->setForeground(QColor(QStringLiteral("#2e7d32")));
+        }
+        else
+        {
+            pnlItem->setData(Qt::ForegroundRole, QVariant());
+        }
+
+        const bool closing =
+            (m_closingPositionIds.end() != m_closingPositionIds.find(position.id));
+        if (rebuild)
+        {
+            auto *closeButton = new QPushButton(
+                closing ? QStringLiteral("平仓中") : QStringLiteral("平仓"));
+            closeButton->setEnabled(false == closing);
+            connect(closeButton, &QPushButton::clicked, this,
+                    [this, position]() { closeRealPosition(position); });
+            table->setCellWidget(row, kRealPositionCloseColumn, closeButton);
+        }
+        else
+        {
+            auto *closeButton = qobject_cast<QPushButton *>(
+                table->cellWidget(row, kRealPositionCloseColumn));
+            if (nullptr != closeButton)
+            {
+                closeButton->setText(closing ? QStringLiteral("平仓中")
+                                             : QStringLiteral("平仓"));
+                closeButton->setEnabled(false == closing);
+            }
+        }
+    }
+    m_updatingRealPositionsTable = false;
+}
+
+void SimGateSystem::showRealPositionsMessage(const QString &text)
+{
+    QTableWidget *table = ui->table_realPositions;
+    m_updatingRealPositionsTable = true;
+    table->clearSpans();
+    // Drop the per-row 平仓 buttons together with the data rows.
+    for (int row = 0; row < table->rowCount(); ++row)
+    {
+        table->removeCellWidget(row, kRealPositionCloseColumn);
+    }
+    table->setRowCount(0);
+    table->setRowCount(1);
+    table->setSpan(0, 0, 1, table->columnCount());
+    auto *item = new QTableWidgetItem(text);
+    item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    item->setToolTip(text); // long transport errors are clipped by the row
+    table->setItem(0, 0, item);
+    m_updatingRealPositionsTable = false;
+}
+
+void SimGateSystem::onRealPositionItemChanged(QTableWidgetItem *item)
+{
+    if (m_updatingRealPositionsTable || nullptr == item)
+    {
+        return;
+    }
+    const int column = item->column();
+    if (kTakeProfitColumn != column && kStopLossColumn != column)
+    {
+        return;
+    }
+
+    QTableWidget *table = ui->table_realPositions;
+    QTableWidgetItem *nameItem = table->item(item->row(), 0);
+    if (nullptr == nameItem)
+    {
+        return;
+    }
+    const QString id = nameItem->data(Qt::UserRole).toString();
+    if (id.isEmpty())
+    {
+        return;
+    }
+
+    // Reject a malformed value and restore the last accepted one. Empty is a
+    // VALID edit: it clears that protective price on the exchange ("0").
+    const QString text = item->text().trimmed();
+    bool parsed = false;
+    const double newPrice = text.isEmpty() ? 0.0 : text.toDouble(&parsed);
+    if (false == text.isEmpty() && (false == parsed || 0.0 >= newPrice))
+    {
+        const double previous = item->data(Qt::UserRole).toDouble();
+        m_updatingRealPositionsTable = true;
+        item->setText((0.0 < previous) ? formatPositionPrice(previous)
+                                       : QString());
+        m_updatingRealPositionsTable = false;
+        QMessageBox::warning(
+            this, QStringLiteral("价格无效"),
+            QStringLiteral("请输入大于 0 的价格，或留空以清除该价格。"));
+        return;
+    }
+
+    // Don't stack writes on one position — the second PUT could reach Gate
+    // before the first and leave the older stops attached. An automatic stop
+    // update holds the same row.
+    if (m_modifyingPositionIds.end() != m_modifyingPositionIds.find(id)
+        || m_autoStopInFlight.end() != m_autoStopInFlight.find(id))
+    {
+        const double previous = item->data(Qt::UserRole).toDouble();
+        m_updatingRealPositionsTable = true;
+        item->setText((0.0 < previous) ? formatPositionPrice(previous)
+                                       : QString());
+        m_updatingRealPositionsTable = false;
+        appendLog(QStringLiteral("[真实持仓] %1 的止盈止损正在同步，请稍候再改")
+                      .arg(nameItem->text()));
+        return;
+    }
+
+    // Accept the edit locally, canonicalise the cell and remember the value,
+    // so an edit of the OTHER price sends this one along. `previous` is the
+    // exchange value from the last refresh — needed to spot a no-op edit.
+    const double previous = item->data(Qt::UserRole).toDouble();
+    const bool unchanged = std::abs(newPrice - previous) <= 1e-9;
+    m_updatingRealPositionsTable = true;
+    item->setText((0.0 < newPrice) ? formatPositionPrice(newPrice) : QString());
+    item->setData(Qt::UserRole, newPrice);
+    m_updatingRealPositionsTable = false;
+
+    // Gate rejects a modification that does not change either price with
+    // HTTP 400 INVALID_ARGUMENT ("Invalid parameter"). Committing the same
+    // value (or clearing an already-empty cell) must therefore stay local.
+    if (unchanged)
+    {
+        appendLog(QStringLiteral("[真实持仓] %1 的%2价格未变化，未提交")
+                      .arg(nameItem->text(),
+                           (kTakeProfitColumn == column) ? QStringLiteral("止盈")
+                                                         : QStringLiteral("止损")));
+        return;
+    }
+
+    QTableWidgetItem *tpItem = table->item(item->row(), kTakeProfitColumn);
+    QTableWidgetItem *slItem = table->item(item->row(), kStopLossColumn);
+    if (nullptr == tpItem || nullptr == slItem)
+    {
+        return;
+    }
+    const double tp = tpItem->data(Qt::UserRole).toDouble();
+    const double sl = slItem->data(Qt::UserRole).toDouble();
+    const QString symbol = nameItem->text();
+
+    m_modifyingPositionIds.insert(id);
+    appendLog(QStringLiteral("[真实持仓] %1 提交止盈/止损：TP %2 / SL %3")
+                  .arg(symbol,
+                       (0.0 < tp) ? formatPositionPrice(tp) : QStringLiteral("无"),
+                       (0.0 < sl) ? formatPositionPrice(sl) : QStringLiteral("无")));
+
+    const pulse::ExchangeConfig cfg =
+        pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
+    // Both fields are always sent; "0" clears one on Gate's side.
+    const QString tpPayload = stopPricePayload(tp);
+    const QString slPayload = stopPricePayload(sl);
+    QPointer<SimGateSystem> self(this);
+    std::thread([self, cfg, id, symbol, tp, sl, tpPayload, slPayload]() {
+        pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
+        // Argument order is (id, SL, TP).
+        const auto res = cfd.putCfdPositionModify(
+            id.toStdString(), slPayload.toStdString(), tpPayload.toStdString());
+        const bool ok = pulse::ok(res);
+        const QString error =
+            ok ? QString() : QString::fromStdString(pulse::error(res).message);
+        QMetaObject::invokeMethod(
+            self, [self, id, symbol, tp, sl, ok, error]() {
+                if (self)
+                {
+                    self->onRealStopsSynced(id, symbol, tp, sl, ok, error);
+                }
+            },
+            Qt::QueuedConnection);
+    }).detach();
+}
+
+void SimGateSystem::onRealStopsSynced(const QString &positionId,
+                                      const QString &symbol, double tp, double sl,
+                                      bool ok, const QString &error)
+{
+    m_modifyingPositionIds.erase(positionId);
+    const QString tpText =
+        (0.0 < tp) ? formatPositionPrice(tp) : QStringLiteral("无");
+    const QString slText =
+        (0.0 < sl) ? formatPositionPrice(sl) : QStringLiteral("无");
+    if (ok)
+    {
+        const QString text = QStringLiteral("%1 止盈 %2 / 止损 %3 已同步到 Gate")
+                                 .arg(symbol, tpText, slText);
+        appendTrade(QStringLiteral("[止盈止损] %1").arg(text));
+        appendLog(QStringLiteral("[真实持仓] %1").arg(text));
+    }
+    else
+    {
+        const QString text =
+            QStringLiteral("%1 止盈止损同步失败：%2").arg(symbol, error);
+        appendLog(QStringLiteral("[真实持仓] %1").arg(text));
+        QMessageBox::warning(this, QStringLiteral("同步失败"), text);
+    }
+    // Re-read the exchange values: a failure restores the true stops, and a
+    // success confirms exactly what Gate accepted.
+    refreshRealPositions();
+}
+
+void SimGateSystem::closeRealPosition(const pulse::ui::CfdPosition &position,
+                                      bool silent)
+{
+    if (m_closingPositionIds.end() != m_closingPositionIds.find(position.id))
+    {
+        return; // a close for this position is already in flight
+    }
+
+    // One click = REAL market close: POST /tradfi/positions/{id}/close with
+    // close_type 2 (full). No confirmation dialog — direct close, as
+    // requested. The in-flight set below prevents a second click from
+    // stacking a duplicate request.
+    // Show the request as in flight before it leaves the UI thread.
+    m_closingPositionIds.insert(position.id);
+    QTableWidget *table = ui->table_realPositions;
+    for (int row = 0; row < table->rowCount(); ++row)
+    {
+        const QTableWidgetItem *nameItem = table->item(row, 0);
+        if (nullptr == nameItem
+            || nameItem->data(Qt::UserRole).toString() != position.id)
+        {
+            continue;
+        }
+        auto *button = qobject_cast<QPushButton *>(
+            table->cellWidget(row, kRealPositionCloseColumn));
+        if (nullptr != button)
+        {
+            button->setText(QStringLiteral("平仓中"));
+            button->setEnabled(false);
+        }
+        break;
+    }
+
+    const pulse::ExchangeConfig cfg =
+        pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
+    const QString id = position.id;
+    const QString symbol = position.symbol;
+    QPointer<SimGateSystem> self(this);
+    std::thread([self, cfg, id, symbol, silent]() {
+        pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
+        // close_type 2 = full close (the endpoint takes no volume).
+        const auto res = cfd.postCfdPositionClose(id.toStdString(), 2);
+        const bool ok = pulse::ok(res);
+        const QString error =
+            ok ? QString() : QString::fromStdString(pulse::error(res).message);
+        QMetaObject::invokeMethod(
+            self, [self, id, symbol, ok, error, silent]() {
+                if (self)
+                {
+                    self->onRealPositionClosed(id, symbol, ok, error, silent);
+                }
+            },
+            Qt::QueuedConnection);
+    }).detach();
+}
+
+void SimGateSystem::onRealPositionClosed(const QString &positionId,
+                                         const QString &symbol, bool ok,
+                                         const QString &error, bool silent)
+{
+    m_closingPositionIds.erase(positionId);
+    if (ok)
+    {
+        // Drop it from the local snapshot now: the confirming GET is still in
+        // flight, and the unattended peak-drawdown path must not see this row
+        // and fire a second close against a position that is already gone.
+        m_realPositions.erase(
+            std::remove_if(m_realPositions.begin(), m_realPositions.end(),
+                           [&positionId](const pulse::ui::CfdPosition &p) {
+                               return p.id == positionId;
+                           }),
+            m_realPositions.end());
+        m_autoStopStates.erase(positionId);
+
+        const QString text = QStringLiteral("%1 已市价全平（持仓 ID %2）")
+                                 .arg(symbol, positionId);
+        appendTrade(QStringLiteral("[平仓] %1").arg(text));
+        appendLog(QStringLiteral("[真实持仓] %1").arg(text));
+    }
+    else
+    {
+        const QString text =
+            QStringLiteral("%1 平仓失败：%2").arg(symbol, error);
+        appendLog(QStringLiteral("[真实持仓] %1").arg(text));
+        if (false == silent)
+        {
+            QMessageBox::warning(this, QStringLiteral("平仓失败"), text);
+        }
+    }
+    // Re-read now; if a timed fetch is already in flight it is skipped and
+    // that request (or the next 1 s tick) refreshes the row and its button.
+    refreshRealPositions();
+}
+
+// ---------------------------------------------------------------------------
+// 自动止损 — manage the LIVE XAUUSD stops from the 1 m SuperTrend.
+//
+// Policy (requested 2026-11-12):
+//   * floating PnL < 0               → 8U loss stop (8 USD / (lots × 100))
+//   * floating PnL > +2 USD          → break-even stop: entry + 0.2 (long) /
+//                                      entry − 0.2 (short)
+//   * 0 ≤ PnL ≤ +2 with no stop yet  → the 8U stop as a protection floor
+//   * every positive PnL sample      → peak-PnL trail: the stop price for
+//                                      (max PnL − 回撤U) competes with the
+//                                      8U / break-even / SuperTrend stops;
+//                                      the tightest one wins
+//   * drawdown from peak ≥ 回撤U     → immediate market close (the trail stop
+//                                      can no longer be placed)
+//
+// A stop is never loosened: the stop already on the exchange wins whenever it
+// is tighter. Every candidate is also compared with the 1 m SuperTrend line
+// placed 1U beyond the line in the loss direction (room against pin-bar
+// wicks) — if that buffered stop is still better (tighter) than the 8U /
+// break-even / peak stop and the line sits on the protective side of the
+// market, it becomes the stop. Writes are throttled per position and skipped
+// when nothing changed — Gate rejects no-op modifications with HTTP 400.
+// ---------------------------------------------------------------------------
+
+void SimGateSystem::autoManageRealStops(double price,
+                                        const pulse::ui::TickOutcome &outcome)
+{
+    if (false == ui->check_goldTrader->isChecked()
+        || false == ui->check_autoFollow->isChecked() || false == m_tradfiWritable)
+    {
+        return;
+    }
+    // Strategy dispatch: only number 1 is implemented today. A future roster
+    // entry gets its own branch here; an unknown number does nothing rather
+    // than silently running another strategy's rules.
+    if (1 != selectedGoldTraderStrategy())
+    {
+        return;
+    }
+    if (0.0 >= price || m_realPositions.empty() || 0 == m_realPositionsUpdatedMs)
+    {
+        return;
+    }
+
+    const std::int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
+    // Act only on a fresh position snapshot: the 1 s refresh normally renews
+    // it, and a network outage must freeze automatic writes instead of
+    // letting them run on stale stops/PnL.
+    if (nowMs - m_realPositionsUpdatedMs > 10'000)
+    {
+        return;
+    }
+
+    // The 1 m SuperTrend line. Other timeframes are display-only here.
+    const pulse::ui::TrendInfo *trend1m = nullptr;
+    for (const auto &trend : outcome.trends)
+    {
+        if (trend.valid && QLatin1String("1m") == trend.label)
+        {
+            trend1m = &trend;
+            break;
+        }
+    }
+
+    const std::int64_t intervalMs =
+        static_cast<std::int64_t>(ui->spin_followInterval->value()) * 1000;
+    const double minDelta = ui->spin_followThreshold->value();
+    // Maximum giveback from the highest floating PnL (USD). The equivalent
+    // stop price competes with the tier/SuperTrend stops; once the giveback
+    // is fully used, the position is closed at market.
+    const double givebackU = ui->spin_peakGiveback->value();
+
+    for (auto &position : m_realPositions)
+    {
+        if (QStringLiteral("XAUUSD") != position.symbol || position.id.isEmpty()
+            || 0.0 >= position.volumeLots || 0.0 >= position.entryPrice)
+        {
+            continue;
+        }
+
+        const bool isLong = (QStringLiteral("short") != position.side);
+        // Use the live polled tick (the same price the SuperTrend was
+        // evaluated on); the snapshot's mark is up to 1 s older.
+        const double mark = (0.0 < price) ? price : position.markPrice;
+        if (mark <= 0.0)
+        {
+            continue;
+        }
+
+        // 0.01 lot of XAUUSD = 1 oz → one full price unit is (lots × 100) USD.
+        const double usdPerPrice = position.volumeLots * 100.0;
+        const double livePnl = isLong ? (mark - position.entryPrice) * usdPerPrice
+                                      : (position.entryPrice - mark) * usdPerPrice;
+
+        // Per-position state. The peak is updated BEFORE the write throttle
+        // and in-flight guards: the maximum PnL is sampled every second even
+        // while a previous stop write is still running.
+        AutoStopState &state = m_autoStopStates[position.id];
+        if (0.0 < livePnl && livePnl > state.peakPnl)
+        {
+            state.peakPnl = livePnl;
+            state.hasPositivePeak = true;
+        }
+
+        // The peak trail is checked before the write throttle: once the
+        // position has given back the full allowance, the trail stop price is
+        // at or through the market and cannot be placed — close at market now.
+        if (state.hasPositivePeak && state.peakPnl - livePnl >= givebackU)
+        {
+            if (m_closingPositionIds.end() == m_closingPositionIds.find(position.id)
+                && (0 == state.lastPeakCloseMs
+                    || nowMs - state.lastPeakCloseMs >= 5'000))
+            {
+                state.lastPeakCloseMs = nowMs;
+                appendLog(
+                    QStringLiteral("[峰值回撤] %1 浮盈从最高 %2U 回撤到 %3U"
+                                   "（回撤 %4U ≥ %5U），立即市价平仓。")
+                        .arg(position.symbol)
+                        .arg(state.peakPnl, 0, 'f', 2)
+                        .arg(livePnl, 0, 'f', 2)
+                        .arg(state.peakPnl - livePnl, 0, 'f', 2)
+                        .arg(givebackU, 0, 'f', 2));
+                closeRealPosition(position, true);
+            }
+            continue;
+        }
+
+        // One write per position at a time. A manual TP/SL edit or a close
+        // also owns the row until its request completes.
+        if (m_autoStopInFlight.end() != m_autoStopInFlight.find(position.id)
+            || m_modifyingPositionIds.end() != m_modifyingPositionIds.find(position.id)
+            || m_closingPositionIds.end() != m_closingPositionIds.find(position.id))
+        {
+            continue;
+        }
+
+        if (0 != state.lastAttemptMs && nowMs - state.lastAttemptMs < intervalMs)
+        {
+            continue;
+        }
+
+        const double lossStop = isLong
+                                    ? position.entryPrice - 8.0 / usdPerPrice
+                                    : position.entryPrice + 8.0 / usdPerPrice;
+        // 保本损: lock in 0.2 price units (0.2 USD per 0.01 lot of gold).
+        const double breakEvenStop = isLong ? position.entryPrice + 0.2
+                                            : position.entryPrice - 0.2;
+
+        // The tier stop is the starting candidate. The peak trail and the
+        // 1 m SuperTrend then compete with it; the most protective one wins.
+        std::optional<double> candidate;
+        QString reason;
+        if (0.0 > position.unrealizedPnl)
+        {
+            candidate = lossStop;
+            reason = QStringLiteral("8U 亏损止损");
+        }
+        else if (2.0 < position.unrealizedPnl)
+        {
+            candidate = breakEvenStop;
+            reason = QStringLiteral("保本损");
+        }
+        else if (0.0 >= position.priceSl)
+        {
+            // Between the two requested tiers but still unprotected: give
+            // the position the 8U loss cap as a floor.
+            candidate = lossStop;
+            reason = QStringLiteral("8U 保护止损");
+        }
+        // else: 0..+2 USD with a stop already attached — no tier candidate,
+        // but the peak/ST candidates below may still tighten it.
+
+        // Peak-PnL trail: stop price equivalent to (max PnL − givebackU).
+        // Only active once the position has actually been in profit. It is
+        // compared with the best tier stop: long → higher wins, short → lower.
+        if (state.hasPositivePeak)
+        {
+            const double peakStop =
+                isLong ? position.entryPrice + (state.peakPnl - givebackU) / usdPerPrice
+                       : position.entryPrice - (state.peakPnl - givebackU) / usdPerPrice;
+            if (false == candidate.has_value()
+                || (isLong ? peakStop > *candidate : peakStop < *candidate))
+            {
+                candidate = peakStop;
+                reason = QStringLiteral("峰值回撤 %1U（最高 %2U）")
+                             .arg(givebackU, 0, 'f', 2)
+                             .arg(state.peakPnl, 0, 'f', 2);
+            }
+        }
+
+        // The 1 m SuperTrend competes with EVERY candidate — including the
+        // 8U loss stop right after opening. The line is given 1U of extra
+        // room in the loss direction (the user's "再多亏损 1U"), and the
+        // resulting stop is used when it is still better (tighter):
+        //   long  → higher is better (less loss / more locked profit)
+        //   short → lower is better.
+        if (nullptr != trend1m && 0.0 < trend1m->supertrend
+            && (isLong ? trend1m->supertrend < mark
+                       : trend1m->supertrend > mark))
+        {
+            const double stBuffer = 1.0 / usdPerPrice; // 1 USD in price units
+            const double trendStop = isLong ? trend1m->supertrend - stBuffer
+                                            : trend1m->supertrend + stBuffer;
+            if (false == candidate.has_value()
+                || (isLong ? trendStop > *candidate : trendStop < *candidate))
+            {
+                candidate = trendStop;
+                reason = QStringLiteral("1m 超级趋势（多留 1U）");
+            }
+        }
+
+        if (false == candidate.has_value())
+        {
+            continue;
+        }
+
+        // Snap to XAUUSD's 2-decimal quote precision before comparing against
+        // the exchange values (see roundXauPrice).
+        double target = roundXauPrice(*candidate);
+
+        // Never loosen an existing protection.
+        if (0.0 < position.priceSl
+            && (isLong ? position.priceSl > target
+                       : position.priceSl < target))
+        {
+            continue;
+        }
+
+        // Gate requires the stop to sit on the protective side of the market
+        // and not too close to it (XAUUSD price_sl_level = 50 points = 0.50).
+        constexpr double kMinStopDistance = 0.5;
+        if (isLong ? target > mark - kMinStopDistance
+                   : target < mark + kMinStopDistance)
+        {
+            // The 8U level is already reached/crossed, or 8U is closer to the
+            // market than Gate's minimum stop distance (a large position): it
+            // cannot be placed there. Say so, but only once a minute — this
+            // state persists until the price recovers.
+            if (reason.startsWith(QStringLiteral("8U")))
+            {
+                state.lastAttemptMs = nowMs;
+                if (0 == state.lastWarningMs
+                    || nowMs - state.lastWarningMs >= 60'000)
+                {
+                    state.lastWarningMs = nowMs;
+                    appendLog(
+                        QStringLiteral("[自动止损] %1 无法挂出 8U 止损：目标价 %2 "
+                                       "距市价不足 0.50 或已在市价错误一侧"
+                                       "（亏损接近/超过 8U，或手数过大）。")
+                            .arg(position.symbol, formatPositionPrice(lossStop)));
+                }
+            }
+            continue;
+        }
+
+        // A just-sent target may take a moment to appear in the 1 s position
+        // refresh; do not mistake that lag for a missing stop and resend it.
+        if (0.0 < state.lastSentSl && nowMs - state.lastSentMs < 15'000
+            && std::abs(target - state.lastSentSl) <= 1e-9)
+        {
+            continue;
+        }
+        if (std::abs(target - position.priceSl) <= 1e-6)
+        {
+            continue; // already exactly where we want it — Gate rejects no-ops.
+        }
+        // Sub-threshold trailing moves are noise; the fixed 8U/保本 tiers
+        // are always applied when they first become relevant.
+        if ((reason.startsWith(QStringLiteral("1m 超级趋势"))
+             || reason.startsWith(QStringLiteral("峰值回撤")))
+            && 0.0 < position.priceSl
+            && std::abs(target - position.priceSl) < minDelta)
+        {
+            continue;
+        }
+
+        state.lastAttemptMs = nowMs;
+        submitAutoRealStop(position, target, reason);
+    }
+}
+
+void SimGateSystem::submitAutoRealStop(const pulse::ui::CfdPosition &position,
+                                       double stopPrice, const QString &reason)
+{
+    const QString id = position.id;
+    const QString symbol = position.symbol;
+    // Gate takes both protective prices; omitting the TP would CLEAR it, so
+    // carry the position's current TP through every automatic SL write.
+    const QString slPayload = stopPricePayload(stopPrice);
+    const QString tpPayload = stopPricePayload(position.priceTp);
+
+    m_autoStopInFlight.insert(id);
+    AutoStopState &state = m_autoStopStates[id];
+    state.lastSentSl = stopPrice;
+    state.lastSentMs = QDateTime::currentMSecsSinceEpoch();
+
+    const pulse::ExchangeConfig cfg =
+        pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
+    QPointer<SimGateSystem> self(this);
+    std::thread([self, cfg, id, symbol, stopPrice, reason, slPayload, tpPayload]() {
+        pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
+        // Argument order is (id, SL, TP).
+        const auto res = cfd.putCfdPositionModify(
+            id.toStdString(), slPayload.toStdString(), tpPayload.toStdString());
+        const bool ok = pulse::ok(res);
+        const QString error =
+            ok ? QString() : QString::fromStdString(pulse::error(res).message);
+        QMetaObject::invokeMethod(
+            self, [self, id, symbol, stopPrice, reason, ok, error]() {
+                if (self)
+                {
+                    self->onAutoRealStopSynced(id, symbol, stopPrice, reason, ok,
+                                               error);
+                }
+            },
+            Qt::QueuedConnection);
+    }).detach();
+}
+
+void SimGateSystem::onAutoRealStopSynced(const QString &positionId,
+                                         const QString &symbol, double stopPrice,
+                                         const QString &reason, bool ok,
+                                         const QString &error)
+{
+    m_autoStopInFlight.erase(positionId);
+    const auto stateIt = m_autoStopStates.find(positionId);
+    if (stateIt != m_autoStopStates.end() && false == ok)
+    {
+        // Allow a retry (after the throttle) with the same target.
+        stateIt->second.lastSentSl = 0.0;
+        stateIt->second.lastSentMs = 0;
+    }
+
+    if (ok)
+    {
+        // Mirror the accepted value into the local snapshot immediately: the
+        // next 1 s GET confirms it, and until then the manager must not see
+        // the pre-modify stop and submit the same target again.
+        for (auto &position : m_realPositions)
+        {
+            if (position.id == positionId)
+            {
+                position.priceSl = stopPrice;
+                break;
+            }
+        }
+        const QString text = QStringLiteral("%1 止损已自动更新为 %2（%3）")
+                                 .arg(symbol, formatPositionPrice(stopPrice), reason);
+        appendTrade(QStringLiteral("[自动止损] %1").arg(text));
+        appendLog(QStringLiteral("[自动止损] %1").arg(text));
+    }
+    else
+    {
+        // Unattended path: log only, never a modal dialog.
+        appendLog(QStringLiteral("[自动止损] %1 止损更新失败（目标 %2，%3）：%4")
+                      .arg(symbol, formatPositionPrice(stopPrice), reason, error));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 动态止盈止损 — LIVE positions: query the real CFD positions, then apply
 // the strategy's TP/SL (current price ± points) via putCfdPositionModify.
 // This is a REAL write operation — never touches the paper account.
@@ -473,42 +1476,22 @@ void SimGateSystem::fetchRealPositions()
         pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
     QPointer<SimGateSystem> self(this);
     std::thread([self, cfg]() {
-        std::vector<pulse::ui::RealPosition> positions;
+        std::vector<pulse::ui::CfdPosition> positions;
         pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
         const auto res = cfd.getCfdPositions();
         if (pulse::ok(res))
         {
-            const nlohmann::json *obj = pulse::ui::VerifyWorker::unwrapData(
-                pulse::ui::VerifyWorker::firstObject(pulse::value(res)));
-            if (nullptr != obj && obj->contains("list") && (*obj)["list"].is_array())
+            const auto parsed =
+                pulse::ui::VerifyWorker::parseCfdPositions(pulse::value(res));
+            if (parsed.has_value())
             {
-                for (const auto &p : (*obj)["list"])
+                // Only gold positions get the strategy's gold stops.
+                for (const auto &position : *parsed)
                 {
-                    if (false == p.is_object())
+                    if (QStringLiteral("XAUUSD") == position.symbol)
                     {
-                        continue;
+                        positions.push_back(position);
                     }
-                    // Only gold positions get the strategy's gold stops.
-                    if ("XAUUSD" != p.value("symbol", ""))
-                    {
-                        continue;
-                    }
-                    const double volume = safeField(p, "volume");
-                    if (volume <= 0.0)
-                    {
-                        continue;
-                    }
-                    pulse::ui::RealPosition pos;
-                    pos.id = QString::number(
-                        static_cast<std::int64_t>(safeField(p, "position_id")));
-                    pos.side = ("Long" == p.value("position_dir", ""))
-                                   ? QStringLiteral("long")
-                                   : QStringLiteral("short");
-                    pos.volumeLots = volume;
-                    pos.entryPrice = safeField(p, "price_open");
-                    pos.priceSl = safeField(p, "price_sl");
-                    pos.priceTp = safeField(p, "price_tp");
-                    positions.push_back(pos);
                 }
             }
         }
@@ -523,7 +1506,7 @@ void SimGateSystem::fetchRealPositions()
     }).detach();
 }
 
-void SimGateSystem::onRealPositionsFetched(const std::vector<pulse::ui::RealPosition> &positions)
+void SimGateSystem::onRealPositionsFetched(const std::vector<pulse::ui::CfdPosition> &positions)
 {
     if (positions.empty())
     {
@@ -566,7 +1549,7 @@ void SimGateSystem::onRealPositionsFetched(const std::vector<pulse::ui::RealPosi
     applyRealStops(positions);
 }
 
-void SimGateSystem::applyRealStops(const std::vector<pulse::ui::RealPosition> &positions)
+void SimGateSystem::applyRealStops(const std::vector<pulse::ui::CfdPosition> &positions)
 {
     const double tpPoints = m_strategyParams->tpPoints.load();
     const double slPoints = m_strategyParams->slPoints.load();
@@ -583,10 +1566,20 @@ void SimGateSystem::applyRealStops(const std::vector<pulse::ui::RealPosition> &p
             // Anchored on the position's entry price.
             const double tp = isLong ? pos.entryPrice + tpPoints : pos.entryPrice - tpPoints;
             const double sl = isLong ? pos.entryPrice - slPoints : pos.entryPrice + slPoints;
-            const auto res = cfd.putCfdPositionModify(
-                pos.id.toStdString(), std::to_string(sl), std::to_string(tp));
             pulse::ui::RealStopsResult r;
             r.id = pos.id;
+            // Gate rejects a modification that changes neither price
+            // (HTTP 400 INVALID_ARGUMENT), so an already-matching position is
+            // reported as applied without a write.
+            if (std::abs(pos.priceSl - sl) <= 1e-9
+                && std::abs(pos.priceTp - tp) <= 1e-9)
+            {
+                r.ok = true;
+                results.push_back(r);
+                continue;
+            }
+            const auto res = cfd.putCfdPositionModify(
+                pos.id.toStdString(), std::to_string(sl), std::to_string(tp));
             r.ok = pulse::ok(res);
             if (false == r.ok)
             {
@@ -598,7 +1591,7 @@ void SimGateSystem::applyRealStops(const std::vector<pulse::ui::RealPosition> &p
             self, [self, results]() {
                 if (self)
                 {
-                    self->onRealStopsApplied(results, 0.0, false);
+                    self->onRealStopsApplied(results, 0.0);
                 }
             },
             Qt::QueuedConnection);
@@ -606,26 +1599,24 @@ void SimGateSystem::applyRealStops(const std::vector<pulse::ui::RealPosition> &p
 }
 
 void SimGateSystem::onRealStopsApplied(const std::vector<pulse::ui::RealStopsResult> &results,
-                                       double price, bool autoMode)
+                                       double price)
 {
-    const QString modeText = autoMode ? QStringLiteral("[跟随]") : QStringLiteral("[止损]");
     int okCount = 0;
     for (const auto &r : results)
     {
         if (r.ok)
         {
             okCount++;
-            appendTrade(QStringLiteral("%1 持仓 %2：止盈止损已更新（按 %3 计算）。")
-                            .arg(modeText, r.id)
+            appendTrade(QStringLiteral("[止损] 持仓 %1：止盈止损已更新（按 %2 计算）。")
+                            .arg(r.id)
                             .arg(price, 0, 'f', 2));
         }
         else
         {
-            appendTrade(QStringLiteral("%1 持仓 %2：设置失败 — %3").arg(modeText, r.id, r.error));
+            appendTrade(QStringLiteral("[止损] 持仓 %1：设置失败 — %2").arg(r.id, r.error));
         }
     }
-    appendLog(QStringLiteral("%1 真实持仓止盈止损：%2/%3 成功。")
-                  .arg(autoMode ? QStringLiteral("自动跟随") : QStringLiteral("手动设置"))
+    appendLog(QStringLiteral("[止损] 真实持仓止盈止损：%1/%2 成功。")
                   .arg(okCount)
                   .arg(results.size()));
 }
@@ -732,6 +1723,69 @@ void SimGateSystem::on_pushBtn_stopEngine_clicked()
     stopEnginePolling();
 }
 
+void SimGateSystem::on_check_goldTrader_toggled(bool checked)
+{
+    if (checked)
+    {
+        const int number = selectedGoldTraderStrategy();
+        QString name = QStringLiteral("未知策略");
+        for (const GoldTraderStrategyInfo &strategy : goldTraderStrategies())
+        {
+            if (strategy.number == number)
+            {
+                name = strategy.name;
+                break;
+            }
+        }
+        appendLog(QStringLiteral("[黄金交易员] 已启动：执行策略 %1（%2），"
+                                 "开始动态调整真实持仓止损。")
+                      .arg(number)
+                      .arg(name));
+        if (false == m_polling)
+        {
+            // The strategy needs the live price and the 1 m SuperTrend, both
+            // produced by the engine poll. Arm-and-start in one action.
+            appendLog(QStringLiteral("[黄金交易员] 行情轮询未运行，正在自动启动引擎..."));
+            startEnginePolling();
+        }
+    }
+    else
+    {
+        // Disarming is a deliberate stop: forget peak/throttle state so a
+        // later re-arm starts a fresh trail instead of closing on a drawdown
+        // that happened while the strategy was off.
+        m_autoStopStates.clear();
+        appendLog(QStringLiteral("[黄金交易员] 已停止：只展示订单数据，不再自动调整止损"
+                                 "（已挂在交易所的止损仍然有效）。"));
+    }
+}
+
+void SimGateSystem::on_combo_goldTraderStrategy_currentIndexChanged(int index)
+{
+    if (0 > index)
+    {
+        return;
+    }
+    const int number = selectedGoldTraderStrategy();
+    for (const GoldTraderStrategyInfo &strategy : goldTraderStrategies())
+    {
+        if (strategy.number == number)
+        {
+            appendLog(QStringLiteral("[黄金交易员] 已切换策略 %1：%2 — %3")
+                          .arg(strategy.number)
+                          .arg(strategy.name, strategy.summary));
+            break;
+        }
+    }
+    // Each strategy has its own thresholds and peak semantics; state gathered
+    // under the previous strategy must not leak into the new one.
+    m_autoStopStates.clear();
+    if (ui->check_goldTrader->isChecked())
+    {
+        appendLog(QStringLiteral("[黄金交易员] 新策略已立即生效，峰值统计从头开始。"));
+    }
+}
+
 void SimGateSystem::startEnginePolling()
 {
     m_polling = true;
@@ -752,6 +1806,50 @@ void SimGateSystem::startEnginePolling()
     appendLog(QStringLiteral("[关联] 每分钟在日志中输出 XAU/USIDX/XBRUSD 的分钟涨跌"
                              "及与 XAU 的相关性（近 30 分钟滚动）。"));
 
+    // Automatic real-stop management starts with this engine run: reset the
+    // write throttles/guards so the first decision is immediate, but KEEP the
+    // peak-PnL trail of positions that are still open — an engine restart
+    // must not forget how much profit the position has already given back.
+    for (auto &entry : m_autoStopStates)
+    {
+        entry.second.lastAttemptMs = 0;
+        entry.second.lastSentSl = 0.0;
+        entry.second.lastSentMs = 0;
+        entry.second.lastWarningMs = 0;
+        entry.second.lastPeakCloseMs = 0;
+    }
+    if (false == ui->check_goldTrader->isChecked())
+    {
+        appendLog(QStringLiteral("[黄金交易员] 未启动：只展示订单数据，不自动调整止损。"
+                                 "点击“启动黄金交易员”后才会执行。"));
+    }
+    else if (ui->check_autoFollow->isChecked())
+    {
+        if (m_tradfiWritable)
+        {
+            const double givebackU = ui->spin_peakGiveback->value();
+            appendLog(QStringLiteral(
+                          "[自动止损] 已启用：浮动亏损→8U 止损；盈利>+2U→"
+                          "保本损（开仓价±0.2）；每秒记录最大浮盈，"
+                          "最大浮盈 − %1U 作为候选止损，与 8U/保本/1m 超级趋势"
+                          "比较取最优；回撤达到 %2U 立即市价平仓；"
+                          "超级趋势价再往亏损方向留 1U 缓冲（避免插针），"
+                          "仍更优时改用它；只收紧不放宽。")
+                          .arg(givebackU, 0, 'f', 2)
+                          .arg(givebackU, 0, 'f', 2));
+        }
+        else
+        {
+            appendLog(QStringLiteral("[自动止损] 未启用：当前 Key 对 CFD 仅有只读权限，"
+                                     "无法修改真实持仓止损。"));
+        }
+    }
+    else
+    {
+        appendLog(QStringLiteral("[黄金交易员] 已启动，但“自动止损”未勾选："
+                                 "只展示订单数据，不调整止损。"));
+    }
+
     // The REST calls block for up to ~10 s on network failures — never run
     // them on the UI thread. The poll threads post results back via a
     // QPointer-guarded queued invocation; closing the window mid-poll is
@@ -762,13 +1860,8 @@ void SimGateSystem::startEnginePolling()
     // atomic fields, the engine reads them every round. The shared_ptr keeps
     // the block alive even if the window is destroyed mid-poll.
     const std::shared_ptr<pulse::ui::GoldStrategyEngine::Params> params = m_strategyParams;
-    // Real-position auto-follow shares the write-permission gate of the
-    // manual button (a read-only key would be rejected by the exchange).
-    const bool tradfiWritable = m_tradfiWritable;
     QPointer<SimGateSystem> self(this);
-    m_pollThread = std::thread([self, cfg, params, tradfiWritable]() {
-        // Auto-follow throttle state (poll-thread local).
-        std::int64_t lastFollowTs = 0;
+    m_pollThread = std::thread([self, cfg, params]() {
         // Live CFD balance refresh throttle (poll-thread local).
         std::int64_t lastBalanceTs = 0;
         pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
@@ -908,34 +2001,6 @@ void SimGateSystem::startEnginePolling()
                             }
                         }
 
-                        // Auto-follow (throttled): every followIntervalSec,
-                        // if the price has moved at least followThresholdPoints
-                        // since the last follow, re-apply the strategy stops
-                        // to the LIVE XAUUSD positions (a real write — gated
-                        // on the key's write permission).
-                        if (tradfiWritable && params->autoFollowReal.load())
-                        {
-                            const std::int64_t intervalMs =
-                                static_cast<std::int64_t>(params->followIntervalSec.load()) * 1000;
-                            // Interval-gated check; the "trigger" parameter is
-                            // the tolerance vs. the entry-anchored targets.
-                            if (0 == lastFollowTs || nowMs - lastFollowTs >= intervalMs)
-                            {
-                                lastFollowTs = nowMs;
-                                const auto results = followRealStopsOnce(
-                                    cfd, params->tpPoints.load(), params->slPoints.load(),
-                                    params->followThresholdPoints.load());
-                                QMetaObject::invokeMethod(
-                                    self,
-                                    [self, results]() {
-                                        if (self)
-                                        {
-                                            self->onRealStopsApplied(results, 0.0, true);
-                                        }
-                                    },
-                                    Qt::QueuedConnection);
-                            }
-                        }
                         // Hot-read the tunable envelope parameters each round
                         // (atomic — the parameter UI writes them).
                         const double tpPoints = params->tpPoints.load();
@@ -1422,6 +2487,10 @@ void SimGateSystem::onPollResult(double price, const pulse::ui::TickOutcome &out
     // Trailing stops run AFTER settlement: a TP/SL hit closes first, then
     // the surviving positions get their stops moved up.
     applyTrailingStops(price);
+    // Real-account stops: 8U loss / break-even / 1m SuperTrend (see
+    // autoManageRealStops). Only acts while the engine polls, i.e. right
+    // after 启动引擎.
+    autoManageRealStops(price, outcome);
     // Live equity readout: the simulated balance and every open position
     // reflect the floating PnL at the current price.
     refreshSimBalance(price);

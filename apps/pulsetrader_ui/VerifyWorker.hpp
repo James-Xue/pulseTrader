@@ -32,6 +32,21 @@ struct PermissionInfo
     bool known = false;     ///< readOnly is authoritative/probe-derived.
 };
 
+/// One active CFD (TradFi) position — the row rendered in the 真实持仓 table
+/// and the input of the dynamic-stop path.
+struct CfdPosition
+{
+    QString id;             ///< Exchange position id (stringified number).
+    QString symbol;         ///< Trading symbol, e.g. "XAUUSD".
+    QString side;           ///< "long" / "short".
+    double volumeLots = 0.0;    ///< Position size in lots (0.01 = 1 oz for gold).
+    double entryPrice = 0.0;    ///< price_open — average opening price.
+    double markPrice = 0.0;     ///< counterparty_price — current quote.
+    double priceSl = 0.0;       ///< Currently attached SL (0 if none).
+    double priceTp = 0.0;       ///< Currently attached TP (0 if none).
+    double unrealizedPnl = 0.0; ///< Exchange-reported floating PnL (USD).
+};
+
 /// Outcome of a login verification attempt.
 struct VerifyResult
 {
@@ -76,6 +91,15 @@ class VerifyWorker
     /// that or a JSON number. Invalid input degrades to 0.0.
     static double jsonToDouble(const nlohmann::json &j);
 
+    /// Format a Gate 64-bit identifier (position_id, order_id, log_id)
+    /// WITHOUT losing precision. Gate sends these as JSON integers that can
+    /// exceed 2^53 (e.g. 72057594045399658); round-tripping through a double
+    /// silently changes the id (…658 becomes …664), so the modify/close
+    /// calls hit a non-existent position ("Record not found"). String ids
+    /// are kept verbatim; integer ids are formatted from their 64-bit
+    /// representation. Anything else falls back to jsonToDouble.
+    static QString jsonIdToString(const nlohmann::json &value);
+
     /// Normalise a response to its first JSON object: an object passes
     /// through, a one-element array yields its element, anything else
     /// (empty array, scalar) yields nullptr.
@@ -110,6 +134,24 @@ class VerifyWorker
     ///   3. An unparseable payload (nullptr) means open as well — never slow
     ///      a poll loop down on a parse failure
     static bool tickerMarketOpen(const nlohmann::json &tickerResponse);
+
+    /// Parse a GET /tradfi/positions response into the active CFD positions:
+    ///
+    ///   1. Normalise the payload (object or one-element array) and unwrap
+    ///      the TradFi {"label", "data", "timestamp"} envelope
+    ///   2. Require data.list to be an array; a null list (Gate's encoding for
+    ///      "no active positions") yields an empty vector, while a missing or
+    ///      malformed list yields std::nullopt — the caller can then show an
+    ///      error instead of claiming the account is flat
+    ///   3. Skip list entries that are not objects or whose volume is missing
+    ///      / non-positive (closed or malformed rows)
+    ///   4. Read Gate's string-encoded numbers tolerantly (jsonToDouble); a
+    ///      row without a symbol is dropped because it cannot be displayed
+    ///
+    /// An empty vector therefore means "no open positions", never "parse
+    /// failure".
+    static std::optional<std::vector<CfdPosition>> parseCfdPositions(
+        const nlohmann::json &positionsResponse);
 
     /// Parse a GET /account/main_keys response into per-product permissions.
     ///

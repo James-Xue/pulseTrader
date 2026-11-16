@@ -334,3 +334,184 @@ TEST(VerifyWorkerTest, WriteProbeSucceededIsReadWrite)
     EXPECT_EQ(VerifyWorker::WriteProbe::ReadWrite,
               VerifyWorker::classifyWriteProbe(QStringLiteral(""), true));
 }
+
+// ---------------------------------------------------------------------------
+// parseCfdPositions — GET /tradfi/positions
+// ---------------------------------------------------------------------------
+
+TEST(VerifyWorkerTest, ParseCfdPositionsReadsEveryDisplayedField)
+{
+    // Shape mirrors the live TradFi positions payload: string-encoded
+    // numbers, position_dir Long/Short and the unrealized_pnl the 真实持仓
+    // table shows.
+    const nlohmann::json response = {
+        {"label", ""},
+        {"data",
+         {{"list",
+           nlohmann::json::array(
+               {nlohmann::json{{"position_id", 17653462},
+                               {"symbol", "XAUUSD"},
+                               {"symbol_desc", "Gold vs US Dollar"},
+                               {"volume", "0.01"},
+                               {"price_open", "4331.08"},
+                               {"counterparty_price", "4335.20"},
+                               {"price_sl", "4325.00"},
+                               {"price_tp", "4340.00"},
+                               {"position_dir", "Long"},
+                               {"unrealized_pnl", "1.23"}}})}}},
+        {"timestamp", 1790143826687LL},
+    };
+
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(1U, parsed->size());
+    const CfdPosition &position = parsed->front();
+    EXPECT_EQ(QStringLiteral("17653462"), position.id);
+    EXPECT_EQ(QStringLiteral("XAUUSD"), position.symbol);
+    EXPECT_EQ(QStringLiteral("long"), position.side);
+    EXPECT_DOUBLE_EQ(0.01, position.volumeLots);
+    EXPECT_DOUBLE_EQ(4331.08, position.entryPrice);
+    EXPECT_DOUBLE_EQ(4335.20, position.markPrice);
+    EXPECT_DOUBLE_EQ(4325.00, position.priceSl);
+    EXPECT_DOUBLE_EQ(4340.00, position.priceTp);
+    EXPECT_DOUBLE_EQ(1.23, position.unrealizedPnl);
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsMapsShortAndNumericFields)
+{
+    // A numeric (not string) payload and a Short direction must parse too;
+    // the PnL sign is preserved for the table's colour rule.
+    const nlohmann::json response = {
+        {"data",
+         {{"list",
+           nlohmann::json::array(
+               {nlohmann::json{{"position_id", 7},
+                               {"symbol", "EURUSD"},
+                               {"volume", 0.5},
+                               {"price_open", 1.08503},
+                               {"counterparty_price", 1.08611},
+                               {"position_dir", "Short"},
+                               {"unrealized_pnl", -2.5}}})}}},
+    };
+
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(1U, parsed->size());
+    EXPECT_EQ(QStringLiteral("short"), (*parsed)[0].side);
+    EXPECT_DOUBLE_EQ(0.5, (*parsed)[0].volumeLots);
+    EXPECT_DOUBLE_EQ(1.08503, (*parsed)[0].entryPrice);
+    EXPECT_DOUBLE_EQ(-2.5, (*parsed)[0].unrealizedPnl);
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsPreservesStringPositionId)
+{
+    // The 平仓 path sends this id back to the exchange VERBATIM. A string id
+    // must not be rounded through a double (the value below is above 2^53).
+    const nlohmann::json response = {
+        {"data",
+         {{"list",
+           nlohmann::json::array(
+               {nlohmann::json{{"position_id", "176534620012345678"},
+                               {"symbol", "XAUUSD"},
+                               {"volume", "0.01"},
+                               {"position_dir", "Long"}}})}}},
+    };
+
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(1U, parsed->size());
+    EXPECT_EQ(QStringLiteral("176534620012345678"), (*parsed)[0].id);
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsPreservesNumeric64BitPositionId)
+{
+    // Gate returns position_id as a JSON NUMBER. Above 2^53 a double
+    // round-trip changes it (72057594045399658 → 72057594045399664), and the
+    // modify/close endpoints then answer "Record not found".
+    const nlohmann::json response = {
+        {"data",
+         {{"list",
+           nlohmann::json::array(
+               {nlohmann::json{{"position_id", 72057594045399658ULL},
+                               {"symbol", "XAUUSD"},
+                               {"volume", "0.01"},
+                               {"position_dir", "Long"}}})}}},
+    };
+
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(1U, parsed->size());
+    EXPECT_EQ(QStringLiteral("72057594045399658"), (*parsed)[0].id);
+}
+
+TEST(VerifyWorkerTest, JsonIdToStringHandlesStringUnsignedSignedAndFloat)
+{
+    EXPECT_EQ(QStringLiteral("176534620012345678"),
+              VerifyWorker::jsonIdToString(nlohmann::json("176534620012345678")));
+    EXPECT_EQ(QStringLiteral("18446744073709551615"),
+              VerifyWorker::jsonIdToString(
+                  nlohmann::json(18446744073709551615ULL)));
+    EXPECT_EQ(QStringLiteral("72057594045399658"),
+              VerifyWorker::jsonIdToString(nlohmann::json(72057594045399658LL)));
+    EXPECT_EQ(QStringLiteral("42"),
+              VerifyWorker::jsonIdToString(nlohmann::json(42.0)));
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsNullListMeansFlatAccount)
+{
+    // Gate documents list as null when no position is open. That is data
+    // ("flat account"), not a parse failure — the table must say 无持仓
+    // rather than 读取失败.
+    const nlohmann::json response = {{"data", {{"list", nullptr}}}};
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->empty());
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsEmptyListMeansFlatAccount)
+{
+    const nlohmann::json response = {
+        {"data", {{"list", nlohmann::json::array()}}}};
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->empty());
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsRejectsMalformedPayload)
+{
+    // No data.list at all — an error envelope or a different endpoint.
+    EXPECT_FALSE(VerifyWorker::parseCfdPositions(nlohmann::json::object()).has_value());
+    EXPECT_FALSE(VerifyWorker::parseCfdPositions(nlohmann::json(nullptr)).has_value());
+    EXPECT_FALSE(VerifyWorker::parseCfdPositions(
+                     nlohmann::json{{"data", {{"list", "not-an-array"}}}})
+                     .has_value());
+}
+
+TEST(VerifyWorkerTest, ParseCfdPositionsSkipsUnusableRows)
+{
+    // Non-object entries, zero/negative volume (closed rows) and rows without
+    // a symbol cannot be displayed; they must not become blank table rows.
+    const nlohmann::json response = {
+        {"data",
+         {{"list",
+           nlohmann::json::array(
+               {nlohmann::json("junk"),
+                nlohmann::json{{"position_id", 1}, {"symbol", "XAUUSD"},
+                               {"volume", "0"}},
+                nlohmann::json{{"position_id", 2}, {"symbol", ""},
+                               {"volume", "0.01"}},
+                nlohmann::json{{"position_id", 3}, {"symbol", "XAGUSD"},
+                               {"volume", "-0.02"}},
+                nlohmann::json{{"position_id", 4}, {"symbol", "XBRUSD"},
+                               {"volume", "0.10"}, {"price_open", "70.25"},
+                               {"position_dir", "Long"},
+                               {"unrealized_pnl", "0.40"}}})}}},
+    };
+
+    const auto parsed = VerifyWorker::parseCfdPositions(response);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(1U, parsed->size());
+    EXPECT_EQ(QStringLiteral("XBRUSD"), (*parsed)[0].symbol);
+    EXPECT_DOUBLE_EQ(0.10, (*parsed)[0].volumeLots);
+    EXPECT_DOUBLE_EQ(0.40, (*parsed)[0].unrealizedPnl);
+}

@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
@@ -302,6 +303,31 @@ double VerifyWorker::jsonToDouble(const nlohmann::json &j)
     return 0.0;
 }
 
+QString VerifyWorker::jsonIdToString(const nlohmann::json &value)
+{
+    // A string id is already exact — Gate commonly encodes ids as strings.
+    if (value.is_string())
+    {
+        return QString::fromStdString(value.get<std::string>());
+    }
+    // JSON integers (including values above 2^53) are stored exactly by
+    // nlohmann::json; format them from the integer representation. Never
+    // route them through get<double>() — that rounds, e.g.
+    // 72057594045399658 → 72057594045399664, and the exchange then answers
+    // "Record not found" for every modify/close call.
+    if (value.is_number_unsigned())
+    {
+        return QString::number(value.get<std::uint64_t>());
+    }
+    if (value.is_number_integer())
+    {
+        return QString::number(value.get<std::int64_t>());
+    }
+    // Older payloads may carry a floating-point number; keep the previous
+    // integer-truncating behaviour for those.
+    return QString::number(static_cast<std::int64_t>(jsonToDouble(value)));
+}
+
 const nlohmann::json *VerifyWorker::firstObject(const nlohmann::json &j)
 {
     if (j.is_object())
@@ -364,6 +390,83 @@ bool VerifyWorker::tickerMarketOpen(const nlohmann::json &tickerResponse)
         return true;
     }
     return "open" == it->get<std::string>();
+}
+
+std::optional<std::vector<CfdPosition>> VerifyWorker::parseCfdPositions(
+    const nlohmann::json &positionsResponse)
+{
+    const nlohmann::json *obj = unwrapData(firstObject(positionsResponse));
+    if (nullptr == obj || false == obj->is_object())
+    {
+        return std::nullopt;
+    }
+
+    // Gate answers {"data": {"list": [...]}}; the list is null when the
+    // account is flat. A null list is therefore DATA ("no positions"), while
+    // a missing or non-array list means the payload is not a positions
+    // response at all.
+    const auto listIt = obj->find("list");
+    if (obj->end() == listIt)
+    {
+        return std::nullopt;
+    }
+    if (listIt->is_null())
+    {
+        return std::vector<CfdPosition>{};
+    }
+    if (false == listIt->is_array())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<CfdPosition> positions;
+    for (const auto &p : *listIt)
+    {
+        if (false == p.is_object())
+        {
+            continue;
+        }
+        const double volume = getDoubleField(p, "volume");
+        if (0.0 >= volume)
+        {
+            continue; // closed or malformed row
+        }
+
+        CfdPosition position;
+        // The id is the exchange's own identifier and is sent back verbatim by
+        // the real-modify/close endpoints, so keep it EXACTLY as Gate encodes
+        // it instead of round-tripping it through a double (64-bit ids such as
+        // 72057594045399658 would round to a different, non-existent id).
+        const auto idIt = p.find("position_id");
+        if (p.end() != idIt)
+        {
+            position.id = jsonIdToString(*idIt);
+        }
+        const auto symbolIt = p.find("symbol");
+        if (p.end() != symbolIt && symbolIt->is_string())
+        {
+            position.symbol = QString::fromStdString(symbolIt->get<std::string>());
+        }
+        if (position.symbol.isEmpty())
+        {
+            continue; // cannot be named in the UI
+        }
+
+        // position_dir is "Long" / "Short"; anything else is treated as a
+        // short so the PnL sign stays defined rather than silently missing.
+        const auto dirIt = p.find("position_dir");
+        const bool isLong = (p.end() != dirIt && dirIt->is_string()
+                             && "Long" == dirIt->get<std::string>());
+        position.side = isLong ? QStringLiteral("long") : QStringLiteral("short");
+        position.volumeLots = volume;
+        position.entryPrice = getDoubleField(p, "price_open");
+        position.markPrice = getDoubleField(p, "counterparty_price");
+        position.priceSl = getDoubleField(p, "price_sl");
+        position.priceTp = getDoubleField(p, "price_tp");
+        position.unrealizedPnl = getDoubleField(p, "unrealized_pnl");
+        positions.push_back(std::move(position));
+    }
+    return positions;
 }
 
 std::vector<PermissionInfo> VerifyWorker::parsePermissions(const nlohmann::json &mainKeysJson)

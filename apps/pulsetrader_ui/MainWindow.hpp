@@ -13,8 +13,16 @@
 // Layout (see MainWindow.ui):
 //   1. "账户信息：" label + balance label (label_balance) + 模拟账户 /
 //      启动引擎 / 关闭引擎 buttons (horizontal row)
-//   2. "模拟账户：" label + simulated balance (label_simBalance)
-//   3. Lower area — two side-by-side columns:
+//   2. "模拟账户：" label + simulated balance (label_simBalance) and
+//      "模拟持仓：" label + the paper positions (label_simPositions)
+//   3. "真实持仓：" label + QTableWidget (table_realPositions) — the LIVE CFD
+//      positions from GET /tradfi/positions: symbol, side, lots, entry price,
+//      current (mark) price, take-profit, stop-loss, floating PnL (USD) and a
+//      per-row 平仓 button that market-closes the position. The TP/SL cells
+//      are editable: a committed value is PUT to the real Gate position.
+//      Refreshed every 1 s from window construction, independent of the
+//      engine poll
+//   4. Lower area — two side-by-side columns:
 //      left:  three stacked price tape panes, each a label + read-only
 //             QPlainTextEdit, latest 50 lines: "黄金（XAUUSD）："
 //             (textEdit_xau), "美元指数（USIDX）：" (textEdit_usidx) and
@@ -30,7 +38,9 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
+#include <set>
 #include <thread>
 
 #include "EngineStrategyAdapter.hpp"
@@ -43,19 +53,10 @@ namespace Ui
 class SimGateSystem;
 }
 
+class QTableWidgetItem;
+
 namespace pulse::ui
 {
-
-/// A live CFD position from the exchange (动态止盈止损 targets).
-struct RealPosition
-{
-    QString id;             ///< Exchange position id (stringified number).
-    QString side;           ///< "long" / "short".
-    double volumeLots = 0.0;
-    double entryPrice = 0.0; ///< price_open — the TP/SL anchor (entry ± points).
-    double priceSl = 0.0;    ///< Currently attached SL (0 if unknown).
-    double priceTp = 0.0;    ///< Currently attached TP (0 if unknown).
-};
 
 /// Outcome of one real position's stop modification.
 struct RealStopsResult
@@ -98,6 +99,16 @@ class SimGateSystem : public QWidget
     void on_pushBtn_startEngine_clicked();
     /// Auto-connected to the 关闭引擎 button — stops the polling loop.
     void on_pushBtn_stopEngine_clicked();
+    /// Auto-connected to the 启动黄金交易员 check box — the master arm switch
+    /// for the automatic real-position stop strategy. Off (the default) means
+    /// the window only displays positions/orders; nothing writes to the
+    /// exchange automatically. Checking it also starts the engine poll if it
+    /// is not already running (the strategy needs live quotes).
+    void on_check_goldTrader_toggled(bool checked);
+    /// Auto-connected to the strategy-number combo box next to the master
+    /// switch — activate the selected 黄金交易员 strategy. Switching resets the
+    /// peak/throttle state so the new strategy starts from a clean slate.
+    void on_combo_goldTraderStrategy_currentIndexChanged(int index);
     /// Auto-connected to the 应用参数 button — push the spin-box values into
     /// the strategy params (atomic, hot-applied on the next poll round).
     void on_pushBtn_applyParams_clicked();
@@ -120,20 +131,106 @@ class SimGateSystem : public QWidget
     /// point distances (favourable direction only).
     void applyTrailingStops(double price);
 
-    // -- Real-CFD dynamic stops (动态止盈止损 on LIVE positions) -------------
+    // -- Real-CFD positions (真实持仓 table + 动态止盈止损) -------------------
+    /// Fetch the real CFD positions on a background thread and repaint the
+    /// 真实持仓 table. Runs once at startup and then every 1 s from
+    /// m_realPositionsTimer — independent of the engine poll, so the table is
+    /// populated even while the engine is stopped.
+    void refreshRealPositions();
+    /// UI-thread handler for refreshRealPositions(): rebuild the table from
+    /// `positions`, or show `error` when the fetch / parse failed.
+    void onRealPositionsUpdated(const std::vector<pulse::ui::CfdPosition> &positions,
+                                const QString &error);
+    /// Render a one-row placeholder (读取中 / 无持仓 / failure reason) across
+    /// the whole 真实持仓 table.
+    void showRealPositionsMessage(const QString &text);
+    /// UI-thread handler for a committed edit of a 止盈/止损 cell: validate
+    /// it and PUT the new protective prices to the REAL Gate position.
+    void onRealPositionItemChanged(QTableWidgetItem *item);
+    /// UI-thread handler for that PUT: log the outcome in the trade/log panes,
+    /// report a failure, and refresh the table.
+    void onRealStopsSynced(const QString &positionId, const QString &symbol,
+                           double tp, double sl, bool ok, const QString &error);
+    /// Market-close one LIVE CFD position immediately on click
+    /// (POST /tradfi/positions/{id}/close, close_type=2 = full) on a
+    /// background thread — no confirmation dialog. `silent` suppresses the
+    /// modal failure dialog for the unattended peak-drawdown path.
+    void closeRealPosition(const pulse::ui::CfdPosition &position,
+                           bool silent = false);
+    /// UI-thread handler for closeRealPosition(): log the outcome in the
+    /// trade/log panes, report a failure (modal only when `silent` is false),
+    /// and refresh the table immediately.
+    void onRealPositionClosed(const QString &positionId, const QString &symbol,
+                              bool ok, const QString &error, bool silent);
+
+    // -- 黄金交易员 strategy roster ------------------------------------------
+    /// One numbered 黄金交易员 strategy. The strategy-number combo box and the
+    /// startup log are both generated from goldTraderStrategies(), so adding
+    /// the next strategy is a single append there plus its dispatch in
+    /// autoManageRealStops().
+    struct GoldTraderStrategyInfo
+    {
+        int number = 0;  ///< 1-based strategy number shown in the combo box.
+        QString name;    ///< Short display name.
+        QString summary; ///< One-paragraph rule summary for the log.
+    };
+    /// The roster, numbered from 1 in display order (defined in the .cpp).
+    static const std::vector<GoldTraderStrategyInfo> &goldTraderStrategies();
+    /// Strategy number of the combo box selection (0 = nothing selected).
+    int selectedGoldTraderStrategy() const;
+    /// Log every strategy as "策略 N：名称 — 说明" plus the current selection.
+    void logGoldTraderRoster();
+
+    // -- Automatic real-position stops (1 m SuperTrend) ---------------------
+    /// Manage the live XAUUSD stops from the latest position snapshot and the
+    /// 1 m SuperTrend line. Runs on the UI thread once per engine poll only
+    /// while BOTH the 启动黄金交易员 master switch and the 自动止损 switch are
+    /// on; with the master off the window only displays positions/orders.
+    ///
+    ///   floating PnL <  0            → 8U loss stop
+    ///   floating PnL > +2 (USD)      → break-even stop (entry ± 0.2)
+    ///   0 ≤ PnL ≤ +2, no stop yet    → 8U protection stop
+    ///   every positive PnL seen      → peak-PnL trail: the stop price
+    ///                                  equivalent to (max PnL − 回撤U)
+    ///                                  competes with the tier and SuperTrend
+    ///                                  stops; the tightest wins
+    ///   drawdown from peak ≥ 回撤U   → immediate market close (the trail stop
+    ///                                  can no longer be placed)
+    ///   every candidate              → compare with the 1 m SuperTrend line
+    ///                                  placed 1U further in the loss
+    ///                                  direction (pin-bar/wick protection);
+    ///                                  use it when still better (long:
+    ///                                  higher wins, short: lower wins)
+    ///
+    /// A stop is NEVER loosened: the tightest of the tier stop, the peak
+    /// trail, the SuperTrend line and the stop already on the exchange is
+    /// kept. Writes are throttled per position (更新间隔) and skipped for
+    /// sub-threshold trailing moves (最小变动) and for unchanged values
+    /// (Gate rejects no-op modifications with HTTP 400).
+    void autoManageRealStops(double price, const pulse::ui::TickOutcome &outcome);
+    /// Background PUT for autoManageRealStops(). Carries the position's
+    /// current TP along so Gate does not clear it.
+    void submitAutoRealStop(const pulse::ui::CfdPosition &position,
+                            double stopPrice, const QString &reason);
+    /// UI-thread handler for submitAutoRealStop(): log the outcome (no modal
+    /// dialog — this path fires unattended) and keep the local snapshot in
+    /// sync with what Gate accepted.
+    void onAutoRealStopSynced(const QString &positionId, const QString &symbol,
+                              double stopPrice, const QString &reason, bool ok,
+                              const QString &error);
+
     /// Phase 1: query the real XAUUSD CFD positions (background thread).
     void fetchRealPositions();
     /// Phase 2 (UI thread): show the confirmation with the strategy stops.
-    void onRealPositionsFetched(const std::vector<pulse::ui::RealPosition> &positions);
+    void onRealPositionsFetched(const std::vector<pulse::ui::CfdPosition> &positions);
     /// Phase 3: apply the strategy stops to the real positions (bg thread).
-    void applyRealStops(const std::vector<pulse::ui::RealPosition> &positions);
+    void applyRealStops(const std::vector<pulse::ui::CfdPosition> &positions);
     /// Phase 4 (UI thread): report the modification results. `price` is the
-    /// price the stops were computed from; `autoMode` marks the throttled
-    /// auto-follow (vs. the manual button).
+    /// price the stops were computed from (0 when not meaningful).
     void onRealStopsApplied(const std::vector<pulse::ui::RealStopsResult> &results,
-                            double price, bool autoMode);
-    /// Re-render the 持仓 row from the persisted positions with the floating
-    /// PnL of each position at `price`.
+                            double price);
+    /// Re-render the 模拟持仓 row from the persisted positions with the
+    /// floating PnL of each position at `price`.
     void refreshSimPositions(double price);
     /// Refresh label_simBalance from the persisted store, including the
     /// floating PnL of open positions at `price` (equity = balance + PnL).
@@ -226,6 +323,54 @@ class SimGateSystem : public QWidget
     std::deque<double> m_xbrusdDeltas;
     /// Fires once per minute while the engine polls; stopped with the engine.
     QTimer m_relationTimer;
+
+    // -- Real CFD positions table (真实持仓) --------------------------------
+    /// Fires every 1 s from window construction — the position table and its
+    /// floating PnL stay current even when the engine is not running.
+    QTimer m_realPositionsTimer;
+    /// True while a background GET /tradfi/positions is in flight; a timed
+    /// refresh that fires during a slow request is skipped instead of piling
+    /// up threads.
+    std::atomic<bool> m_realPositionsFetching{ false };
+    /// Exchange position ids whose full-close request is in flight — their
+    /// row button shows 平仓中 and ignores further clicks until the result
+    /// arrives (UI thread only).
+    std::set<QString> m_closingPositionIds;
+    /// True while onRealPositionsUpdated()/showRealPositionsMessage() write
+    /// into the table, so itemChanged does not mistake those writes for user
+    /// edits (UI thread only).
+    bool m_updatingRealPositionsTable = false;
+    /// Exchange position ids whose TP/SL PUT is in flight — at most one edit
+    /// per row until the exchange answers (UI thread only).
+    std::set<QString> m_modifyingPositionIds;
+
+    // -- Automatic stop manager state (UI thread only) ----------------------
+    /// Latest successful GET /tradfi/positions snapshot — the input of
+    /// autoManageRealStops(). Kept fresh by every 1 s position refresh, even
+    /// while an in-cell editor pauses the table repaint.
+    std::vector<pulse::ui::CfdPosition> m_realPositions;
+    /// Unix ms of that snapshot; 0 marks it stale (the last fetch failed), so
+    /// the manager never acts on values it can no longer re-confirm.
+    std::int64_t m_realPositionsUpdatedMs = 0;
+    /// Position ids whose AUTOMATIC stop PUT is in flight (kept separate from
+    /// m_modifyingPositionIds, whose failures raise a modal dialog).
+    std::set<QString> m_autoStopInFlight;
+    /// Per-position write throttle / duplicate-write guard + peak-PnL trail.
+    struct AutoStopState
+    {
+        std::int64_t lastAttemptMs = 0; ///< Last auto write submitted (Unix ms).
+        double lastSentSl = 0.0;        ///< Last target sent (0 = none).
+        std::int64_t lastSentMs = 0;    ///< When it was sent (Unix ms).
+        std::int64_t lastWarningMs = 0; ///< Last "8U stop unreachable" log.
+        /// Highest floating PnL (USD) observed while the position was in
+        /// profit. Updated every engine poll, before the write throttle.
+        double peakPnl = 0.0;
+        /// True once any positive floating PnL has been observed.
+        bool hasPositivePeak = false;
+        /// Last peak-drawdown market close attempt (Unix ms); retry throttle.
+        std::int64_t lastPeakCloseMs = 0;
+    };
+    std::map<QString, AutoStopState> m_autoStopStates;
 
     QString m_spotBalanceText;            ///< "现货 USDT：x" (login snapshot, static).
     /// Whether the login key has CFD (gold) WRITE permission — modifying

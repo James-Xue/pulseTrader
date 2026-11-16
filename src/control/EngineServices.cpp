@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 namespace pulse::control
@@ -1229,6 +1231,36 @@ static double syncJsonNumber(const nlohmann::json &j, const char *key)
     return 0.0;
 }
 
+/// Read a Gate 64-bit identifier (position_id / order_id / log_id) EXACTLY.
+/// These ids can exceed 2^53, where a double round-trip changes the value
+/// (72057594045399658 → 72057594045399664) and the exchange answers
+/// "Record not found" on the close/modify endpoints.
+static std::string syncJsonId(const nlohmann::json &j, const char *key)
+{
+    const auto it = j.find(key);
+    if (j.end() == it)
+    {
+        return {};
+    }
+    if (it->is_string())
+    {
+        return it->get<std::string>();
+    }
+    if (it->is_number_unsigned())
+    {
+        return std::to_string(it->get<std::uint64_t>());
+    }
+    if (it->is_number_integer())
+    {
+        return std::to_string(it->get<std::int64_t>());
+    }
+    if (it->is_number_float())
+    {
+        return std::to_string(static_cast<std::int64_t>(it->get<double>()));
+    }
+    return {};
+}
+
 int EngineServices::syncFuturesPositionsFromExchange()
 {
     if (nullptr == m_futuresRest)
@@ -1367,8 +1399,7 @@ int EngineServices::syncCfdPositionsFromExchange(int *pruned_out)
             }
 
             // The close/modify endpoints need the EXCHANGE position id.
-            const std::string exchange_id = std::to_string(
-                static_cast<std::int64_t>(syncJsonNumber(p, "position_id")));
+            const std::string exchange_id = syncJsonId(p, "position_id");
             live_exchange_ids.push_back(exchange_id);
 
             const double entry = syncJsonNumber(p, "price_open");

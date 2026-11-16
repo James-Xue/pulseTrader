@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>880</width>
-    <height>820</height>
+    <width>960</width>
+    <height>940</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -166,7 +166,7 @@
      <item>
       <widget class="QLabel" name="label_simPositionsTitle">
        <property name="text">
-        <string>持仓：</string>
+        <string>模拟持仓：</string>
        </property>
       </widget>
      </item>
@@ -192,6 +192,99 @@
         </size>
        </property>
       </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="realPositionsRow">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="label_realPositionsTitle">
+       <property name="text">
+        <string>真实持仓：</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QTableWidget" name="table_realPositions">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>120</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>150</height>
+        </size>
+       </property>
+       <property name="editTriggers">
+        <set>QAbstractItemView::NoEditTriggers</set>
+       </property>
+       <property name="alternatingRowColors">
+        <bool>true</bool>
+       </property>
+       <property name="selectionBehavior">
+        <enum>QAbstractItemView::SelectRows</enum>
+       </property>
+       <attribute name="horizontalHeaderStretchLastSection">
+        <bool>false</bool>
+       </attribute>
+       <attribute name="verticalHeaderVisible">
+        <bool>false</bool>
+       </attribute>
+       <column>
+        <property name="text">
+         <string>持仓名称</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>方向</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>数量（手）</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>开仓价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>当前价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>止盈价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>止损价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>当前盈亏（USD）</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>操作</string>
+        </property>
+       </column>
+      </widget>
      </item>
     </layout>
    </item>
@@ -372,6 +465,33 @@
         </property>
        </widget>
       </item>
+      <item row="4" column="0">
+       <widget class="QCheckBox" name="check_goldTrader">
+        <property name="text">
+         <string>启动黄金交易员</string>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QComboBox" name="combo_goldTraderStrategy">
+        <property name="toolTip">
+         <string>选择黄金交易员的策略号（后续新增策略会自动列出）</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="2" colspan="2">
+       <widget class="QLabel" name="label_goldTraderHint">
+        <property name="text">
+         <string>关闭时只展示订单数据，不自动调整止损（交易所已挂止损仍有效）</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #888;</string>
+        </property>
+       </widget>
+      </item>
       <item row="4" column="4">
        <widget class="QLabel" name="label_dynamicStopsHint">
         <property name="text">
@@ -392,56 +512,101 @@
       <item row="5" column="0">
        <widget class="QCheckBox" name="check_autoFollow">
         <property name="text">
-         <string>自动跟随真实持仓</string>
+         <string>自动止损（一分钟超级趋势）</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
       <item row="5" column="1">
        <widget class="QSpinBox" name="spin_followInterval">
+        <property name="prefix">
+         <string>间隔 </string>
+        </property>
         <property name="suffix">
          <string> 秒</string>
         </property>
         <property name="minimum">
-         <number>10</number>
+         <number>1</number>
         </property>
         <property name="maximum">
          <number>600</number>
         </property>
         <property name="value">
-         <number>30</number>
+         <number>3</number>
         </property>
        </widget>
       </item>
       <item row="5" column="2">
        <widget class="QLabel" name="label_followThreshold">
         <property name="text">
-         <string>触发移动（点）</string>
+         <string>最小变动（价格）</string>
         </property>
        </widget>
       </item>
       <item row="5" column="3">
        <widget class="QDoubleSpinBox" name="spin_followThreshold">
         <property name="decimals">
-         <number>1</number>
+         <number>2</number>
         </property>
         <property name="minimum">
-         <double>0.5</double>
+         <double>0.01</double>
         </property>
         <property name="maximum">
          <double>50.0</double>
         </property>
         <property name="singleStep">
-         <double>0.5</double>
+         <double>0.01</double>
         </property>
         <property name="value">
-         <double>2.0</double>
+         <double>0.10</double>
         </property>
        </widget>
       </item>
       <item row="5" column="4" colspan="2">
        <widget class="QLabel" name="label_autoFollowHint">
         <property name="text">
-         <string>按间隔+价格移动阈值自动 PUT 真实持仓止损（需读写 Key）</string>
+         <string>黄金交易员启动后自动管理真实持仓：亏损 → 8U 止损；盈利 &gt; 2U → 保本损；再与 1 分钟超级趋势比较（超级趋势价多留 1U 缓冲，避免插针），只收紧不放宽</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #888;</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_peakGiveback">
+        <property name="text">
+         <string>峰值回撤（U）</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QDoubleSpinBox" name="spin_peakGiveback">
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="minimum">
+         <double>0.10000000000000001</double>
+        </property>
+        <property name="maximum">
+         <double>100.0</double>
+        </property>
+        <property name="singleStep">
+         <double>0.5</double>
+        </property>
+        <property name="value">
+         <double>5.0</double>
+        </property>
+        <property name="suffix">
+         <string> U</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="2" colspan="4">
+       <widget class="QLabel" name="label_peakGivebackHint">
+        <property name="text">
+         <string>每秒记录最大浮盈：最大浮盈 − 5U 作为候选止损，与 8U/保本/1m 超级趋势比较取最优；回撤达到 5U 立即市价平仓</string>
         </property>
         <property name="styleSheet">
          <string notr="true">color: #888;</string>
