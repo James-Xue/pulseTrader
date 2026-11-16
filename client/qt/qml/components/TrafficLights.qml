@@ -4,10 +4,10 @@ import Pulse.Client
 /// The three macOS window controls.
 ///
 /// The window is frameless (see Main.qml), so these carry the real behaviour:
-/// minimize, close, and maximize/restore. Colours are the macOS traffic-light
+/// minimize, maximize/restore, and close. Colours are the macOS traffic-light
 /// values; the subtle border keeps the yellow button visible on a light title
-/// bar. The close/minimize order is deliberately swapped from the macOS
-/// convention (operator request, 2026-11-16): minimize sits left of close.
+/// bar. The order is deliberately Windows-style rather than the macOS
+/// convention (operator request, 2026-11-16): close sits on the far right.
 Row {
     id: root
 
@@ -19,8 +19,8 @@ Row {
     Repeater {
         model: [
             { base: "#FEBC2E", hover: "#DEA123", action: "minimize" },
-            { base: "#FF5F57", hover: "#E0443E", action: "close" },
-            { base: "#28C840", hover: "#1DAD35", action: "maximize" }
+            { base: "#28C840", hover: "#1DAD35", action: "maximize" },
+            { base: "#FF5F57", hover: "#E0443E", action: "close" }
         ]
 
         delegate: Rectangle {
