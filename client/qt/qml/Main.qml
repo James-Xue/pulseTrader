@@ -163,9 +163,10 @@ ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                // Window controls live at the top-right. The group keeps the
-                // macOS colours but uses the operator's order (2026-11-16):
-                // maximize, minimize, then close at the far right.
+                // Window controls live at the top-right. Colours are the macOS
+                // traffic lights, but the operator chose the mapping
+                // (2026-11-16): green minimizes, yellow maximizes, red closes
+                // at the far right.
                 TrafficLights {
                     anchors.verticalCenter: parent.verticalCenter
                     target: root
