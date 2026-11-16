@@ -7,6 +7,8 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstddef>
+#include <string>
 #include <thread>
 
 namespace pulse::execution
@@ -14,6 +16,38 @@ namespace pulse::execution
 
 using namespace pulse::logging;
 using pulse::exchange::EndpointRouter;
+
+std::string sanitizeGateOrderText(const std::string &client_order_id)
+{
+    // Gate caps the value at 28 bytes after the "t-" prefix and accepts only
+    // alphanumerics, '_' and '-'. Map anything else to '-' rather than
+    // dropping it, so ids that differ only in separators stay distinguishable
+    // in shape and keep a 1:1 length.
+    constexpr std::size_t kMaxLength = 28;
+
+    std::string sanitized;
+    sanitized.reserve(client_order_id.size() < kMaxLength
+                          ? client_order_id.size()
+                          : kMaxLength);
+
+    for (const char c : client_order_id)
+    {
+        if (kMaxLength == sanitized.size())
+        {
+            break;
+        }
+
+        const bool legal = (c >= '0' && c <= '9')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= 'a' && c <= 'z')
+            || '_' == c
+            || '-' == c;
+
+        sanitized.push_back(legal ? c : '-');
+    }
+
+    return sanitized;
+}
 
 OrderExecutor::OrderExecutor(exchange::GateRestClient &rest_client, MarketType market_type)
     : m_restClient{ rest_client }
@@ -287,7 +321,10 @@ nlohmann::json OrderExecutor::buildOrderBody(MarketType mt, const OrderRequest &
     // Optional client order ID (spot/futures only — the MT5 CFD schema has no text field).
     if (!req.client_order_id.empty() && MarketType::Cfd != mt)
     {
-        body["text"] = "t-" + req.client_order_id; // Gate.io prefix: "t-"
+        // Gate rejects illegal bytes in `text` ("text content includes illegal
+        // characters", 2026-11-16 live failure), so the id is rewritten to the
+        // allowed charset before it becomes the exchange-side order tag.
+        body["text"] = "t-" + sanitizeGateOrderText(req.client_order_id);
     }
 
     return body;

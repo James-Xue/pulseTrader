@@ -87,6 +87,30 @@ struct OrderResponse
 };
 
 // ---------------------------------------------------------------------------
+// Gate order-text sanitizing
+// ---------------------------------------------------------------------------
+
+/// Rewrite a client order id into a value Gate accepts in the order `text`
+/// field.
+///
+/// Gate's rules for `text`: optional, prefixed with "t-", at most 28 bytes
+/// after that prefix, and only `[0-9A-Za-z_-]`. Two of our id families break
+/// it: the control plane mints "<strategy>:<seq>" (colon) and the grid mints
+/// "eth-grid-sell-<price>" (dot). Every illegal byte becomes '-', and the
+/// result is truncated to 28 bytes.
+///
+/// The engine keeps the original ``client_order_id`` internally for
+/// idempotency and attribution; only the exchange-side tag is rewritten, so
+/// two ids that differ solely in illegal characters collapse to the same
+/// exchange text (accepted: the local id remains authoritative).
+///
+/// Parameters:
+///   1. client_order_id — the engine-side id (may be empty)
+///
+/// Returns the sanitized tag, without the "t-" prefix.
+[[nodiscard]] std::string sanitizeGateOrderText(const std::string &client_order_id);
+
+// ---------------------------------------------------------------------------
 // OrderExecutor — places orders via REST with retry logic
 // ---------------------------------------------------------------------------
 class OrderExecutor

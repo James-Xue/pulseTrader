@@ -382,3 +382,41 @@ TEST(OrderRequest, MarketTypeRouting)
     EXPECT_EQ(MarketType::Spot, spot_req.market_type);
     EXPECT_EQ(MarketType::Futures, futures_req.market_type);
 }
+
+// ---------------------------------------------------------------------------
+// Gate order-text sanitizing
+// ---------------------------------------------------------------------------
+
+TEST(GateOrderText, ControlPlaneColonBecomesDash)
+{
+    // The control plane mints "<strategy>:<seq>"; Gate rejects ':' in `text`
+    // ("text content includes illegal characters", 2026-11-16 live failure).
+    EXPECT_EQ("btc_pulse-000001", sanitizeGateOrderText("btc_pulse:000001"));
+}
+
+TEST(GateOrderText, GridDecimalPointBecomesDash)
+{
+    // Grid ids embed the price, e.g. "eth-grid-sell-1234.5".
+    EXPECT_EQ("eth-grid-sell-1234-5", sanitizeGateOrderText("eth-grid-sell-1234.5"));
+}
+
+TEST(GateOrderText, LegalIdsPassThroughUnchanged)
+{
+    EXPECT_EQ("signalag-mwirs7qd-7", sanitizeGateOrderText("signalag-mwirs7qd-7"));
+    EXPECT_EQ("abc_123-XYZ", sanitizeGateOrderText("abc_123-XYZ"));
+}
+
+TEST(GateOrderText, IllegalBytesBecomeDashes)
+{
+    EXPECT_EQ("a-b-c-d", sanitizeGateOrderText("a b/c\\d"));
+}
+
+TEST(GateOrderText, TruncatesToGateLimit)
+{
+    EXPECT_EQ(std::size_t{ 28 }, sanitizeGateOrderText(std::string(40, 'x')).size());
+}
+
+TEST(GateOrderText, EmptyStaysEmpty)
+{
+    EXPECT_EQ("", sanitizeGateOrderText(""));
+}
