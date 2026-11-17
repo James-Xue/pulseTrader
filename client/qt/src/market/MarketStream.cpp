@@ -1,6 +1,7 @@
 #include "market/MarketStream.hpp"
 
 #include <QDateTime>
+#include <cmath>
 #include <QJsonArray>
 #include <QJsonValue>
 
@@ -146,6 +147,7 @@ void MarketStream::start(const QString& symbol, const QString& marketType)
     m_aggregator.clear();
     m_candles.clear();
     m_ema.clear();
+    m_emaSeries.clear();
     m_lastIndicatorOpenMs = -1;
     m_inFlight = false;
     m_inFlightId = -1;
@@ -156,6 +158,7 @@ void MarketStream::start(const QString& symbol, const QString& marketType)
     emit tickerChanged();
     emit sampleChanged();
     emit candlesChanged();
+    emit emaSeriesChanged();
     emit indicatorsChanged();
 
     m_streaming = true;
@@ -197,11 +200,13 @@ void MarketStream::clearCandles()
     m_aggregator.clear();
     m_candles.clear();
     m_ema.clear();
+    m_emaSeries.clear();
     m_lastIndicatorOpenMs = -1;
     m_sampleCount = 0;
     m_lastSampleMs = 0;
     emit candlesChanged();
     emit sampleChanged();
+    emit emaSeriesChanged();
     emit indicatorsChanged();
 }
 
@@ -256,13 +261,14 @@ void MarketStream::poll()
         return;
     }
 
-    // 3. The ticker drives the page and 200 one-minute klines feed both the
-    //    display-only fallback close and the EMA strip (the longest period is
-    //    200). book_levels = 0 keeps the order book out of the payload.
+    // 3. Only the ticker matters for this page. book_levels = 0 keeps the
+    //    order book empty, and klines = 1 gives a display-only fallback close
+    //    if a feed has not published a ticker yet. The EMA strip is computed
+    //    from the chart's own candles, not from these klines.
     QJsonObject params;
     params[QStringLiteral("symbol")] = m_symbol;
     params[QStringLiteral("book_levels")] = 0;
-    params[QStringLiteral("klines")] = 200;
+    params[QStringLiteral("klines")] = 1;
     if (!m_marketType.isEmpty())
     {
         params[QStringLiteral("market_type")] = m_marketType;
@@ -347,35 +353,6 @@ void MarketStream::applyTicker(const QJsonObject& ticker,
         return;
     }
 
-    // 1b. EMA strip. Recompute only when a NEW closed one-minute kline shows
-    //     up (the open_time changes), so the five series cost one pass per
-    //     minute instead of one per second. The engine sends 200 bars, enough
-    //     for the EMA200 seed; IndicatorEngine ignores the forming bar.
-    if (!klines.isEmpty())
-    {
-        const qint64 newestOpenMs = static_cast<qint64>(
-            priceField(klines.last().toObject(), QStringLiteral("open_time")));
-        if (0 < newestOpenMs && newestOpenMs != m_lastIndicatorOpenMs)
-        {
-            m_lastIndicatorOpenMs = newestOpenMs;
-            const QJsonObject emaJson =
-                data::IndicatorEngine()
-                    .compute(klines)
-                    .value(QStringLiteral("ema"))
-                    .toObject();
-            QVariantMap ema;
-            for (auto it = emaJson.begin(); it != emaJson.end(); ++it)
-            {
-                if (it.value().isDouble())
-                {
-                    ema.insert(it.key(), it.value().toDouble());
-                }
-            }
-            m_ema = ema;
-            emit indicatorsChanged();
-        }
-    }
-
     const qint64 now = nowMs();
     const qint64 exchangeTimestamp =
         static_cast<qint64>(priceField(ticker, QStringLiteral("timestamp")));
@@ -445,6 +422,56 @@ void MarketStream::rebuildCandles()
     }
 
     m_candles = list;
+
+    // EMA over the same candles the chart draws, so the lines and the bars
+    // share one timeframe. Values before each period's seed stay NaN.
+    static const QList<int> kPeriods{ 7, 14, 30, 60, 200 };
+    m_emaSeries = computeEmaSeries(list, kPeriods);
+
+    QVariantMap latest;
+    for (auto it = m_emaSeries.begin(); it != m_emaSeries.end(); ++it)
+    {
+        const QVariantList values = it.value().toList();
+        for (int i = values.size() - 1; 0 <= i; --i)
+        {
+            const double value = values.at(i).toDouble();
+            if (std::isfinite(value))
+            {
+                latest.insert(it.key(), value);
+                break;
+            }
+        }
+    }
+    m_ema = latest;
+
+    emit emaSeriesChanged();
+    emit indicatorsChanged();
+}
+
+QVariantMap MarketStream::computeEmaSeries(const QVariantList& candles,
+                                           const QList<int>& periods)
+{
+    QVector<double> closes;
+    closes.reserve(candles.size());
+    for (const QVariant& entry : candles)
+    {
+        closes.append(entry.toMap().value(QStringLiteral("c")).toDouble());
+    }
+
+    QVariantMap series;
+    const data::IndicatorEngine engine;
+    for (int period : periods)
+    {
+        const QVector<double> values = engine.emaSeries(closes, period);
+        QVariantList list;
+        list.reserve(values.size());
+        for (double value : values)
+        {
+            list.append(value);
+        }
+        series.insert(QString::number(period), list);
+    }
+    return series;
 }
 
 void MarketStream::refreshStale()

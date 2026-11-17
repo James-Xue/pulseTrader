@@ -32,6 +32,11 @@ ColumnLayout {
     /// endpoint and token without duplicating the login form state.
     readonly property var stream: root.controller ? root.controller.marketStream : null
 
+    /// EMA periods and their line colours. The strip and the chart share both
+    /// so a value always matches its curve.
+    readonly property var emaPeriods: [7, 14, 30, 60, 200]
+    readonly property var emaColors: ["#F5A623", "#4A90D9", "#7ED321", "#BD10E0", "#50E3C2"]
+
     /// Re-evaluated whenever the C++ candlesChanged signal fires.
     readonly property var candleData: (root.stream && root.stream.candles)
                                       ? root.stream.candles : []
@@ -289,6 +294,7 @@ ColumnLayout {
 
                 const candles = root.candleData
                 const lastPrice = root.stream ? root.stream.lastPrice : 0
+                const emaSeriesData = root.stream ? root.stream.emaSeries : null
 
                 // Margins leave room for the price axis on the right, the
                 // time labels at the bottom, and the live-price overlay at
@@ -327,6 +333,23 @@ ColumnLayout {
                 if (lastPrice > 0) {
                     lo = Math.min(lo, lastPrice)
                     hi = Math.max(hi, lastPrice)
+                }
+                // EMA curves may sit outside the candle range in a strong
+                // trend; include them so no line is clipped.
+                if (emaSeriesData) {
+                    for (let k = 0; k < root.emaPeriods.length; ++k) {
+                        const values = emaSeriesData[String(root.emaPeriods[k])]
+                        if (!values) {
+                            continue
+                        }
+                        for (let i = 0; i < values.length; ++i) {
+                            const value = values[i]
+                            if (isFinite(value) && value > 0) {
+                                lo = Math.min(lo, value)
+                                hi = Math.max(hi, value)
+                            }
+                        }
+                    }
                 }
                 if (!isFinite(lo) || !isFinite(hi)) {
                     return
@@ -388,6 +411,38 @@ ColumnLayout {
                     ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight)
                 }
                 ctx.globalAlpha = 1.0
+
+                // 3b. EMA polylines. Each series is index-aligned with the
+                //     candles; NaN marks the region before its seed, where the
+                //     path is broken rather than drawn from zero.
+                if (emaSeriesData) {
+                    for (let k = 0; k < root.emaPeriods.length; ++k) {
+                        const values = emaSeriesData[String(root.emaPeriods[k])]
+                        if (!values || values.length !== candles.length) {
+                            continue
+                        }
+                        ctx.strokeStyle = root.emaColors[k]
+                        ctx.lineWidth = 1.2
+                        ctx.beginPath()
+                        let drawing = false
+                        for (let i = 0; i < candles.length; ++i) {
+                            const value = values[i]
+                            if (!isFinite(value) || value <= 0) {
+                                drawing = false
+                                continue
+                            }
+                            const x = padLeft + (i + 0.5) * slot
+                            const y = yOf(value)
+                            if (drawing) {
+                                ctx.lineTo(x, y)
+                            } else {
+                                ctx.moveTo(x, y)
+                                drawing = true
+                            }
+                        }
+                        ctx.stroke()
+                    }
+                }
 
                 // 4. Last price marker. The filled tag covers the grid label
                 //    at the same height, so the two never overprint.
@@ -482,12 +537,13 @@ ColumnLayout {
             Row {
                 spacing: Style.gap
                 Repeater {
-                    model: [7, 14, 30, 60, 200]
+                    model: root.emaPeriods
 
                     Text {
                         required property int modelData
+                        required property int index
                         text: "EMA" + modelData + " " + root.emaText(modelData)
-                        color: Style.secondaryText
+                        color: root.emaColors[index]
                         font.pixelSize: Style.fontSizeSmall
                     }
                 }
@@ -697,6 +753,7 @@ ColumnLayout {
     Connections {
         target: root.stream
         function onCandlesChanged() { chart.requestPaint() }
+        function onEmaSeriesChanged() { chart.requestPaint() }
         function onTickerChanged() {
             chart.requestPaint()
             // Terminal mode keeps a rolling log; the chart does not need it,

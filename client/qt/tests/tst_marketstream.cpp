@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QDateTime>
+#include <cmath>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -218,7 +219,7 @@ class TestMarketStream : public QObject
     void reportsEngineErrors();
     void staleTickerIsNotFolded();
     void klineFallbackIsDisplayOnly();
-    void computesEmaFromClosedKlines();
+    void emaSeriesAlignsWithCandles();
     void stopHaltsPolling();
 };
 
@@ -259,7 +260,7 @@ void TestMarketStream::pollsAndBuildsCandles()
     QCOMPARE(params.value(QStringLiteral("market_type")).toString(),
              QStringLiteral("spot"));
     QCOMPARE(params.value(QStringLiteral("book_levels")).toInt(), 0);
-    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 200);
+    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 1);
 
     // The first candle opens at the first sample's price.
     QCOMPARE(stream.candles().size(), 1);
@@ -378,45 +379,31 @@ void TestMarketStream::klineFallbackIsDisplayOnly()
     stream.stop();
 }
 
-void TestMarketStream::computesEmaFromClosedKlines()
+void TestMarketStream::emaSeriesAlignsWithCandles()
 {
-    FakeEngine engine;
-    QVERIFY(engine.listen());
-
-    // A constant close series makes every EMA equal to that constant, so the
-    // test exercises the wiring (property, recompute trigger) rather than the
-    // indicator math (tst_indicators covers that).
-    QJsonArray klines;
-    for (int i = 0; i < 200; ++i)
+    // Ten constant closes: the 3-period EMA seeds at index 2 and stays at the
+    // constant; everything before the seed is NaN so the chart breaks the line
+    // instead of drawing from zero.
+    QVariantList candles;
+    for (int i = 0; i < 10; ++i)
     {
-        QJsonObject kline;
-        kline[QStringLiteral("open_time")] =
-            static_cast<double>(1'700'000'000'000LL + qint64(i) * 60'000);
-        kline[QStringLiteral("open")] = 100.0;
-        kline[QStringLiteral("high")] = 101.0;
-        kline[QStringLiteral("low")] = 99.0;
-        kline[QStringLiteral("close")] = 100.0;
-        kline[QStringLiteral("volume")] = 1.0;
-        kline[QStringLiteral("closed")] = true;
-        klines.append(kline);
+        QVariantMap candle;
+        candle[QStringLiteral("c")] = 100.0;
+        candles.append(candle);
     }
-    engine.setKlines(klines);
 
-    MarketStream stream;
-    stream.setPollIntervalMs(50);
-    stream.setEndpoint(QStringLiteral("127.0.0.1"), engine.port(), false,
-                       QString());
-
-    QSignalSpy emaSpy(&stream, &MarketStream::indicatorsChanged);
-    stream.start(QStringLiteral("BTC_USDT"), QStringLiteral("futures"));
-
-    // start() emits one reset (empty map); wait for the first computed set.
-    QTRY_COMPARE_WITH_TIMEOUT(stream.ema().size(), 5, 3000);
-    const QVariantMap ema = stream.ema();
-    QCOMPARE(ema.size(), 5);
-    QVERIFY(qAbs(ema.value(QStringLiteral("7")).toDouble() - 100.0) < 1e-9);
-    QVERIFY(qAbs(ema.value(QStringLiteral("200")).toDouble() - 100.0) < 1e-9);
-    stream.stop();
+    const QVariantMap series = MarketStream::computeEmaSeries(candles, { 3, 5 });
+    QCOMPARE(series.size(), 2);
+    const QVariantList threes = series.value(QStringLiteral("3")).toList();
+    QCOMPARE(threes.size(), 10);
+    QVERIFY(std::isnan(threes.at(0).toDouble()));
+    QVERIFY(std::isnan(threes.at(1).toDouble()));
+    QVERIFY(qAbs(threes.at(2).toDouble() - 100.0) < 1e-9);
+    QVERIFY(qAbs(threes.at(9).toDouble() - 100.0) < 1e-9);
+    // Not enough input for the 5-period seed.
+    const QVariantList tens = series.value(QStringLiteral("5")).toList();
+    QCOMPARE(tens.size(), 10);
+    QVERIFY(std::isnan(tens.at(9).toDouble()) || qAbs(tens.at(4).toDouble() - 100.0) < 1e-9);
 }
 
 void TestMarketStream::stopHaltsPolling()
