@@ -260,7 +260,7 @@ void TestMarketStream::pollsAndBuildsCandles()
     QCOMPARE(params.value(QStringLiteral("market_type")).toString(),
              QStringLiteral("spot"));
     QCOMPARE(params.value(QStringLiteral("book_levels")).toInt(), 0);
-    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 1);
+    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 500);
 
     // The first candle opens at the first sample's price.
     QCOMPARE(stream.candles().size(), 1);

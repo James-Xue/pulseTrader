@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <cmath>
+#include <limits>
 #include <QJsonArray>
 #include <QJsonValue>
 
@@ -148,6 +149,9 @@ void MarketStream::start(const QString& symbol, const QString& marketType)
     m_candles.clear();
     m_ema.clear();
     m_emaSeries.clear();
+    m_klines = QJsonArray();
+    m_emaByKline.clear();
+    m_klineTimes.clear();
     m_lastIndicatorOpenMs = -1;
     m_inFlight = false;
     m_inFlightId = -1;
@@ -201,6 +205,9 @@ void MarketStream::clearCandles()
     m_candles.clear();
     m_ema.clear();
     m_emaSeries.clear();
+    m_klines = QJsonArray();
+    m_emaByKline.clear();
+    m_klineTimes.clear();
     m_lastIndicatorOpenMs = -1;
     m_sampleCount = 0;
     m_lastSampleMs = 0;
@@ -261,14 +268,14 @@ void MarketStream::poll()
         return;
     }
 
-    // 3. Only the ticker matters for this page. book_levels = 0 keeps the
-    //    order book empty, and klines = 1 gives a display-only fallback close
-    //    if a feed has not published a ticker yet. The EMA strip is computed
-    //    from the chart's own candles, not from these klines.
+    // 3. The ticker drives the page; 500 one-minute klines carry both the
+    //    display-only fallback close and the EMA history, so the curves are
+    //    warm from the first paint instead of growing from the chart's own
+    //    10-second candles.
     QJsonObject params;
     params[QStringLiteral("symbol")] = m_symbol;
     params[QStringLiteral("book_levels")] = 0;
-    params[QStringLiteral("klines")] = 1;
+    params[QStringLiteral("klines")] = 500;
     if (!m_marketType.isEmpty())
     {
         params[QStringLiteral("market_type")] = m_marketType;
@@ -353,6 +360,20 @@ void MarketStream::applyTicker(const QJsonObject& ticker,
         return;
     }
 
+    // 1b. Keep the kline history that seeds the EMA curves. Recompute only
+    //     when a NEW closed bar appears (open_time changes), not per poll.
+    if (!klines.isEmpty())
+    {
+        const qint64 newestOpenMs = static_cast<qint64>(
+            priceField(klines.last().toObject(), QStringLiteral("open_time")));
+        if (0 < newestOpenMs && newestOpenMs != m_lastIndicatorOpenMs)
+        {
+            m_lastIndicatorOpenMs = newestOpenMs;
+            m_klines = klines;
+            updateEmaFromKlines();
+        }
+    }
+
     const qint64 now = nowMs();
     const qint64 exchangeTimestamp =
         static_cast<qint64>(priceField(ticker, QStringLiteral("timestamp")));
@@ -422,30 +443,7 @@ void MarketStream::rebuildCandles()
     }
 
     m_candles = list;
-
-    // EMA over the same candles the chart draws, so the lines and the bars
-    // share one timeframe. Values before each period's seed stay NaN.
-    static const QList<int> kPeriods{ 7, 14, 30, 60, 200 };
-    m_emaSeries = computeEmaSeries(list, kPeriods);
-
-    QVariantMap latest;
-    for (auto it = m_emaSeries.begin(); it != m_emaSeries.end(); ++it)
-    {
-        const QVariantList values = it.value().toList();
-        for (int i = values.size() - 1; 0 <= i; --i)
-        {
-            const double value = values.at(i).toDouble();
-            if (std::isfinite(value))
-            {
-                latest.insert(it.key(), value);
-                break;
-            }
-        }
-    }
-    m_ema = latest;
-
-    emit emaSeriesChanged();
-    emit indicatorsChanged();
+    projectEmaOntoCandles();
 }
 
 QVariantMap MarketStream::computeEmaSeries(const QVariantList& candles,
@@ -472,6 +470,79 @@ QVariantMap MarketStream::computeEmaSeries(const QVariantList& candles,
         series.insert(QString::number(period), list);
     }
     return series;
+}
+
+void MarketStream::updateEmaFromKlines()
+{
+    // Closed 1m bars only: the forming bar moves every poll and would make
+    // every value flicker.
+    QVariantList candleLike;
+    m_klineTimes.clear();
+    for (const QJsonValue& entry : m_klines)
+    {
+        const QJsonObject kline = entry.toObject();
+        if (!kline.value(QStringLiteral("closed")).toBool())
+        {
+            continue;
+        }
+        QVariantMap candle;
+        candle[QStringLiteral("c")] = kline.value(QStringLiteral("close")).toDouble();
+        const qint64 openMs = static_cast<qint64>(
+            kline.value(QStringLiteral("open_time")).toDouble());
+        const qint64 closeMs = openMs + 60'000;
+        candle[QStringLiteral("t")] = static_cast<double>(closeMs);
+        candleLike.append(candle);
+        m_klineTimes.append(closeMs);
+    }
+
+    static const QList<int> kPeriods{ 7, 14, 30, 60, 200 };
+    m_emaByKline = computeEmaSeries(candleLike, kPeriods);
+    projectEmaOntoCandles();
+}
+
+void MarketStream::projectEmaOntoCandles()
+{
+    static const QList<int> kPeriods{ 7, 14, 30, 60, 200 };
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    QVariantMap aligned;
+    QVariantMap latest;
+    for (int period : kPeriods)
+    {
+        const QString key = QString::number(period);
+        const QVariantList byKline = m_emaByKline.value(key).toList();
+
+        QVariantList projected;
+        projected.reserve(m_candles.size());
+        int index = -1;  // newest kline whose close is at or before the candle
+        for (const QVariant& entry : m_candles)
+        {
+            const double candleMs = entry.toMap().value(QStringLiteral("t")).toDouble();
+            while (index + 1 < m_klineTimes.size()
+                   && static_cast<double>(m_klineTimes.at(index + 1)) <= candleMs)
+            {
+                ++index;
+            }
+            const bool usable = 0 <= index && index < byKline.size();
+            projected.append(usable ? byKline.at(index) : QVariant(nan));
+        }
+        aligned.insert(key, projected);
+
+        for (int i = byKline.size() - 1; 0 <= i; --i)
+        {
+            const double value = byKline.at(i).toDouble();
+            if (std::isfinite(value))
+            {
+                latest.insert(key, value);
+                break;
+            }
+        }
+    }
+
+    m_emaSeries = aligned;
+    m_ema = latest;
+    emit emaSeriesChanged();
+    emit indicatorsChanged();
 }
 
 void MarketStream::refreshStale()

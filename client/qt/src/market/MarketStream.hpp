@@ -60,12 +60,13 @@ class MarketStream : public QObject
     Q_PROPERTY(int candlePeriodSec READ candlePeriodSec WRITE setCandlePeriodSec
                    NOTIFY candlePeriodSecChanged)
     Q_PROPERTY(QVariantList candles READ candles NOTIFY candlesChanged)
-    /// Latest EMA per period over the CHART's candle series (chart period,
-    /// not 1-minute klines), keyed by period ("7".."200").
+    /// Latest EMA per period, computed on the engine's 1-minute klines and
+    /// warmed up from history, keyed by period ("7".."200").
     Q_PROPERTY(QVariantMap ema READ ema NOTIFY indicatorsChanged)
-    /// Full EMA series aligned index-for-index with `candles`, period ->
-    /// list of doubles (NaN before the period has seeded). The chart draws
-    /// these over the candles.
+    /// EMA series projected onto `candles`: the 1m EMA is sampled at each
+    /// candle's bucket start, so the lines are available immediately after
+    /// start() instead of waiting for the chart to accumulate candles.
+    /// Period -> list of doubles aligned with `candles` (NaN before data).
     Q_PROPERTY(QVariantMap emaSeries READ emaSeries NOTIFY emaSeriesChanged)
 
     Q_PROPERTY(int pollIntervalMs READ pollIntervalMs WRITE setPollIntervalMs
@@ -121,6 +122,12 @@ class MarketStream : public QObject
     /// the alignment without waiting for live candles to accumulate.
     [[nodiscard]] static QVariantMap computeEmaSeries(
         const QVariantList& candles, const QList<int>& periods);
+
+    /// Recompute the 1m EMA series from the engine's kline history.
+    void updateEmaFromKlines();
+
+    /// Sample the 1m EMA series at each chart candle's bucket start.
+    void projectEmaOntoCandles();
 
     [[nodiscard]] int pollIntervalMs() const { return m_pollIntervalMs; }
     [[nodiscard]] QString lastError() const { return m_lastError; }
@@ -199,6 +206,9 @@ class MarketStream : public QObject
     QVariantList m_candles;
     QVariantMap m_ema;
     QVariantMap m_emaSeries;
+    QJsonArray m_klines;        ///< closed 1m bars from the engine
+    QVariantMap m_emaByKline;   ///< period -> EMA aligned to m_klines
+    QVector<qint64> m_klineTimes; ///< close time per m_klines entry
     /// open_time of the newest closed kline the EMA values were computed from;
     /// -1 forces a recompute after a restart or symbol change.
     qint64 m_lastIndicatorOpenMs = -1;
