@@ -16,12 +16,51 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
 namespace pulse::risk
 {
+
+// ---------------------------------------------------------------------------
+// Drawdown equity — the account legs that feed the circuit breaker
+// ---------------------------------------------------------------------------
+//
+// The breaker answers one question: how much *trading* equity can the engine
+// still lose? Only accounts that are marked to market in the same snapshot may
+// answer it.
+//
+// The spot USDT cash balance is deliberately NOT an input. A spot purchase
+// converts USDT into a token: the cash leg collapses by the full position size
+// while the token's value never enters this snapshot, so every spot entry reads
+// as a total loss. That is not hypothetical — on 2026-11-17 the spot cash leg
+// read 500.00 and then fell back to 0.00 against a 19.45 USDT futures wallet,
+// producing a 90.9% "drawdown" with zero open positions. The resulting halt
+// latched and blocked every entry (PT strategies and the GT external runner
+// alike) for 20 hours until the engine was restarted.
+struct DrawdownEquityInputs
+{
+    std::optional<double> futures_total; ///< Futures wallet total (USDT).
+    std::optional<double> cfd_equity;    ///< CFD account equity (USD ≈ USDT).
+};
+
+struct DrawdownEquity
+{
+    double total = 0.0;    ///< Sum of every leg that was fetched.
+    bool complete = false; ///< True only when EVERY leg fetched successfully.
+};
+
+/// Aggregate the mark-to-market account legs for the drawdown breaker.
+///
+/// A leg that failed to fetch is absent (std::nullopt) and makes the result
+/// incomplete. Callers must skip the guard update in that case: feeding a
+/// partial sum after a transient REST failure fakes a huge drawdown and halts
+/// trading for no reason.
+///
+/// Thread safety: pure function, no shared state.
+[[nodiscard]] DrawdownEquity computeDrawdownEquity(const DrawdownEquityInputs &inputs);
 
 // ---------------------------------------------------------------------------
 // DrawdownGuard — circuit breaker that halts trading on excessive drawdown
@@ -31,6 +70,18 @@ class DrawdownGuard
   public:
     /// Construct with risk configuration containing drawdown thresholds.
     explicit DrawdownGuard(const RiskConfig &config);
+
+    // --- Snapshot plausibility (see updateEquity) ---
+
+    /// Largest upward equity step a single snapshot may carry. A bigger jump
+    /// is either a bad read or an external deposit; believing it immediately
+    /// arms the peak with a level the account never held, and the next normal
+    /// snapshot then reads as a catastrophic drawdown.
+    static constexpr double kMaxPeakStepFraction = 0.50;
+
+    /// Consecutive snapshots required before an outsized high is accepted as a
+    /// real balance (a deposit) instead of a one-off bad read.
+    static constexpr int kPeakStepConfirmations = 2;
 
     // --- PnL reporting ---
 
@@ -44,12 +95,16 @@ class DrawdownGuard
     /// Set current equity value (called periodically from portfolio snapshot).
     ///
     /// Updates:
-    ///   0. Rolls the daily baseline when the UTC day (days since epoch) changes
-    ///   1. m_currentEquity
-    ///   2. m_peakEquity (if new high)
-    ///   3. Check daily drawdown: (daily_start - current) / daily_start
-    ///   4. Check peak-to-valley: (peak - current) / peak
-    ///   5. Set halt flag if either threshold is breached
+    ///   0. Rejects the snapshot outright when it jumps more than
+    ///      kMaxPeakStepFraction above the peak and does not repeat — an
+    ///      implausible read must never touch a baseline. A repeated jump is
+    ///      accepted as an external cash flow and rebases both baselines
+    ///   1. Rolls the daily baseline when the UTC day (days since epoch) changes
+    ///   2. m_currentEquity
+    ///   3. m_peakEquity (if new high)
+    ///   4. Check daily drawdown: (daily_start - current) / daily_start
+    ///   5. Check peak-to-valley: (peak - current) / peak
+    ///   6. Set halt flag if either threshold is breached
     void updateEquity(double equity);
 
     /// Deterministic overload used by tests: the caller supplies the UTC day
@@ -93,6 +148,19 @@ class DrawdownGuard
     void manualHalt(ErrorCode reason = ErrorCode::ManualHalt);
 
   private:
+    /// Decide whether a snapshot may touch any baseline. Caller holds m_mutex
+    /// exclusively.
+    ///
+    /// Returns false when the reading is an unconfirmed upward jump — the
+    /// caller then drops the snapshot entirely instead of clamping it, so no
+    /// baseline is ever armed with a level the account did not actually hold.
+    /// A jump that repeats within the confirmation band is treated as an
+    /// external cash flow: both baselines rebase to it and it returns true.
+    [[nodiscard]] bool acceptSnapshotLocked(double equity);
+
+    /// Forget any pending (unconfirmed) high/low run. Caller holds m_mutex.
+    void clearPendingSteps() noexcept;
+
     RiskConfig m_config;
     mutable std::shared_mutex m_mutex;
 
@@ -101,6 +169,10 @@ class DrawdownGuard
     double m_currentEquity{ 0.0 };      ///< Latest equity snapshot.
     double m_dailyPnl{ 0.0 };           ///< Cumulative realized PnL today.
     std::int64_t m_dayKey{ -1 };        ///< UTC day of the current daily baseline.
+    double m_pendingHighEquity{ 0.0 };  ///< High from an unconfirmed jump.
+    int m_pendingHighCount{ 0 };        ///< Consecutive snapshots at that high.
+    double m_pendingLowEquity{ 0.0 };   ///< Low from an unconfirmed drop.
+    int m_pendingLowCount{ 0 };         ///< Consecutive snapshots at that low.
 
     std::atomic<bool> m_halted{ false };                ///< Circuit breaker flag (lock-free read).
     std::atomic<ErrorCode> m_haltReason{ ErrorCode::Ok }; ///< Reason for halt (lock-free read).

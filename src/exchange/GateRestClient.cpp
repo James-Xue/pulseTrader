@@ -24,6 +24,7 @@
 #include <curl/curl.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
@@ -628,8 +629,24 @@ Result<AccountBalance> GateRestClient::getFuturesAccountBalance()
     }
 
     const auto &j = value(result);
+
+    // `total` is the wallet's mark-to-market equity and the only field the
+    // drawdown breaker trusts. A missing, blank, unparseable or non-finite
+    // value must FAIL the call instead of defaulting to 0.0: a fabricated zero
+    // is indistinguishable from a wiped account, so the breaker would read a
+    // 100% drawdown and latch a halt that no later snapshot can clear
+    // (2026-11-17, the same class as the spot-cash incident).
+    const auto total = safeParseDouble(j.value("total", ""));
+    if (!total.has_value() || !std::isfinite(*total))
+    {
+        PULSE_LOG_WARN("exchange",
+            "Futures balance response has no usable 'total' — refusing to report 0");
+        return PulseError{ErrorCode::ExchangeError,
+                          "Futures balance response has no usable 'total' field"};
+    }
+
     AccountBalance bal;
-    bal.total           = safeParseDouble(j.value("total", "0")).value_or(0.0);
+    bal.total           = *total;
     bal.available       = safeParseDouble(j.value("available", "0")).value_or(0.0);
     bal.unrealised_pnl  = safeParseDouble(j.value("unrealised_pnl", "0")).value_or(0.0);
     bal.position_margin = safeParseDouble(j.value("position_margin", "0")).value_or(0.0);

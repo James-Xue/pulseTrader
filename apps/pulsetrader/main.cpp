@@ -499,13 +499,20 @@ static void logSystemHeartbeat(
 
     // Drawdown-guard equity aggregation.
     //
-    // All configured accounts are summed in USDT-equivalent (USD≈USDT) so a
-    // transfer between accounts does not read as a drawdown. The snapshot is
-    // fed to the guard only when EVERY configured fetch succeeds: feeding a
-    // partial sum after a transient API failure would fake a huge drawdown
-    // and halt trading.
-    double equity_total = 0.0;
-    bool equity_complete = true;
+    // Only MARK-TO-MARKET accounts feed the circuit breaker — see
+    // computeDrawdownEquity(). They are summed in USDT-equivalent (USD≈USDT)
+    // so a transfer between them does not read as a drawdown, and the guard is
+    // updated only when EVERY fetch succeeds: feeding a partial sum after a
+    // transient REST failure would fake a huge drawdown and halt trading.
+    //
+    // The spot USDT cash balance is logged but deliberately NOT summed: buying
+    // a token spends the cash leg by the full position size while the token's
+    // value never enters this snapshot, so every spot entry reads as a loss.
+    // On 2026-11-17 spot cash read 500.00 and then fell back to 0.00 against a
+    // 19.45 USDT futures wallet — a 90.9% "drawdown" with zero open positions
+    // that latched a halt for 20 hours (PT strategies and the GT external
+    // runner alike).
+    pulse::risk::DrawdownEquityInputs dd_inputs;
 
     if (nullptr != rest_client)
     {
@@ -513,20 +520,19 @@ static void logSystemHeartbeat(
         if (ok(bal_result))
         {
             const auto &bal = value(bal_result);
-            equity_total += bal.total;
+            dd_inputs.futures_total = bal.total;
             msg << " | futures " << std::fixed << std::setprecision(2)
                 << bal.total << " " << bal.currency
                 << " (avail " << bal.available
                 << ", pnl " << (bal.unrealised_pnl >= 0 ? "+" : "")
                 << bal.unrealised_pnl << ")";
         }
-        else
-        {
-            equity_complete = false;
-        }
+        // A failed fetch leaves futures_total unset, which makes
+        // computeDrawdownEquity() report the snapshot incomplete — the guard
+        // is then skipped for this heartbeat rather than fed a partial sum.
     }
 
-    // Spot account balance.
+    // Spot account balance — display only, never part of drawdown equity.
     if (nullptr != spot_rest_client)
     {
         auto spot_result = spot_rest_client->getSpotAccounts();
@@ -539,7 +545,6 @@ static void logSystemHeartbeat(
                 {
                     double avail = pulse::safeParseDouble(item.value("available", "0")).value_or(0.0);
                     double locked = pulse::safeParseDouble(item.value("locked", "0")).value_or(0.0);
-                    equity_total += avail + locked;
                     msg << " | spot " << std::fixed << std::setprecision(2)
                         << (avail + locked) << " USDT"
                         << " (avail " << avail << ")";
@@ -547,10 +552,9 @@ static void logSystemHeartbeat(
                 }
             }
         }
-        else
-        {
-            equity_complete = false;
-        }
+        // Spot is cash, not marked equity: a token purchase or a manual
+        // deposit/withdrawal moves it by the full amount without any trading
+        // PnL, so it must neither feed the guard nor gate its update.
     }
 
     // CFD account balance (USD, MT5 account).
@@ -560,16 +564,25 @@ static void logSystemHeartbeat(
         if (ok(cfd_result))
         {
             const auto &data = value(cfd_result).value("data", nlohmann::json::object());
-            const double equity = pulse::safeParseDouble(data.value("equity", "0")).value_or(0.0);
+            const auto cfd_equity = pulse::safeParseDouble(data.value("equity", ""));
             const double free   = pulse::safeParseDouble(data.value("margin_free", "0")).value_or(0.0);
-            equity_total += equity;
-            msg << " | cfd " << std::fixed << std::setprecision(2)
-                << equity << " USD (avail " << free << ")";
+
+            // Same rule as the futures leg: a missing or unparseable equity is
+            // a FAILED fetch, not a zero balance. A fabricated zero is
+            // indistinguishable from a wiped sub-account, so the breaker would
+            // read it as a 100% drawdown and latch a halt.
+            if (cfd_equity.has_value() && std::isfinite(*cfd_equity))
+            {
+                dd_inputs.cfd_equity = *cfd_equity;
+                msg << " | cfd " << std::fixed << std::setprecision(2)
+                    << *cfd_equity << " USD (avail " << free << ")";
+            }
+            else
+            {
+                msg << " | cfd n/a (no usable equity)";
+            }
         }
-        else
-        {
-            equity_complete = false;
-        }
+        // Failed fetch → cfd_equity stays unset → incomplete snapshot.
     }
 
     // Feed the circuit breaker once per heartbeat. updateEquity() also rolls
@@ -577,9 +590,10 @@ static void logSystemHeartbeat(
     // needed. Skip the update entirely when any fetch failed — see above.
     if (nullptr != drawdown_guard)
     {
-        if (equity_complete)
+        const auto dd_equity = pulse::risk::computeDrawdownEquity(dd_inputs);
+        if (dd_equity.complete)
         {
-            drawdown_guard->updateEquity(equity_total);
+            drawdown_guard->updateEquity(dd_equity.total);
         }
         else
         {
