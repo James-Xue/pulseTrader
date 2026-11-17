@@ -60,9 +60,13 @@ class MarketStream : public QObject
     Q_PROPERTY(int candlePeriodSec READ candlePeriodSec WRITE setCandlePeriodSec
                    NOTIFY candlePeriodSecChanged)
     Q_PROPERTY(QVariantList candles READ candles NOTIFY candlesChanged)
-    /// EMA values from the engine's 1-minute klines, keyed by period
-    /// ("7".."200"). Empty until the first closed kline arrives.
+    /// Latest EMA per period over the CHART's candle series (chart period,
+    /// not 1-minute klines), keyed by period ("7".."200").
     Q_PROPERTY(QVariantMap ema READ ema NOTIFY indicatorsChanged)
+    /// Full EMA series aligned index-for-index with `candles`, period ->
+    /// list of doubles (NaN before the period has seeded). The chart draws
+    /// these over the candles.
+    Q_PROPERTY(QVariantMap emaSeries READ emaSeries NOTIFY emaSeriesChanged)
 
     Q_PROPERTY(int pollIntervalMs READ pollIntervalMs WRITE setPollIntervalMs
                    NOTIFY pollIntervalMsChanged)
@@ -111,6 +115,12 @@ class MarketStream : public QObject
     [[nodiscard]] int candlePeriodSec() const { return m_candlePeriodSec; }
     [[nodiscard]] QVariantList candles() const { return m_candles; }
     [[nodiscard]] QVariantMap ema() const { return m_ema; }
+    [[nodiscard]] QVariantMap emaSeries() const { return m_emaSeries; }
+
+    /// EMA over a candle list, aligned to it. Static so tests can exercise
+    /// the alignment without waiting for live candles to accumulate.
+    [[nodiscard]] static QVariantMap computeEmaSeries(
+        const QVariantList& candles, const QList<int>& periods);
 
     [[nodiscard]] int pollIntervalMs() const { return m_pollIntervalMs; }
     [[nodiscard]] QString lastError() const { return m_lastError; }
@@ -129,6 +139,7 @@ class MarketStream : public QObject
     void candlePeriodSecChanged();
     void candlesChanged();
     void indicatorsChanged();
+    void emaSeriesChanged();
     void pollIntervalMsChanged();
     void lastErrorChanged();
 
@@ -157,7 +168,7 @@ class MarketStream : public QObject
     static constexpr qint64 kStaleAfterMs = 5000;
     static constexpr int kDefaultPollIntervalMs = 1000;
     static constexpr int kDefaultCandlePeriodSec = 10;
-    static constexpr int kMaxCandles = 120;
+    static constexpr int kMaxCandles = 400;
     static constexpr int kMinPollIntervalMs = 50;
     static constexpr int kMaxPollIntervalMs = 60'000;
 
@@ -187,6 +198,7 @@ class MarketStream : public QObject
     qint64 m_lastSampleMs = 0;
     QVariantList m_candles;
     QVariantMap m_ema;
+    QVariantMap m_emaSeries;
     /// open_time of the newest closed kline the EMA values were computed from;
     /// -1 forces a recompute after a restart or symbol change.
     qint64 m_lastIndicatorOpenMs = -1;
