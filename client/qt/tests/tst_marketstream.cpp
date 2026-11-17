@@ -66,6 +66,12 @@ class FakeEngine : public QObject
         m_klineOnly = enabled;
     }
 
+    /// Klines returned alongside the ticker (EMA strip input).
+    void setKlines(const QJsonArray& klines)
+    {
+        m_klines = klines;
+    }
+
     [[nodiscard]] int requestCount() const
     {
         return m_requestCount;
@@ -171,6 +177,10 @@ class FakeEngine : public QObject
                 ticker[QStringLiteral("timestamp")] =
                     static_cast<double>(QDateTime::currentMSecsSinceEpoch()
                                         - m_timestampAgeMs);
+                if (!m_klines.isEmpty())
+                {
+                    result[QStringLiteral("klines")] = m_klines;
+                }
                 result[QStringLiteral("symbol")] = QStringLiteral("BTC_USDT");
                 result[QStringLiteral("ticker")] = ticker;
             }
@@ -190,6 +200,7 @@ class FakeEngine : public QObject
     QString m_error;
     qint64 m_timestampAgeMs = 0;
     bool m_klineOnly = false;
+    QJsonArray m_klines;
     int m_requestCount = 0;
     QJsonObject m_lastParams;
 };
@@ -207,6 +218,7 @@ class TestMarketStream : public QObject
     void reportsEngineErrors();
     void staleTickerIsNotFolded();
     void klineFallbackIsDisplayOnly();
+    void computesEmaFromClosedKlines();
     void stopHaltsPolling();
 };
 
@@ -247,7 +259,7 @@ void TestMarketStream::pollsAndBuildsCandles()
     QCOMPARE(params.value(QStringLiteral("market_type")).toString(),
              QStringLiteral("spot"));
     QCOMPARE(params.value(QStringLiteral("book_levels")).toInt(), 0);
-    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 1);
+    QCOMPARE(params.value(QStringLiteral("klines")).toInt(), 200);
 
     // The first candle opens at the first sample's price.
     QCOMPARE(stream.candles().size(), 1);
@@ -363,6 +375,47 @@ void TestMarketStream::klineFallbackIsDisplayOnly()
     QVERIFY(stream.stale());
     QCOMPARE(stream.candles().size(), 0);
     QCOMPARE(stream.sampleCount(), 0);
+    stream.stop();
+}
+
+void TestMarketStream::computesEmaFromClosedKlines()
+{
+    FakeEngine engine;
+    QVERIFY(engine.listen());
+
+    // A constant close series makes every EMA equal to that constant, so the
+    // test exercises the wiring (property, recompute trigger) rather than the
+    // indicator math (tst_indicators covers that).
+    QJsonArray klines;
+    for (int i = 0; i < 200; ++i)
+    {
+        QJsonObject kline;
+        kline[QStringLiteral("open_time")] =
+            static_cast<double>(1'700'000'000'000LL + qint64(i) * 60'000);
+        kline[QStringLiteral("open")] = 100.0;
+        kline[QStringLiteral("high")] = 101.0;
+        kline[QStringLiteral("low")] = 99.0;
+        kline[QStringLiteral("close")] = 100.0;
+        kline[QStringLiteral("volume")] = 1.0;
+        kline[QStringLiteral("closed")] = true;
+        klines.append(kline);
+    }
+    engine.setKlines(klines);
+
+    MarketStream stream;
+    stream.setPollIntervalMs(50);
+    stream.setEndpoint(QStringLiteral("127.0.0.1"), engine.port(), false,
+                       QString());
+
+    QSignalSpy emaSpy(&stream, &MarketStream::indicatorsChanged);
+    stream.start(QStringLiteral("BTC_USDT"), QStringLiteral("futures"));
+
+    // start() emits one reset (empty map); wait for the first computed set.
+    QTRY_COMPARE_WITH_TIMEOUT(stream.ema().size(), 5, 3000);
+    const QVariantMap ema = stream.ema();
+    QCOMPARE(ema.size(), 5);
+    QVERIFY(qAbs(ema.value(QStringLiteral("7")).toDouble() - 100.0) < 1e-9);
+    QVERIFY(qAbs(ema.value(QStringLiteral("200")).toDouble() - 100.0) < 1e-9);
     stream.stop();
 }
 

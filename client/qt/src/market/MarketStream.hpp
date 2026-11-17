@@ -60,6 +60,9 @@ class MarketStream : public QObject
     Q_PROPERTY(int candlePeriodSec READ candlePeriodSec WRITE setCandlePeriodSec
                    NOTIFY candlePeriodSecChanged)
     Q_PROPERTY(QVariantList candles READ candles NOTIFY candlesChanged)
+    /// EMA values from the engine's 1-minute klines, keyed by period
+    /// ("7".."200"). Empty until the first closed kline arrives.
+    Q_PROPERTY(QVariantMap ema READ ema NOTIFY indicatorsChanged)
 
     Q_PROPERTY(int pollIntervalMs READ pollIntervalMs WRITE setPollIntervalMs
                    NOTIFY pollIntervalMsChanged)
@@ -107,6 +110,7 @@ class MarketStream : public QObject
     [[nodiscard]] qint64 lastSampleMs() const { return m_lastSampleMs; }
     [[nodiscard]] int candlePeriodSec() const { return m_candlePeriodSec; }
     [[nodiscard]] QVariantList candles() const { return m_candles; }
+    [[nodiscard]] QVariantMap ema() const { return m_ema; }
 
     [[nodiscard]] int pollIntervalMs() const { return m_pollIntervalMs; }
     [[nodiscard]] QString lastError() const { return m_lastError; }
@@ -124,6 +128,7 @@ class MarketStream : public QObject
     void sampleChanged();
     void candlePeriodSecChanged();
     void candlesChanged();
+    void indicatorsChanged();
     void pollIntervalMsChanged();
     void lastErrorChanged();
 
@@ -181,6 +186,10 @@ class MarketStream : public QObject
     int m_sampleCount = 0;
     qint64 m_lastSampleMs = 0;
     QVariantList m_candles;
+    QVariantMap m_ema;
+    /// open_time of the newest closed kline the EMA values were computed from;
+    /// -1 forces a recompute after a restart or symbol change.
+    qint64 m_lastIndicatorOpenMs = -1;
 
     QString m_lastError;
     CandleAggregator m_aggregator;

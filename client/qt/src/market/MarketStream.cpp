@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonValue>
 
+#include "data/IndicatorEngine.hpp"
 #include "rpc/RpcMethods.hpp"
 
 namespace pulse::client
@@ -144,6 +145,8 @@ void MarketStream::start(const QString& symbol, const QString& marketType)
     m_lastSampleMs = 0;
     m_aggregator.clear();
     m_candles.clear();
+    m_ema.clear();
+    m_lastIndicatorOpenMs = -1;
     m_inFlight = false;
     m_inFlightId = -1;
 
@@ -153,6 +156,7 @@ void MarketStream::start(const QString& symbol, const QString& marketType)
     emit tickerChanged();
     emit sampleChanged();
     emit candlesChanged();
+    emit indicatorsChanged();
 
     m_streaming = true;
     emit streamingChanged();
@@ -192,10 +196,13 @@ void MarketStream::clearCandles()
 {
     m_aggregator.clear();
     m_candles.clear();
+    m_ema.clear();
+    m_lastIndicatorOpenMs = -1;
     m_sampleCount = 0;
     m_lastSampleMs = 0;
     emit candlesChanged();
     emit sampleChanged();
+    emit indicatorsChanged();
 }
 
 void MarketStream::setCandlePeriodSec(int seconds)
@@ -249,13 +256,13 @@ void MarketStream::poll()
         return;
     }
 
-    // 3. Only the ticker matters for this page. book_levels = 0 keeps the
-    //    order book empty and klines = 1 gives a fallback close if a feed has
-    //    not published a ticker yet.
+    // 3. The ticker drives the page and 200 one-minute klines feed both the
+    //    display-only fallback close and the EMA strip (the longest period is
+    //    200). book_levels = 0 keeps the order book out of the payload.
     QJsonObject params;
     params[QStringLiteral("symbol")] = m_symbol;
     params[QStringLiteral("book_levels")] = 0;
-    params[QStringLiteral("klines")] = 1;
+    params[QStringLiteral("klines")] = 200;
     if (!m_marketType.isEmpty())
     {
         params[QStringLiteral("market_type")] = m_marketType;
@@ -338,6 +345,35 @@ void MarketStream::applyTicker(const QJsonObject& ticker,
         setStale(true);
         setLastError(QStringLiteral("no price for ") + m_symbol);
         return;
+    }
+
+    // 1b. EMA strip. Recompute only when a NEW closed one-minute kline shows
+    //     up (the open_time changes), so the five series cost one pass per
+    //     minute instead of one per second. The engine sends 200 bars, enough
+    //     for the EMA200 seed; IndicatorEngine ignores the forming bar.
+    if (!klines.isEmpty())
+    {
+        const qint64 newestOpenMs = static_cast<qint64>(
+            priceField(klines.last().toObject(), QStringLiteral("open_time")));
+        if (0 < newestOpenMs && newestOpenMs != m_lastIndicatorOpenMs)
+        {
+            m_lastIndicatorOpenMs = newestOpenMs;
+            const QJsonObject emaJson =
+                data::IndicatorEngine()
+                    .compute(klines)
+                    .value(QStringLiteral("ema"))
+                    .toObject();
+            QVariantMap ema;
+            for (auto it = emaJson.begin(); it != emaJson.end(); ++it)
+            {
+                if (it.value().isDouble())
+                {
+                    ema.insert(it.key(), it.value().toDouble());
+                }
+            }
+            m_ema = ema;
+            emit indicatorsChanged();
+        }
     }
 
     const qint64 now = nowMs();

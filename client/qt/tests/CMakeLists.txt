@@ -132,6 +132,7 @@ qt_add_executable(tst_enginecontroller
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/EngineController.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/MarketStream.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/CandleAggregator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/data/IndicatorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcClient.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcError.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/models/JsonListModel.cpp
@@ -206,6 +207,7 @@ qt_add_executable(tst_marketstream
     tst_marketstream.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/MarketStream.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market/CandleAggregator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/data/IndicatorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcClient.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/RpcError.cpp
 )
