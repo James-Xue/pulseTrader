@@ -70,6 +70,19 @@ ColumnLayout {
         return value.toFixed(6)
     }
 
+    /// One EMA value from the stream's 1-minute kline strip, or an em dash
+    /// when the engine has not published enough closed bars yet.
+    function emaText(period) {
+        if (!root.stream || !root.stream.ema) {
+            return "—"
+        }
+        const value = root.stream.ema[String(period)]
+        if (!isFinite(value) || value <= 0) {
+            return "—"
+        }
+        return root.fmtPrice(value)
+    }
+
     /// Pad a cell to a fixed width so the monospace log columns stay aligned.
     function padRight(value, width) {
         let text = "" + value
@@ -461,6 +474,22 @@ ColumnLayout {
                     color: (root.stream && root.stream.engineReady && !root.stream.stale)
                            ? Style.success : Style.warning
                     font.pixelSize: Style.fontSizeSmall
+                }
+            }
+
+            // EMA strip: 1-minute kline EMAs, same periods as the gold data
+            // feed (DATA IPC v1). Values update once per closed minute.
+            Row {
+                spacing: Style.gap
+                Repeater {
+                    model: [7, 14, 30, 60, 200]
+
+                    Text {
+                        required property int modelData
+                        text: "EMA" + modelData + " " + root.emaText(modelData)
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
                 }
             }
         }
