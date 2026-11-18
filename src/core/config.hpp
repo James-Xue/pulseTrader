@@ -263,6 +263,12 @@ struct RiskConfig
     int maxOpenPositions = 5;             ///< Max concurrent open positions (all markets).
     double maxDailyDrawdown = 0.02;       ///< Max daily loss as fraction of equity.
     double maxDrawdown = 0.05;            ///< Max total drawdown before halt.
+    /// Master switch for the engine-side ProtectiveExitManager (the percentage
+    /// stop-loss / take-profit supervisor). When false the engine never closes
+    /// a position on its own — every exit belongs to its strategy or to the
+    /// operator. The drawdown breaker is INDEPENDENT of this flag: it still
+    /// halts new entries, it just cannot close anything.
+    bool protectiveExitEnabled = true;
     std::uint32_t maxOrdersPerSec = 5;    ///< Token-bucket capacity for rate limiting.
     double maxSymbolNotional = 500.0;     ///< Max notional per individual symbol (USDT).
     /// Per-market overrides for the position-notional cap. Each falls back to

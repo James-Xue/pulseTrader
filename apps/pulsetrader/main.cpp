@@ -2293,7 +2293,16 @@ static int runTrade(int argc, char* argv[])
         // L7 protective exits: engine-side stop-loss / take-profit. Runs
         // every tick; each position is throttled to one close attempt per
         // kRetryCooldownSeconds inside the manager.
-        (void)protective_exits.tick(std::chrono::system_clock::now());
+        //
+        // [risk] protective_exit_enabled = false skips the tick entirely: the
+        // engine then never closes a position on its own, which is what an
+        // operator wants while a hand-managed position must survive normal
+        // pullbacks. The drawdown breaker is unaffected — it still blocks new
+        // entries.
+        if (cfg.risk.protectiveExitEnabled)
+        {
+            (void)protective_exits.tick(std::chrono::system_clock::now());
+        }
 
         // Strategy Flat exits queued by the signal callback. Only positions
         // owned by the signalling strategy (or untagged ones) on that symbol

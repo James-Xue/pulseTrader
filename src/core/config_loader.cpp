@@ -576,6 +576,10 @@ PulseError parseRisk(const toml::value &root, RiskConfig &out)
         findDouble(sec, "maxDailyDrawdown", out.maxDailyDrawdown);
     out.maxDrawdown =
         findDouble(sec, "maxDrawdown", out.maxDrawdown);
+    // Master switch for the engine-side protective exits (see RiskConfig).
+    // Absent key keeps the historical behaviour: the supervisor runs.
+    out.protectiveExitEnabled =
+        toml::find_or(sec, "protective_exit_enabled", out.protectiveExitEnabled);
     out.maxOrdersPerSec =
         static_cast<std::uint32_t>(
             toml::find_or(sec, "maxOrdersPerSec",
