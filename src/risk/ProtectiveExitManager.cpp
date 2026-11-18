@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 namespace pulse::risk
@@ -20,6 +21,56 @@ namespace
 std::int64_t secondsBetween(const Timestamp &newer, const Timestamp &older)
 {
     return std::chrono::duration_cast<std::chrono::seconds>(newer - older).count();
+}
+
+/// Smallest tradeable step for a market: whole contracts on futures, 0.01 lots
+/// on CFD, and no venue step worth rounding to on spot.
+double lotStepFor(MarketType market_type)
+{
+    switch (market_type)
+    {
+        case MarketType::Futures:
+            return 1.0;
+        case MarketType::Cfd:
+            return 0.01;
+        case MarketType::Spot:
+        default:
+            return 0.0;
+    }
+}
+
+/// Snap a requested partial-close size onto the venue's tradeable grid.
+///
+/// The take-profit ladder asks for fractions (0.33 / 0.33 / 0.34) of the whole
+/// position, which is not a tradeable size on its own: 0.33 x 0.01 CFD lots is
+/// 0.0033, and 0.33 x 1 futures contract is 0.33. Sending either to the venue
+/// fails, and because TakeProfitEngine advances its target index when it emits
+/// the signal, that target is then lost for good — the ladder silently never
+/// fills (2026-11-18: "Take-profit close failed ... retry in 10s", then the
+/// next target failed the same way, leaving the stop-loss as the only exit that
+/// ever worked).
+///
+/// Rounding to the NEAREST step keeps multi-step positions proportional
+/// (3 contracts x 0.33 -> 1 contract) and lifts a single-step position to a
+/// full close — the only tradeable reading of "sell a third of one lot".
+double snapToLot(double quantity, double position_quantity, MarketType market_type)
+{
+    const double step = lotStepFor(market_type);
+    if (step <= 0.0)
+    {
+        return quantity;
+    }
+
+    double snapped = std::round(quantity / step) * step;
+    if (snapped <= 0.0)
+    {
+        snapped = step;
+    }
+    if (snapped > position_quantity)
+    {
+        snapped = position_quantity;
+    }
+    return snapped;
 }
 
 } // namespace
@@ -173,7 +224,12 @@ ProtectiveExitManager::TickResult ProtectiveExitManager::tick(Timestamp now)
             }
 
             const double fraction = std::clamp(signal.close_fraction, 0.0, 1.0);
-            const double quantity = pos_it->second.quantity * fraction;
+            // Snap the fractional slice onto the venue's tradeable grid — see
+            // snapToLot(). Without this every target on a one-lot position is
+            // rejected and burned, and the ladder never fires at all.
+            const double quantity = snapToLot(pos_it->second.quantity * fraction,
+                                              pos_it->second.quantity,
+                                              pos_it->second.market_type);
             if (quantity <= 0.0)
             {
                 continue;
@@ -184,9 +240,11 @@ ProtectiveExitManager::TickResult ProtectiveExitManager::tick(Timestamp now)
             {
                 ++result.took_profit;
                 PULSE_LOG_INFO("risk",
-                               "Take-profit close placed for {} {} (target #{}, {:.1f}%)",
+                               "Take-profit close placed for {} {} (target #{}, {:.1f}%, "
+                               "qty {:.4f} of {:.4f})",
                                signal.position_id, pos_it->second.symbol,
-                               signal.target_index, fraction * 100.0);
+                               signal.target_index, fraction * 100.0,
+                               quantity, pos_it->second.quantity);
             }
             else
             {

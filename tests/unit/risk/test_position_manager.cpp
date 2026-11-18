@@ -1193,3 +1193,60 @@ TEST(PositionManager, ReduceOnly_NoExposureBehavesLikeNormalOrder)
     EXPECT_EQ(RiskDecision::Rejected, res.decision);
     EXPECT_EQ(ErrorCode::PositionLimitHit, res.reason_code);
 }
+
+// ---------------------------------------------------------------------------
+// Two DISTINCT exchange positions on the same symbol+side must stay apart
+// (2026-11-18: XAUUSD1000 longs at 3846.23 and 3846.84 sixteen seconds apart
+// collapsed into one "_sync" entry — the engine tracked half the exposure and
+// carried the other lot's cost basis, which armed a stop at 3857.99 against a
+// 3832.16 market that fired 0 s after registration).
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, SyncKeepsDistinctExchangePositionsApart)
+{
+    PositionManager pm(make_config(1e9, 20, 1e9));
+
+    pm.syncPositionFromExchange(
+        "XAUUSD1000", Side::Buy, 0.01, 3846.23, 3845.87,
+        MarketType::Cfd, 1000.0, MarginMode::Cross, 1.0, 0.0, 0.0,
+        Timestamp{}, 0.0, 0.0, "27895001");
+    pm.syncPositionFromExchange(
+        "XAUUSD1000", Side::Buy, 0.01, 3846.84, 3846.54,
+        MarketType::Cfd, 1000.0, MarginMode::Cross, 1.0, 0.0, 0.0,
+        Timestamp{}, 0.0, 0.0, "27895002");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(2u, all.size()) << "the second lot must not overwrite the first";
+    EXPECT_NE(all[0].position_id, all[1].position_id);
+
+    // Real exposure must be preserved, not halved.
+    double total_qty = 0.0;
+    for (const auto &p : all)
+    {
+        total_qty += p.quantity;
+    }
+    EXPECT_NEAR(0.02, total_qty, 1e-9);
+
+    // Each lot keeps its own cost basis.
+    EXPECT_NE(all[0].entry_price, all[1].entry_price);
+}
+
+// Re-importing the SAME exchange position must still update in place rather
+// than minting a second entry on every sync cycle.
+TEST(PositionManager, SyncReimportOfSameExchangePositionUpdatesInPlace)
+{
+    PositionManager pm(make_config(1e9, 20, 1e9));
+
+    pm.syncPositionFromExchange(
+        "XAUUSD1000", Side::Buy, 0.01, 3846.23, 3845.87,
+        MarketType::Cfd, 1000.0, MarginMode::Cross, 1.0, 0.0, 0.0,
+        Timestamp{}, 0.0, 0.0, "27895001");
+    pm.syncPositionFromExchange(
+        "XAUUSD1000", Side::Buy, 0.01, 3846.23, 3840.00,
+        MarketType::Cfd, 1000.0, MarginMode::Cross, 1.0, 0.0, 0.0,
+        Timestamp{}, 0.0, 0.0, "27895001");
+
+    const auto all = pm.getAllPositions();
+    ASSERT_EQ(1u, all.size());
+    EXPECT_NEAR(3840.00, all[0].current_price, 1e-9);
+}

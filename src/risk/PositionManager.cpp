@@ -58,13 +58,31 @@ void PositionManager::syncPositionFromExchange(
     {
         // Inline scan (the write lock is already held here — a helper that
         // takes its own shared lock would self-deadlock).
+        bool twins_engine_entry = false;
         for (const auto &[candidate_id, candidate] : m_positions)
         {
             if (candidate.exchange_position_id == exchange_position_id)
             {
                 pos_id = candidate_id; // update the fill-tracked entry in place
+                twins_engine_entry = true;
                 break;
             }
+        }
+
+        // Two DISTINCT exchange positions can share symbol+side: the operator
+        // simply bought the same CFD twice (2026-11-18: XAUUSD1000 longs at
+        // 3846.23 and 3846.84 sixteen seconds apart). The plain "_sync" id is
+        // already taken by the first one, so importing the second into it
+        // overwrites quantity and entry_price — the engine then tracks HALF the
+        // real exposure and carries the other lot's cost basis. That armed a
+        // stop at 3857.99 against a 3832.16 market, which fired 0 seconds after
+        // registration and sold a lot at a loss the engine had invented.
+        // Disambiguate with the exchange id so every lot keeps its own basis.
+        if (!twins_engine_entry
+            && m_positions.find(pos_id) != m_positions.end()
+            && m_positions[pos_id].exchange_position_id != exchange_position_id)
+        {
+            pos_id += "_" + exchange_position_id;
         }
     }
 

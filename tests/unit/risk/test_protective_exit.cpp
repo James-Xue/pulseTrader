@@ -223,3 +223,73 @@ TEST(ProtectiveExit, ManageFilterSkipsExcludedPositions)
     EXPECT_EQ(0, closes);
     EXPECT_EQ(0u, exits.trackedPositions());
 }
+
+// ---------------------------------------------------------------------------
+// Take-profit ladder on a position too small to split
+// ---------------------------------------------------------------------------
+
+TEST(ProtectiveExit, TakeProfitRoundsFractionToTradeableLot)
+{
+    // 0.33 x 0.01 CFD lots = 0.0033, below the 0.01 venue step. Sending it is
+    // rejected, and TakeProfitEngine has already advanced the target index, so
+    // the target is burned and the ladder never fills at all. The only
+    // tradeable reading of "sell a third of one lot" is a full close.
+    auto cfg = make_config();
+    cfg.stop_loss.mode = StopMode::Fixed;
+    cfg.stop_loss.fixed_pct = 0.50; // far away — keep the stop out of this test
+    cfg.take_profit.enabled = true;
+    cfg.take_profit.targets_pct = { 0.005, 0.01, 0.02 };
+    cfg.take_profit.fractions = { 0.33, 0.33, 0.34 };
+
+    PositionManager positions(cfg);
+    auto opened = positions.openPosition("XAUUSD1000", Side::Buy, 0.01, 3800.0, "s1",
+                                         MarketType::Cfd, 100.0, MarginMode::Cross,
+                                         1.0, 0.0);
+    ASSERT_TRUE(ok(opened)) << error(opened).message;
+
+    std::vector<double> closes;
+    ProtectiveExitManager exits(
+        cfg, positions,
+        [](const Symbol &, MarketType) { return std::optional<Price>{ 3850.0 }; },
+        [&](const Position &, double qty) {
+            closes.push_back(qty);
+            return true;
+        });
+
+    const auto r = exits.tick(at(10));
+    EXPECT_EQ(1, r.took_profit);
+    ASSERT_EQ(1u, closes.size());
+    EXPECT_DOUBLE_EQ(0.01, closes[0]);
+}
+
+TEST(ProtectiveExit, TakeProfitRoundsDownToWholeContracts)
+{
+    // Three contracts x 0.33 = 0.99 — not a whole contract. Nearest-step
+    // rounding must yield ONE contract, not zero and not the whole position.
+    auto cfg = make_config();
+    cfg.stop_loss.mode = StopMode::Fixed;
+    cfg.stop_loss.fixed_pct = 0.50;
+    cfg.take_profit.enabled = true;
+    cfg.take_profit.targets_pct = { 0.005, 0.01, 0.02 };
+    cfg.take_profit.fractions = { 0.33, 0.33, 0.34 };
+
+    PositionManager positions(cfg);
+    auto opened = positions.openPosition("BTC_USDT", Side::Buy, 3.0, 100.0, "s1",
+                                         MarketType::Futures, 10.0, MarginMode::Cross,
+                                         0.0001, 0.005);
+    ASSERT_TRUE(ok(opened)) << error(opened).message;
+
+    std::vector<double> closes;
+    ProtectiveExitManager exits(
+        cfg, positions,
+        [](const Symbol &, MarketType) { return std::optional<Price>{ 120.0 }; },
+        [&](const Position &, double qty) {
+            closes.push_back(qty);
+            return true;
+        });
+
+    const auto r = exits.tick(at(10));
+    EXPECT_EQ(1, r.took_profit);
+    ASSERT_EQ(1u, closes.size());
+    EXPECT_DOUBLE_EQ(1.0, closes[0]);
+}
