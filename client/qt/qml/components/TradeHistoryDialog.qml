@@ -25,6 +25,16 @@ Dialog {
         return root.columnWidths[index] * root.zoom
     }
 
+    /// Total table width: every column plus the gaps between them. The
+    /// delegates use this width instead of the viewport width, so zooming in
+    /// overflows (and scrolls) rather than squeezing the columns.
+    readonly property real tableWidth: {
+        let total = 0
+        for (let i = 0; i < root.columnWidths.length; ++i)
+            total += root.colWidth(i)
+        return total + Style.gapSmall * (root.columnWidths.length - 1)
+    }
+
     title: qsTr("Trade History")
     modal: false
     width: 1080
@@ -70,10 +80,20 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.HorizontalAndVerticalFlick
+            contentWidth: root.tableWidth
             model: root.controller ? root.controller.tradeHistory : []
 
+            ScrollBar.horizontal: ScrollBar {
+                policy: ScrollBar.AlwaysOn
+            }
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AsNeeded
+            }
+
             header: RowLayout {
-                width: ListView.view.width
+                width: Math.max(ListView.view.width, root.tableWidth)
                 spacing: Style.gapSmall
 
                 Text { text: qsTr("Time"); color: Style.tertiaryText
@@ -93,11 +113,12 @@ Dialog {
                 Text { text: qsTr("Status"); color: Style.tertiaryText
                        font.pixelSize: root.cellFont; Layout.preferredWidth: root.colWidth(7) }
                 Text { text: qsTr("Strategy"); color: Style.tertiaryText
-                       font.pixelSize: root.cellFont; Layout.fillWidth: true }
+                       font.pixelSize: root.cellFont
+                       Layout.preferredWidth: root.colWidth(8) }
             }
 
             delegate: RowLayout {
-                width: ListView.view.width
+                width: Math.max(ListView.view.width, root.tableWidth)
                 spacing: Style.gapSmall
 
                 Text {
@@ -168,7 +189,7 @@ Dialog {
                     }
                     color: Style.tertiaryText; font.pixelSize: root.cellFont
                     elide: Text.ElideRight
-                    Layout.fillWidth: true
+                    Layout.preferredWidth: root.colWidth(8)
                 }
             }
         }
