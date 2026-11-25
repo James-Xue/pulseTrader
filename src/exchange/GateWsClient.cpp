@@ -12,6 +12,7 @@
 #include "exchange/GateWsClient.hpp"
 
 #include "exchange/EndpointRouter.hpp"
+#include "exchange/GateRestClient.hpp"
 #include "exchange/gate_auth.hpp"
 #include "exchange/ProxyTunnel.hpp"
 #include "logging/Logger.hpp"
@@ -372,6 +373,17 @@ void GateWsClient::subscribePrivate(const std::string &channel,
     const std::vector<std::string> &payload,
     ChannelCallback callback)
 {
+    // Paper-mode isolation (2026-11-25): the private channel carries account
+    // state (balances, positions, order updates). A paper process must never
+    // learn, or leak, live account data — refuse before queueing anything.
+    if (GateRestClient::paperGuardEnabled())
+    {
+        PULSE_LOG_CRITICAL("exchange",
+                           "paper mode blocked private WS subscription: {}",
+                           channel);
+        return;
+    }
+
     m_channels.subscribe(channel, payload, std::move(callback));
 
     {

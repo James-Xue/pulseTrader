@@ -133,13 +133,6 @@ PulseError validatePaperConfig(const PulseConfig &cfg)
                            "simulated in paper v1)" };
     }
 
-    if (cfg.grid.state_file == "data/grid_state.json")
-    {
-        return PulseError{ ErrorCode::ConfigValidationError,
-                           "[paper] grid.state_file collides with the live "
-                           "grid state despite [grid] being disabled" };
-    }
-
     // CFD contract sizes cannot be fetched without credentials (the TradFi
     // detail endpoint is authenticated), so the paper config must carry them.
     for (const auto &inst : cfg.strategy.strategies)

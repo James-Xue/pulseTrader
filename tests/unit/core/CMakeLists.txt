@@ -22,6 +22,7 @@ target_link_libraries(test_config_loader
 
 add_executable(test_config_validator
     test_config_validator.cpp
+    test_config_paper.cpp
 )
 
 target_link_libraries(test_config_validator

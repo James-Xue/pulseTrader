@@ -324,6 +324,22 @@ class GateRestClient
             const std::string &body = "",
             bool retry = true);
 
+    // -----------------------------------------------------------------------
+    // Paper-mode guard (2026-11-25)
+    //
+    // Process-wide switch armed by the paper engine before any client is
+    // constructed. While armed, request() rejects every path outside the
+    // public market-data allow-list BEFORE signing, DNS resolution or curl.
+    // This is the third isolation layer: even a missed branch in the control
+    // plane cannot sign a live request from a paper process.
+    //
+    // Static because the guard must apply to every GateRestClient the process
+    // could construct, including ones created by subsystems that do not know
+    // paper mode exists.
+    // -----------------------------------------------------------------------
+    static void setPaperGuardEnabled(bool enabled);
+    [[nodiscard]] static bool paperGuardEnabled();
+
   private:
     ExchangeConfig m_config;
     MarketType m_marketType;

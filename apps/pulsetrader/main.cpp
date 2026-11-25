@@ -611,35 +611,20 @@ static void logSystemHeartbeat(
 // main
 // ===========================================================================
 
-static int runTrade(int argc, char* argv[])
+/// Run the trading engine.
+///
+/// `paper_requested` is set by the `paper` subcommand. The config's
+/// [paper] enabled flag is authoritative: a disagreement between the
+/// subcommand and the file aborts, because either direction of drift is a
+/// real-money hazard (a paper profile launched as `trade` would sign live
+/// orders; a live profile launched as `paper` would silently stop trading).
+static int runTrade(int argc, char* argv[], bool paper_requested = false)
 {
     using pulse::MarketType;
     using pulse::MarginMode;
 
     // ------------------------------------------------------------------
-    // 0. Single-instance guard — refuse a second engine on this machine.
-    //    Two engines ran simultaneously on 2026-08-16 and each only knew
-    //    its own fills, so the exchange position drifted from the engine
-    //    view. The flock lives for the whole process (RAII).
-    // ------------------------------------------------------------------
-    std::optional<pulse::SingleInstanceGuard> instance_guard;
-    if (nullptr == std::getenv("PULSE_ALLOW_MULTI_INSTANCES"))
-    {
-        instance_guard.emplace("data/engine.lock");
-        if (!instance_guard->acquired())
-        {
-            std::cerr << "[fatal] Another pulseTrader engine instance is "
-                         "already running (lock: data/engine.lock).\n"
-                         "Stopping this instance to avoid double trading.\n"
-                         "  - check `systemctl --user status pulsetrader`\n"
-                         "  - or set PULSE_ALLOW_MULTI_INSTANCES=1 to "
-                         "bypass (not recommended)\n";
-            return 1;
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // 1. Command-line parsing
+    // 0. Command-line parsing
     // ------------------------------------------------------------------
     std::string config_path;
 
@@ -712,7 +697,76 @@ static int runTrade(int argc, char* argv[])
         return 1;
     }
 
-    if (cfg.exchange.apiKey.empty() || cfg.exchange.apiSecret.empty())
+    // ------------------------------------------------------------------
+    // 2. Mode authority (fail-closed) and single-instance guard
+    // ------------------------------------------------------------------
+    // The subcommand and the config flag must agree. Both mismatches are
+    // real-money hazards:
+    //   * a paper profile started as `trade` would construct live clients
+    //     from a file the operator believes is a simulation;
+    //   * a live profile started as `paper` would silently stop trading.
+    if (paper_requested != cfg.paper.enabled)
+    {
+        if (cfg.paper.enabled)
+        {
+            std::cerr << "[fatal] this config enables [paper] but was started "
+                         "as the live engine.\n"
+                         "  Use ./run.sh paper (or `pulsetrader paper "
+                         "--config <file>`).\n";
+        }
+        else
+        {
+            std::cerr << "[fatal] the paper subcommand requires a config with "
+                         "[paper] enabled = true.\n"
+                         "  Use --config trading.paper.toml.\n";
+        }
+
+        return 1;
+    }
+
+    const bool paper_mode = cfg.paper.enabled;
+
+    if (paper_mode)
+    {
+        // Arm the process-wide REST/WS guard before ANY client exists. From
+        // here on, every private path is rejected before signing, DNS or
+        // curl — a missed branch in the control plane cannot reach mainnet.
+        pulse::exchange::GateRestClient::setPaperGuardEnabled(true);
+    }
+
+    // Single-instance guard. Paper takes its own lock so it can run beside
+    // the live engine; two LIVE engines remain forbidden (2026-08-16).
+    std::optional<pulse::SingleInstanceGuard> instance_guard;
+    if (nullptr == std::getenv("PULSE_ALLOW_MULTI_INSTANCES"))
+    {
+        const std::string lock_path = paper_mode
+            ? cfg.paper.lock_file
+            : std::string{ "data/engine.lock" };
+        instance_guard.emplace(lock_path);
+        if (!instance_guard->acquired())
+        {
+            std::cerr << "[fatal] Another pulseTrader "
+                      << (paper_mode ? "paper" : "engine")
+                      << " instance is already running (lock: " << lock_path
+                      << ").\n";
+
+            if (!paper_mode)
+            {
+                std::cerr << "Stopping this instance to avoid double trading.\n"
+                             "  - check `systemctl --user status pulsetrader`\n"
+                             "  - or set PULSE_ALLOW_MULTI_INSTANCES=1 to "
+                             "bypass (not recommended)\n";
+            }
+
+            return 1;
+        }
+    }
+
+    // Credentials: live requires them; paper requires their absence (the
+    // validator already rejects keys in paper mode, this branch keeps the
+    // live-side hint that tells the operator where to get them).
+    if (!paper_mode
+        && (cfg.exchange.apiKey.empty() || cfg.exchange.apiSecret.empty()))
     {
         std::cerr << "Error: exchange.apiKey and exchange.apiSecret must be set.\n";
 
@@ -752,6 +806,18 @@ static int runTrade(int argc, char* argv[])
         log->warn("REST:        {}", cfg.exchange.restBaseUrl);
         log->warn("Spot WS:     {}", cfg.exchange.wsUrl);
         log->warn("Futures WS:  {}", cfg.exchange.futuresWsUrl);
+        log->warn("========================================");
+    }
+
+    if (paper_mode)
+    {
+        log->warn("========================================");
+        log->warn("PAPER MODE — simulated venue, no real orders");
+        log->warn("Account:  {} (seeded {:.2f} USDT per leg)",
+                  cfg.paper.account_id, cfg.paper.initial_balance_usdt);
+        log->warn("State:    {}", cfg.paper.state_file);
+        log->warn("Lock:     {}", cfg.paper.lock_file);
+        log->warn("Market data: real public feeds (L1/L3)");
         log->warn("========================================");
     }
 
@@ -927,6 +993,11 @@ static int runTrade(int argc, char* argv[])
             cfg.exchange, MarketType::Spot);
         spot_feed = std::make_unique<pulse::market::MarketFeed>(
             spot_ws.get(), *spot_rest, MarketType::Spot);
+        // Paper mode keeps the Gate executor/tracker objects for now: the
+        // strategy registry requires per-market infrastructure to exist, and
+        // the order path is already sealed by the REST allow-list + private
+        // WS guard + empty credentials. Phase 2 replaces these with the paper
+        // venue (PaperPlacer/PaperTracker).
         spot_executor = std::make_unique<pulse::execution::OrderExecutor>(
             *spot_rest, MarketType::Spot);
         spot_tracker = std::make_unique<pulse::execution::OrderTracker>(
@@ -2653,7 +2724,8 @@ int main(int argc, char *argv[])
     {
         const std::string first(argv[1]);
         if ("trade" == first || "cli" == first || "mcp" == first
-            || "backtest" == first || "kline-store" == first)
+            || "backtest" == first || "kline-store" == first
+            || "paper" == first)
         {
             subcommand = first;
             argv += 2;
@@ -2686,6 +2758,10 @@ int main(int argc, char *argv[])
     if ("kline-store" == subcommand)
     {
         return pulse::runKlineStore(argc, argv);
+    }
+    if ("paper" == subcommand)
+    {
+        return runTrade(argc, argv, /*paper_requested=*/true);
     }
     return runTrade(argc, argv);
 }
