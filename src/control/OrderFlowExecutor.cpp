@@ -128,12 +128,12 @@ OrderFlowExecutor::OrderFlowExecutor(
     risk::RiskManager &risk_mgr,
     risk::PositionManager &position_mgr,
     risk::DrawdownGuard &drawdown_guard,
-    IOrderPlacer *spot_placer,
-    IOrderPlacer *futures_placer,
-    IOrderPlacer *cfd_placer,
-    execution::OrderTracker *spot_tracker,
-    execution::OrderTracker *futures_tracker,
-    execution::OrderTracker *cfd_tracker,
+    execution::IOrderPlacer *spot_placer,
+    execution::IOrderPlacer *futures_placer,
+    execution::IOrderPlacer *cfd_placer,
+    execution::IOrderTracker *spot_tracker,
+    execution::IOrderTracker *futures_tracker,
+    execution::IOrderTracker *cfd_tracker,
     market::OrderBookManager *spot_order_book,
     market::OrderBookManager *futures_order_book,
     std::mutex &rest_mutex,
@@ -499,8 +499,8 @@ OrderFlowExecutor::placeOrder(const execution::OrderRequest &req,
     }
 
     // 3. Pick placer/tracker by market type.
-    IOrderPlacer *placer = m_spotPlacer;
-    execution::OrderTracker *tracker = m_spotTracker;
+    execution::IOrderPlacer *placer = m_spotPlacer;
+    execution::IOrderTracker *tracker = m_spotTracker;
     switch (order_req.market_type)
     {
     case MarketType::Futures:
@@ -677,8 +677,8 @@ bool OrderFlowExecutor::cancelOrder(const std::string &order_id)
 
 int OrderFlowExecutor::cancelAllOpenOrders(MarketType mt)
 {
-    execution::OrderTracker *tracker = m_spotTracker;
-    IOrderPlacer *placer = m_spotPlacer;
+    execution::IOrderTracker *tracker = m_spotTracker;
+    execution::IOrderPlacer *placer = m_spotPlacer;
     switch (mt)
     {
     case MarketType::Futures:
@@ -932,7 +932,7 @@ void OrderFlowExecutor::recordExternalClose(const execution::ExecutionReport &re
                   report.avg_fill_price,
                   pnl);
 
-    execution::OrderTracker *tracker = nullptr;
+    execution::IOrderTracker *tracker = nullptr;
     if (MarketType::Cfd == market_type)
     {
         tracker = m_cfdTracker;
@@ -1043,7 +1043,7 @@ OrderFlowExecutor::bestBookPrice(market::OrderBookManager *book,
     return levels.front().price;
 }
 
-execution::OrderTracker *
+execution::IOrderTracker *
 OrderFlowExecutor::trackerFor(MarketType mt) const noexcept
 {
     switch (mt)

@@ -2,6 +2,9 @@ add_library(pulse_execution STATIC
     ExecutionReport.cpp
     OrderExecutor.cpp
     OrderTracker.cpp
+    PaperAccount.cpp
+    PaperAccountStore.cpp
+    PaperVenue.cpp
 )
 
 add_library(pulse::execution ALIAS pulse_execution)

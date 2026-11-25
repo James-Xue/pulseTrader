@@ -1,0 +1,551 @@
+# trading.paper.toml — paper-trading profile (simulated venue, no real orders)
+#
+# Usage:
+#   ./run.sh paper                 (starts the engine)
+#   ./run.sh paper-cli             (REPL against port 8082)
+#   ./run.sh paper-mcp             (stdio MCP bridge against port 8082)
+#
+# Hard rules enforced by config validation:
+#   * exchange.apiKey / apiSecret MUST be empty — paper holds no credentials
+#   * [paper] lock / port / database / log dir / grid state must differ from
+#     the live engine's, so both may run side by side
+#   * unknown keys inside [paper] are a hard error (a typo must not silently
+#     start the live path)
+#
+# Market data is REAL (public L1/L3 feeds); only execution is simulated.
+
+symbols = ["BTC_USDT", "XAUUSD", "SNDK_USDT", "UNITREE_USDT", "ETH_USDT", "XAGUSD", "ZEC_USDT"]
+
+# XAU_USDT (USDT-margined gold perpetual) 2026-11-19: live-trading pilot.
+# Streamed through the ACTIVE-market watchlist only — it creates no strategy
+# instance, so manual open_order can price/size it while the CFD side keeps
+# its own feed. Futures-only name: never add it to the CFD subscription.
+watch_symbols = ["XAU_USDT"]
+
+# ── Active trading direction ──────────────────────────────────────────
+# Only ONE direction trades at a time. The other direction's strategies are
+# paused and its open orders cancelled when switching via the control plane
+# (REPL `switch <futures|cfd>`, MCP switch_direction). Restart returns here.
+active_market = "cfd"   # paper profile: 2026-11-19: XAU_USDT live pilot — futures is the active direction (CFD strategies paused, CFD feed still streams)
+
+# ── Exchange (mainnet mode) ────────────────────────────────────────────
+[exchange]
+testnet             = false
+apiKey              = ""   # paper mode: credentials are forbidden
+apiSecret           = ""   # paper mode: credentials are forbidden
+# URLs are auto-set by code when testnet=false, no need to specify manually
+proxyUrl            = "http://127.0.0.1:7897"
+restTimeoutMs       = 10000
+maxRetries          = 3
+
+# ── Logging ───────────────────────────────────────────────────────────
+[log]
+level     = "info"
+logDir    = "logs/paper"
+toConsole = true
+toFile    = true
+
+# ── Strategy (futures + spot on mainnet) ────────────────────────────────
+[strategy]
+signal_aggregator_threshold = 0.6
+signal_cooldown_sec         = 30
+# Signal-only default (2026-08-23): seeds EVERY strategy's runtime
+# auto_trade switch to OFF at startup — strategies publish signals to the
+# signal board (get_signals) but never place orders. Runtime one-click
+# override per strategy: set_strategy_trading / `autotrade <id> on|off`
+# (a restart resets to this default). Manual open_order/close_position
+# (REPL/CLI/MCP — the sub-agent's path) are unaffected.
+signal_only = true
+
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1                # Contract size (1 contract = 0.0001 BTC)
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "orderbook_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "supertrend_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── BTC_USDT 扩展信号源 (2026-09-04, 与 ETH 同款信号覆盖) ────────────────
+# eth_scalper 与 ema_resonance 类均 symbol-agnostic(探索已验证无 ETH 硬编码),
+# 实例 id 自动为 eth_scalper_BTC_USDT / ema_resonance_scalper_BTC_USDT。
+# 用途:信号源(追空 + trend_state/spike 趋势闸门 + 五周期共振),signal_only
+# 不参与下单;将来若启用 BTC 网格,GridManager 闸门自动读 eth_scalper_BTC_USDT。
+# BTC 参数标定(2026-09-04 初值):eth_spike_filter_usd ETH 版 120 ≈ $2500 的
+# 极端单根;BTC $81k 下 120 = 0.15% 会把正常波动全判为暴拉 → 放宽到 2000
+# (≈2.5% 单根);pct/atr/conf_scale 为无量纲口径沿用 ETH 实测值。初值按
+# get_signals 板上 confidence/spike 实测再调(同 ETH 08-23 标定流程)。
+[[strategy.instances]]
+name            = "eth_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+custom_params = { eth_spike_filter_usd = 2000, eth_spike_filter_pct = 1.5, eth_spike_filter_atr = 3.0, eth_atr_step = 0.05, eth_min_confidence_scale = 20.0 }
+
+[[strategy.instances]]
+name            = "ema_resonance_scalper"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
+
+# ── IronTrader 铁律交易员 (2026-09-06, v1.5 重大消息事件闸) ────────────────
+# 低频纪律型趋势跟随(BTC 1m),规则 docs/strategies/iron-trader.md。
+# ⚠️ enabled=false = 档案/回测载体,引擎不建实例;回测播种:
+#   ./run.sh backtest --strategy iron_trader --symbol BTC_USDT --config trading.toml
+#   (seedFromConfig 按 name+symbol 匹配,事件窗自动注入;--news CLI 显式值胜出)
+# news_windows = 重大消息事件闸(§4.6):禁开 [T−X, T+Y),持仓跨 T−X 强制
+# Flat(news_blackout)。时刻 = 官方宏观日历 2026-09→11(最近两个月):
+#   FOMC 决议 = 美联储日程(9/16、10/28 为 18:00Z;11-01 起美东冬令时后移);
+#   CPI/NFP = BLS 8:30 ET(夏 12:30Z / 冬 13:30Z)。窗口建议:CPI/NFP 15/30;
+#   FOMC 含 SEP(9 月)15/45,常规 15/30。过期事件自失效,滚动维护。
+[[strategy.instances]]
+name            = "iron_trader"
+symbol          = "BTC_USDT"
+market_type     = "futures"
+leverage        = 5
+margin_mode     = "cross"
+order_quantity  = 1
+min_confidence  = 0.6
+enabled         = false
+poll_interval_ms = 500
+news_windows = [
+    { time = "2026-09-11T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # CPI(8月)
+    { time = "2026-09-16T18:00:00Z", close_before_min = 15, resume_after_min = 45 },  # FOMC 决议+SEP
+    { time = "2026-10-02T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # NFP(9月)
+    { time = "2026-10-14T12:30:00Z", close_before_min = 15, resume_after_min = 30 },  # CPI(9月)
+    { time = "2026-10-28T18:00:00Z", close_before_min = 15, resume_after_min = 30 },  # FOMC 决议
+    { time = "2026-11-06T13:30:00Z", close_before_min = 15, resume_after_min = 30 },  # NFP(10月,冬令时)
+]
+
+# ── SNDK_USDT futures instances (2026-08-18, SNDK 子代理信号源) ──────────
+# 与 BTC 同款 kline 策略,只发信号不下单(signal_only)。1 合约 = 0.01 SNDK
+# (quanto 0.01,~17 USD 名义 @1733)。order_quantity 仅信息性——下单由
+# SNDK 子代理经 MCP 手动执行。
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "SNDK_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "SNDK_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "supertrend_scalper"
+symbol          = "SNDK_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── UNITREE_USDT futures instances (2026-08-19, 宇树做空 scalping 信号源) ──
+# 与 SNDK 同款 kline 策略,只发信号不下单(signal_only)。1 合约 = 0.1 UNITREE
+# (quanto 0.1,~13.1 USDT 名义 @131)。杠杆上限 50×;资金费率 -0.0002(空头收)。
+# order_quantity 仅信息性——下单由宇树子代理经 MCP 手动执行。
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "UNITREE_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 10
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "UNITREE_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 10
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "supertrend_scalper"
+symbol          = "UNITREE_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 10
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── ETH_USDT futures instances (2026-08-19, 以太坊子代理信号源) ──────────
+# 与 SNDK/UNITREE 同款 kline 策略,只发信号不下单(signal_only)。1 合约 = 0.01 ETH
+# (quanto 0.01,~20 USD 名义 @2011)。maker 费率 -0.01%(限价挂单返佣)。
+# order_quantity 仅信息性——下单由 ETH 子代理经 MCP 手动执行。
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "ETH_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "ETH_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "supertrend_scalper"
+symbol          = "ETH_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── eth_scalper (M26, 2026-08-21 v2) — 币种专属策略:ETH 追空信号源 ─────
+# UnifiedScalper 派生:EMA bearish cross 只做空 + 三口径暴拉过滤 + ATR 自适应
+# 止盈提示。v2(复盘后升级):每 candle 发布 Flat 状态信号,indicators 恒带
+# trend_state(bullish/bearish/neutral)+ spike(0/1)供网格子代理作趋势闸门
+# (挂格前置:trend_state=bearish 且 spike=0 才允许挂新格),无需代理自算 EMA。
+# signal_only —— 只发信号不下单(复盘 eth-review-20260821-grid-v1.md)。
+[[strategy.instances]]
+name            = "eth_scalper"
+symbol          = "ETH_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+# custom_params 语义:eth_spike_filter_usd/pct/atr=暴拉过滤三口径(任一触发即
+# 过滤,设 0 禁用);eth_atr_step=止盈提示(成交价-0.05×ATR);
+# eth_min_confidence_scale=置信度缩放。2026-08-23:1.0→20.0 —— 实测
+# |EMA9-EMA21|/ATR 仅 ~0.03,乘 1.0 永远过不了 min_confidence=0.6 闸,
+# 真信号被 emitSignal 静默丢弃;20 使典型交叉 ~0.65 过闸(仍守 0.6 语义)。
+# 注:TOML inline table 必须单行且内不允许注释。
+custom_params = { eth_spike_filter_usd = 120, eth_spike_filter_pct = 1.5, eth_spike_filter_atr = 3.0, eth_atr_step = 0.05, eth_min_confidence_scale = 20.0 }
+
+# ── ema_resonance_scalper (2026-08-23) — 五周期 EMA 共振信号源 ──────────
+# UnifiedScalper 派生:EMA 7/14/30/60/200 全排列对齐才出信号 —— 严格
+# 递增(7>14>30>60>200)= 多头共振 Buy,严格递减 = 空头共振 Sell,其余 mixed
+# 无信号。入场为"共振状态迁移"触发(非每根 K 线重发);置信度 =
+# clamp(|ema7-ema200|/ATR,0,1)×res_conf_scale。规则文档:
+# docs/strategies/ema-resonance-scalper.md。
+# 当前引擎全局 signal_only=true —— 本策略只发信号不下单(先信号后激活;
+# 以后翻转 signal_only/active_market 即自动走风控闸门下单)。
+[[strategy.instances]]
+name            = "ema_resonance_scalper"
+symbol          = "ETH_USDT"
+market_type     = "futures"
+leverage        = 10
+margin_mode     = "cross"
+order_quantity  = 20
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+# custom_params 语义:res_ema_p1..p5=五条 EMA 周期(默认 7/14/30/60/200),
+# res_conf_scale=置信度缩放。2026-08-23:1.0→2.0 —— 首条真信号实测
+# |ema7-ema200|/ATR=0.5459,乘 1.0 不过 min_confidence=0.6 闸被静默丢弃
+# (与 eth_scalper scale 20 同族问题);2.0 使典型对齐 ~1.0 过闸。
+# 注:TOML inline table 必须单行且内不允许注释。
+custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
+
+# ── TradFi CFD strategies (XAUUSD gold) ─────────────────────────────────
+# Active direction (active_market = "cfd") — the futures strategies below are
+# paused until `switch futures` is issued; CFD trades by default. order_quantity is in
+# LOTS: 0.01 lot = 1 oz ≈ 4,348 USD notional ≈ 8.7 USD margin at 500x.
+# CFD-compatible: momentum / mean_reversion / supertrend (kline-driven);
+# orderbook_scalper is NOT usable (no order-book channel — validator rejects).
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "XAUUSD"
+market_type     = "cfd"
+leverage        = 500
+margin_mode     = "cross"
+order_quantity  = 0.01             # Min lot (0.001 default would be rejected)
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "mean_reversion_scalper"
+symbol          = "XAUUSD"
+market_type     = "cfd"
+leverage        = 500
+margin_mode     = "cross"
+order_quantity  = 0.01
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+[[strategy.instances]]
+name            = "supertrend_scalper"
+symbol          = "XAUUSD"
+market_type     = "cfd"
+leverage        = 500
+margin_mode     = "cross"
+order_quantity  = 0.01
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── XAGUSD CFD (2026-08-19, 银金背离信号源) ─────────────────────────────
+# 只发信号不下单(signal_only)。用途:让 CFD feed 订阅 XAGUSD 1m klines,
+# 供黄金子代理 v3.1 银金背离自算(get_market XAGUSD)。板上本实例信号不参与增强。
+[[strategy.instances]]
+name            = "momentum_scalper"
+symbol          = "XAGUSD"
+market_type     = "cfd"
+leverage        = 500
+margin_mode     = "cross"
+order_quantity  = 0.01             # 仅信息性——下单由代理经 MCP 手动执行
+min_confidence  = 0.6
+enabled         = true
+poll_interval_ms = 500
+
+# ── Gold trader: USD dynamic stop ladder (strategy 1, 2026-11-13) ────────
+# Supervises EVERY open XAUUSD CFD position — including positions opened
+# manually in the Gate app and imported by sync_positions. It never opens a
+# position; it only manages the exit:
+#   1. loss reaches -8 USD              -> stop out (hard stop)
+#   2. peak floating profit > +2 USD    -> stop moves to break-even (entry)
+#   3. 1m SuperTrend line participates  -> stop placed 1 USD beyond the line
+#   4. peak floating profit is sampled every second; the level
+#      peak - 5 USD participates, and trading through it closes at market
+#   5. stops only tighten, never loosen (a manually tightened exchange stop
+#      is adopted, never widened)
+# The thresholds are ACCOUNT USD. 0.01 lot XAUUSD = 1 ounce, so 1 USD of PnL
+# equals a 1.00 price move; larger lots divide the same USD by their ounces.
+# Every tightened stop is mirrored to the exchange-native price_sl, so the
+# position keeps a protective stop if the engine process dies.
+[gold_trader]
+enabled                = false     # 2026-11-18: operator asked for NO automatic exits
+symbol                 = "XAUUSD"
+market_type            = "cfd"
+hard_stop_usd          = 8.0
+breakeven_trigger_usd  = 2.0
+supertrend_buffer_usd  = 1.0
+peak_drawdown_usd      = 5.0
+peak_trail_arm_usd     = 2.0       # give-back arms after +2U peak (0 = any profit)
+supertrend_period      = 10.0
+supertrend_multiplier  = 3.0
+contract_volume        = 100.0      # XAUUSD: 100 oz per lot (sanity guard)
+poll_interval_ms       = 1000
+retry_cooldown_sec     = 10
+exchange_stop          = true
+
+# ── Risk Management (conservative params — adjust for account size) ────
+[risk]
+# The position-notional cap is enforced PER MARKET TYPE: each market has its
+# own budget (override fields below), falling back to maxPositionNotional.
+# This lets the synced SKHY futures short (~5099 USDT notional) coexist with
+# a CFD gold position — the futures position does NOT consume the CFD budget.
+maxPositionNotional = 6000        # fallback cap (markets without an override)
+# futures cap: SNDK 网格峰值 (~5099) + ETH 网格峰值 (~805 @2011, 20 格×2 张)
+# + 预留。08-19 教训:6000 被 ETH 网格名义击穿(9103),循环冻结+4 格裸奔
+# (复盘 eth-review-20260821-grid-v1.md)。reduce-only 买单也按新增名义计不抵扣。
+maxPositionNotionalFutures = 12000
+maxPositionNotionalCfd = 6000     # CFD cap: 0.01-lot XAUUSD (~4392 USDT) fits
+maxOpenPositions    = 80  # SNDK 20-slot + ETH 20-slot grids (each resting order
+                          # reserves a slot) + user App orders + positions (08-19)
+maxDailyDrawdown    = 0.02
+maxDrawdown         = 0.05
+# Engine-side protective exits (percentage stop-loss / take-profit supervisor).
+# false = the engine NEVER closes a position on its own; exits belong to the
+# strategy or the operator. The drawdown breaker still blocks new entries.
+# Set 2026-11-18 so hand-managed XAUUSD longs survive normal pullbacks.
+protective_exit_enabled = false
+maxOrdersPerSec     = 5
+# 单币种名义上限:ETH 网格峰值(~805)+ SNDK(~5099)任意其一 + 用户仓余量。
+# 08-19 教训:5500 按 SNDK 单币种算,ETH 网格加入后击穿。
+maxSymbolNotional   = 6500
+max_leverage        = 500.0        # CFD ladder: 20/50/100/200/500 (futures use 10)
+max_margin_used     = 0.5
+minAvailableAfterStopUsd = 6.0   # M22: CFD 带 SL 开仓后可用-保证金-止损 ≥ 6 USD,防薄账户一笔止损耗尽交易能力
+
+# Exchange-native catastrophe stop for FUTURES positions (audit B1). PT places
+# a whole-position reduce-only trigger at this distance from entry and keeps it
+# refreshed as positions appear. External (GT) futures opens are rejected
+# unless this is enabled: the caller owns its software exit, so this trigger is
+# the only floor left if the GT process dies. 5% from entry is deliberately
+# wider than a 1h strategy stop so it never competes with the caller's exit.
+exchange_stop_enabled = false   # paper: the venue has no exchange-side triggers
+exchange_stop_pct     = 0.05
+
+[risk.stop_loss]
+mode            = "Trailing"
+trailing_pct    = 0.005
+fixed_pct       = 0.01
+max_hold_seconds = 300
+
+[risk.take_profit]
+enabled     = true
+targets_pct = [0.005, 0.01, 0.02]
+fractions   = [0.33, 0.33, 0.34]
+
+# ── AI (disabled, not needed for initial testing) ─────────────────────
+[ai]
+# AI 定期调参闭环(引擎内):策略引擎 + LLM 每 5 分钟评估市场与策略表现,
+# 经 ParamAdvisor 安全边界(±max_delta + hard 区间)微调全部策略参数。
+# apiKey 走 from_env:.env 中填 AI_API_KEY 即自动通电;无 key 时 AI 保持
+# 离线(安全禁用,不影响交易)。
+backend              = "claude"              # "claude" | "openai";可配 baseUrl 指向 new-api 兼容网关
+model                = "claude-sonnet-4-6"   # 或网关支持的上游模型名
+apiKey               = "from_env:AI_API_KEY" # 留空 = 不启动 AI 心跳
+heartbeatIntervalSec = 300                   # AI 调参节奏(秒):300 = 每 5 分钟一次
+stats_lookback_hours = 24                    # AI prompt 中每策略表现统计窗口(小时)
+requestTimeoutMs     = 30000
+maxRetries           = 2
+
+# ── Control (JSON-RPC control socket) ─────────────────────────────────
+[control]
+enabled     = true
+bindAddress = "127.0.0.1"
+port        = 8082
+# Human-readable timestamps in control-plane output (*_str fields / REPL).
+# "local" (machine TZ) | "utc" | fixed offset like "-04:00" (US Eastern
+# summer) or "+08:00" (Beijing) — align with the phone app's timezone.
+display_timezone = "local"
+# External strategy runtime (GT) order authority. Fail-safe default is false:
+# caller-authoritative opens are rejected while off. Reduce-only futures
+# closes and engine-sized orders are always allowed. Toggle at runtime with
+# the set_external_orders control method.
+external_orders_enabled = true
+
+# ── SQLite ────────────────────────────────────────────────────────────
+[sqlite]
+enabled = true
+dbPath  = "data/trades-paper.db"
+record_market = true   # M18: persist ticker/kline to data/trades.db
+record_signals = true  # M32: A/B 权重实验 — 每条策略信号 + 聚合共识落 signals 表(重放源)
+skip_kline_markets = ["futures"]   # M30: 不再录制合约 kline_bars(Gate REST 实时可拉);ticker_ticks 不受影响
+daily_kline_sync = false   # M31: 每日拉近 10000 根 1m k线合并入库(REST 深度上限 6.9 天)
+daily_sync_hour = 8       # 北京时刻;UTC 00:00 == 北京 08:00(与网格日界一致)
+
+# ── 资金费率窗口监视器(funding_watch,2026-09-06)───────────────────────
+# 纯观察服务:费率连续高企(阈值/持续见下)时信号板亮灯 + 日志 WARN,
+# 永不下单不接聚合器。规则文本 docs/funding-watch.md。
+# 默认关闭 —— 开启需引擎含本模块(待 VPS 部署新二进制)。
+[funding_watch]
+enabled = false
+symbols = ["BTC_USDT", "ETH_USDT"]
+threshold = 0.0005   # 5bp/8h
+consec_events = 6    # ≈48h 持续
+poll_sec = 1800      # 30 分钟轮询
+
+# ---------------------------------------------------------------------------
+# [execution] — 为外部策略运行时(GT)预先接通市场
+# 即使没有启用的策略实例,也创建该市场的 feed/executor/tracker,
+# 供 GT 通过控制面 subscribe_market 取行情、open_order 下单。
+# ---------------------------------------------------------------------------
+[execution]
+markets = ["futures"]
+symbols = ["BTC_USDT"]
+
+# ── Paper trading (simulated venue) ───────────────────────────────────
+[paper]
+enabled                  = true
+account_id               = "paper-default"
+# Each wallet leg (spot / futures / cfd) is seeded independently, mirroring
+# Gate's separate wallets.
+initial_balance_usdt     = 10000.0
+state_file               = "data/paper-state.json"
+lock_file                = "data/engine.paper.lock"
+# Gate fee model: futures maker 0.02% / taker 0.05%, spot 0.1% per leg,
+# TradFi CFD 6 USDT per 100 oz lot charged on the BUY leg only.
+maker_fee_rate           = 0.0002
+taker_fee_rate           = 0.0005
+spot_fee_rate            = 0.001
+cfd_commission_usdt_per_lot = 6.0
+# Overnight swap is NOT modelled yet (0.0 overstates multi-day PnL).
+cfd_swap_usdt_per_lot_per_day = 0.0
+# Execution realism: fill at the touch, all-or-nothing.
+slippage_bps             = 0.0
+fill_ratio               = 1.0
+# A mark older than this refuses new orders and matches (weekend gate).
+max_mark_age_ms          = 5000
+maintenance_rate         = 0.005
+cfd_stop_out_level       = 0.5
+stop_out_enabled         = true
+snapshot_interval_ms     = 1000
+# Contract sizes/tick cannot be fetched without credentials (the TradFi
+# detail endpoint is authenticated), so they are configured here.
+[paper.contract_volume]
+XAUUSD = 100.0
+XAGUSD = 5000.0
+[paper.price_tick]
+XAUUSD = 0.01
+XAGUSD = 0.001

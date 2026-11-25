@@ -28,6 +28,8 @@ using namespace pulse::control;
 using namespace pulse::exchange;
 using namespace pulse::risk;
 using namespace pulse::strategy;
+// The placement seam moved into L8 on 2026-11-25 (execution/IOrderPlacer.hpp).
+using pulse::execution::IOrderPlacer;
 
 namespace
 {

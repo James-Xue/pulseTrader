@@ -34,11 +34,14 @@ if [ "build" != "$BUILD_DIR" ]; then
 fi
 
 usage() {
-    echo "Usage: $0 {trade|cli|mcp|backtest|rest|ws|market|strategy|ai|test} [args...]"
+    echo "Usage: $0 {trade|paper|cli|paper-cli|mcp|paper-mcp|backtest|rest|ws|market|strategy|ai|test} [args...]"
     echo ""
     echo "  trade [--config <path>]  Start trading engine (optional TOML config)"
+    echo "  paper [--config <path>]  Start the SIMULATED engine (trading.paper.toml)"
     echo "  cli [--config <path>]   Attach REPL to running engine"
+    echo "  paper-cli               Attach REPL to the paper engine (port 8082)"
     echo "  mcp [--config <path>]   Run stdio MCP server (bridges to engine)"
+    echo "  paper-mcp               MCP bridge to the paper engine (port 8082)"
     echo "  backtest ...            Offline strategy replay (M29/M33), see --help"
     echo "  kline-store ...         Daily 1m kline accumulation (M33), see --help"
     echo "  sweep ...               Parameter sweep over backtest (M33)"
@@ -66,6 +69,30 @@ case "$1" in
         else
             "$BUILD_DIR/apps/pulsetrader/pulsetrader" "$@"
         fi
+        ;;
+    paper)
+        echo "=== pulseTrader PAPER Engine (simulated venue) ==="
+        shift  # consume 'paper' argument
+        # Paper mode must never fall back to a live profile: the default is
+        # trading.paper.toml, and a missing file is fatal rather than implicit.
+        if [ $# -eq 0 ]; then
+            if [ ! -f trading.paper.toml ]; then
+                echo "❌ trading.paper.toml not found — refusing to start paper mode without an explicit paper config." >&2
+                exit 1
+            fi
+            echo "📄 Auto-loading trading.paper.toml"
+            "$BUILD_DIR/apps/pulsetrader/pulsetrader" paper --config trading.paper.toml
+        else
+            "$BUILD_DIR/apps/pulsetrader/pulsetrader" paper "$@"
+        fi
+        ;;
+    paper-cli)
+        echo "=== Control CLI (attach to PAPER engine on 8082) ==="
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" cli --config trading.paper.toml
+        ;;
+    paper-mcp)
+        # stdout must stay pure JSON-RPC.
+        "$BUILD_DIR/apps/pulsetrader/pulsetrader" mcp --config trading.paper.toml
         ;;
     rest)
         echo "=== Gate.io REST API ==="

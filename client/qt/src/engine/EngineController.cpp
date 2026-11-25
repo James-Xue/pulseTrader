@@ -542,6 +542,9 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         m_engineVersion = result.value(QStringLiteral("version")).toString();
         m_engineUptimeSec = result.value(QStringLiteral("uptime_sec")).toDouble();
         m_network = result.value(QStringLiteral("network")).toString();
+        m_mode = result.value(QStringLiteral("mode")).toString(
+            QStringLiteral("live"));
+        m_simulated = result.value(QStringLiteral("simulated")).toBool();
         m_tradingHalted = result.value(QStringLiteral("trading_halted")).toBool();
         m_activeMarket = result.value(QStringLiteral("active_market")).toString();
         m_openPositions = result.value(QStringLiteral("open_positions")).toInt();

@@ -2,6 +2,8 @@
 
 #include "backtest/BacktestAccount.hpp"
 
+#include "core/fill_math.hpp"
+
 #include <algorithm>
 #include <limits>
 
@@ -23,27 +25,21 @@ BacktestAccount::BacktestAccount(const BacktestOptions &opts)
 
 double BacktestAccount::feeFor(double price) const
 {
-    // Fee base = notional = qty × price × quanto. Rate semantics (tri-state):
-    // <0 disables fees, 0 falls back to the market default (futures taker
-    // 0.05%, spot 0.1%), >0 is an explicit rate.
-    double rate = m_opts.taker_fee_rate;
-    if (rate < 0.0)
-    {
-        return 0.0;
-    }
-    if (rate == 0.0)
-    {
-        rate = (MarketType::Futures == m_opts.market_type) ? 0.0005 : 0.001;
-    }
-    return m_opts.order_quantity * price * m_opts.quanto_multiplier * rate;
+    // Delegates to the shared fill arithmetic (src/core/fill_math.hpp) so the
+    // offline backtest and the live paper venue cannot drift numerically. The
+    // tri-state rate semantics (<0 disable, 0 = market default, >0 explicit)
+    // live in that header now.
+    return core::fill_math::feeFor(m_opts.order_quantity, price,
+                                   m_opts.quanto_multiplier,
+                                   m_opts.market_type,
+                                   m_opts.taker_fee_rate);
 }
 
 double BacktestAccount::positionPnL(const OpenPosition &pos, double mark) const
 {
-    const double diff = (Side::Buy == pos.side)
-        ? (mark - pos.entry_price)
-        : (pos.entry_price - mark);
-    return diff * pos.quantity * m_opts.quanto_multiplier;
+    return core::fill_math::positionPnl(pos.side, pos.entry_price, mark,
+                                        pos.quantity,
+                                        m_opts.quanto_multiplier);
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +69,12 @@ bool BacktestAccount::openFrom(const strategy::TradingSignal &sig,
 void BacktestAccount::closePosition(OpenPosition &pos, double exit_price,
                                     std::int64_t exit_open_ms)
 {
-    const double exit_fee = feeFor(exit_price);
+    // Exit fee uses the position's own quantity (was m_opts.order_quantity —
+    // numerically identical while openFrom always uses the configured size,
+    // but correct for variable-size lots).
+    const double exit_fee = core::fill_math::feeFor(
+        pos.quantity, exit_price, m_opts.quanto_multiplier,
+        m_opts.market_type, m_opts.taker_fee_rate);
     const double gross = positionPnL(pos, exit_price);
     const double net = gross - pos.entry_fee - exit_fee;
 

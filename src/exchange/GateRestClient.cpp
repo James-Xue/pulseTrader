@@ -23,14 +23,80 @@
 
 #include <curl/curl.h>
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <mutex>
+#include <string_view>
 #include <thread>
 
 namespace pulse::exchange
 {
+
+namespace
+{
+
+/// Process-wide paper-mode guard (see GateRestClient::setPaperGuardEnabled).
+std::atomic<bool> g_paperGuard{ false };
+
+/// True when MODE + PATH is public market data.
+///
+/// The list is deliberately an allow-list, not a deny-list: a new private
+/// endpoint added later is blocked by default, which is the failure direction
+/// a paper process needs. Paths carry no query string (that is the separate
+/// `query` argument), so suffix checks are unambiguous.
+[[nodiscard]] bool isPublicPaperPath(const std::string &path)
+{
+    static constexpr std::array<std::string_view, 9> kPrefixes{
+        "/api/v4/spot/currencies",
+        "/api/v4/spot/currency_pairs",
+        "/api/v4/spot/tickers",
+        "/api/v4/spot/candlesticks",
+        "/api/v4/spot/time",
+        "/api/v4/futures/usdt/contracts",
+        "/api/v4/futures/usdt/tickers",
+        "/api/v4/futures/usdt/candlesticks",
+        "/api/v4/futures/usdt/funding_rate",
+    };
+
+    for (const std::string_view prefix : kPrefixes)
+    {
+        if (path.starts_with(prefix))
+        {
+            return true;
+        }
+    }
+
+    // TradFi: the bare symbol list and the per-symbol klines/tickers are
+    // public, but /api/v4/tradfi/symbols/detail is AUTHENTICATED. A plain
+    // prefix on "/symbols" would let it through, so match the suffix too.
+    if ("/api/v4/tradfi/symbols" == path
+        || "/api/v4/tradfi/tickers" == path)
+    {
+        return true;
+    }
+    if (path.starts_with("/api/v4/tradfi/symbols/")
+        && (path.ends_with("/klines") || path.ends_with("/tickers")))
+    {
+        return true;
+    }
+
+    return false;
+}
+
+} // namespace
+
+void GateRestClient::setPaperGuardEnabled(bool enabled)
+{
+    g_paperGuard.store(enabled, std::memory_order_release);
+}
+
+bool GateRestClient::paperGuardEnabled()
+{
+    return g_paperGuard.load(std::memory_order_acquire);
+}
 
 // ---------------------------------------------------------------------------
 // Process-wide curl initialisation (RAII guard)
@@ -266,6 +332,20 @@ Result<nlohmann::json> GateRestClient::request(
         const std::string &body,
         bool retry)
 {
+    // 0. Paper-mode guard: refuse private paths before signing, DNS or curl.
+    //    This runs ahead of everything else on purpose — a blocked request
+    //    must not even reveal whether credentials exist.
+    if (g_paperGuard.load(std::memory_order_acquire)
+        && !isPublicPaperPath(path))
+    {
+        PULSE_LOG_CRITICAL("exchange",
+                           "paper mode blocked private request: {} {}",
+                           method, path);
+        return PulseError{ ErrorCode::InternalError,
+                           "paper mode: private exchange access blocked ("
+                               + method + " " + path + ")" };
+    }
+
     // 1. Sign the request
     const std::string timestamp = unixSeconds();
     std::string sign;

@@ -19,6 +19,140 @@
 namespace pulse
 {
 
+namespace
+{
+
+// ---------------------------------------------------------------------------
+// validatePaperConfig — semantic rules for the [paper] simulated venue.
+//
+// Two jobs:
+//   1. Keep the simulation numerically sane (fees, margin, cadence).
+//   2. Keep a paper run physically separate from the live one: its own port,
+//      lock, database and log directory. These are checked here rather than
+//      documented, because a collision silently writes paper trades into the
+//      live ledger — the failure mode a paper mode exists to prevent.
+// ---------------------------------------------------------------------------
+PulseError validatePaperConfig(const PulseConfig &cfg)
+{
+    const PaperConfig &p = cfg.paper;
+
+    if (p.initial_balance_usdt <= 0.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] initial_balance_usdt must be > 0" };
+    }
+
+    const auto rate_ok = [](double r) { return r >= 0.0 && r < 0.01; };
+    if (!rate_ok(p.maker_fee_rate) || !rate_ok(p.taker_fee_rate)
+        || !rate_ok(p.spot_fee_rate))
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] maker/taker/spot fee rates must be in "
+                           "[0, 0.01)" };
+    }
+
+    if (p.cfd_commission_usdt_per_lot < 0.0
+        || p.cfd_swap_usdt_per_lot_per_day < 0.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] CFD commission and swap must be >= 0" };
+    }
+
+    if (p.slippage_bps < 0.0 || p.slippage_bps > 100.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] slippage_bps must be in [0, 100]" };
+    }
+
+    if (p.fill_ratio <= 0.0 || p.fill_ratio > 1.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] fill_ratio must be in (0, 1]" };
+    }
+
+    if (p.max_mark_age_ms < 100 || p.max_mark_age_ms > 600000)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] max_mark_age_ms must be in [100, 600000]" };
+    }
+
+    if (p.maintenance_rate <= 0.0 || p.maintenance_rate >= 1.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] maintenance_rate must be in (0, 1)" };
+    }
+
+    if (p.cfd_stop_out_level <= 0.0 || p.cfd_stop_out_level > 1.0)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] cfd_stop_out_level must be in (0, 1]" };
+    }
+
+    if (p.snapshot_interval_ms < 100 || p.snapshot_interval_ms > 60000)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] snapshot_interval_ms must be in "
+                           "[100, 60000]" };
+    }
+
+    // Resource separation from the live engine. Both may run side by side,
+    // and a shared resource would make paper trades indistinguishable from
+    // live ones after the fact.
+    if (8081 == cfg.control.port)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] control.port must differ from the live "
+                           "engine port 8081" };
+    }
+
+    if ("trades.db" == cfg.sqlite.dbPath)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] sqlite.dbPath must differ from the live "
+                           "database trades.db" };
+    }
+
+    if ("logs" == cfg.log.logDir)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] log.logDir must differ from the live "
+                           "directory \"logs\"" };
+    }
+
+    if ("data/engine.lock" == p.lock_file)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] lock_file must differ from the live "
+                           "lock data/engine.lock" };
+    }
+
+    if (cfg.grid.enabled)
+    {
+        return PulseError{ ErrorCode::ConfigValidationError,
+                           "[paper] grid.enabled must be false (grid is not "
+                           "simulated in paper v1)" };
+    }
+
+    // CFD contract sizes cannot be fetched without credentials (the TradFi
+    // detail endpoint is authenticated), so the paper config must carry them.
+    for (const auto &inst : cfg.strategy.strategies)
+    {
+        if (MarketType::Cfd == inst.market_type
+            && 0 == p.contract_volume.count(inst.symbol))
+        {
+            return PulseError{ ErrorCode::ConfigValidationError,
+                               "[paper] contract_volume is missing the CFD "
+                               "symbol \"" + inst.symbol
+                                   + "\" (required: the authenticated detail "
+                                     "endpoint is unavailable in paper)" };
+        }
+    }
+
+    return {};
+}
+
+} // namespace
+
 PulseError validateConfig(const PulseConfig &cfg)
 {
     // -----------------------------------------------------------------------
@@ -31,18 +165,49 @@ PulseError validateConfig(const PulseConfig &cfg)
     }
 
     // -----------------------------------------------------------------------
-    // 2. Exchange credentials
+    // 2. Exchange credentials and paper-mode isolation
     // -----------------------------------------------------------------------
-    if (cfg.exchange.apiKey.empty())
+    if (cfg.paper.enabled)
     {
-        return PulseError{ErrorCode::ConfigValidationError,
-                          "exchange.apiKey must not be empty"};
-    }
+        // First isolation layer: a paper process must hold no signing
+        // capability. A paper config accidentally launched as `trade` fails
+        // here instead of starting the live path with live keys.
+        if (!cfg.exchange.apiKey.empty() || !cfg.exchange.apiSecret.empty())
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                "[paper] enabled requires empty exchange.apiKey and "
+                "exchange.apiSecret (paper mode must not hold live "
+                "credentials)"};
+        }
 
-    if (cfg.exchange.apiSecret.empty())
+        if (cfg.exchange.testnet)
+        {
+            return PulseError{
+                ErrorCode::ConfigValidationError,
+                "[paper] enabled and exchange.testnet are mutually exclusive "
+                "(testnet is futures-only; paper simulates locally)"};
+        }
+
+        const PulseError paper_err = validatePaperConfig(cfg);
+        if (ErrorCode::Ok != paper_err.code)
+        {
+            return paper_err;
+        }
+    }
+    else
     {
-        return PulseError{ErrorCode::ConfigValidationError,
-                          "exchange.apiSecret must not be empty"};
+        if (cfg.exchange.apiKey.empty())
+        {
+            return PulseError{ ErrorCode::ConfigValidationError,
+                               "exchange.apiKey must not be empty" };
+        }
+
+        if (cfg.exchange.apiSecret.empty())
+        {
+            return PulseError{ ErrorCode::ConfigValidationError,
+                               "exchange.apiSecret must not be empty" };
+        }
     }
 
     if (0 == cfg.exchange.restTimeoutMs)
