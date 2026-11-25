@@ -40,6 +40,18 @@ ColumnLayout {
 
     readonly property int activeCount: root.activeModel ? root.activeModel.count : 0
     readonly property int reportCount: root.reportModel ? root.reportModel.count : 0
+    readonly property int historyCount: root.controller
+        ? root.controller.tradeHistory.length : 0
+
+    /// Fixed column widths, shared by the header and every row so they stay
+    /// aligned; the table can be wider than the viewport and scroll sideways.
+    readonly property var historyColumns: [150, 110, 60, 80, 100, 90, 80, 80, 140]
+    readonly property real historyTableWidth: {
+        let total = 0
+        for (let i = 0; i < root.historyColumns.length; ++i)
+            total += root.historyColumns[i]
+        return total + Style.gapSmall * (root.historyColumns.length - 1)
+    }
 
     /// Status colour shared by both views. Recognised terminal states get the
     /// semantic colour; anything else stays neutral rather than guessing.
@@ -87,13 +99,14 @@ ColumnLayout {
             Item { Layout.fillWidth: true }
 
             MacButton {
-                text: qsTr("History")
-                onClicked: tradeHistoryDialog.open()
-            }
-
-            MacButton {
                 text: qsTr("Refresh")
-                onClicked: if (root.controller) root.controller.refreshAll()
+                onClicked: {
+                    if (!root.controller) return
+                    root.controller.refreshAll()
+                    if (viewStack.currentIndex === 2) {
+                        root.controller.fetchTradeHistory()
+                    }
+                }
             }
         }
 
@@ -116,11 +129,17 @@ ColumnLayout {
             Item { Layout.fillWidth: true }
 
             MacSegmentedControl {
-                Layout.preferredWidth: 240
+                Layout.preferredWidth: 360
                 items: [qsTr("Active (%1)").arg(root.activeCount),
-                        qsTr("Recent (%1)").arg(root.reportCount)]
+                        qsTr("Recent (%1)").arg(root.reportCount),
+                        qsTr("History (%1)").arg(root.historyCount)]
                 currentIndex: viewStack.currentIndex
-                onActivated: function (index) { viewStack.currentIndex = index }
+                onActivated: function (index) {
+                    viewStack.currentIndex = index
+                    if (index === 2 && root.controller) {
+                        root.controller.fetchTradeHistory()
+                    }
+                }
             }
         }
     }
@@ -318,10 +337,161 @@ ColumnLayout {
                 }
             }
         }
-    }
 
-    TradeHistoryDialog {
-        id: tradeHistoryDialog
-        controller: root.controller
+        // -- Trade history --------------------------------------------------
+        // The table the popup used to carry, now a page view: persisted fills
+        // from get_trade_history with a summary line. The horizontal
+        // scrollbar appears whenever the viewport is narrower than the table.
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Style.gapSmall
+
+            Text {
+                Layout.fillWidth: true
+                color: Style.secondaryText
+                font.pixelSize: Style.fontSizeSmall
+                wrapMode: Text.WordWrap
+                text: {
+                    const s = root.controller ? root.controller.tradeHistorySummary : null
+                    if (!s || !s.count)
+                        return qsTr("No trades yet — fills appear here once recorded")
+                    return qsTr("%1 trades · %2 filled · win rate %3% · net %4 · fees %5")
+                        .arg(s.count).arg(s.filled)
+                        .arg(((s.win_rate || 0) * 100).toFixed(1))
+                        .arg(Number(s.net_pnl || 0).toFixed(2))
+                        .arg(Number(s.fees || 0).toFixed(2))
+                }
+            }
+
+            ListView {
+                id: historyList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.HorizontalAndVerticalFlick
+                contentWidth: root.historyTableWidth
+                model: root.controller ? root.controller.tradeHistory : []
+
+                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOn }
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                header: RowLayout {
+                    width: Math.max(ListView.view.width, root.historyTableWidth)
+                    spacing: Style.gapSmall
+                    Text { text: qsTr("Time"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: root.historyColumns[0] }
+                    Text { text: qsTr("Symbol"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: root.historyColumns[1] }
+                    Text { text: qsTr("Side"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: root.historyColumns[2] }
+                    Text { text: qsTr("Qty"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: root.historyColumns[3] }
+                    Text { text: qsTr("Price"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: root.historyColumns[4] }
+                    Text { text: qsTr("PnL"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: root.historyColumns[5] }
+                    Text { text: qsTr("Fees"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: root.historyColumns[6] }
+                    Text { text: qsTr("Status"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: root.historyColumns[7] }
+                    Text { text: qsTr("Strategy"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: root.historyColumns[8] }
+                }
+
+                delegate: RowLayout {
+                    width: Math.max(ListView.view.width, root.historyTableWidth)
+                    spacing: Style.gapSmall
+
+                    Text {
+                        text: new Date(Number(modelData.time_ms) || 0)
+                                  .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
+                        color: Style.text; font.pixelSize: Style.fontSizeSmall
+                        font.family: "monospace"
+                        Layout.preferredWidth: root.historyColumns[0]
+                    }
+                    Text {
+                        text: modelData.symbol
+                        color: Style.text; font.pixelSize: Style.fontSizeSmall
+                        elide: Text.ElideRight
+                        Layout.preferredWidth: root.historyColumns[1]
+                    }
+                    Text {
+                        text: modelData.side
+                        color: modelData.side === "buy" ? Style.success : Style.danger
+                        font.pixelSize: Style.fontSizeSmall
+                        Layout.preferredWidth: root.historyColumns[2]
+                    }
+                    Text {
+                        text: Number(modelData.quantity || 0).toFixed(4)
+                        color: Style.text; font.pixelSize: Style.fontSizeSmall
+                        font.family: "monospace"
+                        horizontalAlignment: Text.AlignRight
+                        Layout.preferredWidth: root.historyColumns[3]
+                    }
+                    Text {
+                        text: Number(modelData.price || 0).toFixed(2)
+                        color: Style.text; font.pixelSize: Style.fontSizeSmall
+                        font.family: "monospace"
+                        horizontalAlignment: Text.AlignRight
+                        Layout.preferredWidth: root.historyColumns[4]
+                    }
+                    Text {
+                        text: Number(modelData.pnl || 0).toFixed(2)
+                        color: Number(modelData.pnl || 0) >= 0 ? Style.success : Style.danger
+                        font.pixelSize: Style.fontSizeSmall
+                        font.family: "monospace"
+                        horizontalAlignment: Text.AlignRight
+                        Layout.preferredWidth: root.historyColumns[5]
+                    }
+                    Text {
+                        text: Number(modelData.fees || 0).toFixed(2)
+                        color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
+                        font.family: "monospace"
+                        horizontalAlignment: Text.AlignRight
+                        Layout.preferredWidth: root.historyColumns[6]
+                    }
+                    Text {
+                        text: modelData.status
+                        color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
+                        Layout.preferredWidth: root.historyColumns[7]
+                    }
+                    Text {
+                        text: {
+                            const cid = String(modelData.client_order_id || "")
+                            if (cid.indexOf("xau_team:") === 0) {
+                                const parts = cid.split(":")
+                                if (parts.length > 1 && parts[1] !== "") {
+                                    return parts[1]
+                                }
+                            }
+                            return modelData.strategy || cid || "—"
+                        }
+                        color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall
+                        elide: Text.ElideRight
+                        Layout.preferredWidth: root.historyColumns[8]
+                    }
+                }
+            }
+
+            EmptyState {
+                visible: historyList.count === 0
+                text: qsTr("No trades yet")
+            }
+        }
     }
 }
