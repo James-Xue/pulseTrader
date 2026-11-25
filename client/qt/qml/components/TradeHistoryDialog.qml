@@ -16,7 +16,10 @@ Dialog {
     id: root
 
     property var controller
-    property real zoom: 1.0
+
+    /// The dialog starts at 1080x560; zoom is derived from the window width,
+    /// so A-/A+ resize the whole window and the table follows.
+    readonly property real zoom: root.width / 1080.0
 
     readonly property real cellFont: Style.fontSizeSmall * root.zoom
     readonly property var columnWidths: [150, 110, 60, 80, 100, 90, 80, 80, 140]
@@ -205,7 +208,10 @@ Dialog {
             // Zoom controls live here so they are impossible to miss.
             MacButton {
                 text: "A−"
-                onClicked: root.zoom = Math.max(0.8, root.zoom - 0.1)
+                onClicked: {
+                    root.width = Math.max(800, root.width * 0.9)
+                    root.height = Math.max(420, root.height * 0.9)
+                }
             }
             Text {
                 text: Math.round(root.zoom * 100) + "%"
@@ -216,7 +222,10 @@ Dialog {
             }
             MacButton {
                 text: "A+"
-                onClicked: root.zoom = Math.min(1.8, root.zoom + 0.1)
+                onClicked: {
+                    root.width = Math.min(1600, root.width * 1.1)
+                    root.height = Math.min(900, root.height * 1.1)
+                }
             }
 
             Item { Layout.fillWidth: true }
