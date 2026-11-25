@@ -16,6 +16,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -956,6 +957,92 @@ PulseError parseExecution(const toml::value &root, ExecutionConfig &out)
     return {};
 }
 
+// ---------------------------------------------------------------------------
+// parsePaper — [paper] section (2026-11-25)
+//
+// Deliberately STRICTER than every other section: unknown keys are a hard
+// error. config_loader silently ignores unknown keys elsewhere for forward
+// compatibility, but inside [paper] a typo such as `enable` would leave paper
+// disabled and let the live path start from a file the operator believes is a
+// paper profile — the exact fail-open this mode must not have.
+// ---------------------------------------------------------------------------
+PulseError parsePaper(const toml::value &root, PaperConfig &out)
+{
+    if (!root.contains("paper"))
+    {
+        return {};
+    }
+
+    const auto &sec = root.at("paper");
+
+    static const std::set<std::string> kAllowed{
+        "enabled",
+        "account_id",
+        "initial_balance_usdt",
+        "state_file",
+        "lock_file",
+        "maker_fee_rate",
+        "taker_fee_rate",
+        "spot_fee_rate",
+        "cfd_commission_usdt_per_lot",
+        "cfd_swap_usdt_per_lot_per_day",
+        "slippage_bps",
+        "fill_ratio",
+        "max_mark_age_ms",
+        "maintenance_rate",
+        "cfd_stop_out_level",
+        "stop_out_enabled",
+        "snapshot_interval_ms",
+        "contract_volume",
+        "price_tick",
+    };
+
+    for (const auto &entry : sec.as_table())
+    {
+        if (0 == kAllowed.count(entry.first))
+        {
+            return PulseError{ ErrorCode::ConfigInvalidValue,
+                               "[paper] unknown key '" + entry.first
+                                   + "' (a typo here must not silently "
+                                     "disable paper mode)" };
+        }
+    }
+
+    out.enabled = toml::find_or(sec, "enabled", out.enabled);
+    out.account_id = toml::find_or(sec, "account_id", out.account_id);
+    out.initial_balance_usdt =
+        toml::find_or(sec, "initial_balance_usdt", out.initial_balance_usdt);
+    out.state_file = toml::find_or(sec, "state_file", out.state_file);
+    out.lock_file = toml::find_or(sec, "lock_file", out.lock_file);
+    out.maker_fee_rate = toml::find_or(sec, "maker_fee_rate", out.maker_fee_rate);
+    out.taker_fee_rate = toml::find_or(sec, "taker_fee_rate", out.taker_fee_rate);
+    out.spot_fee_rate = toml::find_or(sec, "spot_fee_rate", out.spot_fee_rate);
+    out.cfd_commission_usdt_per_lot = toml::find_or(
+        sec, "cfd_commission_usdt_per_lot", out.cfd_commission_usdt_per_lot);
+    out.cfd_swap_usdt_per_lot_per_day = toml::find_or(
+        sec, "cfd_swap_usdt_per_lot_per_day",
+        out.cfd_swap_usdt_per_lot_per_day);
+    out.slippage_bps = toml::find_or(sec, "slippage_bps", out.slippage_bps);
+    out.fill_ratio = toml::find_or(sec, "fill_ratio", out.fill_ratio);
+    out.max_mark_age_ms =
+        static_cast<int>(toml::find_or(sec, "max_mark_age_ms",
+                                       out.max_mark_age_ms));
+    out.maintenance_rate =
+        toml::find_or(sec, "maintenance_rate", out.maintenance_rate);
+    out.cfd_stop_out_level =
+        toml::find_or(sec, "cfd_stop_out_level", out.cfd_stop_out_level);
+    out.stop_out_enabled =
+        toml::find_or(sec, "stop_out_enabled", out.stop_out_enabled);
+    out.snapshot_interval_ms =
+        static_cast<int>(toml::find_or(sec, "snapshot_interval_ms",
+                                       out.snapshot_interval_ms));
+    out.contract_volume =
+        toml::find_or(sec, "contract_volume", out.contract_volume);
+    out.price_tick = toml::find_or(sec, "price_tick", out.price_tick);
+
+    return {};
+}
+
 PulseError parseSqlite(const toml::value &root, SqliteConfig &out)
 {
     if (!root.contains("sqlite"))
@@ -1293,6 +1380,13 @@ Result<PulseConfig> loadConfigFile(const std::filesystem::path &path)
     }
 
     err = parseExecution(root, cfg.execution);
+
+    if (ErrorCode::Ok != err.code)
+    {
+        return err;
+    }
+
+    err = parsePaper(root, cfg.paper);
 
     if (ErrorCode::Ok != err.code)
     {

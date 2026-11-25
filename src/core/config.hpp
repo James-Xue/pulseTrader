@@ -599,6 +599,74 @@ struct ExecutionConfig
     std::vector<std::string> symbols;
 };
 
+// ---------------------------------------------------------------------------
+// PaperConfig — [paper] in-process simulated venue (2026-11-25)
+//
+// Paper mode replaces ONLY execution: market data stays the real public L1/L3
+// feed, while orders are matched, margined and fee-charged against a local
+// ledger. The mode is authoritative and fail-closed: a config with
+// enabled = true must be started through the `paper` subcommand, and the
+// paper process never constructs a credentialed exchange client.
+// ---------------------------------------------------------------------------
+struct PaperConfig
+{
+    /// Master switch. A config with this true must NOT be started as `trade`;
+    /// startup aborts with "use ./run.sh paper".
+    bool enabled = false;
+
+    /// Ledger identity. Deliberately NOT an exchange API key — a paper run
+    /// must never be mistakable for, or leak, a live credential.
+    std::string account_id = "paper-default";
+
+    /// Seeded available balance per wallet leg (spot / futures / cfd).
+    double initial_balance_usdt = 10000.0;
+
+    /// Atomic JSON snapshot of cash, positions, peak equity and resting
+    /// orders. tmp + fsync + rename + .bak; corruption is fail-closed.
+    std::string state_file = "data/paper-state.json";
+
+    /// Separate single-instance lock so a paper engine can run beside the
+    /// live engine (which holds data/engine.lock).
+    std::string lock_file = "data/engine.paper.lock";
+
+    /// Fee model. Gate futures: maker 0.02% / taker 0.05%; spot 0.1% per leg.
+    double maker_fee_rate = 0.0002;
+    double taker_fee_rate = 0.0005;
+    double spot_fee_rate = 0.001;
+
+    /// TradFi CFD charges a flat commission on the BUY leg only (verified
+    /// against the venue's own commission field: 6 USDT per 100 oz lot).
+    double cfd_commission_usdt_per_lot = 6.0;
+
+    /// Overnight swap per lot per day. 0 = not modelled (overstates multi-day
+    /// PnL); set a real value once Gate's TradFi swap rate is known.
+    double cfd_swap_usdt_per_lot_per_day = 0.0;
+
+    /// Execution realism knobs. slippage_bps is applied directionally to
+    /// market fills; fill_ratio models partial fills (1.0 = all-or-nothing).
+    double slippage_bps = 0.0;
+    double fill_ratio = 1.0;
+
+    /// A mark older than this refuses new orders and matches (weekend/holiday
+    /// gate for CFD, whose TradFi feed goes stale outside session hours).
+    int max_mark_age_ms = 5000;
+
+    /// Margin maintenance and forced stop-out.
+    double maintenance_rate = 0.005;
+    double cfd_stop_out_level = 0.5; ///< Margin level below this forces a close.
+    bool stop_out_enabled = true;
+
+    /// Snapshot cadence for the ledger writer thread.
+    int snapshot_interval_ms = 1000;
+
+    /// Contract size per symbol (XAUUSD = 100 oz per lot). Needed because the
+    /// authenticated /tradfi/symbols/detail endpoint is unavailable in paper.
+    std::map<std::string, double> contract_volume;
+
+    /// Price tick per symbol (XAUUSD = 0.01).
+    std::map<std::string, double> price_tick;
+};
+
 struct PulseConfig
 {
     ExchangeConfig exchange;
@@ -615,6 +683,7 @@ struct PulseConfig
     GoldTraderConfig gold_trader;       ///< [gold_trader] USD dynamic stop supervisor.
     BacktestConfig backtest;            ///< [backtest] backtest/kline-store tooling (M33).
     ExecutionConfig execution;          ///< [execution] markets wired without a strategy.
+    PaperConfig paper;                  ///< [paper] in-process simulated venue (2026-11-25).
     std::vector<std::string> symbols; ///< Symbols to trade, e.g. {"BTC_USDT"}.
     /// Extra symbols to stream in the ACTIVE market only (watchlist). They are
     /// unioned into that market's feed subscriptions but create no strategy
