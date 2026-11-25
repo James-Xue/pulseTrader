@@ -44,7 +44,6 @@ qt_add_qml_module(pulseTraderQt
         qml/pages/MarketPage.qml
         qml/pages/GoldTradersPage.qml
         qml/pages/SettingsPage.qml
-        qml/components/TradeHistoryDialog.qml
         qml/components/StatusBar.qml
         qml/components/MetricTile.qml
         qml/components/StaleBadge.qml
