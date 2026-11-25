@@ -152,6 +152,11 @@ class EngineServices
     /// no locks itself and tolerates "no marks yet".
     void tickPaperVenue(std::int64_t now_ms);
 
+    /// Paper mode only: import restored venue positions into PositionManager
+    /// so risk limits and get_positions see them after a restart. Idempotent
+    /// (the venue supplies stable exchange position ids).
+    void importPaperPositions();
+
     /// Dynamically adjust the protective stops on an open CFD position —
     /// `modify_sl_tp` (exchange-native price_sl/price_tp, "0" clears a stop).
     /// Params: position_id (required), sl_price?, tp_price?. CFD only.

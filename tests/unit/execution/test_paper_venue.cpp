@@ -241,4 +241,33 @@ TEST_F(PaperVenueTest, MissingContractVolumeIsRejected)
     EXPECT_FALSE(ok(placed));
 }
 
+TEST_F(PaperVenueTest, JsonRoundTripRestoresThePositionBook)
+{
+    placeAndFill(marketOrder(Side::Buy, 0.01, 3995.0, 4005.0));
+    ASSERT_EQ(1u, venue.openPositionCount());
+    const nlohmann::json saved = venue.toJson();
+
+    PaperConfig restored_cfg = cfg;
+    PaperAccount restored_account{ restored_cfg };
+    PaperVenue restored{ restored_cfg, { "XAUUSD" }, restored_account };
+
+    ASSERT_TRUE(restored.restore(saved));
+    EXPECT_EQ(1u, restored.openPositionCount());
+    const auto rows = restored.openPositions(MarketType::Cfd);
+    ASSERT_EQ(1u, rows.size());
+    EXPECT_DOUBLE_EQ(4000.0, rows[0].entry_price);
+    EXPECT_DOUBLE_EQ(3995.0, rows[0].sl_price);
+    EXPECT_DOUBLE_EQ(4005.0, rows[0].tp_price);
+    EXPECT_EQ("test-cid", rows[0].client_order_id);
+    EXPECT_FALSE(rows[0].exchange_position_id.empty());
+}
+
+TEST_F(PaperVenueTest, RestoreRejectsMalformedPayload)
+{
+    EXPECT_FALSE(venue.restore(nlohmann::json::object()));
+    EXPECT_FALSE(venue.restore(
+        nlohmann::json{ { "positions", nlohmann::json::array(
+                                             { nlohmann::json::object() }) } }));
+}
+
 } // namespace

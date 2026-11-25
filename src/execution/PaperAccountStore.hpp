@@ -22,6 +22,7 @@
 
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -50,8 +51,18 @@ class PaperAccountStore
     PaperAccountStore(const PaperAccountStore &) = delete;
     PaperAccountStore &operator=(const PaperAccountStore &) = delete;
 
-    /// Read the state file (or its backup) into `account`.
-    [[nodiscard]] PaperStoreLoad load(PaperAccount &account) const;
+    /// Read the state file (or its backup) into `account`. The venue section
+    /// (schema v2+) is kept and exposed via loadedVenue(); a v1 file simply
+    /// has none.
+    [[nodiscard]] PaperStoreLoad load(PaperAccount &account);
+
+    /// Supply the venue's serialized book. Called by the writer thread, so
+    /// the provider must be thread-safe.
+    using VenueProvider = std::function<nlohmann::json()>;
+    void setVenueProvider(VenueProvider provider);
+
+    /// Venue section read by the last load() (empty for v1 files).
+    [[nodiscard]] const nlohmann::json &loadedVenue() const noexcept;
 
     /// Start the periodic snapshot writer. The account must outlive the store.
     void start(PaperAccount &account);
@@ -70,7 +81,10 @@ class PaperAccountStore
     [[nodiscard]] const std::filesystem::path &path() const noexcept;
 
     /// Schema version written into every file. Bump with a migration.
-    static constexpr int kSchemaVersion = 1;
+    ///   v1 — account wallets only
+    ///   v2 — + venue positions (restored into the simulated exchange)
+    static constexpr int kSchemaVersion = 2;
+    static constexpr int kMinSchemaVersion = 1;
 
   private:
     /// Writer loop: waits `interval_ms` or until stop is requested.
@@ -88,6 +102,8 @@ class PaperAccountStore
     std::condition_variable_any m_waitCv;
     std::jthread m_thread;
     PaperAccount *m_account{ nullptr };
+    VenueProvider m_venueProvider;
+    nlohmann::json m_loadedVenue;
     std::mutex m_writeMutex; ///< Serializes file replacement.
 };
 

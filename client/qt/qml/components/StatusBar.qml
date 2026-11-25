@@ -61,6 +61,24 @@ Row {
         }
     }
 
+    Rectangle {
+        visible: root.controller && root.controller.simulated
+        width: paperLabel.implicitWidth + 12
+        height: 18
+        radius: Style.radiusSmall
+        anchors.verticalCenter: parent.verticalCenter
+        color: "#7C3AED"
+
+        Text {
+            id: paperLabel
+            anchors.centerIn: parent
+            text: qsTr("PAPER")
+            color: "white"
+            font.pixelSize: 10
+            font.bold: true
+        }
+    }
+
     Text {
         anchors.verticalCenter: parent.verticalCenter
         text: root.controller

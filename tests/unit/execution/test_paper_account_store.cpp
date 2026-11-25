@@ -154,6 +154,49 @@ TEST(PaperAccountStoreTest, WriterThreadPersistsWithoutManualSave)
     EXPECT_EQ(PaperStoreLoad::Loaded, reader.load(reloaded));
 }
 
+TEST(PaperAccountStoreTest, VenueSectionRoundTrips)
+{
+    const auto dir = freshDir("venue-section");
+    const auto path = dir / "state.json";
+    PaperAccount account(makePaperConfig());
+
+    {
+        PaperAccountStore store(path, 1'000);
+        store.setVenueProvider(
+            []
+            {
+                return nlohmann::json{
+                    { "seq", 7 },
+                    { "positions", nlohmann::json::array() },
+                };
+            });
+        store.saveNow(account);
+    }
+
+    PaperAccount reloaded(makePaperConfig());
+    PaperAccountStore store(path, 1'000);
+    EXPECT_EQ(PaperStoreLoad::Loaded, store.load(reloaded));
+    ASSERT_TRUE(store.loadedVenue().is_object());
+    EXPECT_EQ(7, store.loadedVenue().value("seq", 0));
+}
+
+TEST(PaperAccountStoreTest, AcceptsLegacySchemaV1WithoutVenue)
+{
+    const auto dir = freshDir("schema-v1");
+    const auto path = dir / "state.json";
+    PaperAccount account(makePaperConfig());
+
+    nlohmann::json legacy;
+    legacy["schema_version"] = 1;
+    legacy["account"] = account.toJson();
+    writeText(path, legacy.dump(2));
+
+    PaperAccount reloaded(makePaperConfig());
+    PaperAccountStore store(path, 1'000);
+    EXPECT_EQ(PaperStoreLoad::Loaded, store.load(reloaded));
+    EXPECT_TRUE(store.loadedVenue().empty());
+}
+
 TEST(PaperAccountStoreTest, StateFileCarriesNoCredentials)
 {
     const auto dir = freshDir("no-secrets");

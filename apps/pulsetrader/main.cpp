@@ -998,9 +998,30 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
             log->warn("paper ledger seeded with {:.2f} USDT per leg",
                       cfg.paper.initial_balance_usdt);
         }
-        // v1 persists wallets but not venue positions: a restart after an open
-        // position would otherwise leave locked margin with nothing behind it.
-        paper_account->releaseOrphanedMargin();
+        // Schema v2 persists the venue book too. Restore it before deciding
+        // whether the wallet's locked margin has any position behind it.
+        const auto &venue_state = paper_store->loadedVenue();
+        if (venue_state.is_object() && !venue_state.empty())
+        {
+            if (!paper_venue->restore(venue_state))
+            {
+                log->critical("paper venue state is invalid; refusing to start "
+                              "(fix or remove {})",
+                              cfg.paper.state_file);
+                return 1;
+            }
+            log->info("paper venue restored {} open position(s)",
+                      paper_venue->openPositionCount());
+        }
+        if (0 == paper_venue->openPositionCount())
+        {
+            // v1 files (or a flat book): any locked margin has no position
+            // behind it, so return it to cash rather than hiding it.
+            paper_account->releaseOrphanedMargin();
+        }
+
+        paper_store->setVenueProvider(
+            [&paper_venue]() { return paper_venue->toJson(); });
         paper_store->start(*paper_account);
     }
 
@@ -1698,6 +1719,11 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         &param_change_log,
         trade_recorder_ptr,
         paper_venue.get());
+
+    if (paper_venue)
+    {
+        services.importPaperPositions();
+    }
 
     // Reconcile positions that already exist on the exchange (previous
     // engine run, manual trading) so risk limits and displays reflect the

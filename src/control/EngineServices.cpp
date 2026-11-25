@@ -596,6 +596,37 @@ nlohmann::json EngineServices::status() const
     j["external_orders_enabled"] =
         m_externalOrdersEnabled.load(std::memory_order_relaxed);
 
+    // Paper mode is an ADDITIVE surface. `network` keeps its live meaning (the
+    // market-data venue); mode/simulated tell a client that the account is a
+    // simulation, so a desktop UI can badge it instead of showing paper equity
+    // as if it were real.
+    const bool paper_mode = (nullptr != m_paperVenue);
+    j["mode"] = paper_mode
+        ? "paper"
+        : (m_cfg.exchange.testnet ? "testnet" : "live");
+    j["simulated"] = paper_mode;
+    if (paper_mode)
+    {
+        const auto snapshot = m_paperVenue->accountSnapshot();
+        const double cash = snapshot.spot.cash_usdt
+            + snapshot.futures.cash_usdt + snapshot.cfd.cash_usdt;
+        const double locked = snapshot.spot.locked_margin_usdt
+            + snapshot.futures.locked_margin_usdt
+            + snapshot.cfd.locked_margin_usdt;
+        const double fees = snapshot.spot.fees_paid_usdt
+            + snapshot.futures.fees_paid_usdt + snapshot.cfd.fees_paid_usdt;
+        j["paper"] = {
+            { "equity_usdt", snapshot.equity_usdt },
+            { "cash_usdt", cash },
+            { "margin_used_usdt", locked },
+            { "margin_free_usdt", cash },
+            { "unrealized_pnl_usdt", snapshot.unrealized_pnl_usdt },
+            { "fees_paid_usdt", fees },
+            { "open_positions", m_paperVenue->openPositionCount() },
+            { "account_id", snapshot.account_id },
+        };
+    }
+
     if (m_spotFeed)
     {
         j["feed_spot"] = m_spotFeed->stats();
@@ -2816,6 +2847,40 @@ void EngineServices::tickPaperVenue(std::int64_t now_ms)
                        event.exchange_position_id, event.closed_qty,
                        event.fill_price, pnl.value(),
                        static_cast<int>(event.reason));
+    }
+}
+
+void EngineServices::importPaperPositions()
+{
+    if (nullptr == m_paperVenue)
+    {
+        return;
+    }
+
+    for (const auto &row : m_paperVenue->openPositions(MarketType::Cfd))
+    {
+        const auto opened = m_positionMgr.openPosition(
+            row.symbol, row.side, row.lots, row.entry_price,
+            row.client_order_id, MarketType::Cfd, row.leverage,
+            MarginMode::Cross, row.quanto, m_cfg.paper.maintenance_rate,
+            row.sl_price, row.tp_price);
+        if (!ok(opened))
+        {
+            PULSE_LOG_ERROR("control",
+                            "paper import failed for {}: {}",
+                            row.exchange_position_id, error(opened).message);
+            continue;
+        }
+
+        m_positionMgr.setExchangePositionId(value(opened),
+                                           row.exchange_position_id);
+        if (row.mark_price > 0.0)
+        {
+            m_positionMgr.updatePrice(value(opened), row.mark_price);
+        }
+        PULSE_LOG_INFO("control",
+                       "paper import venue {} -> engine {} ({:.2f} lots)",
+                       row.exchange_position_id, value(opened), row.lots);
     }
 }
 

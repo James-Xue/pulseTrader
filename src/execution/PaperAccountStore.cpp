@@ -45,7 +45,7 @@ const std::filesystem::path &PaperAccountStore::path() const noexcept
     return m_path;
 }
 
-PaperStoreLoad PaperAccountStore::load(PaperAccount &account) const
+PaperStoreLoad PaperAccountStore::load(PaperAccount &account)
 {
     // 1. Try the main file.
     // 2. Fall back to the .bak copy written by the previous rotation.
@@ -71,22 +71,36 @@ PaperStoreLoad PaperAccountStore::load(PaperAccount &account) const
             && out.contains("account");
     };
 
+    const auto version_ok = [](const nlohmann::json &payload)
+    {
+        const int version = payload.at("schema_version").get<int>();
+        return version >= kMinSchemaVersion && version <= kSchemaVersion;
+    };
+
+    const auto adopt = [this](const nlohmann::json &payload)
+    {
+        // v1 wrote wallets only; v2 adds the venue book.
+        m_loadedVenue = payload.value("venue", nlohmann::json::object());
+    };
+
     nlohmann::json j;
     bool main_exists = std::filesystem::exists(m_path);
-    if (try_read(m_path, j) && j.at("schema_version").get<int>() == kSchemaVersion)
+    if (try_read(m_path, j) && version_ok(j))
     {
         if (account.restore(j.at("account")))
         {
+            adopt(j);
             PULSE_LOG_INFO(kLogModule, "restored paper ledger from {}",
                            m_path.string());
             return PaperStoreLoad::Loaded;
         }
     }
 
-    if (try_read(m_bak, j) && j.at("schema_version").get<int>() == kSchemaVersion)
+    if (try_read(m_bak, j) && version_ok(j))
     {
         if (account.restore(j.at("account")))
         {
+            adopt(j);
             PULSE_LOG_WARN(kLogModule,
                            "main state unreadable; restored from {}",
                            m_bak.string());
@@ -104,6 +118,17 @@ PaperStoreLoad PaperAccountStore::load(PaperAccount &account) const
                     "re-fund the account",
                     m_path.string());
     return PaperStoreLoad::Corrupt;
+}
+
+void PaperAccountStore::setVenueProvider(VenueProvider provider)
+{
+    std::lock_guard<std::mutex> lock(m_writeMutex);
+    m_venueProvider = std::move(provider);
+}
+
+const nlohmann::json &PaperAccountStore::loadedVenue() const noexcept
+{
+    return m_loadedVenue;
 }
 
 void PaperAccountStore::start(PaperAccount &account)
@@ -159,6 +184,16 @@ void PaperAccountStore::saveNow(const PaperAccount &account)
     nlohmann::json payload;
     payload["schema_version"] = kSchemaVersion;
     payload["account"] = account.toJson();
+
+    VenueProvider provider;
+    {
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        provider = m_venueProvider;
+    }
+    if (provider)
+    {
+        payload["venue"] = provider();
+    }
 
     // Serialise outside the account's lock (toJson copies under it) and keep
     // file replacement serialized separately.

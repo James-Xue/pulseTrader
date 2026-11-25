@@ -576,9 +576,11 @@ PaperVenue::openPositions(MarketType market_type) const
         row.mark_price = mark.has_value() ? mark->price : position.entry_price;
         row.leverage = position.leverage;
         row.locked_margin = position.locked_margin;
+        row.quanto = position.quanto;
         row.sl_price = position.sl_price;
         row.tp_price = position.tp_price;
         row.open_time = position.open_time;
+        row.client_order_id = position.client_order_id;
         out.push_back(std::move(row));
     }
     return out;
@@ -692,6 +694,81 @@ std::size_t PaperVenue::openPositionCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_positions.size();
+}
+
+nlohmann::json PaperVenue::toJson() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    nlohmann::json positions = nlohmann::json::array();
+    for (const PaperPosition &position : m_positions)
+    {
+        positions.push_back(nlohmann::json{
+            { "exchange_position_id", position.exchange_position_id },
+            { "symbol", position.symbol },
+            { "side", (Side::Buy == position.side) ? "buy" : "sell" },
+            { "lots", position.lots },
+            { "entry_price", position.entry_price },
+            { "leverage", position.leverage },
+            { "quanto", position.quanto },
+            { "locked_margin", position.locked_margin },
+            { "sl_price", position.sl_price },
+            { "tp_price", position.tp_price },
+            { "open_time_ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  position.open_time.time_since_epoch())
+                  .count() },
+            { "client_order_id", position.client_order_id },
+        });
+    }
+    return nlohmann::json{ { "seq", m_seq }, { "positions", positions } };
+}
+
+bool PaperVenue::restore(const nlohmann::json &j)
+{
+    if (!j.is_object() || !j.contains("positions")
+        || !j["positions"].is_array())
+    {
+        return false;
+    }
+
+    std::vector<PaperPosition> restored;
+    for (const auto &row : j["positions"])
+    {
+        if (!row.is_object())
+        {
+            return false;
+        }
+        PaperPosition position;
+        position.exchange_position_id =
+            row.value("exchange_position_id", std::string{});
+        position.symbol = row.value("symbol", std::string{});
+        position.side = ("buy" == row.value("side", std::string{}))
+            ? Side::Buy
+            : Side::Sell;
+        position.lots = row.value("lots", 0.0);
+        position.entry_price = row.value("entry_price", 0.0);
+        position.leverage = row.value("leverage", 1.0);
+        position.quanto = row.value("quanto", 1.0);
+        position.locked_margin = row.value("locked_margin", 0.0);
+        position.sl_price = row.value("sl_price", 0.0);
+        position.tp_price = row.value("tp_price", 0.0);
+        position.open_time = Timestamp{ std::chrono::milliseconds{
+            row.value("open_time_ms", std::int64_t{ 0 }) } };
+        position.client_order_id =
+            row.value("client_order_id", std::string{});
+
+        if (position.exchange_position_id.empty() || position.symbol.empty()
+            || position.lots <= 0.0 || position.entry_price <= 0.0)
+        {
+            return false;
+        }
+        restored.push_back(std::move(position));
+    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_positions = std::move(restored);
+    m_seq = j.value("seq", m_seq);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

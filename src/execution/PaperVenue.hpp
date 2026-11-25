@@ -58,9 +58,11 @@ struct PaperPositionRow
     double mark_price{ 0.0 };
     double leverage{ 1.0 };
     double locked_margin{ 0.0 };
+    double quanto{ 1.0 };
     double sl_price{ 0.0 };
     double tp_price{ 0.0 };
     Timestamp open_time{};
+    std::string client_order_id;
 };
 
 /// Current protective stops of one venue position.
@@ -203,6 +205,15 @@ class PaperVenue final : public IOrderPlacer, public IOrderTracker
 
     /// Number of open venue positions (diagnostics/tests).
     [[nodiscard]] std::size_t openPositionCount() const;
+
+    /// Serialize the venue book (positions + id sequence) for the state
+    /// store. The account (cash/margin) lives in PaperAccount and is
+    /// persisted separately in the same file.
+    [[nodiscard]] nlohmann::json toJson() const;
+
+    /// Rebuild the venue book from a previous toJson(). Returns false on a
+    /// structurally invalid payload (the caller must then fail closed).
+    [[nodiscard]] bool restore(const nlohmann::json &j);
 
   private:
     struct PendingOrder

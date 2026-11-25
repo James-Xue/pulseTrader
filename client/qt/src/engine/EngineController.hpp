@@ -52,6 +52,10 @@ class EngineController : public QObject
     Q_PROPERTY(QString engineVersion READ engineVersion NOTIFY statusChanged)
     Q_PROPERTY(double engineUptimeSec READ engineUptimeSec NOTIFY statusChanged)
     Q_PROPERTY(QString network READ network NOTIFY statusChanged)
+    /// Engine mode: "live" | "testnet" | "paper" (see get_status.mode).
+    Q_PROPERTY(QString mode READ mode NOTIFY statusChanged)
+    /// True when the engine runs the in-process simulated venue.
+    Q_PROPERTY(bool simulated READ simulated NOTIFY statusChanged)
     Q_PROPERTY(bool tradingHalted READ tradingHalted NOTIFY statusChanged)
     Q_PROPERTY(QString activeMarket READ activeMarket NOTIFY statusChanged)
     Q_PROPERTY(QStringList symbols READ symbols NOTIFY statusChanged)
@@ -140,6 +144,8 @@ public:
     [[nodiscard]] QString engineVersion() const { return m_engineVersion; }
     [[nodiscard]] double engineUptimeSec() const { return m_engineUptimeSec; }
     [[nodiscard]] QString network() const { return m_network; }
+    [[nodiscard]] QString mode() const { return m_mode; }
+    [[nodiscard]] bool simulated() const { return m_simulated; }
     [[nodiscard]] bool tradingHalted() const { return m_tradingHalted; }
     [[nodiscard]] QString activeMarket() const { return m_activeMarket; }
     [[nodiscard]] QStringList symbols() const { return m_symbols; }
@@ -281,6 +287,8 @@ private:
     QString m_engineVersion;
     double m_engineUptimeSec = 0.0;
     QString m_network;
+    QString m_mode{ QStringLiteral("live") };
+    bool m_simulated{ false };
     bool m_tradingHalted = false;
     QString m_activeMarket;
     QStringList m_symbols;
