@@ -7,6 +7,7 @@
 
 #include "core/types.hpp"
 #include "execution/ExecutionReport.hpp"
+#include "execution/IOrderTracker.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
 
@@ -25,48 +26,15 @@ namespace pulse::execution
 {
 
 // ---------------------------------------------------------------------------
-// OrderSnapshot — lightweight read-only snapshot of a tracked order
+// OrderTracker — tracks orders via WS + REST fallback.
 //
-// Used by the WebUI dashboard (Layer 9) to display active order state without
-// exposing internal TrackedOrder struct.
+// This is the Gate (live) implementation of IOrderTracker. OrderSnapshot and
+// the CompletionCallback alias live on the interface; the paper venue supplies
+// its own implementation of the same contract.
 // ---------------------------------------------------------------------------
-struct OrderSnapshot
-{
-    std::string order_id;
-    std::string client_order_id; ///< M27: client-assigned id (e.g. "eth-grid-2100").
-    Symbol symbol;
-    Side side;
-    OrderType type;
-    Quantity requested_qty;
-    Quantity filled_qty;
-    OrderStatus status;
-    Timestamp submit_time;
-    Timestamp last_update_time;
-
-    OrderSnapshot()
-        : order_id{}
-        , client_order_id{}
-        , symbol{}
-        , side{ Side::Buy }
-        , type{ OrderType::Market }
-        , requested_qty{ 0.0 }
-        , filled_qty{ 0.0 }
-        , status{ OrderStatus::Pending }
-        , submit_time{}
-        , last_update_time{}
-    {
-    }
-};
-
-// ---------------------------------------------------------------------------
-// OrderTracker — tracks orders via WS + REST fallback
-// ---------------------------------------------------------------------------
-class OrderTracker
+class OrderTracker : public IOrderTracker
 {
   public:
-    /// Callback type for order completion (Filled or Cancelled).
-    using CompletionCallback = std::function<void(const ExecutionReport &)>;
-
     /// Construct an OrderTracker with WS and REST clients.
     ///
     /// market_type selects which WS channel and REST paths to use.
@@ -95,25 +63,25 @@ class OrderTracker
         OrderType type,
         Quantity requested_qty,
         Price submit_mid_price,
-        const std::string &client_order_id = "");
+        const std::string &client_order_id = "") override;
 
     /// Stop tracking an order (reached terminal state).
     void stopTracking(const std::string &order_id);
 
     /// Get current order status.
-    [[nodiscard]] std::optional<OrderStatus> getStatus(const std::string &order_id) const;
+    [[nodiscard]] std::optional<OrderStatus> getStatus(const std::string &order_id) const override;
 
     /// Get execution report (only available for terminal states).
     [[nodiscard]] std::optional<ExecutionReport> getReport(const std::string &order_id) const;
 
     /// Set callback invoked when an order reaches terminal state.
-    void setCompletionCallback(CompletionCallback callback);
+    void setCompletionCallback(CompletionCallback callback) override;
 
     /// Poll order status via REST (fallback when WS events are missed).
     ///
     /// Calls GET /api/v4/spot/orders/{order_id} and updates internal state.
     /// Returns the updated status, or PulseError on failure.
-    [[nodiscard]] Result<OrderStatus> pollOrderStatus(const std::string &order_id);
+    [[nodiscard]] Result<OrderStatus> pollOrderStatus(const std::string &order_id) override;
 
     /// Poll every tracked order's status via REST (reconcile fallback).
     ///
@@ -121,7 +89,7 @@ class OrderTracker
     /// was established (market orders can fill within the same millisecond).
     /// Individual failures are logged and tolerated; terminal orders emit
     /// completion reports through the normal path.
-    void reconcileAll();
+    void reconcileAll() override;
 
     /// Reconcile every tracked order, holding `rest_mutex` around each
     /// individual status poll.
@@ -135,7 +103,7 @@ class OrderTracker
     /// The caller must NOT already hold `rest_mutex` (std::mutex is not
     /// recursive). Order placement calls pollOrderStatus() directly while
     /// holding it and must keep using the unlocked overload.
-    void reconcileAll(std::mutex &rest_mutex);
+    void reconcileAll(std::mutex &rest_mutex) override;
 
     /// Check if an order status is terminal (Filled or Cancelled).
     [[nodiscard]] static bool isTerminalStatus(OrderStatus status);
@@ -183,7 +151,7 @@ class OrderTracker
 
     /// Returns a snapshot of all currently tracked (non-terminal) orders.
     /// Thread-safe: takes shared read lock.
-    [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const;
+    [[nodiscard]] std::vector<OrderSnapshot> activeOrders() const override;
 
     /// M27: active orders whose client_order_id starts with `prefix`
     /// (e.g. "eth-grid-" for the grid service). Linear scan — tracked order
@@ -196,14 +164,14 @@ class OrderTracker
     ///
     /// Parameters:
     ///   1. n — maximum number of reports to return (default: 20)
-    [[nodiscard]] std::vector<ExecutionReport> recentReports(std::size_t n = 20) const;
+    [[nodiscard]] std::vector<ExecutionReport> recentReports(std::size_t n = 20) const override;
 
     /// Stash a terminal ExecutionReport that never passed through
     /// trackOrder(). TradFi CFD closes use the dedicated position-close
     /// endpoint (no order lifecycle), so the engine synthesizes the report
     /// and records it here to keep recentReports / trades.db / execution.log
     /// complete (2026-08-17 overnight: close side left zero trace without it).
-    void recordCompletedReport(const ExecutionReport &report);
+    void recordCompletedReport(const ExecutionReport &report) override;
 
   public:
     /// Test-only: simulate a WS order update event (calls processOrderUpdate).
@@ -219,7 +187,7 @@ class OrderTracker
     /// real id. After pollCfdOrderStatus re-anchors a tracked key, this
     /// returns the real id (callers like cancel need it). Returns the input
     /// unchanged when no alias is recorded.
-    [[nodiscard]] std::string resolveExchangeId(const std::string &order_id) const;
+    [[nodiscard]] std::string resolveExchangeId(const std::string &order_id) const override;
 
     /// Test-only: simulate a CFD list-poll result for one order (calls the
     /// same apply+complete path as pollCfdOrderStatus, without network).

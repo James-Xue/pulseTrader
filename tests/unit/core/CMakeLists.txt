@@ -40,8 +40,21 @@ target_link_libraries(test_param_change_log
         GTest::gtest_main
 )
 
+# Shared fill arithmetic (src/core/fill_math.hpp) — golden values pinned from
+# BacktestAccount's pre-refactor formulas (2026-11-25).
+add_executable(test_fill_math
+    test_fill_math.cpp
+)
+
+target_link_libraries(test_fill_math
+    PRIVATE
+        pulse::core
+        GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(test_core)
 gtest_discover_tests(test_config_loader)
 gtest_discover_tests(test_config_validator)
 gtest_discover_tests(test_param_change_log)
+gtest_discover_tests(test_fill_math)

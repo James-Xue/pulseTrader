@@ -497,9 +497,9 @@ EngineServices::EngineServices(
     exchange::GateRestClient *spot_rest,
     exchange::GateRestClient *futures_rest,
     exchange::GateRestClient *cfd_rest,
-    execution::OrderTracker *spot_tracker,
-    execution::OrderTracker *futures_tracker,
-    execution::OrderTracker *cfd_tracker,
+    execution::IOrderTracker *spot_tracker,
+    execution::IOrderTracker *futures_tracker,
+    execution::IOrderTracker *cfd_tracker,
     OrderFlowExecutor &order_flow,
     strategy::SignalBoard &signal_board,
     std::mutex &rest_mutex,
@@ -769,7 +769,7 @@ nlohmann::json EngineServices::orders(bool reconcile) const
     // single indistinguishable pool (the reported dashboard problem).
     nlohmann::json active = nlohmann::json::array();
     nlohmann::json reports = nlohmann::json::array();
-    const auto appendTracker = [&active, &reports](execution::OrderTracker *tracker,
+    const auto appendTracker = [&active, &reports](execution::IOrderTracker *tracker,
                                                    const char *market)
     {
         if (nullptr == tracker)

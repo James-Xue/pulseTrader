@@ -88,9 +88,9 @@ class EngineServices
                    exchange::GateRestClient *spot_rest,
                    exchange::GateRestClient *futures_rest,
                    exchange::GateRestClient *cfd_rest,
-                   execution::OrderTracker *spot_tracker,
-                   execution::OrderTracker *futures_tracker,
-                   execution::OrderTracker *cfd_tracker,
+                   execution::IOrderTracker *spot_tracker,
+                   execution::IOrderTracker *futures_tracker,
+                   execution::IOrderTracker *cfd_tracker,
                    OrderFlowExecutor &order_flow,
                    strategy::SignalBoard &signal_board,
                    std::mutex &rest_mutex,
@@ -460,9 +460,9 @@ class EngineServices
     exchange::GateRestClient *m_spotRest;
     exchange::GateRestClient *m_futuresRest;
     exchange::GateRestClient *m_cfdRest;
-    execution::OrderTracker *m_spotTracker;
-    execution::OrderTracker *m_futuresTracker;
-    execution::OrderTracker *m_cfdTracker;
+    execution::IOrderTracker *m_spotTracker;
+    execution::IOrderTracker *m_futuresTracker;
+    execution::IOrderTracker *m_cfdTracker;
     OrderFlowExecutor &m_orderFlow;
     grid::GridManager *m_grid{ nullptr }; ///< M27 grid service (nullable).
     const risk::GoldTrader *m_goldTrader{ nullptr }; ///< L7 supervisor (nullable).

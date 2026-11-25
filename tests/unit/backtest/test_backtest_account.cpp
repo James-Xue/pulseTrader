@@ -2,6 +2,8 @@
 
 #include "backtest/BacktestAccount.hpp"
 
+#include "core/fill_math.hpp"
+
 #include <gtest/gtest.h>
 
 namespace pulse::backtest::test
@@ -283,6 +285,40 @@ TEST(BacktestAccountTest, ZeroQuantityCannotTrade)
     EXPECT_FALSE(account.hasPosition());
     EXPECT_EQ(0, account.entrySignalCount());
     EXPECT_EQ(1, account.ignoredSignalCount());
+}
+
+// ---------------------------------------------------------------------------
+// Shared fill-math parity (2026-11-25)
+//
+// Pins BacktestAccount to core::fill_math: a round trip must equal the
+// hand-computed values from the shared header, which is also what the paper
+// venue uses. If either side drifts, this fails.
+// ---------------------------------------------------------------------------
+
+TEST(BacktestAccountTest, RoundTripMatchesSharedFillMath)
+{
+    BacktestOptions opts = makeOpts();
+    BacktestAccount account(opts);
+
+    account.onSignal(makeSignal(strategy::SignalType::Buy, 2000.0), 1'000'000);
+    account.onSignal(makeSignal(strategy::SignalType::Sell, 2050.0), 1'060'000);
+    ASSERT_EQ(1u, account.trades().size());
+
+    const auto &t = account.trades()[0];
+    const double expected_entry_fee = core::fill_math::feeFor(
+        opts.order_quantity, 2000.0, opts.quanto_multiplier,
+        opts.market_type, opts.taker_fee_rate);
+    const double expected_exit_fee = core::fill_math::feeFor(
+        t.quantity, 2050.0, opts.quanto_multiplier,
+        opts.market_type, opts.taker_fee_rate);
+    const double expected_gross = core::fill_math::positionPnl(
+        Side::Buy, 2000.0, 2050.0, t.quantity, opts.quanto_multiplier);
+
+    EXPECT_DOUBLE_EQ(expected_entry_fee, t.entry_fee);
+    EXPECT_DOUBLE_EQ(expected_exit_fee, t.exit_fee);
+    EXPECT_DOUBLE_EQ(expected_gross, t.pnl);
+    EXPECT_DOUBLE_EQ(expected_gross - expected_entry_fee - expected_exit_fee,
+                     t.net_pnl);
 }
 
 } // namespace pulse::backtest::test

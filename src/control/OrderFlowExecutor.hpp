@@ -13,6 +13,7 @@
 
 #include "core/PulseError.hpp"
 #include "core/config.hpp"
+#include "execution/IOrderPlacer.hpp"
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
 #include "market/OrderBookManager.hpp"
@@ -61,31 +62,13 @@ namespace pulse::control
                                             std::int64_t now_ms);
 
 // ---------------------------------------------------------------------------
-// IOrderPlacer — thin interface so unit tests can fake order placement
-// (OrderExecutor is concrete, takes a live GateRestClient, and is not virtual)
+// ExecutorOrderPlacer — IOrderPlacer backed by a real OrderExecutor.
+//
+// The interface itself lives in L8 (execution/IOrderPlacer.hpp); this Gate
+// adapter stays with the control-plane wiring. Unit tests and the paper venue
+// supply their own IOrderPlacer implementations.
 // ---------------------------------------------------------------------------
-class IOrderPlacer
-{
-  public:
-    virtual ~IOrderPlacer() = default;
-
-    /// Place an order via the exchange REST API.
-    [[nodiscard]] virtual Result<execution::OrderResponse>
-    place(const execution::OrderRequest &req) = 0;
-
-    /// Cancel an order by exchange order ID.
-    [[nodiscard]] virtual bool cancel(const std::string &order_id) = 0;
-
-    /// Ensure futures leverage matches the request before an order is placed.
-    /// Gate.io applies leverage at the position level, not per order — the
-    /// account's current setting (possibly 200x) silently applies otherwise.
-    /// Spot placers implement as a no-op.
-    [[nodiscard]] virtual Result<nlohmann::json>
-    setLeverage(const std::string &contract, double leverage) = 0;
-};
-
-/// IOrderPlacer backed by a real OrderExecutor.
-class ExecutorOrderPlacer final : public IOrderPlacer
+class ExecutorOrderPlacer final : public execution::IOrderPlacer
 {
   public:
     explicit ExecutorOrderPlacer(execution::OrderExecutor &exec)
@@ -131,12 +114,12 @@ class OrderFlowExecutor
                       risk::RiskManager &risk_mgr,
                       risk::PositionManager &position_mgr,
                       risk::DrawdownGuard &drawdown_guard,
-                      IOrderPlacer *spot_placer,
-                      IOrderPlacer *futures_placer,
-                      IOrderPlacer *cfd_placer,
-                      execution::OrderTracker *spot_tracker,
-                      execution::OrderTracker *futures_tracker,
-                      execution::OrderTracker *cfd_tracker,
+                      execution::IOrderPlacer *spot_placer,
+                      execution::IOrderPlacer *futures_placer,
+                      execution::IOrderPlacer *cfd_placer,
+                      execution::IOrderTracker *spot_tracker,
+                      execution::IOrderTracker *futures_tracker,
+                      execution::IOrderTracker *cfd_tracker,
                       market::OrderBookManager *spot_order_book,
                       market::OrderBookManager *futures_order_book,
                       std::mutex &rest_mutex,
@@ -342,7 +325,7 @@ class OrderFlowExecutor
 
     /// Tracker for a market type (spot/futures/cfd), matching cancelOrder's
     /// probe order. Nullable.
-    [[nodiscard]] execution::OrderTracker *
+    [[nodiscard]] execution::IOrderTracker *
     trackerFor(MarketType mt) const noexcept;
 
     /// Erase a maker attempt (guarded by m_mutex).
@@ -361,12 +344,12 @@ class OrderFlowExecutor
     risk::RiskManager &m_riskMgr;
     risk::PositionManager &m_positionMgr;
     risk::DrawdownGuard &m_drawdownGuard;
-    IOrderPlacer *m_spotPlacer;
-    IOrderPlacer *m_futuresPlacer;
-    IOrderPlacer *m_cfdPlacer;
-    execution::OrderTracker *m_spotTracker;
-    execution::OrderTracker *m_futuresTracker;
-    execution::OrderTracker *m_cfdTracker;
+    execution::IOrderPlacer *m_spotPlacer;
+    execution::IOrderPlacer *m_futuresPlacer;
+    execution::IOrderPlacer *m_cfdPlacer;
+    execution::IOrderTracker *m_spotTracker;
+    execution::IOrderTracker *m_futuresTracker;
+    execution::IOrderTracker *m_cfdTracker;
     market::OrderBookManager *m_spotOrderBook;
     market::OrderBookManager *m_futuresOrderBook;
     std::mutex &m_restMutex;
