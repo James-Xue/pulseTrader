@@ -15,6 +15,7 @@ inline const QString kGetStatus = QStringLiteral("get_status");
 inline const QString kGetAccount = QStringLiteral("get_account");
 inline const QString kGetPositions = QStringLiteral("get_positions");
 inline const QString kGetOrders = QStringLiteral("get_orders");
+inline const QString kGetTradeHistory = QStringLiteral("get_trade_history");
 inline const QString kGetSignals = QStringLiteral("get_signals");
 inline const QString kGetMarket = QStringLiteral("get_market");
 

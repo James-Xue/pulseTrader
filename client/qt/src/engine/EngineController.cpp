@@ -415,6 +415,20 @@ void EngineController::pollAccount()
     m_inFlight.insert(id, PollKind::Account);
 }
 
+void EngineController::fetchTradeHistory()
+{
+    if (RpcClient::State::Ready != m_rest->state()
+        || isInFlight(PollKind::TradeHistory))
+    {
+        return;
+    }
+    QJsonObject params;
+    params[QStringLiteral("limit")] = 500;
+    const qint64 id =
+        m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
+    m_inFlight.insert(id, PollKind::TradeHistory);
+}
+
 void EngineController::fetchMarket(const QString& symbol)
 {
     if (RpcClient::State::Ready != m_rest->state() || symbol.isEmpty())
@@ -569,6 +583,16 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         emit statusChanged();
         break;
     }
+    case PollKind::TradeHistory:
+        m_tradeHistory = result.value(QStringLiteral("rows"))
+                             .toArray()
+                             .toVariantList();
+        m_tradeHistorySummary = result.value(QStringLiteral("summary"))
+                                    .toObject()
+                                    .toVariantMap();
+        setLastError(QString());
+        emit tradeHistoryChanged();
+        break;
     case PollKind::Positions:
         m_positionsModel->setRows(result.value(QStringLiteral("positions")).toArray());
         setLastError(QString());
