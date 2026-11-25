@@ -31,14 +31,25 @@ struct SimPosition
 {
     QString id;                  ///< e.g. "SIM-1700000000000".
     QString side = QStringLiteral("long");  ///< "long" or "short".
+    /// Owning strategy. Empty/legacy positions normalize to "v10".
+    QString strategyId = QStringLiteral("v10");
     double volumeLots = 0.0;     ///< Lots (XAUUSD min 0.01).
     double entryPrice = 0.0;     ///< Open price.
     double takeProfit = 0.0;     ///< TP price (long: above entry; short: below).
     double stopLoss = 0.0;       ///< SL price (long: below entry; short: above).
     double marginUsdt = 0.0;     ///< Margin locked at open (notional / leverage).
-    double feeUsdt = 0.0;        ///< Commission paid at open (BUY side only).
+    double feeUsdt = 0.0;        ///< Commission paid at open (charged on every open).
     double leverage = 1.0;       ///< Leverage used for the margin.
     std::int64_t openedAtMs = 0; ///< Open timestamp (Unix ms).
+    /// Highest floating PnL (USD) observed while the position was open.
+    /// Starts at 0 — a position that never went into profit keeps 0.
+    double maxFloatingProfitUsd = 0.0;
+    /// Lowest floating PnL (USD) observed while the position was open
+    /// (signed, so a loss is negative). Starts at 0.
+    double maxFloatingLossUsd = 0.0;
+    /// Non-empty when the position was opened by an external analysis signal
+    /// (gold.exec/1). Empty for manual/legacy positions.
+    QString sourceSignalId;
 };
 
 /// The persisted per-key simulated account: available balance plus the open

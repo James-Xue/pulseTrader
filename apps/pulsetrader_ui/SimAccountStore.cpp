@@ -30,6 +30,8 @@ QJsonObject positionToJson(const SimPosition &p)
     QJsonObject obj;
     obj[QLatin1String("id")] = p.id;
     obj[QLatin1String("side")] = p.side;
+    obj[QLatin1String("strategy_id")] = p.strategyId.isEmpty()
+        ? QStringLiteral("v10") : p.strategyId;
     obj[QLatin1String("volume")] = p.volumeLots;
     obj[QLatin1String("entry")] = p.entryPrice;
     obj[QLatin1String("tp")] = p.takeProfit;
@@ -38,6 +40,14 @@ QJsonObject positionToJson(const SimPosition &p)
     obj[QLatin1String("fee")] = p.feeUsdt;
     obj[QLatin1String("leverage")] = p.leverage;
     obj[QLatin1String("opened_at_ms")] = static_cast<double>(p.openedAtMs);
+    // Floating-PnL excursion extremes, persisted so they survive restarts
+    // and can be written to the order history when the position closes.
+    obj[QLatin1String("max_fp_usd")] = p.maxFloatingProfitUsd;
+    obj[QLatin1String("max_fl_usd")] = p.maxFloatingLossUsd;
+    if (false == p.sourceSignalId.isEmpty())
+    {
+        obj[QLatin1String("source_signal_id")] = p.sourceSignalId;
+    }
     return obj;
 }
 
@@ -47,6 +57,12 @@ SimPosition positionFromJson(const QJsonObject &obj)
     SimPosition p;
     p.id = obj.value(QLatin1String("id")).toString();
     p.side = obj.value(QLatin1String("side")).toString(QStringLiteral("long"));
+    p.strategyId = obj.value(QLatin1String("strategy_id"))
+                       .toString(QStringLiteral("v10"));
+    if (p.strategyId.isEmpty())
+    {
+        p.strategyId = QStringLiteral("v10");
+    }
     p.volumeLots = obj.value(QLatin1String("volume")).toDouble(0.0);
     p.entryPrice = obj.value(QLatin1String("entry")).toDouble(0.0);
     p.takeProfit = obj.value(QLatin1String("tp")).toDouble(0.0);
@@ -56,11 +72,25 @@ SimPosition positionFromJson(const QJsonObject &obj)
     p.leverage = obj.value(QLatin1String("leverage")).toDouble(1.0);
     p.openedAtMs = static_cast<std::int64_t>(
         obj.value(QLatin1String("opened_at_ms")).toDouble(0.0));
+    p.maxFloatingProfitUsd =
+        obj.value(QLatin1String("max_fp_usd")).toDouble(0.0);
+    p.maxFloatingLossUsd =
+        obj.value(QLatin1String("max_fl_usd")).toDouble(0.0);
+    p.sourceSignalId = obj.value(QLatin1String("source_signal_id")).toString();
     return p;
 }
 
 QString resolveFilePath()
 {
+    // 0. Explicit override — keeps the UI, the order DB and the external
+    //    signal writer on one directory regardless of the launch cwd.
+    const QString overrideDir = qEnvironmentVariable("PULSETRADER_SIM_DATA_DIR");
+    if (false == overrideDir.isEmpty())
+    {
+        QDir().mkpath(overrideDir);
+        return QDir(overrideDir).filePath(QStringLiteral("sim_account.json"));
+    }
+
     // 1. data/ under the process working directory (project root when
     //    launched from the repo — matches the engine's data/ convention).
     const QString cwdPath = QDir::current().filePath(QStringLiteral("data/sim_account.json"));

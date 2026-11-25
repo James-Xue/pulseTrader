@@ -10,6 +10,7 @@
 // environment, so no engine code is touched.
 
 #include <QApplication>
+#include <QTimer>
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QCoreApplication> // Qt5: opt-in high-DPI support
@@ -29,7 +30,18 @@ int main(int argc, char *argv[])
     app.setApplicationVersion(QStringLiteral("0.1.0"));
     app.setOrganizationName(QStringLiteral("pulseTrader"));
 
+    const QStringList args = app.arguments();
+    const bool autoLogin = args.contains(QStringLiteral("--auto-login"));
+    const bool autoStartEngine = args.contains(QStringLiteral("--auto-start-engine"));
+
     pulse::ui::LoginDialog login;
+    if (autoLogin)
+    {
+        // Uses the credentials remembered in .env; if they are missing or
+        // invalid the dialog stays visible for manual correction.
+        login.setAutoLogin(true);
+        QTimer::singleShot(0, &login, &pulse::ui::LoginDialog::autoLogin);
+    }
     if (QDialog::Accepted != login.exec())
     {
         return 0;
@@ -40,5 +52,12 @@ int main(int argc, char *argv[])
     // checked) and the engine start button will read them from there.
     SimGateSystem window(login.verifyResult(), login.apiKey(), login.apiSecret());
     window.show();
+    if (autoStartEngine)
+    {
+        // Start after the window is visible. If xau-5m is not running yet the
+        // engine keeps polling prices and picks up signals once its heartbeat
+        // appears.
+        QTimer::singleShot(0, &window, &SimGateSystem::startEngine);
+    }
     return app.exec();
 }

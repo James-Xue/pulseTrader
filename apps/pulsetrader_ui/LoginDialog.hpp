@@ -33,6 +33,13 @@ class LoginDialog : public QDialog
   public:
     explicit LoginDialog(QWidget *parent = nullptr);
 
+    /// Auto-login mode (used by the --auto-login launcher flag): when the
+    /// remembered .env credentials are present, submit them without user
+    /// interaction and skip the success summary popup. On failure the dialog
+    /// stays open so the user can correct the credentials.
+    void setAutoLogin(bool enabled);
+    bool autoLogin();
+
     /// Credentials the user submitted (non-empty after a successful login).
     QString apiKey() const;
     QString apiSecret() const;
@@ -58,6 +65,7 @@ class LoginDialog : public QDialog
 
     VerifyResult m_result;
     bool m_verifying = false;
+    bool m_autoLogin = false;
 };
 
 } // namespace pulse::ui

@@ -33,6 +33,8 @@
 
 #include <QWidget>
 #include <QTimer>
+#include <QStringList>
+#include <QJsonObject>
 
 #include <array>
 #include <atomic>
@@ -44,6 +46,7 @@
 #include <thread>
 
 #include "EngineStrategyAdapter.hpp"
+#include "ExternalSignalStore.hpp"
 #include "GoldStrategyEngine.hpp"
 #include "SimAccountStore.hpp"
 #include "VerifyWorker.hpp"
@@ -66,6 +69,9 @@ struct RealStopsResult
     QString error;
 };
 
+class TradeHistoryDialog;
+class LlmOverlayDialog;
+
 } // namespace pulse::ui
 
 class SimGateSystem : public QWidget
@@ -83,10 +89,20 @@ class SimGateSystem : public QWidget
                            QWidget *parent = nullptr);
     ~SimGateSystem() override;
 
+    /// Start the polling engine if it is not already running. Used by the
+    /// --auto-start-engine launcher flag.
+    void startEngine();
+
   private slots:
     /// Auto-connected to the 模拟账户 button — create (initial balance) on
-    /// first use, edit the balance afterwards.
+    /// first use, reset the balance + open positions and clear the trade
+    /// history afterwards.
     void on_pushBtn_simAccount_clicked();
+    /// Auto-connected to the 查看历史交易数据 button — open (or raise) the
+    /// non-modal trade-history dialog. The engine keeps polling while it is
+    /// open.
+    void on_pushBtn_tradeHistory_clicked();
+    void on_pushBtn_llmOverlay_clicked();
     /// Auto-connected to the 订单分析 button — prints the post-trade report
     /// (per-order lifecycle + aggregates) into the trade pane.
     void on_pushBtn_analyze_clicked();
@@ -229,9 +245,13 @@ class SimGateSystem : public QWidget
     /// price the stops were computed from (0 when not meaningful).
     void onRealStopsApplied(const std::vector<pulse::ui::RealStopsResult> &results,
                             double price);
-    /// Re-render the 模拟持仓 row from the persisted positions with the
+    /// Re-render the 模拟持仓 table from the persisted positions with the
     /// floating PnL of each position at `price`.
     void refreshSimPositions(double price);
+    /// Manual close of one simulated position from the table's 平仓 button.
+    /// The external strategy's signal remains the normal exit path; this is a
+    /// deliberate operator override.
+    void closeSimPosition(const QString &positionId);
     /// Refresh label_simBalance from the persisted store, including the
     /// floating PnL of open positions at `price` (equity = balance + PnL).
     void refreshSimBalance(double price);
@@ -264,14 +284,45 @@ class SimGateSystem : public QWidget
     void stopEnginePolling();
     void updateEngineButtons(bool running);
     /// UI-thread handler for one poll round (queued from the poll thread).
-    void onPollResult(double price, const pulse::ui::TickOutcome &outcome);
+    void onGoldTick(double price);
+
+    /// External 5-minute analysis: read external_signal.json, validate it and
+    /// execute the paper action on the UI thread (1 Hz while the engine runs).
+    void onExternalSignalTimer();
+    /// Claude Code advisory overlay: log a 5-minute status line and append a
+    /// reviewable audit record. Analysis only; never opens/changes a position.
+    void pollLlmOverlay();
+    void processExternalSignal(const pulse::ui::ExternalSignal &signal);
+    void finishExternalSignal(const pulse::ui::ExternalSignal &signal,
+                              const QString &status,
+                              const QString &code,
+                              const QString &message,
+                              const QString &positionId = QString(),
+                              const QString &closedPositionId = QString(),
+                              double fillPrice = 0.0,
+                              double riskUsd = 0.0,
+                              double riskPct = 0.0);
+    /// Write external_state.json (5 s heartbeat unless `force`).
+    void writeExternalState(bool force = false);
+    /// True when xau_5m_heartbeat.json is present and younger than 12 min.
+    bool xau5mHeartbeatFresh() const;
+    /// Append one event line to external_signals.jsonl.
+    void appendExternalJournal(const QJsonObject &event);
     void onPollingStopped();
     void appendLog(const QString &text);
     void appendTrade(const QString &text);
+    /// Load the closed-trade history from sim_orders.db into the trade pane
+    /// at startup: entry/exit price and time, PnL, newest at the bottom.
+    void loadClosedTradeHistory();
 
     Ui::SimGateSystem *ui;
     QString m_apiKey;
     QString m_apiSecret;
+
+    /// Non-modal history window, created on first use. Owned by the Qt parent
+    /// (`this`), so it is destroyed with the main window.
+    pulse::ui::TradeHistoryDialog *m_tradeHistoryDialog = nullptr;
+    pulse::ui::LlmOverlayDialog *m_llmOverlayDialog = nullptr;
 
     /// Strategy tuning parameters — atomic fields, shared with the polling
     /// thread; the parameter UI writes here, the engine reads here.
@@ -295,6 +346,37 @@ class SimGateSystem : public QWidget
     // with it; the MultiTimeframeEma class and its tests stay in pulse_ui.
     bool m_polling = false;
     double m_lastPrice = 0.0;             ///< Latest polled gold price (UI thread).
+    /// Last successful XAUUSD tick (Unix ms) — external signals require a
+    /// fresh price (<=10 s) before they may open/close/modify.
+    qint64 m_lastPriceMs = 0;
+    /// Set by the poll thread: the TradFi ticker status is open.
+    std::atomic<bool> m_marketOpen{ false };
+    /// True once the poll thread has read a ticker status at least once.
+    std::atomic<bool> m_marketStatusKnown{ false };
+
+    // -- External 5-minute analysis signal ----------------------------------
+    /// Reads external_signal.json once per second while the engine polls.
+    QTimer m_externalSignalTimer;
+    /// Signal ids already processed (accepted or rejected). Loaded from
+    /// external_state.json's recent_signal_ids on construction.
+    std::set<QString> m_processedSignalIds;
+    QStringList m_recentSignalIds;       ///< Newest last, capped at 100.
+    QString m_lastProcessedSignalId;     ///< For external_state.json.
+    QString m_lastSeenSignalId;          ///< Suppresses duplicate log lines.
+    QString m_lastInvalidSignalError;    ///< Suppresses repeated invalid-JSON logs.
+    qint64 m_lastExternalStateMs = 0;    ///< 5 s state heartbeat throttle.
+    qint64 m_lastHeartbeatCheckMs = 0;   ///< 30 s xau-5m heartbeat check.
+    qint64 m_lastHeartbeatWarnMs = 0;    ///< 5 min warning throttle.
+    bool m_xau5mHeartbeatFresh = false;  ///< Last liveness check result.
+
+    // -- Claude Code advisory overlay (analysis only, no orders) -------------
+    QTimer m_llmOverlayTimer;
+    QString m_lastLlmOverlaySignature;
+    QString m_lastLlmOverlayStatus;
+    qint64 m_lastLlmOverlayLogMs = 0;
+    /// Set once when we start waiting for a fresh price for a pending signal,
+    /// so the UI logs the wait once instead of every second.
+    QString m_waitingPriceSignalId;
 
     // -- Per-minute XAU/USIDX/XBRUSD relation report ------------------------
     /// One symbol's state for the relation report (UI thread only — price

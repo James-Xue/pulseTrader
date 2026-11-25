@@ -65,7 +65,20 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="pushBtn_analyze">
+      <widget class="QPushButton" name="pushBtn_tradeHistory">
+       <property name="minimumSize">
+        <size>
+         <width>150</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>查看历史交易数据</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pushBtn_llmOverlay">
        <property name="minimumSize">
         <size>
          <width>100</width>
@@ -73,7 +86,7 @@
         </size>
        </property>
        <property name="text">
-        <string>订单分析</string>
+        <string>LLM盘面</string>
        </property>
       </widget>
      </item>
@@ -168,30 +181,91 @@
        <property name="text">
         <string>模拟持仓：</string>
        </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="label_simPositions">
-       <property name="text">
-        <string>无</string>
-       </property>
-       <property name="textFormat">
-        <enum>Qt::PlainText</enum>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
        </property>
       </widget>
      </item>
      <item>
-      <spacer name="simPositionsSpacer">
-       <property name="orientation">
-        <enum>Qt::Horizontal</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
+      <widget class="QTableWidget" name="table_simPositions">
+       <property name="minimumSize">
         <size>
-         <width>40</width>
-         <height>20</height>
+         <width>0</width>
+         <height>120</height>
         </size>
        </property>
-      </spacer>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>150</height>
+        </size>
+       </property>
+       <property name="editTriggers">
+        <set>QAbstractItemView::NoEditTriggers</set>
+       </property>
+       <property name="alternatingRowColors">
+        <bool>true</bool>
+       </property>
+       <property name="selectionBehavior">
+        <enum>QAbstractItemView::SelectRows</enum>
+       </property>
+       <attribute name="horizontalHeaderStretchLastSection">
+        <bool>false</bool>
+       </attribute>
+       <attribute name="verticalHeaderVisible">
+        <bool>false</bool>
+       </attribute>
+       <column>
+        <property name="text">
+         <string>持仓名称</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>方向</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>数量（手）</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>开仓价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>当前价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>止盈价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>止损价格</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>保证金（USDT）</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>当前盈亏（USD）</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>操作</string>
+        </property>
+       </column>
+      </widget>
      </item>
     </layout>
    </item>

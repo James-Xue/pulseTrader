@@ -23,6 +23,7 @@ add_library(pulse_ui STATIC
     MultiTimeframeEma.cpp
     GoldStrategyEngine.cpp
     EngineStrategyAdapter.cpp
+    ExternalSignalStore.cpp
 )
 
 target_include_directories(pulse_ui
@@ -57,6 +58,8 @@ add_executable(pulsetrader_ui WIN32
     main.cpp
     LoginDialog.cpp
     MainWindow.cpp
+    TradeHistoryDialog.cpp
+    LlmOverlayDialog.cpp
     MainWindow.ui
 )
 

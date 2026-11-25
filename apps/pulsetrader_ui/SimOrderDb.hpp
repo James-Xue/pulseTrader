@@ -7,7 +7,8 @@
 //
 //   orders        — one row per opening: order_id, key, side, symbol,
 //                   volume, entry, initial TP/SL, leverage, margin, fee,
-//                   status (open/closed), open/close time, exit, realized PnL
+//                   status (open/closed), open/close time, exit, realized PnL,
+//                   max floating profit/loss
 //   order_stops   — every TP/SL change: order_id, time, TP, SL, price at the
 //                   update, reason ("open" for the entry attachment,
 //                   "trailing" for follow-up moves)
@@ -33,6 +34,8 @@ struct OrderRecord
     QString apiKey;
     QString side;            ///< "long" / "short".
     QString symbol;          ///< "XAUUSD".
+    /// Owning strategy; legacy rows normalize to "v10".
+    QString strategyId = QStringLiteral("v10");
     double volumeLots = 0.0;
     double entryPrice = 0.0;
     double takeProfit = 0.0; ///< TP at open.
@@ -45,6 +48,11 @@ struct OrderRecord
     QString closedAt;
     double exitPrice = 0.0;
     double realizedPnl = 0.0;
+    /// Mark-to-market extremes over the position's life (USD, signed).
+    /// Captured when the order closes; also available for open orders from
+    /// SimAccountStore's position record.
+    double maxFloatingProfit = 0.0;
+    double maxFloatingLoss = 0.0;
 };
 
 /// One stop-update row (order_stops table).
@@ -74,12 +82,19 @@ class SimOrderDb
     /// Insert one opening order + its initial stop attachment ("open").
     static bool insertOrder(const OrderRecord &order);
 
-    /// Mark an order closed with its exit price and realized PnL.
+    /// Mark an order closed with its exit price and realized PnL. The two
+    /// excursion values default to 0 for callers that do not track them.
     static bool closeOrder(const QString &orderId, double exitPrice,
-                           double realizedPnl, const QString &closedAt);
+                           double realizedPnl, const QString &closedAt,
+                           double maxFloatingProfit = 0.0,
+                           double maxFloatingLoss = 0.0);
 
     /// Append one TP/SL update (reason "trailing").
     static bool insertStopUpdate(const StopUpdateRecord &update);
+
+    /// Delete every order (and its stop-update rows) belonging to `apiKey`.
+    /// Used by the 模拟账户 reset. Returns false when the transaction fails.
+    static bool clearAll(const QString &apiKey);
 
     // -- Reads (post-trade analysis) ----------------------------------------
 

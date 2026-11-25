@@ -7,10 +7,13 @@
 #include "MainWindow.hpp"
 
 #include "EngineStrategyAdapter.hpp"
+#include "ExternalSignalStore.hpp"
 #include "SimAccountStore.hpp"
 #include "SimOrderAnalyzer.hpp"
 #include "SimOrderDb.hpp"
 #include "SimTradeEngine.hpp"
+#include "TradeHistoryDialog.hpp"
+#include "LlmOverlayDialog.hpp"
 
 #include "exchange/GateRestClient.hpp"
 
@@ -18,8 +21,14 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPointer>
@@ -29,6 +38,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextCursor>
 #include <QVariant>
 
 #include <algorithm>
@@ -48,6 +58,15 @@ namespace
 constexpr auto kPollInterval = std::chrono::seconds(1);
 // How often a persistent failure is reported to the log pane.
 constexpr auto kErrorReportInterval = std::chrono::seconds(10);
+
+// External 5-minute analysis policy: the user fixed the paper size and
+// leverage; the analysis supplies the prices. Risk is capped at 50 USDT as
+// an abnormal-signal guard (the 100 USDT account deliberately does not use a
+// 1% gate — normal 7.5–30 USDT stops must pass).
+constexpr double kExternalLots = 0.01;
+constexpr double kExternalLeverage = 1000.0;
+constexpr double kExternalMaxRiskUsd = 50.0;
+constexpr double kExternalMaxDriftCapUsd = 20.0;
 
 // Trailing column of the 真实持仓 table — one 平仓 button per row.
 constexpr int kRealPositionCloseColumn = 8;
@@ -246,22 +265,28 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
 {
     ui->setupUi(this);
 
+    // External 5-minute analysis mode: the built-in strategies and automatic
+    // real-position stops are disabled permanently. The old strategy
+    // parameter panel (params, 黄金交易员, 自动止损, 动态止盈止损) is hidden —
+    // its controls remain in the .ui only because legacy slots still
+    // reference them; nothing in it can act. Manual real-position
+    // close/TP-SL edits stay available.
+    ui->groupBox_params->hide();
+    ui->check_goldTrader->setChecked(false);
+    ui->check_autoFollow->setChecked(false);
+
     // 真实持仓 table: the symbol column takes the spare width, the numeric
     // columns size to their headers. Row content is filled by
     // onRealPositionsUpdated() from the background position refresh.
     QHeaderView *positionsHeader = ui->table_realPositions->horizontalHeader();
-    positionsHeader->setSectionResizeMode(0, QHeaderView::Stretch);
-    positionsHeader->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(kTakeProfitColumn,
-                                          QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(kStopLossColumn,
-                                          QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(7, QHeaderView::ResizeToContents);
-    positionsHeader->setSectionResizeMode(kRealPositionCloseColumn,
-                                          QHeaderView::ResizeToContents);
+    positionsHeader->setMinimumSectionSize(40);
+    const int realWidths[] = { 100, 70, 80, 90, 90, 90, 90, 110, 70 };
+    for (int column = 0; column < ui->table_realPositions->columnCount()
+         && column < static_cast<int>(sizeof(realWidths) / sizeof(realWidths[0])); ++column)
+    {
+        positionsHeader->setSectionResizeMode(column, QHeaderView::Interactive);
+        positionsHeader->resizeSection(column, realWidths[column]);
+    }
     // A little taller than the text-only rows so the 平仓 button fits.
     ui->table_realPositions->verticalHeader()->setDefaultSectionSize(28);
     // Only the TP/SL cells keep Qt::ItemIsEditable (set per item below), and
@@ -270,6 +295,20 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
                                              | QAbstractItemView::EditKeyPressed);
     connect(ui->table_realPositions, &QTableWidget::itemChanged, this,
             &SimGateSystem::onRealPositionItemChanged);
+
+    // 模拟持仓 table: same columns/layout as 真实持仓. It is read-only except
+    // for the per-row 平仓 button (a deliberate manual override; the external
+    // 5-minute signal remains the normal exit path).
+    QHeaderView *simHeader = ui->table_simPositions->horizontalHeader();
+    simHeader->setMinimumSectionSize(40);
+    const int simWidths[] = { 100, 70, 80, 90, 90, 90, 90, 100, 110, 70 };
+    for (int column = 0; column < ui->table_simPositions->columnCount()
+         && column < static_cast<int>(sizeof(simWidths) / sizeof(simWidths[0])); ++column)
+    {
+        simHeader->setSectionResizeMode(column, QHeaderView::Interactive);
+        simHeader->resizeSection(column, simWidths[column]);
+    }
+    ui->table_simPositions->verticalHeader()->setDefaultSectionSize(28);
 
     // Cap the trade pane so a long run cannot grow memory without bound
     // (QTextEdit has no block cap of its own — the document has). The log and
@@ -330,6 +369,7 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
     {
         appendLog(QStringLiteral("[模拟] 订单数据库就绪：%1")
                       .arg(pulse::ui::SimOrderDb::defaultPath()));
+        loadClosedTradeHistory();
     }
     else
     {
@@ -337,7 +377,8 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
                                  "订单历史将不落库"));
     }
 
-    appendLog(QStringLiteral("[引擎] 就绪：点击“启动引擎”开始轮询 XAUUSD 行情并运行策略。"));
+    appendLog(QStringLiteral("[引擎] 就绪：点击“启动引擎”开始轮询 XAUUSD/USIDX/XBRUSD；"
+                             "交易由外部 5 分钟分析信号驱动。"));
 
     // Populate the 策略号 combo from the same roster that feeds the startup
     // log. itemData carries the strategy number, the text is "策略 N：名称".
@@ -352,7 +393,38 @@ SimGateSystem::SimGateSystem(const pulse::ui::VerifyResult &login,
                 strategy.number);
         }
     }
-    logGoldTraderRoster();
+    // External 5-minute analysis signal inbox. The timer runs only while the
+    // engine is polling; it reads external_signal.json on the UI thread and
+    // writes ack/state/journal next to sim_account.json.
+    m_externalSignalTimer.setInterval(1'000);
+    connect(&m_externalSignalTimer, &QTimer::timeout, this,
+            &SimGateSystem::onExternalSignalTimer);
+    m_recentSignalIds = pulse::ui::ExternalSignalStore::loadRecentSignalIds();
+    for (const QString &id : m_recentSignalIds)
+    {
+        m_processedSignalIds.insert(id);
+    }
+    if (false == m_recentSignalIds.isEmpty())
+    {
+        m_lastProcessedSignalId = m_recentSignalIds.back();
+    }
+    appendLog(QStringLiteral("[模式] 外部信号模式：内置策略/黄金交易员/自动止损已停用；"
+                             "固定 0.01 手、1000x、单仓。"));
+    appendLog(QStringLiteral("[外部信号] 监听：%1")
+                  .arg(pulse::ui::ExternalSignalStore::signalPath()));
+    appendLog(QStringLiteral("[外部信号] 回执：%1")
+                  .arg(pulse::ui::ExternalSignalStore::ackPath()));
+    appendLog(QStringLiteral("[外部信号] 状态：%1")
+                  .arg(pulse::ui::ExternalSignalStore::statePath()));
+
+    // Claude Code advisory overlay: analysis-only viewer. The 5-minute audit
+    // is written here; the isolated LLM盘面 dialog displays it. Nothing is
+    // written to the v10 log pane.
+    m_llmOverlayTimer.setInterval(5'000);
+    connect(&m_llmOverlayTimer, &QTimer::timeout, this,
+            &SimGateSystem::pollLlmOverlay);
+    m_llmOverlayTimer.start();
+    QTimer::singleShot(0, this, &SimGateSystem::pollLlmOverlay);
 
     // Once-per-minute XAU/USIDX/XBRUSD relation report. The timer is started
     // and stopped with the engine polling (see start/stopEnginePolling), so
@@ -406,29 +478,84 @@ void SimGateSystem::on_pushBtn_simAccount_clicked()
 {
     const auto existing = SimAccountStore::load(m_apiKey);
 
-    // First use: initial-balance setup. Later clicks: edit the balance.
-    const QString title = existing.has_value()
-                              ? QStringLiteral("修改模拟账户余额")
-                              : QStringLiteral("初始余额设置");
-    const double current = existing.has_value() ? existing->balanceUsdt : 0.0;
+    // First use: initial-balance setup. Later clicks: full reset — the
+    // entered balance replaces the account, open positions are dropped and
+    // the local order history is cleared.
+    const bool isReset = existing.has_value();
+    const QString title = isReset ? QStringLiteral("重置模拟账户")
+                                  : QStringLiteral("初始余额设置");
+    const QString prompt =
+        isReset ? QStringLiteral("重置后余额（USDT，将清空持仓与历史交易）：")
+                : QStringLiteral("初始余额（USDT）：");
+    const double current = isReset ? existing->balanceUsdt : 0.0;
 
     bool ok = false;
     const double value = QInputDialog::getDouble(
-        this, title, QStringLiteral("模拟账户余额（USDT）："), current,
-        0.0, 9999999999.0, 2, &ok);
+        this, title, prompt, current, 0.0, 9999999999.0, 2, &ok);
     if (false == ok)
     {
-        return; // Cancelled — keep the stored balance untouched.
+        return; // Cancelled — keep the stored account/history untouched.
     }
 
-    if (false == SimAccountStore::save(m_apiKey, value))
+    pulse::ui::SimAccount account;
+    account.balanceUsdt = value;
+    account.updatedAt = QDateTime::currentDateTime().toString(
+        QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    account.positions.clear();
+    if (false == SimAccountStore::saveAccount(m_apiKey, account))
     {
         appendLog(QStringLiteral("[模拟账户] 保存失败：%1").arg(SimAccountStore::filePath()));
         return;
     }
+
+    // Clear the persisted order history as part of the reset. A database
+    // failure must not undo the balance reset, but it is reported.
+    const bool historyCleared = pulse::ui::SimOrderDb::clearAll(m_apiKey);
+
+    // The trade pane held the old history/log lines; clear them so the reset
+    // visibly starts from an empty account.
+    ui->textEdit_trade->clear();
     refreshSimBalance(0.0);
-    appendLog(QStringLiteral("[模拟账户] 余额已设置：%1 USDT")
-                  .arg(QString::number(value, 'f', 2)));
+    refreshSimPositions(0.0);
+    writeExternalState(true);
+    if (nullptr != m_tradeHistoryDialog)
+    {
+        m_tradeHistoryDialog->reload();
+    }
+
+    appendTrade(QStringLiteral("[模拟账户] 已重置：余额 %1 USDT，持仓与历史交易已清空%2")
+                    .arg(QString::number(value, 'f', 2),
+                         historyCleared ? QString()
+                                        : QStringLiteral("（历史数据库清理失败）")));
+}
+
+void SimGateSystem::on_pushBtn_tradeHistory_clicked()
+{
+    // Non-modal by design: show() (not exec()) so the 1 s price poll and the
+    // external-signal executor keep running while the table is open.
+    if (nullptr == m_tradeHistoryDialog)
+    {
+        m_tradeHistoryDialog = new pulse::ui::TradeHistoryDialog(m_apiKey, this);
+    }
+    // Re-read the store on every click so a restart/reset is reflected.
+    m_tradeHistoryDialog->reload();
+    m_tradeHistoryDialog->show();
+    m_tradeHistoryDialog->raise();
+    m_tradeHistoryDialog->activateWindow();
+}
+
+void SimGateSystem::on_pushBtn_llmOverlay_clicked()
+{
+    // The overlay viewer is analysis-only and non-modal. It reads the latest
+    // audit record written by pollLlmOverlay(); it cannot place an order.
+    if (nullptr == m_llmOverlayDialog)
+    {
+        m_llmOverlayDialog = new pulse::ui::LlmOverlayDialog(this);
+    }
+    m_llmOverlayDialog->reload();
+    m_llmOverlayDialog->show();
+    m_llmOverlayDialog->raise();
+    m_llmOverlayDialog->activateWindow();
 }
 
 double SimGateSystem::floatingPnl(const pulse::ui::SimPosition &position, double price)
@@ -1727,37 +1854,16 @@ void SimGateSystem::on_check_goldTrader_toggled(bool checked)
 {
     if (checked)
     {
-        const int number = selectedGoldTraderStrategy();
-        QString name = QStringLiteral("未知策略");
-        for (const GoldTraderStrategyInfo &strategy : goldTraderStrategies())
-        {
-            if (strategy.number == number)
-            {
-                name = strategy.name;
-                break;
-            }
-        }
-        appendLog(QStringLiteral("[黄金交易员] 已启动：执行策略 %1（%2），"
-                                 "开始动态调整真实持仓止损。")
-                      .arg(number)
-                      .arg(name));
-        if (false == m_polling)
-        {
-            // The strategy needs the live price and the 1 m SuperTrend, both
-            // produced by the engine poll. Arm-and-start in one action.
-            appendLog(QStringLiteral("[黄金交易员] 行情轮询未运行，正在自动启动引擎..."));
-            startEnginePolling();
-        }
+        // External-signal mode: the legacy 黄金交易员 stop manager must never
+        // run automatically. The control is also disabled in the constructor;
+        // this guard protects against programmatic/state changes.
+        const QSignalBlocker blocker(ui->check_goldTrader);
+        ui->check_goldTrader->setChecked(false);
+        appendLog(QStringLiteral("[黄金交易员] 已停用：外部信号模式下不运行内置策略/自动止损。"));
+        return;
     }
-    else
-    {
-        // Disarming is a deliberate stop: forget peak/throttle state so a
-        // later re-arm starts a fresh trail instead of closing on a drawdown
-        // that happened while the strategy was off.
-        m_autoStopStates.clear();
-        appendLog(QStringLiteral("[黄金交易员] 已停止：只展示订单数据，不再自动调整止损"
-                                 "（已挂在交易所的止损仍然有效）。"));
-    }
+    m_autoStopStates.clear();
+    appendLog(QStringLiteral("[黄金交易员] 已停止：只展示订单数据，不再自动调整止损。"));
 }
 
 void SimGateSystem::on_combo_goldTraderStrategy_currentIndexChanged(int index)
@@ -1786,8 +1892,57 @@ void SimGateSystem::on_combo_goldTraderStrategy_currentIndexChanged(int index)
     }
 }
 
+void SimGateSystem::startEngine()
+{
+    on_pushBtn_startEngine_clicked();
+}
+
+bool SimGateSystem::xau5mHeartbeatFresh() const
+{
+    QString heartbeatError;
+    const QJsonObject heartbeat =
+        pulse::ui::ExternalSignalStore::readHeartbeat(&heartbeatError);
+    const QDateTime heartbeatAt = QDateTime::fromString(
+        heartbeat.value(QLatin1String("updated_at")).toString(), Qt::ISODate);
+    if (false == heartbeatAt.isValid())
+    {
+        return false;
+    }
+    const qint64 ageSec = heartbeatAt.secsTo(QDateTime::currentDateTime());
+    return ageSec >= 0 && ageSec <= 12 * 60;
+}
+
 void SimGateSystem::startEnginePolling()
 {
+    // xau-5m coupling: the loop writes a heartbeat at the start/end of every
+    // round. A missing heartbeat is not a reason to block the price poll: the
+    // engine keeps polling and starts consuming external signals as soon as
+    // the loop appears. This lets the app be launched first (or automatically)
+    // and wait for xau-5m instead of showing a blocking modal.
+    {
+        QString heartbeatError;
+        const QJsonObject heartbeat =
+            pulse::ui::ExternalSignalStore::readHeartbeat(&heartbeatError);
+        const QDateTime heartbeatAt = QDateTime::fromString(
+            heartbeat.value(QLatin1String("updated_at")).toString(), Qt::ISODate);
+        const qint64 ageSec = heartbeatAt.isValid()
+                                  ? heartbeatAt.secsTo(QDateTime::currentDateTime())
+                                  : -1;
+        const bool fresh = (ageSec >= 0 && ageSec <= 12 * 60);
+        m_xau5mHeartbeatFresh = fresh;
+        if (false == fresh)
+        {
+            appendLog(QStringLiteral(
+                "[外部信号] 未检测到 xau-5m 心跳：先持续轮询 XAUUSD/USIDX/XBRUSD，"
+                "暂不交易；xau-5m 启动后自动接收信号。"));
+            m_lastHeartbeatWarnMs = QDateTime::currentMSecsSinceEpoch();
+        }
+        else
+        {
+            appendLog(QStringLiteral("[外部信号] xau-5m 心跳正常（%1 秒前）。").arg(ageSec));
+        }
+    }
+
     m_polling = true;
     m_stopRequested = false;
     // Fresh relation window per engine run: stale prices and minute anchors
@@ -1798,57 +1953,24 @@ void SimGateSystem::startEnginePolling()
     m_xbrusdDeltas.clear();
     m_relationTimer.start();
     updateEngineButtons(true);
-    appendLog(QStringLiteral("[引擎] 启动轮询：XAUUSD（策略）、USIDX 与 XBRUSD"
-                             "（参考价格面板）分别在独立线程中每 1 秒读取。"));
+    appendLog(QStringLiteral("[引擎] 启动轮询：XAUUSD（行情）、USIDX 与 XBRUSD"
+                             "（参考价格面板）分别在独立线程中每 1 秒读取；"
+                             "交易只由外部 5 分钟分析信号驱动。"));
     appendLog(QStringLiteral("[参考价格] 三个面板分别逐条追加 \"XAUUSD:<价格>\"、"
                              "\"USIDX:<价格>\" 与 \"XBRUSD:<价格>\"；"
                              "休市时停止追加并降频至 60 秒。"));
     appendLog(QStringLiteral("[关联] 每分钟在日志中输出 XAU/USIDX/XBRUSD 的分钟涨跌"
                              "及与 XAU 的相关性（近 30 分钟滚动）。"));
 
-    // Automatic real-stop management starts with this engine run: reset the
-    // write throttles/guards so the first decision is immediate, but KEEP the
-    // peak-PnL trail of positions that are still open — an engine restart
-    // must not forget how much profit the position has already given back.
-    for (auto &entry : m_autoStopStates)
-    {
-        entry.second.lastAttemptMs = 0;
-        entry.second.lastSentSl = 0.0;
-        entry.second.lastSentMs = 0;
-        entry.second.lastWarningMs = 0;
-        entry.second.lastPeakCloseMs = 0;
-    }
-    if (false == ui->check_goldTrader->isChecked())
-    {
-        appendLog(QStringLiteral("[黄金交易员] 未启动：只展示订单数据，不自动调整止损。"
-                                 "点击“启动黄金交易员”后才会执行。"));
-    }
-    else if (ui->check_autoFollow->isChecked())
-    {
-        if (m_tradfiWritable)
-        {
-            const double givebackU = ui->spin_peakGiveback->value();
-            appendLog(QStringLiteral(
-                          "[自动止损] 已启用：浮动亏损→8U 止损；盈利>+2U→"
-                          "保本损（开仓价±0.2）；每秒记录最大浮盈，"
-                          "最大浮盈 − %1U 作为候选止损，与 8U/保本/1m 超级趋势"
-                          "比较取最优；回撤达到 %2U 立即市价平仓；"
-                          "超级趋势价再往亏损方向留 1U 缓冲（避免插针），"
-                          "仍更优时改用它；只收紧不放宽。")
-                          .arg(givebackU, 0, 'f', 2)
-                          .arg(givebackU, 0, 'f', 2));
-        }
-        else
-        {
-            appendLog(QStringLiteral("[自动止损] 未启用：当前 Key 对 CFD 仅有只读权限，"
-                                     "无法修改真实持仓止损。"));
-        }
-    }
-    else
-    {
-        appendLog(QStringLiteral("[黄金交易员] 已启动，但“自动止损”未勾选："
-                                 "只展示订单数据，不调整止损。"));
-    }
+    m_marketOpen.store(false, std::memory_order_release);
+    m_marketStatusKnown.store(false, std::memory_order_release);
+    m_waitingPriceSignalId.clear();
+    m_externalSignalTimer.start();
+    appendLog(QStringLiteral("[外部信号] 已启动 1 秒监听：%1")
+                  .arg(pulse::ui::ExternalSignalStore::signalPath()));
+    appendLog(QStringLiteral("[外部信号] 仅当引擎运行、行情新鲜且市场开市时执行；"
+                             "固定 0.01 手 / 1000x / 单仓。"));
+    writeExternalState(true);
 
     // The REST calls block for up to ~10 s on network failures — never run
     // them on the UI thread. The poll threads post results back via a
@@ -1856,51 +1978,19 @@ void SimGateSystem::startEnginePolling()
     // safe (callbacks become no-ops).
     const pulse::ExchangeConfig cfg =
         pulse::ui::VerifyWorker::makeExchangeConfig(m_apiKey, m_apiSecret);
-    // Share the parameter block by pointer: the UI thread hot-updates the
-    // atomic fields, the engine reads them every round. The shared_ptr keeps
-    // the block alive even if the window is destroyed mid-poll.
-    const std::shared_ptr<pulse::ui::GoldStrategyEngine::Params> params = m_strategyParams;
     QPointer<SimGateSystem> self(this);
-    m_pollThread = std::thread([self, cfg, params]() {
+    m_pollThread = std::thread([self, cfg]() {
         // Live CFD balance refresh throttle (poll-thread local).
         std::int64_t lastBalanceTs = 0;
         pulse::exchange::GateRestClient cfd(cfg, pulse::MarketType::Cfd);
-        // The engine's real strategy (EmaResonanceScalper) drives the paper
-        // trades; the adapter aggregates ticks into 1m candles and calls the
-        // strategy's pure evaluateEntry() on every poll.
-        pulse::ui::EngineStrategyAdapter adapter;
-        const int warmupCandles = adapter.warmup(cfd);
-        // The multi-timeframe EMA panel that used to render here was removed
-        // from the window on 2026-09-23 (it had been parked since 2026-09-10:
-        // a 7-request kline backfill on this thread bought a display nobody
-        // read). The panel slot now carries the USD index reference price.
-        // MultiTimeframeEma itself is untouched and still unit-tested.
-        QMetaObject::invokeMethod(
-            self,
-            [self, warmupCandles]() {
-                if (self)
-                {
-                    self->appendLog(warmupCandles > 0
-                                        ? QStringLiteral("[策略] K线历史回填 %1 根，预热完成。")
-                                              .arg(warmupCandles)
-                                        : QStringLiteral("[策略] K线回填失败，将依赖实时轮询累积预热。"));
-                }
-            },
-            Qt::QueuedConnection);
 
         std::chrono::steady_clock::time_point lastErrorReport{};
         bool firstErrorLogged = false;
         // Market-open tracking: the TradFi ticker carries a "status" field
-        // ("open"/"closed"). While closed, evaluation is paused (no new
-        // ticks reach the strategy — a closed market can never produce a
-        // valid entry) and the poll slows to one request per minute.
+        // ("open"/"closed"). While closed the poll slows to one request per
+        // minute and external signals are refused by the UI gate.
         bool marketOpen = true;
         bool lastReportedOpen = true;
-        // Market-open protection: entries stay blocked for the first
-        // `openProtectMin` minutes after a closed→open transition — opening
-        // prices/spreads are unreliable right after the open (gaps, spikes,
-        // thin liquidity). Re-arm the timer on every transition.
-        std::int64_t marketOpenSinceMs = -1;  // -1 = not armed (already open at start).
 
         while (true)
         {
@@ -1929,30 +2019,22 @@ void SimGateSystem::startEnginePolling()
                     // re-unwraps it — three pointer checks, worth the safety).
                     marketOpen =
                         pulse::ui::VerifyWorker::tickerMarketOpen(pulse::value(ticker));
+                    if (self)
+                    {
+                        self->m_marketOpen.store(marketOpen, std::memory_order_release);
+                        self->m_marketStatusKnown.store(true, std::memory_order_release);
+                    }
 
                     if (marketOpen != lastReportedOpen)
                     {
-                        // Report the market-state transition exactly once and
-                        // (re)arm the open-protection window.
+                        // Report the market-state transition exactly once.
                         lastReportedOpen = marketOpen;
-                        if (marketOpen)
-                        {
-                            marketOpenSinceMs =
-                                std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    std::chrono::system_clock::now().time_since_epoch())
-                                    .count();
-                        }
-                        else
-                        {
-                            marketOpenSinceMs = -1;  // Re-arm on the next open.
-                        }
                         const QString stateText =
                             marketOpen
-                                ? QStringLiteral("[行情] XAUUSD 开市，恢复 1 秒轮询与策略评估"
-                                                 "（开市保护 %1 分钟，期间不开仓）。")
-                                      .arg(params->openProtectMin.load())
+                                ? QStringLiteral("[行情] XAUUSD 开市，恢复 1 秒轮询；"
+                                                 "等待外部 5 分钟分析信号。")
                                 : QStringLiteral("[行情] XAUUSD 休市（最后价格 %1 USD），"
-                                                 "暂停策略评估，轮询降至 60 秒。")
+                                                 "暂停外部信号执行，轮询降至 60 秒。")
                                       .arg(price, 0, 'f', 2);
                         QMetaObject::invokeMethod(
                             self,
@@ -2001,38 +2083,16 @@ void SimGateSystem::startEnginePolling()
                             }
                         }
 
-                        // Hot-read the tunable envelope parameters each round
-                        // (atomic — the parameter UI writes them).
-                        const double tpPoints = params->tpPoints.load();
-                        const double slPoints = params->slPoints.load();
-                        pulse::ui::TickOutcome outcome =
-                            adapter.onTick(price, nowMs, tpPoints, slPoints,
-                                           params->cooldownMs.load());
-                        // Open-protection gate: evaluation keeps running (the
-                        // kline stream stays continuous) but any entry signal
-                        // inside the window is downgraded to "no open" — the
-                        // first minutes of a fresh market carry unreliable
-                        // prices (gaps/spikes), exactly the data the user
-                        // does not want to trade on.
-                        const std::int64_t protectMs =
-                            static_cast<std::int64_t>(params->openProtectMin.load()) * 60'000;
-                        if (outcome.decision.has_value() && outcome.decision->shouldOpen
-                            && marketOpenSinceMs > 0
-                            && nowMs - marketOpenSinceMs < protectMs)
-                        {
-                            outcome.decision->shouldOpen = false;
-                            outcome.decision->reason =
-                                QStringLiteral("开市保护期（剩余 %1 秒，开市初期数据不可靠）")
-                                    .arg((protectMs - (nowMs - marketOpenSinceMs)) / 1000);
-                        }
-                        // Trailing stops are applied on the UI thread with the
-                        // live price and the hot-tunable point distances.
+                        // External-signal mode: the poll thread only feeds the
+                        // price; the UI thread updates the tape, settles TP/SL,
+                        // refreshes the account and processes external JSON
+                        // signals. No built-in strategy decision is produced.
                         QMetaObject::invokeMethod(
                             self,
-                            [self, price, outcome]() {
+                            [self, price]() {
                                 if (self)
                                 {
-                                    self->onPollResult(price, outcome);
+                                    self->onGoldTick(price);
                                 }
                             },
                             Qt::QueuedConnection);
@@ -2102,6 +2162,11 @@ void SimGateSystem::startEnginePolling()
             }
         }
 
+        if (self)
+        {
+            self->m_marketOpen.store(false, std::memory_order_release);
+            self->m_marketStatusKnown.store(false, std::memory_order_release);
+        }
         QMetaObject::invokeMethod(
             self, [self]() {
                 if (self)
@@ -2267,9 +2332,13 @@ void SimGateSystem::startEnginePolling()
 
 void SimGateSystem::stopEnginePolling()
 {
-    // Stop the relation clock first — no tick may append to the log while
-    // the poll threads are being torn down.
+    // Stop the relation clock and the external-signal reader first — no tick
+    // or signal may append to the log while the poll threads are torn down.
     m_relationTimer.stop();
+    m_externalSignalTimer.stop();
+    m_marketOpen.store(false, std::memory_order_release);
+    m_marketStatusKnown.store(false, std::memory_order_release);
+    m_waitingPriceSignalId.clear();
 
     // Signal first: ALL polling threads test this flag, so raise it before
     // any join can block. startEnginePolling() clears it again, so setting it
@@ -2301,6 +2370,7 @@ void SimGateSystem::stopEnginePolling()
     m_polling = false;
     updateEngineButtons(false);
     appendLog(QStringLiteral("[引擎] 轮询已停止。"));
+    writeExternalState(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -2471,30 +2541,787 @@ void SimGateSystem::reportMarketRelations()
                   .arg(relations.join(QStringLiteral("；")), closestName));
 }
 
-void SimGateSystem::onPollResult(double price, const pulse::ui::TickOutcome &outcome)
+void SimGateSystem::onGoldTick(double price)
 {
     if (false == m_polling)
     {
         return;
     }
     m_lastPrice = price;
+    m_lastPriceMs = QDateTime::currentMSecsSinceEpoch();
     // The gold price goes to its own tape pane; the log pane carries only
     // events and state transitions (it used to repeat this line every poll).
     appendReferencePrice(QStringLiteral("XAUUSD"), price);
-    handleDecision(outcome.decision);
-    showTrendReadout(outcome);
+    // TP/SL settlement is execution, not a strategy: keep it running. External
+    // positions have no automatic trailing; their stops come from the signal.
     settleSimPositions(price);
-    // Trailing stops run AFTER settlement: a TP/SL hit closes first, then
-    // the surviving positions get their stops moved up.
-    applyTrailingStops(price);
-    // Real-account stops: 8U loss / break-even / 1m SuperTrend (see
-    // autoManageRealStops). Only acts while the engine polls, i.e. right
-    // after 启动引擎.
-    autoManageRealStops(price, outcome);
-    // Live equity readout: the simulated balance and every open position
-    // reflect the floating PnL at the current price.
     refreshSimBalance(price);
     refreshSimPositions(price);
+    writeExternalState(false);
+}
+
+void SimGateSystem::onExternalSignalTimer()
+{
+    if (false == m_polling)
+    {
+        return;
+    }
+
+    // Periodic xau-5m liveness check: a stale heartbeat while polling means the
+    // analysis loop stopped. Warn (throttled) but keep the price poll running.
+    const qint64 heartbeatNow = QDateTime::currentMSecsSinceEpoch();
+    if (heartbeatNow - m_lastHeartbeatCheckMs >= 30'000)
+    {
+        m_lastHeartbeatCheckMs = heartbeatNow;
+        QString heartbeatError;
+        const QJsonObject heartbeat =
+            pulse::ui::ExternalSignalStore::readHeartbeat(&heartbeatError);
+        const QDateTime heartbeatAt = QDateTime::fromString(
+            heartbeat.value(QLatin1String("updated_at")).toString(), Qt::ISODate);
+        const qint64 ageSec = heartbeatAt.isValid()
+                                  ? heartbeatAt.secsTo(QDateTime::currentDateTime())
+                                  : -1;
+        const bool fresh = (ageSec >= 0 && ageSec <= 12 * 60);
+        if (fresh != m_xau5mHeartbeatFresh)
+        {
+            m_xau5mHeartbeatFresh = fresh;
+            if (fresh)
+            {
+                appendLog(QStringLiteral(
+                    "[外部信号] 检测到 xau-5m 心跳：开始接收 5 分钟分析信号。"));
+            }
+            else
+            {
+                appendLog(QStringLiteral(
+                    "[外部信号] xau-5m 心跳已过期/未检测到；继续轮询行情，"
+                    "等待 xau-5m 恢复。"));
+                m_lastHeartbeatWarnMs = heartbeatNow;
+            }
+        }
+        else if ((!fresh) && heartbeatNow - m_lastHeartbeatWarnMs >= 5 * 60'000)
+        {
+            m_lastHeartbeatWarnMs = heartbeatNow;
+            appendLog(QStringLiteral(
+                "[外部信号] xau-5m 心跳已过期/未检测到；"
+                "请检查新 Claude 会话里的 /loop 5m /xau-5m。"));
+        }
+    }
+
+    const QStringList inboxes =
+        pulse::ui::ExternalSignalStore::pendingSignalPaths();
+    if (inboxes.isEmpty())
+    {
+        return;
+    }
+
+    for (const QString &inbox : inboxes)
+    {
+        pulse::ui::ExternalSignal signal;
+        const auto result =
+            pulse::ui::ExternalSignalStore::readSignalAt(inbox, signal);
+        if (pulse::ui::ExternalSignalStore::ReadResult::Missing == result)
+        {
+            continue;
+        }
+        if (pulse::ui::ExternalSignalStore::ReadResult::Invalid == result)
+        {
+            if (signal.signalId.isEmpty())
+            {
+                // No id to de-duplicate on; log once per distinct parse error
+                // so a half-written file cannot flood the log at 1 Hz.
+                if (m_lastSeenSignalId != QStringLiteral("<invalid>")
+                    || m_lastInvalidSignalError != signal.error)
+                {
+                    m_lastSeenSignalId = QStringLiteral("<invalid>");
+                    m_lastInvalidSignalError = signal.error;
+                    appendLog(QStringLiteral("[外部信号] %1 忽略无效信号：%2")
+                                  .arg(signal.strategyId, signal.error));
+                }
+                continue;
+            }
+            if (m_processedSignalIds.count(signal.signalId) > 0)
+            {
+                continue;
+            }
+            m_lastSeenSignalId = signal.signalId;
+            appendLog(QStringLiteral("[5分钟分析] %1 无效信号 %2：%3")
+                          .arg(signal.strategyId, signal.signalId, signal.error));
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("INVALID"), signal.error);
+            return;
+        }
+
+        if (m_processedSignalIds.count(signal.signalId) > 0)
+        {
+            if (m_lastSeenSignalId != signal.signalId)
+            {
+                m_lastSeenSignalId = signal.signalId;
+                appendLog(QStringLiteral("[外部信号] %1 忽略重复 signal_id：%2")
+                              .arg(signal.strategyId, signal.signalId));
+            }
+            continue;
+        }
+
+        processExternalSignal(signal);
+        return;
+    }
+}
+
+void SimGateSystem::processExternalSignal(const pulse::ui::ExternalSignal &signal)
+{
+    if (m_lastSeenSignalId != signal.signalId)
+    {
+        m_lastSeenSignalId = signal.signalId;
+        const QString target = signal.targets.isEmpty()
+                                   ? QStringLiteral("--")
+                                   : QString::number(signal.targets.first(), 'f', 2);
+        appendLog(QStringLiteral("[5分钟分析] %1 action=%2 stance=%3 ref=%4 stop=%5 TP=%6")
+                      .arg(signal.round, signal.action, signal.stance)
+                      .arg(signal.referencePrice, 0, 'f', 2)
+                      .arg(signal.stop, 0, 'f', 2)
+                      .arg(target));
+        if (false == signal.reason.isEmpty())
+        {
+            appendLog(QStringLiteral("[5分钟分析] 理由：%1").arg(signal.reason));
+        }
+        if (false == signal.analysis.isEmpty())
+        {
+            QString analysis = signal.analysis.trimmed();
+            if (analysis.size() > 800)
+            {
+                analysis = analysis.left(800) + QStringLiteral("…");
+            }
+            appendLog(QStringLiteral("[v10精选 每秒执行] %1 %2")
+                          .arg(signal.round)
+                          .arg(analysis));
+        }
+    }
+
+    const QDateTime now = QDateTime::currentDateTime();
+
+    // ---- source / mode / symbol ------------------------------------------
+    if (signal.source != QStringLiteral("gold-trader-mind"))
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("SOURCE"), QStringLiteral("未知信号来源：%1").arg(signal.source));
+        return;
+    }
+    if (signal.mode != QStringLiteral("paper") && signal.mode != QStringLiteral("shadow"))
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("MODE"), QStringLiteral("不支持的 mode：%1").arg(signal.mode));
+        return;
+    }
+    if (signal.symbol != QStringLiteral("XAUUSD"))
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("SYMBOL"), QStringLiteral("不支持的品种：%1").arg(signal.symbol));
+        return;
+    }
+
+    // A shadow signal is a dry run: log/ack it, but never touch the account.
+    if (signal.mode == QStringLiteral("shadow"))
+    {
+        finishExternalSignal(signal, QStringLiteral("accepted"),
+                             QStringLiteral("SHADOW"),
+                             QStringLiteral("shadow 模式：只校验/记录，不落单"));
+        return;
+    }
+
+    // ---- timestamps ------------------------------------------------------
+    if (signal.createdAt.msecsTo(now) < -60'000)
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("FUTURE"), QStringLiteral("created_at 超前当前时间"));
+        return;
+    }
+    if (signal.action == QStringLiteral("open"))
+    {
+        if (now > signal.validUntil.addSecs(15)
+            || signal.createdAt.secsTo(now) > 15 * 60)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("STALE"), QStringLiteral("信号已过期"));
+            return;
+        }
+    }
+    else if (signal.action == QStringLiteral("close") || signal.action == QStringLiteral("modify"))
+    {
+        if (now > signal.validUntil.addSecs(10 * 60))
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("STALE"), QStringLiteral("信号已过期"));
+            return;
+        }
+    }
+
+    if (signal.action == QStringLiteral("none"))
+    {
+        finishExternalSignal(signal, QStringLiteral("accepted"),
+                             QStringLiteral("NO_TRADE"),
+                             signal.reason.isEmpty() ? QStringLiteral("本轮无交易")
+                                                     : signal.reason);
+        return;
+    }
+
+    // No paper execution without a live analysis loop: xau-5m writes its
+    // heartbeat immediately before the signal, so a legitimate current-round
+    // signal always passes. A leftover paper signal from a stopped loop is
+    // rejected instead of opening a position into a dead strategy.
+    if (false == xau5mHeartbeatFresh())
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("XAU5M_DOWN"),
+                             QStringLiteral("xau-5m 心跳缺失/过期，暂不执行；模拟盘继续轮询行情"));
+        return;
+    }
+
+    // ---- market / price freshness ---------------------------------------
+    if (false == m_marketStatusKnown.load(std::memory_order_acquire))
+    {
+        if (now <= signal.validUntil)
+        {
+            if (m_waitingPriceSignalId != signal.signalId)
+            {
+                m_waitingPriceSignalId = signal.signalId;
+                appendLog(QStringLiteral("[外部信号] 等待 XAUUSD 行情状态后再执行…"));
+            }
+            return; // Retry on the next 1 s tick; do not mark as processed.
+        }
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("STALE"), QStringLiteral("行情状态未就绪且信号已过期"));
+        return;
+    }
+    if (false == m_marketOpen.load(std::memory_order_acquire))
+    {
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("MARKET_CLOSED"),
+                             QStringLiteral("XAUUSD 休市，不执行信号"));
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastPrice <= 0.0 || m_lastPriceMs <= 0 || nowMs - m_lastPriceMs > 10'000)
+    {
+        if (now <= signal.validUntil)
+        {
+            if (m_waitingPriceSignalId != signal.signalId)
+            {
+                m_waitingPriceSignalId = signal.signalId;
+                appendLog(QStringLiteral("[外部信号] 等待有效的 XAUUSD 行情后再执行…"));
+            }
+            return; // Retry on the next 1 s tick; do not mark as processed.
+        }
+        finishExternalSignal(signal, QStringLiteral("rejected"),
+                             QStringLiteral("STALE"), QStringLiteral("行情未就绪且信号已过期"));
+        return;
+    }
+    m_waitingPriceSignalId.clear();
+
+    const double fill = m_lastPrice;
+    const bool isLong = (signal.stance == QStringLiteral("long"));
+
+    if (signal.action == QStringLiteral("open"))
+    {
+        if (false == signal.triggerConfirmed)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("NOT_CONFIRMED"),
+                                 QStringLiteral("open 信号未标记 trigger.confirmed"));
+            return;
+        }
+        if (signal.stance != QStringLiteral("long") && signal.stance != QStringLiteral("short"))
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("STANCE"),
+                                 QStringLiteral("open 信号 stance 必须是 long/short"));
+            return;
+        }
+        if (std::abs(signal.lots - kExternalLots) > 1e-9
+            || std::abs(signal.leverage - kExternalLeverage) > 1e-9)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("LOTS_LEVERAGE"),
+                                 QStringLiteral("手数/杠杆必须是 0.01 / 1000（收到 %1 / %2）")
+                                     .arg(signal.lots, 0, 'f', 2)
+                                     .arg(signal.leverage, 0, 'f', 0));
+            return;
+        }
+        if (signal.targets.isEmpty() || signal.stop <= 0.0)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("LEVELS"),
+                                 QStringLiteral("open 信号缺少 stop/targets"));
+            return;
+        }
+
+        const double maxDrift = std::min(kExternalMaxDriftCapUsd,
+                                         std::max(0.1, signal.maxDriftUsd));
+        if (std::abs(fill - signal.referencePrice) > maxDrift)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("DRIFT"),
+                                 QStringLiteral("价格漂移 %1 USD > 允许 %2 USD")
+                                     .arg(std::abs(fill - signal.referencePrice), 0, 'f', 2)
+                                     .arg(maxDrift, 0, 'f', 2));
+            return;
+        }
+
+        const double tp = signal.targets.first();
+        const double sl = signal.stop;
+        const bool levelsOk = isLong ? (sl < fill && fill < tp) : (tp < fill && fill < sl);
+        if (false == levelsOk)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("LEVELS_CROSSED"),
+                                 QStringLiteral("价位与当前价不相容（fill %1 TP %2 SL %3）")
+                                     .arg(fill, 0, 'f', 2)
+                                     .arg(tp, 0, 'f', 2)
+                                     .arg(sl, 0, 'f', 2));
+            return;
+        }
+
+        const double riskUsd = std::abs(fill - sl) * kExternalLots
+            * SimTradeEngine::kOzPerLot;
+        const auto accountBefore = SimAccountStore::load(m_apiKey);
+        const double balanceBefore = accountBefore ? accountBefore->balanceUsdt : 0.0;
+        const double riskPct = balanceBefore > 0.0 ? riskUsd / balanceBefore * 100.0 : 0.0;
+        if (riskUsd > kExternalMaxRiskUsd)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("RISK_CAP"),
+                                 QStringLiteral("单笔风险 %1 USD > 上限 %2 USD")
+                                     .arg(riskUsd, 0, 'f', 2)
+                                     .arg(kExternalMaxRiskUsd, 0, 'f', 2));
+            return;
+        }
+        if (riskPct > 20.0)
+        {
+            appendLog(QStringLiteral("[外部信号] 风险提示：单笔风险 %1 USD，占余额 %2%")
+                          .arg(riskUsd, 0, 'f', 2)
+                          .arg(riskPct, 0, 'f', 2));
+        }
+
+        const auto positions = SimTradeEngine::positions(m_apiKey);
+        const QString owner = signal.strategyId.isEmpty()
+            ? QStringLiteral("v10") : signal.strategyId;
+        std::vector<pulse::ui::SimPosition> sameStrategy;
+        for (const auto &position : positions)
+        {
+            const QString positionOwner = position.strategyId.isEmpty()
+                ? QStringLiteral("v10") : position.strategyId;
+            if (positionOwner == owner)
+            {
+                sameStrategy.push_back(position);
+            }
+        }
+        QString closedPositionId;
+        double closedPnl = 0.0;
+        if (false == sameStrategy.empty())
+        {
+            if (false == signal.closeExisting)
+            {
+                finishExternalSignal(signal, QStringLiteral("rejected"),
+                                     QStringLiteral("POSITION_EXISTS"),
+                                     QStringLiteral("策略 %1 已有模拟持仓 %2；open 被拒绝")
+                                         .arg(owner, sameStrategy.front().id));
+                return;
+            }
+            const auto selected = std::find_if(
+                sameStrategy.begin(), sameStrategy.end(),
+                [&signal](const pulse::ui::SimPosition &position) {
+                    return signal.positionId.isEmpty()
+                        || signal.positionId == position.id;
+                });
+            if (selected == sameStrategy.end())
+            {
+                finishExternalSignal(signal, QStringLiteral("rejected"),
+                                     QStringLiteral("POSITION_MISMATCH"),
+                                     QStringLiteral("指定持仓 %1 不存在于策略 %2")
+                                         .arg(signal.positionId, owner));
+                return;
+            }
+
+            // Pre-check the post-close balance before giving up the old
+            // position: closing first and then failing to open would leave
+            // the account flat unintentionally.
+            const auto &old = *selected;
+            const bool oldIsLong = (old.side != QStringLiteral("short"));
+            const double closePnl = oldIsLong
+                                        ? (fill - old.entryPrice) * old.volumeLots
+                                              * SimTradeEngine::kOzPerLot
+                                        : (old.entryPrice - fill) * old.volumeLots
+                                              * SimTradeEngine::kOzPerLot;
+            const double balanceAfterClose = balanceBefore + old.marginUsdt + closePnl;
+            // Both sides pay commission on open.
+            const double fee = kExternalLots * SimTradeEngine::kFeeUsdtPerLot;
+            const double required = kExternalLots * SimTradeEngine::kOzPerLot
+                * fill / kExternalLeverage + fee;
+            if (balanceAfterClose < required)
+            {
+                finishExternalSignal(signal, QStringLiteral("rejected"),
+                                     QStringLiteral("BALANCE"),
+                                     QStringLiteral("平掉旧仓后余额 %1 仍不足以开新仓（需 %2）")
+                                         .arg(balanceAfterClose, 0, 'f', 2)
+                                         .arg(required, 0, 'f', 2));
+                return;
+            }
+
+            const auto close = SimTradeEngine::closePosition(
+                m_apiKey, old.id, fill, QStringLiteral("external_reverse"), nowMs);
+            if (false == close.ok)
+            {
+                finishExternalSignal(signal, QStringLiteral("rejected"),
+                                     QStringLiteral("CLOSE_FAILED"), close.error);
+                return;
+            }
+            closedPositionId = close.positionId;
+            closedPnl = close.realizedPnl;
+            const QString reverseText =
+                QStringLiteral("外部信号反手平仓 %1 @%2：盈亏 %3 USD")
+                    .arg(close.positionId)
+                    .arg(fill, 0, 'f', 2)
+                    .arg(close.realizedPnl, 0, 'f', 2);
+            appendTrade(QStringLiteral("[模拟] %1").arg(reverseText));
+            appendLog(QStringLiteral("[模拟] %1").arg(reverseText));
+            refreshSimBalance(fill);
+            refreshSimPositions(fill);
+        }
+
+        const SimTradeEngine::OpenResult open = isLong
+            ? SimTradeEngine::openLong(m_apiKey, kExternalLots, fill, tp, sl,
+                                       kExternalLeverage, nowMs,
+                                       signal.signalId, owner)
+            : SimTradeEngine::openShort(m_apiKey, kExternalLots, fill, tp, sl,
+                                        kExternalLeverage, nowMs,
+                                        signal.signalId, owner);
+        if (false == open.ok)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("OPEN_FAILED"), open.error,
+                                 QString(), closedPositionId, fill, riskUsd, riskPct);
+            return;
+        }
+
+        refreshSimBalance(fill);
+        refreshSimPositions(fill);
+        const QString message = QStringLiteral(
+                                    "策略 %1 开%2 0.01 手 @%3 TP%4 SL%5 杠杆1000x；"
+                                    "保证金 %6 USD 手续费 %7 USD；风险 %8 USD (%9%)")
+                                    .arg(owner)
+                                    .arg(isLong ? QStringLiteral("多") : QStringLiteral("空"))
+                                    .arg(fill, 0, 'f', 2)
+                                    .arg(tp, 0, 'f', 2)
+                                    .arg(sl, 0, 'f', 2)
+                                    .arg(open.marginUsdt, 0, 'f', 2)
+                                    .arg(open.feeUsdt, 0, 'f', 2)
+                                    .arg(riskUsd, 0, 'f', 2)
+                                    .arg(riskPct, 0, 'f', 2);
+        appendLog(QStringLiteral("[模拟] %1").arg(message));
+        appendTrade(QStringLiteral("[模拟] %1").arg(message));
+        finishExternalSignal(signal, QStringLiteral("accepted"), QStringLiteral("OK"),
+                             message, open.positionId, closedPositionId, fill,
+                             riskUsd, riskPct);
+        return;
+    }
+
+    if (signal.action == QStringLiteral("close"))
+    {
+        const auto positions = SimTradeEngine::positions(m_apiKey);
+        const QString owner = signal.strategyId.isEmpty()
+            ? QStringLiteral("v10") : signal.strategyId;
+        if (positions.empty())
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("NO_POSITION"),
+                                 QStringLiteral("没有可平的模拟持仓"));
+            return;
+        }
+        QString targetId = signal.positionId;
+        const pulse::ui::SimPosition *target = nullptr;
+        for (const auto &position : positions)
+        {
+            const QString positionOwner = position.strategyId.isEmpty()
+                ? QStringLiteral("v10") : position.strategyId;
+            if (positionOwner != owner)
+            {
+                continue;
+            }
+            if (targetId.isEmpty() || position.id == targetId)
+            {
+                target = &position;
+                targetId = position.id;
+                break;
+            }
+        }
+        if (nullptr == target)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("NO_POSITION"),
+                                 QStringLiteral("策略 %1 没有指定持仓：%2")
+                                     .arg(owner, targetId));
+            return;
+        }
+
+        const auto close = SimTradeEngine::closePosition(
+            m_apiKey, targetId, fill, QStringLiteral("external_signal"), nowMs);
+        if (false == close.ok)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("CLOSE_FAILED"), close.error,
+                                 QString(), QString(), fill);
+            return;
+        }
+        refreshSimBalance(fill);
+        refreshSimPositions(fill);
+        const QString message = QStringLiteral("平仓 %1 @%2：盈亏 %3 USD")
+                                    .arg(close.positionId)
+                                    .arg(fill, 0, 'f', 2)
+                                    .arg(close.realizedPnl, 0, 'f', 2);
+        appendLog(QStringLiteral("[模拟] 外部信号%1").arg(message));
+        appendTrade(QStringLiteral("[模拟] 外部信号%1").arg(message));
+        finishExternalSignal(signal, QStringLiteral("accepted"), QStringLiteral("OK"),
+                             message, close.positionId, close.positionId, fill);
+        return;
+    }
+
+    if (signal.action == QStringLiteral("modify"))
+    {
+        const auto positions = SimTradeEngine::positions(m_apiKey);
+        const QString owner = signal.strategyId.isEmpty()
+            ? QStringLiteral("v10") : signal.strategyId;
+        if (positions.empty())
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("NO_POSITION"),
+                                 QStringLiteral("没有可修改的模拟持仓"));
+            return;
+        }
+        QString targetId = signal.positionId;
+        const pulse::ui::SimPosition *target = nullptr;
+        for (const auto &position : positions)
+        {
+            const QString positionOwner = position.strategyId.isEmpty()
+                ? QStringLiteral("v10") : position.strategyId;
+            if (positionOwner != owner)
+            {
+                continue;
+            }
+            if (targetId.isEmpty() || position.id == targetId)
+            {
+                target = &position;
+                targetId = position.id;
+                break;
+            }
+        }
+        if (nullptr == target)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("NO_POSITION"),
+                                 QStringLiteral("策略 %1 没有指定持仓：%2")
+                                     .arg(owner, targetId));
+            return;
+        }
+
+        const double tp = signal.targets.first();
+        const double sl = signal.stop;
+        const double riskUsd = std::abs(fill - sl) * kExternalLots
+            * SimTradeEngine::kOzPerLot;
+        const auto account = SimAccountStore::load(m_apiKey);
+        const double balance = account ? account->balanceUsdt : 0.0;
+        const double riskPct = balance > 0.0 ? riskUsd / balance * 100.0 : 0.0;
+        if (riskUsd > kExternalMaxRiskUsd)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("RISK_CAP"),
+                                 QStringLiteral("修改后单笔风险 %1 USD > 上限 %2 USD")
+                                     .arg(riskUsd, 0, 'f', 2)
+                                     .arg(kExternalMaxRiskUsd, 0, 'f', 2));
+            return;
+        }
+
+        const auto update = SimTradeEngine::setStops(m_apiKey, targetId, tp, sl, fill);
+        if (false == update.ok)
+        {
+            finishExternalSignal(signal, QStringLiteral("rejected"),
+                                 QStringLiteral("MODIFY_FAILED"), update.error,
+                                 targetId, QString(), fill, riskUsd, riskPct);
+            return;
+        }
+        refreshSimBalance(fill);
+        refreshSimPositions(fill);
+        const QString message = QStringLiteral("修改 %1：TP %2 SL %3；风险 %4 USD (%5%)")
+                                    .arg(targetId)
+                                    .arg(tp, 0, 'f', 2)
+                                    .arg(sl, 0, 'f', 2)
+                                    .arg(riskUsd, 0, 'f', 2)
+                                    .arg(riskPct, 0, 'f', 2);
+        appendLog(QStringLiteral("[模拟] 外部信号%1").arg(message));
+        appendTrade(QStringLiteral("[模拟] 外部信号%1").arg(message));
+        finishExternalSignal(signal, QStringLiteral("accepted"), QStringLiteral("OK"),
+                             message, targetId, QString(), fill, riskUsd, riskPct);
+        return;
+    }
+
+    finishExternalSignal(signal, QStringLiteral("rejected"),
+                         QStringLiteral("ACTION"), QStringLiteral("未知 action：%1").arg(signal.action));
+}
+
+void SimGateSystem::finishExternalSignal(const pulse::ui::ExternalSignal &signal,
+                                         const QString &status,
+                                         const QString &code,
+                                         const QString &message,
+                                         const QString &positionId,
+                                         const QString &closedPositionId,
+                                         double fillPrice,
+                                         double riskUsd,
+                                         double riskPct)
+{
+    if (false == signal.signalId.isEmpty()
+        && m_processedSignalIds.insert(signal.signalId).second)
+    {
+        m_recentSignalIds.append(signal.signalId);
+        while (m_recentSignalIds.size() > 100)
+        {
+            m_recentSignalIds.removeFirst();
+        }
+        m_lastProcessedSignalId = signal.signalId;
+    }
+
+    const QDateTime now = QDateTime::currentDateTime();
+    const auto account = SimAccountStore::load(m_apiKey);
+    const double balance = account ? account->balanceUsdt : 0.0;
+
+    QJsonObject ack;
+    ack[QLatin1String("schema")] = QStringLiteral("gold.exec/1/ack");
+    ack[QLatin1String("signal_id")] = signal.signalId;
+    ack[QLatin1String("round")] = signal.round;
+    ack[QLatin1String("strategy_id")] = signal.strategyId.isEmpty()
+        ? QStringLiteral("v10") : signal.strategyId;
+    ack[QLatin1String("processed_at")] = now.toString(Qt::ISODate);
+    ack[QLatin1String("status")] = status;
+    ack[QLatin1String("code")] = code;
+    ack[QLatin1String("message")] = message;
+    ack[QLatin1String("action")] = signal.action;
+    ack[QLatin1String("stance")] = signal.stance;
+    ack[QLatin1String("filled_price")] = fillPrice;
+    ack[QLatin1String("position_id")] = positionId;
+    ack[QLatin1String("closed_position_id")] = closedPositionId;
+    ack[QLatin1String("balance_usdt")] = balance;
+    ack[QLatin1String("risk_usd")] = riskUsd;
+    ack[QLatin1String("risk_pct")] = riskPct;
+    ack[QLatin1String("reference_price")] = signal.referencePrice;
+    ack[QLatin1String("stop")] = signal.stop;
+    ack[QLatin1String("leverage")] = signal.leverage;
+    ack[QLatin1String("lots")] = signal.lots;
+    QJsonArray targets;
+    for (double target : signal.targets)
+    {
+        targets.append(target);
+    }
+    ack[QLatin1String("targets")] = targets;
+
+    const QString ackTarget = signal.ackPath.isEmpty()
+        ? pulse::ui::ExternalSignalStore::ackPath() : signal.ackPath;
+    pulse::ui::ExternalSignalStore::writeAckAt(ackTarget, ack);
+
+    QJsonObject event = ack;
+    event[QLatin1String("schema")] = QStringLiteral("pulsetrader.external_event/1");
+    event[QLatin1String("event")] = QStringLiteral("signal");
+    event[QLatin1String("ts")] = now.toString(Qt::ISODate);
+    event[QLatin1String("reason")] = signal.reason;
+    event[QLatin1String("report")] = signal.report;
+    appendExternalJournal(event);
+
+    writeExternalState(true);
+    appendLog(QStringLiteral("[外部信号] %1 %2：%3")
+                  .arg(status.toUpper(), code, message));
+}
+
+void SimGateSystem::writeExternalState(bool force)
+{
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (false == force && m_lastExternalStateMs > 0
+        && nowMs - m_lastExternalStateMs < 5'000)
+    {
+        return;
+    }
+
+    const auto account = SimAccountStore::load(m_apiKey);
+    const double balance = account ? account->balanceUsdt : 0.0;
+    double floatingTotal = 0.0;
+    double riskTotal = 0.0;
+
+    QJsonArray positions;
+    if (account.has_value())
+    {
+        for (const auto &position : account->positions)
+        {
+            const double floating = floatingPnl(position, m_lastPrice);
+            floatingTotal += floating;
+            riskTotal += std::abs(position.entryPrice - position.stopLoss)
+                * position.volumeLots * SimTradeEngine::kOzPerLot;
+
+            QJsonObject item;
+            item[QLatin1String("position_id")] = position.id;
+            item[QLatin1String("side")] = position.side;
+            item[QLatin1String("strategy_id")] = position.strategyId.isEmpty()
+                ? QStringLiteral("v10") : position.strategyId;
+            item[QLatin1String("lots")] = position.volumeLots;
+            item[QLatin1String("entry_price")] = position.entryPrice;
+            item[QLatin1String("take_profit")] = position.takeProfit;
+            item[QLatin1String("stop_loss")] = position.stopLoss;
+            item[QLatin1String("leverage")] = position.leverage;
+            item[QLatin1String("margin_usdt")] = position.marginUsdt;
+            item[QLatin1String("floating_pnl_usd")] = floating;
+            item[QLatin1String("risk_usd")] = std::abs(position.entryPrice - position.stopLoss)
+                * position.volumeLots * SimTradeEngine::kOzPerLot;
+            item[QLatin1String("opened_at_ms")] = static_cast<double>(position.openedAtMs);
+            if (false == position.sourceSignalId.isEmpty())
+            {
+                item[QLatin1String("source_signal_id")] = position.sourceSignalId;
+            }
+            positions.append(item);
+        }
+    }
+
+    QJsonArray recent;
+    for (const QString &id : m_recentSignalIds)
+    {
+        recent.append(id);
+    }
+
+    const double equity = balance + floatingTotal;
+    QJsonObject state;
+    state[QLatin1String("schema")] = QStringLiteral("pulsetrader.external_state/1");
+    state[QLatin1String("updated_at")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    state[QLatin1String("engine_running")] = m_polling;
+    state[QLatin1String("market_open")] = m_marketOpen.load(std::memory_order_acquire);
+    state[QLatin1String("last_price")] = m_lastPrice;
+    state[QLatin1String("last_price_age_ms")] =
+        m_lastPriceMs > 0 ? static_cast<double>(nowMs - m_lastPriceMs) : -1.0;
+    state[QLatin1String("balance_usdt")] = balance;
+    state[QLatin1String("equity_usdt")] = equity;
+    state[QLatin1String("positions")] = positions;
+    state[QLatin1String("last_processed_signal_id")] = m_lastProcessedSignalId;
+    state[QLatin1String("recent_signal_ids")] = recent;
+    state[QLatin1String("data_dir")] = pulse::ui::ExternalSignalStore::dataDir();
+
+    QJsonObject risk;
+    risk[QLatin1String("max_risk_usd")] = kExternalMaxRiskUsd;
+    risk[QLatin1String("current_risk_usd")] = riskTotal;
+    risk[QLatin1String("risk_pct")] = equity > 0.0 ? riskTotal / equity * 100.0 : 0.0;
+    state[QLatin1String("paper_risk")] = risk;
+
+    if (pulse::ui::ExternalSignalStore::writeState(state))
+    {
+        m_lastExternalStateMs = nowMs;
+    }
+}
+
+void SimGateSystem::appendExternalJournal(const QJsonObject &event)
+{
+    pulse::ui::ExternalSignalStore::appendJournal(event);
 }
 
 void SimGateSystem::showTrendReadout(const pulse::ui::TickOutcome &outcome)
@@ -2602,6 +3429,10 @@ void SimGateSystem::settleSimPositions(double price)
                            std::chrono::system_clock::now().time_since_epoch())
                            .count();
     const auto closes = SimTradeEngine::checkAndClose(m_apiKey, price, nowMs);
+    // Positions that remain open get their mark-to-market extremes updated
+    // for this tick. Closed positions were folded in at their fill price by
+    // checkAndClose() before the DB write.
+    SimTradeEngine::trackExcursions(m_apiKey, price);
     for (const auto &close : closes)
     {
         const QString pnlText = QStringLiteral("%1 USD")
@@ -2616,44 +3447,206 @@ void SimGateSystem::settleSimPositions(double price)
         appendLog(QStringLiteral("[模拟] 持仓 %1 触发%2 平仓，结算后可用余额 %3 USDT")
                       .arg(close.positionId, close.reason)
                       .arg(SimAccountStore::load(m_apiKey)->balanceUsdt, 0, 'f', 2));
+
+        QJsonObject event;
+        event[QLatin1String("schema")] = QStringLiteral("pulsetrader.external_event/1");
+        event[QLatin1String("event")] = QStringLiteral("settlement");
+        event[QLatin1String("ts")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        event[QLatin1String("position_id")] = close.positionId;
+        event[QLatin1String("status")] = QStringLiteral("closed");
+        event[QLatin1String("code")] = close.reason;
+        event[QLatin1String("filled_price")] = close.exitPrice;
+        event[QLatin1String("pnl_usd")] = close.realizedPnl;
+        event[QLatin1String("message")] = QStringLiteral("TP/SL 自动结算");
+        appendExternalJournal(event);
     }
     if (false == closes.empty())
     {
         refreshSimBalance(price);
         refreshSimPositions(price);
+        writeExternalState(true);
     }
 }
 
 void SimGateSystem::refreshSimPositions(double price)
 {
+    QTableWidget *table = ui->table_simPositions;
     const auto positions = SimTradeEngine::positions(m_apiKey);
+
     if (positions.empty())
     {
-        ui->label_simPositions->setText(QStringLiteral("无"));
+        table->clearSpans();
+        table->setRowCount(1);
+        table->setSpan(0, 0, 1, table->columnCount());
+        auto *item = new QTableWidgetItem(QStringLiteral("无模拟持仓"));
+        item->setTextAlignment(Qt::AlignCenter);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        table->setItem(0, 0, item);
         return;
     }
-    QStringList parts;
-    for (const auto &p : positions)
+
+    table->clearSpans();
+
+    const int rowCount = static_cast<int>(positions.size());
+    bool rebuild = (table->rowCount() != rowCount);
+    if (false == rebuild)
     {
-        const bool isLong = (p.side != QStringLiteral("short"));
-        const double pnl = floatingPnl(p, price);
-        parts << QStringLiteral("%1手@%2 %3 TP%4 SL%5 保证金%6 浮盈%7%8")
-                     .arg(p.volumeLots, 0, 'f', 2)
-                     .arg(p.entryPrice, 0, 'f', 2)
-                     .arg(isLong ? QStringLiteral("多") : QStringLiteral("空"))
-                     .arg(p.takeProfit, 0, 'f', 2)
-                     .arg(p.stopLoss, 0, 'f', 2)
-                     .arg(p.marginUsdt, 0, 'f', 2)
-                     .arg(pnl >= 0.0 ? QStringLiteral("+") : QString())
-                     .arg(pnl, 0, 'f', 2);
+        for (int row = 0; row < rowCount; ++row)
+        {
+            const QTableWidgetItem *nameItem = table->item(row, 0);
+            if (nullptr == nameItem
+                || nameItem->data(Qt::UserRole).toString()
+                       != positions[static_cast<std::size_t>(row)].id)
+            {
+                rebuild = true;
+                break;
+            }
+        }
     }
-    ui->label_simPositions->setText(parts.join(QStringLiteral("  |  ")));
+    if (rebuild)
+    {
+        table->setRowCount(0);
+        table->setRowCount(rowCount);
+    }
+
+    const int operationColumn = table->columnCount() - 1;
+    for (int row = 0; row < rowCount; ++row)
+    {
+        const pulse::ui::SimPosition &position =
+            positions[static_cast<std::size_t>(row)];
+        const bool isLong = (position.side != QStringLiteral("short"));
+        const double pnl = floatingPnl(position, price);
+
+        const auto setCell = [table, row, rebuild](int column, const QString &text,
+                                                   Qt::Alignment alignment) {
+            QTableWidgetItem *item = rebuild ? nullptr : table->item(row, column);
+            if (nullptr == item)
+            {
+                item = new QTableWidgetItem();
+                item->setTextAlignment(alignment);
+                table->setItem(row, column, item);
+            }
+            item->setText(text);
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            return item;
+        };
+
+        // The name column mirrors 真实持仓: the instrument, with the position
+        // id/source in the tooltip.
+        QTableWidgetItem *nameItem =
+            setCell(0, QStringLiteral("XAUUSD"), Qt::AlignLeft | Qt::AlignVCenter);
+        nameItem->setData(Qt::UserRole, position.id);
+        QString tooltip = QStringLiteral("模拟持仓 ID：%1").arg(position.id);
+        tooltip += QStringLiteral("\n策略：%1")
+                       .arg(position.strategyId.isEmpty()
+                                ? QStringLiteral("v10") : position.strategyId);
+        if (false == position.sourceSignalId.isEmpty())
+        {
+            tooltip += QStringLiteral("\n来源信号：%1").arg(position.sourceSignalId);
+        }
+        nameItem->setToolTip(tooltip);
+
+        setCell(1, isLong ? QStringLiteral("多仓") : QStringLiteral("空仓"),
+                Qt::AlignCenter);
+        setCell(2, QString::number(position.volumeLots, 'f', 2),
+                Qt::AlignRight | Qt::AlignVCenter);
+        setCell(3, formatPositionPrice(position.entryPrice),
+                Qt::AlignRight | Qt::AlignVCenter);
+        setCell(4, price > 0.0 ? formatPositionPrice(price) : QStringLiteral("--"),
+                Qt::AlignRight | Qt::AlignVCenter);
+        setCell(5, formatPositionPrice(position.takeProfit),
+                Qt::AlignRight | Qt::AlignVCenter);
+        setCell(6, formatPositionPrice(position.stopLoss),
+                Qt::AlignRight | Qt::AlignVCenter);
+        setCell(7, QString::number(position.marginUsdt, 'f', 2),
+                Qt::AlignRight | Qt::AlignVCenter);
+        QTableWidgetItem *pnlItem =
+            setCell(8, price > 0.0 ? formatSignedUsd(pnl) : QStringLiteral("--"),
+                    Qt::AlignRight | Qt::AlignVCenter);
+        if (price > 0.0 && pnl > 0.0)
+        {
+            pnlItem->setForeground(QColor(QStringLiteral("#c62828")));
+        }
+        else if (price > 0.0 && pnl < 0.0)
+        {
+            pnlItem->setForeground(QColor(QStringLiteral("#2e7d32")));
+        }
+        else
+        {
+            pnlItem->setData(Qt::ForegroundRole, QVariant());
+        }
+
+        if (rebuild)
+        {
+            auto *closeButton = new QPushButton(QStringLiteral("平仓"));
+            connect(closeButton, &QPushButton::clicked, this,
+                    [this, id = position.id]() { closeSimPosition(id); });
+            table->setCellWidget(row, operationColumn, closeButton);
+        }
+        else
+        {
+            auto *closeButton =
+                qobject_cast<QPushButton *>(table->cellWidget(row, operationColumn));
+            if (nullptr != closeButton)
+            {
+                closeButton->setText(QStringLiteral("平仓"));
+                closeButton->setEnabled(true);
+            }
+        }
+    }
 }
+
+void SimGateSystem::closeSimPosition(const QString &positionId)
+{
+    if (m_lastPrice <= 0.0)
+    {
+        appendLog(QStringLiteral("[模拟] 手动平仓失败：暂无 XAUUSD 行情价格"));
+        return;
+    }
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+    const auto close = SimTradeEngine::closePosition(
+        m_apiKey, positionId, m_lastPrice, QStringLiteral("manual_ui"), nowMs);
+    if (false == close.ok)
+    {
+        appendLog(QStringLiteral("[模拟] 手动平仓失败：%1").arg(close.error));
+        return;
+    }
+    const QString manualCloseText = QStringLiteral("手动平仓 %1 @%2：盈亏 %3 USD")
+                                        .arg(close.positionId)
+                                        .arg(close.exitPrice, 0, 'f', 2)
+                                        .arg(close.realizedPnl, 0, 'f', 2);
+    appendLog(QStringLiteral("[模拟] %1").arg(manualCloseText));
+    appendTrade(QStringLiteral("[模拟] %1").arg(manualCloseText));
+
+    QJsonObject event;
+    event[QLatin1String("schema")] = QStringLiteral("pulsetrader.external_event/1");
+    event[QLatin1String("event")] = QStringLiteral("settlement");
+    event[QLatin1String("ts")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    event[QLatin1String("position_id")] = close.positionId;
+    event[QLatin1String("status")] = QStringLiteral("closed");
+    event[QLatin1String("code")] = QStringLiteral("MANUAL");
+    event[QLatin1String("filled_price")] = close.exitPrice;
+    event[QLatin1String("pnl_usd")] = close.realizedPnl;
+    event[QLatin1String("message")] = QStringLiteral("模拟持仓表格手动平仓");
+    appendExternalJournal(event);
+
+    refreshSimBalance(m_lastPrice);
+    refreshSimPositions(m_lastPrice);
+    writeExternalState(true);
+}
+
 
 void SimGateSystem::onPollingStopped()
 {
     m_polling = false;
+    m_externalSignalTimer.stop();
+    m_marketOpen.store(false, std::memory_order_release);
+    m_marketStatusKnown.store(false, std::memory_order_release);
+    m_waitingPriceSignalId.clear();
     updateEngineButtons(false);
+    writeExternalState(true);
 }
 
 void SimGateSystem::updateEngineButtons(bool running)
@@ -2662,8 +3655,213 @@ void SimGateSystem::updateEngineButtons(bool running)
     ui->pushBtn_stopEngine->setEnabled(running);
 }
 
+void SimGateSystem::pollLlmOverlay()
+{
+    const QString overlayPath =
+        QFileInfo(pulse::ui::ExternalSignalStore::statePath()).absolutePath()
+        + QStringLiteral("/llm_overlay.json");
+    const QString auditPath =
+        QFileInfo(pulse::ui::ExternalSignalStore::statePath()).absolutePath()
+        + QStringLiteral("/llm_overlay_audit.jsonl");
+    const QDateTime now = QDateTime::currentDateTime();
+    const qint64 nowMs = now.toMSecsSinceEpoch();
+    const QFileInfo info(overlayPath);
+
+    QString status;
+    QString error;
+    QJsonObject overlay;
+    QByteArray raw;
+    qint64 mtimeMs = 0;
+    QDateTime generatedAt;
+    QDateTime validUntil;
+
+    if (false == info.exists())
+    {
+        status = QStringLiteral("missing");
+        error = QStringLiteral("未找到 overlay 文件（Claude Code 5分钟分析未运行或尚未写入）");
+    }
+    else
+    {
+        mtimeMs = info.lastModified().toMSecsSinceEpoch();
+        QFile file(overlayPath);
+        if (false == file.open(QIODevice::ReadOnly))
+        {
+            status = QStringLiteral("invalid");
+            error = QStringLiteral("无法读取 overlay 文件");
+        }
+        else
+        {
+            raw = file.readAll();
+            file.close();
+            QJsonParseError parseError;
+            const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
+            if (parseError.error != QJsonParseError::NoError || false == doc.isObject())
+            {
+                status = QStringLiteral("invalid");
+                error = QStringLiteral("JSON 解析失败：%1")
+                            .arg(parseError.errorString());
+            }
+            else
+            {
+                overlay = doc.object();
+                QStringList errors;
+                if (overlay.value(QStringLiteral("schema")).toString()
+                    != QStringLiteral("xau.llm_overlay/1"))
+                {
+                    errors << QStringLiteral("schema 不是 xau.llm_overlay/1");
+                }
+                if (overlay.value(QStringLiteral("symbol")).toString().toUpper()
+                    != QStringLiteral("XAUUSD"))
+                {
+                    errors << QStringLiteral("symbol 不是 XAUUSD");
+                }
+                const QString bias =
+                    overlay.value(QStringLiteral("bias")).toString().toLower();
+                if (bias != QStringLiteral("long")
+                    && bias != QStringLiteral("short")
+                    && bias != QStringLiteral("neutral"))
+                {
+                    errors << QStringLiteral("bias 无效");
+                }
+                const QString regime =
+                    overlay.value(QStringLiteral("regime")).toString().toLower();
+                if (regime != QStringLiteral("trend")
+                    && regime != QStringLiteral("range")
+                    && regime != QStringLiteral("transition"))
+                {
+                    errors << QStringLiteral("regime 无效");
+                }
+                const double confidence =
+                    overlay.value(QStringLiteral("confidence")).toDouble(-1.0);
+                if (confidence < 0.0 || confidence > 1.0)
+                {
+                    errors << QStringLiteral("confidence 不在 0..1");
+                }
+                if (overlay.contains(QStringLiteral("support"))
+                    && false == overlay.value(QStringLiteral("support")).isArray())
+                {
+                    errors << QStringLiteral("support 不是数组");
+                }
+                if (overlay.contains(QStringLiteral("resistance"))
+                    && false == overlay.value(QStringLiteral("resistance")).isArray())
+                {
+                    errors << QStringLiteral("resistance 不是数组");
+                }
+                generatedAt = QDateTime::fromString(
+                    overlay.value(QStringLiteral("generated_at")).toString(),
+                    Qt::ISODate);
+                validUntil = QDateTime::fromString(
+                    overlay.value(QStringLiteral("valid_until")).toString(),
+                    Qt::ISODate);
+                if (false == generatedAt.isValid())
+                {
+                    errors << QStringLiteral("generated_at 缺失或格式错误");
+                }
+                if (false == validUntil.isValid())
+                {
+                    errors << QStringLiteral("valid_until 缺失或格式错误");
+                }
+                if (generatedAt.isValid() && validUntil.isValid()
+                    && validUntil <= generatedAt)
+                {
+                    errors << QStringLiteral("valid_until 不晚于 generated_at");
+                }
+                if (generatedAt.isValid() && generatedAt > now.addSecs(120))
+                {
+                    errors << QStringLiteral("generated_at 超前超过 120 秒");
+                }
+
+                if (false == errors.isEmpty())
+                {
+                    status = QStringLiteral("invalid");
+                    error = errors.join(QStringLiteral("；"));
+                }
+                else if (now > validUntil)
+                {
+                    status = QStringLiteral("stale");
+                    error = QStringLiteral("overlay 已过期：valid_until=%1，当前=%2")
+                                .arg(validUntil.toString(Qt::ISODate),
+                                     now.toString(Qt::ISODate));
+                }
+                else if (generatedAt.secsTo(now) > 600)
+                {
+                    status = QStringLiteral("stale");
+                    error = QStringLiteral("overlay 年龄 %1 秒 > 600 秒")
+                                .arg(generatedAt.secsTo(now));
+                }
+                else
+                {
+                    status = QStringLiteral("ok");
+                }
+            }
+        }
+    }
+
+    const QString signature = status + QLatin1Char('|')
+        + overlay.value(QStringLiteral("generated_at")).toString()
+        + QLatin1Char('|') + QString::number(mtimeMs);
+    const bool changed = (signature != m_lastLlmOverlaySignature);
+    const bool periodic = (nowMs - m_lastLlmOverlayLogMs >= 300'000);
+    if (false == changed && false == periodic)
+    {
+        return;
+    }
+    m_lastLlmOverlaySignature = signature;
+    m_lastLlmOverlayStatus = status;
+    m_lastLlmOverlayLogMs = nowMs;
+
+    // Persist a reviewable record even when the overlay is missing/invalid.
+    QJsonObject audit;
+    audit[QStringLiteral("at")] = now.toString(Qt::ISODate);
+    audit[QStringLiteral("status")] = status;
+    audit[QStringLiteral("error")] = error;
+    audit[QStringLiteral("file_mtime_ms")] = static_cast<double>(mtimeMs);
+    audit[QStringLiteral("last_price")] = m_lastPrice;
+    audit[QStringLiteral("market_open")] = m_marketOpen.load();
+    if (false == overlay.isEmpty())
+    {
+        audit[QStringLiteral("overlay")] = overlay;
+    }
+    else if (false == raw.isEmpty())
+    {
+        audit[QStringLiteral("raw")] =
+            QString::fromUtf8(raw.left(2000));
+    }
+    if (const auto account = SimAccountStore::load(m_apiKey);
+        account.has_value())
+    {
+        audit[QStringLiteral("balance_usdt")] = account->balanceUsdt;
+        audit[QStringLiteral("positions")] =
+            static_cast<int>(account->positions.size());
+        if (false == account->positions.empty())
+        {
+            const auto &position = account->positions.front();
+            audit[QStringLiteral("position_side")] = position.side;
+            audit[QStringLiteral("position_entry")] = position.entryPrice;
+        }
+    }
+    QFile auditFile(auditPath);
+    if (auditFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        auditFile.write(QJsonDocument(audit).toJson(QJsonDocument::Compact));
+        auditFile.write("\n");
+        auditFile.close();
+    }
+
+    if (m_llmOverlayDialog != nullptr && m_llmOverlayDialog->isVisible())
+    {
+        m_llmOverlayDialog->reload();
+    }
+}
+
 void SimGateSystem::appendLog(const QString &text)
 {
+    // UI log pane: only the deterministic v10-selected analysis is shown.
+    // LLM overlay data lives in the separate LLM盘面 dialog and audit file.
+    if (false == text.contains(QStringLiteral("v10精选")))
+    {
+        return;
+    }
     // appendPlainText, not QTextEdit::append: the log carries strategy text
     // that could look like markup ("<" in a comparison, for instance), which
     // QTextEdit::append would render as HTML. The pane keeps the latest 5000
@@ -2673,5 +3871,56 @@ void SimGateSystem::appendLog(const QString &text)
 
 void SimGateSystem::appendTrade(const QString &text)
 {
-    ui->textEdit_trade->append(text);
+    // QTextEdit::append() interprets its argument as rich text and trade
+    // lines can carry "<" from error strings, so insert them as plain text
+    // at the end of the document instead.
+    QTextCursor cursor(ui->textEdit_trade->document());
+    cursor.movePosition(QTextCursor::End);
+    cursor.insertText(text + QLatin1Char('\n'));
+}
+
+void SimGateSystem::loadClosedTradeHistory()
+{
+    const auto orders = pulse::ui::SimOrderDb::queryOrders(m_apiKey);
+    std::vector<pulse::ui::OrderRecord> closed;
+    closed.reserve(orders.size());
+    for (const auto &order : orders)
+    {
+        if (order.status == QStringLiteral("closed"))
+        {
+            closed.push_back(order);
+        }
+    }
+    if (closed.empty())
+    {
+        appendTrade(QStringLiteral("[历史] 暂无已平仓记录"));
+        return;
+    }
+
+    // queryOrders() returns newest first; show the latest 50 oldest-first so
+    // the pane reads chronologically and the newest line sits at the bottom.
+    constexpr std::size_t kMaxLines = 50;
+    const std::size_t count = std::min(closed.size(), kMaxLines);
+    appendTrade(QStringLiteral("[历史] 已平仓交易 %1 笔（显示最近 %2 笔）")
+                    .arg(closed.size())
+                    .arg(count));
+    for (std::size_t i = count; i > 0; --i)
+    {
+        const pulse::ui::OrderRecord &order = closed[i - 1];
+        const QString side = (order.side == QStringLiteral("short"))
+                                 ? QStringLiteral("空")
+                                 : QStringLiteral("多");
+        const QString pnlText =
+            QStringLiteral("%1%2 USD")
+                .arg(order.realizedPnl >= 0.0 ? QStringLiteral("+") : QString())
+                .arg(order.realizedPnl, 0, 'f', 2);
+        appendTrade(QStringLiteral("[历史] %1 %2 %3 手 | 开仓 %4 @%5 | 平仓 %6 @%7 | 盈亏 %8")
+                        .arg(order.orderId, side)
+                        .arg(order.volumeLots, 0, 'f', 2)
+                        .arg(QString::number(order.entryPrice, 'f', 2))
+                        .arg(order.openedAt)
+                        .arg(QString::number(order.exitPrice, 'f', 2))
+                        .arg(order.closedAt)
+                        .arg(pnlText));
+    }
 }

@@ -5,6 +5,7 @@
 #include <QDateTime>
 
 #include <algorithm>
+#include <cstddef>
 
 namespace pulse::ui
 {
@@ -23,14 +24,23 @@ QString nowStamp()
 namespace
 {
 
-// Shared open-core for both sides. `feeUsdt` is 0 for shorts (sell side is
-// free in the real CFD fee model). The caller pre-validates the TP/SL
-// orientation for its side.
+QString normalizedStrategyId(const QString &strategyId)
+{
+    const QString trimmed = strategyId.trimmed();
+    return trimmed.isEmpty() ? QStringLiteral("v10") : trimmed;
+}
+
+// Shared open-core for both sides. `feeUsdt` is charged on every open
+// (long and short). The caller pre-validates the TP/SL orientation for its
+// side. A strategy may hold at most one position, but other strategies can
+// hold their own positions concurrently.
 SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &side,
                                         double volumeLots, double entryPrice,
                                         double takeProfit, double stopLoss,
                                         double leverage, double feeUsdt,
-                                        std::int64_t nowMs)
+                                        std::int64_t nowMs,
+                                        const QString &sourceSignalId,
+                                        const QString &strategyId)
 {
     SimTradeEngine::OpenResult result;
     if (volumeLots <= 0.0 || entryPrice <= 0.0)
@@ -64,6 +74,16 @@ SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &si
         result.error = QStringLiteral("未设置模拟账户，请先点击“模拟账户”设置初始余额");
         return result;
     }
+    const QString owner = normalizedStrategyId(strategyId);
+    for (const auto &position : account->positions)
+    {
+        if (normalizedStrategyId(position.strategyId) == owner)
+        {
+            result.error = QStringLiteral("策略 %1 已有持仓 %2；单策略最多一仓")
+                               .arg(owner, position.id);
+            return result;
+        }
+    }
     const double required = result.marginUsdt + result.feeUsdt;
     if (account->balanceUsdt < required)
     {
@@ -90,6 +110,7 @@ SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &si
                       .arg(nowMs)
                       .arg(s_orderSeq.fetch_add(1));
     position.side = side;
+    position.strategyId = owner;
     position.volumeLots = volumeLots;
     position.entryPrice = entryPrice;
     position.takeProfit = takeProfit;
@@ -98,6 +119,7 @@ SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &si
     position.feeUsdt = result.feeUsdt;
     position.leverage = leverage;
     position.openedAtMs = nowMs;
+    position.sourceSignalId = sourceSignalId;
     updated.positions.push_back(position);
 
     if (false == SimAccountStore::saveAccount(apiKey, updated))
@@ -114,6 +136,7 @@ SimTradeEngine::OpenResult openPosition(const QString &apiKey, const QString &si
     record.apiKey = apiKey;
     record.side = side;
     record.symbol = QStringLiteral("XAUUSD");
+    record.strategyId = owner;
     record.volumeLots = position.volumeLots;
     record.entryPrice = position.entryPrice;
     record.takeProfit = position.takeProfit;
@@ -138,7 +161,9 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
                                                     double takeProfit,
                                                     double stopLoss,
                                                     double leverage,
-                                                    std::int64_t nowMs)
+                                                    std::int64_t nowMs,
+                                                    const QString &sourceSignalId,
+                                                    const QString &strategyId)
 {
     // Real CFD rule: an opening order MUST carry both stops (checked before
     // the orientation checks so the message is precise).
@@ -168,7 +193,7 @@ SimTradeEngine::OpenResult SimTradeEngine::openLong(const QString &apiKey,
     return openPosition(apiKey, QStringLiteral("long"), volumeLots, entryPrice,
                         takeProfit, stopLoss, leverage,
                         volumeLots * SimTradeEngine::kFeeUsdtPerLot,  // BUY side commission.
-                        nowMs);
+                        nowMs, sourceSignalId, strategyId);
 }
 
 SimTradeEngine::OpenResult SimTradeEngine::openShort(const QString &apiKey,
@@ -177,7 +202,9 @@ SimTradeEngine::OpenResult SimTradeEngine::openShort(const QString &apiKey,
                                                      double takeProfit,
                                                      double stopLoss,
                                                      double leverage,
-                                                     std::int64_t nowMs)
+                                                     std::int64_t nowMs,
+                                                     const QString &sourceSignalId,
+                                                     const QString &strategyId)
 {
     // Real CFD rule: an opening order MUST carry both stops.
     if (takeProfit <= 0.0 || stopLoss <= 0.0)
@@ -205,14 +232,15 @@ SimTradeEngine::OpenResult SimTradeEngine::openShort(const QString &apiKey,
     }
     return openPosition(apiKey, QStringLiteral("short"), volumeLots, entryPrice,
                         takeProfit, stopLoss, leverage,
-                        0.0,  // Sell side: no commission.
-                        nowMs);
+                        volumeLots * SimTradeEngine::kFeeUsdtPerLot,  // Both sides pay commission.
+                        nowMs, sourceSignalId, strategyId);
 }
 
 std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QString &apiKey,
                                                                         double price,
                                                                         std::int64_t nowMs)
 {
+    (void)nowMs; // Reserved for a future close-time field.
     std::vector<CloseResult> results;
     const auto account = SimAccountStore::load(apiKey);
     if (false == account.has_value() || account->positions.empty())
@@ -266,6 +294,10 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
             const double pnl = isLong
                                    ? (exitPrice - it->entryPrice) * it->volumeLots * SimTradeEngine::kOzPerLot
                                    : (it->entryPrice - exitPrice) * it->volumeLots * SimTradeEngine::kOzPerLot;
+            // The fill PnL is itself an observed extreme (the exit tick can
+            // jump past a prior mark), so fold it in before persisting.
+            it->maxFloatingProfitUsd = std::max(it->maxFloatingProfitUsd, pnl);
+            it->maxFloatingLossUsd = std::min(it->maxFloatingLossUsd, pnl);
             updated.balanceUsdt += it->marginUsdt + pnl;
 
             CloseResult close;
@@ -279,7 +311,9 @@ std::vector<SimTradeEngine::CloseResult> SimTradeEngine::checkAndClose(const QSt
 
             // Persist the close (analysis); a failure must not break the
             // settlement.
-            SimOrderDb::closeOrder(it->id, exitPrice, pnl, nowStamp());
+            SimOrderDb::closeOrder(it->id, exitPrice, pnl, nowStamp(),
+                                   it->maxFloatingProfitUsd,
+                                   it->maxFloatingLossUsd);
 
             it = positions.erase(it);
         }
@@ -373,6 +407,48 @@ SimTradeEngine::StopsUpdateResult SimTradeEngine::updateStops(const QString &api
     return result;
 }
 
+bool SimTradeEngine::trackExcursions(const QString &apiKey, double price)
+{
+    if (price <= 0.0)
+    {
+        return false;
+    }
+    const auto account = SimAccountStore::load(apiKey);
+    if (false == account.has_value() || account->positions.empty())
+    {
+        return false;
+    }
+
+    SimAccount updated = *account;
+    bool changed = false;
+    for (auto &position : updated.positions)
+    {
+        const bool isLong = (position.side != QStringLiteral("short"));
+        const double pnl =
+            isLong ? (price - position.entryPrice) * position.volumeLots
+                         * SimTradeEngine::kOzPerLot
+                   : (position.entryPrice - price) * position.volumeLots
+                         * SimTradeEngine::kOzPerLot;
+        if (pnl > position.maxFloatingProfitUsd)
+        {
+            position.maxFloatingProfitUsd = pnl;
+            changed = true;
+        }
+        if (pnl < position.maxFloatingLossUsd)
+        {
+            position.maxFloatingLossUsd = pnl;
+            changed = true;
+        }
+    }
+    if (false == changed)
+    {
+        return false;
+    }
+
+    updated.updatedAt = nowStamp();
+    return SimAccountStore::saveAccount(apiKey, updated);
+}
+
 std::vector<SimPosition> SimTradeEngine::positions(const QString &apiKey)
 {
     const auto account = SimAccountStore::load(apiKey);
@@ -381,6 +457,162 @@ std::vector<SimPosition> SimTradeEngine::positions(const QString &apiKey)
         return account->positions;
     }
     return {};
+}
+
+SimTradeEngine::CloseResult SimTradeEngine::closePosition(const QString &apiKey,
+                                                          const QString &positionId,
+                                                          double exitPrice,
+                                                          const QString &reason,
+                                                          std::int64_t nowMs)
+{
+    (void)nowMs; // Reserved for a future close-time field.
+    CloseResult result;
+    result.positionId = positionId;
+    result.reason = reason;
+
+    if (exitPrice <= 0.0)
+    {
+        result.error = QStringLiteral("平仓价格无效：%1").arg(exitPrice);
+        return result;
+    }
+
+    const auto account = SimAccountStore::load(apiKey);
+    if (false == account.has_value())
+    {
+        result.error = QStringLiteral("未设置模拟账户，请先点击“模拟账户”设置初始余额");
+        return result;
+    }
+
+    std::size_t index = account->positions.size();
+    for (std::size_t i = 0; i < account->positions.size(); ++i)
+    {
+        if (account->positions[i].id == positionId)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index >= account->positions.size())
+    {
+        result.error = QStringLiteral("模拟持仓不存在：%1").arg(positionId);
+        return result;
+    }
+
+    const SimPosition &position = account->positions[index];
+    const bool isLong = (position.side != QStringLiteral("short"));
+    const double pnl = isLong
+                           ? (exitPrice - position.entryPrice) * position.volumeLots
+                                 * SimTradeEngine::kOzPerLot
+                           : (position.entryPrice - exitPrice) * position.volumeLots
+                                 * SimTradeEngine::kOzPerLot;
+
+    SimAccount updated = *account;
+    updated.balanceUsdt += position.marginUsdt + pnl;
+    updated.updatedAt = nowStamp();
+    updated.positions.erase(updated.positions.begin() + static_cast<std::ptrdiff_t>(index));
+
+    if (false == SimAccountStore::saveAccount(apiKey, updated))
+    {
+        result.error = QStringLiteral("模拟账户保存失败：%1")
+                           .arg(SimAccountStore::filePath());
+        return result;
+    }
+
+    // Order history: a DB failure must not undo the paper close. Fold the
+    // exit PnL into the excursion extremes first so a manual/external close
+    // records the same maxima as a TP/SL settlement.
+    const double maxProfit = std::max(position.maxFloatingProfitUsd, pnl);
+    const double maxLoss = std::min(position.maxFloatingLossUsd, pnl);
+    SimOrderDb::closeOrder(positionId, exitPrice, pnl, nowStamp(),
+                           maxProfit, maxLoss);
+
+    result.ok = true;
+    result.exitPrice = exitPrice;
+    result.realizedPnl = pnl;
+    result.releasedMargin = position.marginUsdt;
+    return result;
+}
+
+SimTradeEngine::StopsUpdateResult SimTradeEngine::setStops(const QString &apiKey,
+                                                           const QString &positionId,
+                                                           double takeProfit,
+                                                           double stopLoss,
+                                                           double price)
+{
+    StopsUpdateResult result;
+
+    if (takeProfit <= 0.0 || stopLoss <= 0.0)
+    {
+        result.error = QStringLiteral("止盈/止损必须大于 0（TP %1，SL %2）")
+                           .arg(takeProfit, 0, 'f', 2)
+                           .arg(stopLoss, 0, 'f', 2);
+        return result;
+    }
+
+    const auto account = SimAccountStore::load(apiKey);
+    if (false == account.has_value())
+    {
+        result.error = QStringLiteral("未设置模拟账户，请先点击“模拟账户”设置初始余额");
+        return result;
+    }
+
+    std::size_t index = account->positions.size();
+    for (std::size_t i = 0; i < account->positions.size(); ++i)
+    {
+        if (account->positions[i].id == positionId)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index >= account->positions.size())
+    {
+        result.error = QStringLiteral("模拟持仓不存在：%1").arg(positionId);
+        return result;
+    }
+
+    const SimPosition &position = account->positions[index];
+    const bool isLong = (position.side != QStringLiteral("short"));
+    if ((isLong && takeProfit <= stopLoss) || (false == isLong && takeProfit >= stopLoss))
+    {
+        result.error = QStringLiteral("止盈/止损方向无效（%1：TP %2，SL %3）")
+                           .arg(isLong ? QStringLiteral("多") : QStringLiteral("空"))
+                           .arg(takeProfit, 0, 'f', 2)
+                           .arg(stopLoss, 0, 'f', 2);
+        return result;
+    }
+
+    if (takeProfit == position.takeProfit && stopLoss == position.stopLoss)
+    {
+        result.ok = true; // Already at the requested levels — no-op.
+        return result;
+    }
+
+    SimAccount updated = *account;
+    SimPosition &target = updated.positions[index];
+    target.takeProfit = takeProfit;
+    target.stopLoss = stopLoss;
+    updated.updatedAt = nowStamp();
+
+    if (false == SimAccountStore::saveAccount(apiKey, updated))
+    {
+        result.error = QStringLiteral("模拟账户保存失败：%1")
+                           .arg(SimAccountStore::filePath());
+        return result;
+    }
+
+    StopUpdateRecord update;
+    update.orderId = positionId;
+    update.updatedAt = nowStamp();
+    update.takeProfit = takeProfit;
+    update.stopLoss = stopLoss;
+    update.price = price;
+    update.reason = QStringLiteral("external");
+    SimOrderDb::insertStopUpdate(update);
+
+    result.ok = true;
+    result.updatedCount = 1;
+    return result;
 }
 
 } // namespace pulse::ui

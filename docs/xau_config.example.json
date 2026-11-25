@@ -1,0 +1,9 @@
+{
+  "_note": "Copy to the ce directory as xau_config.json and replace the paths. Environment variables XAU_WORK_DIR, XAU_DATA_DIR, PULSETRADER_SIM_DATA_DIR, PULSETRADER_APP_DIR and PULSETRADER_EXE take precedence over this file.",
+  "work_dir": "D:/quant/quantification_platform/ce",
+  "data_dir": "D:/quant/quantification_platform/xau_data",
+  "sim_data_dir": "D:/quant/quantification_platform/xau_data/sim",
+  "sim_app_dir": "D:/quant/pulseTrader/build/apps/pulsetrader_ui",
+  "sim_exe": "D:/quant/pulseTrader/build/apps/pulsetrader_ui/Debug/pulsetrader_ui.exe",
+  "analysis_cadence": "1m_all"
+}

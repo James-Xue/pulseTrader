@@ -132,6 +132,26 @@ QString LoginDialog::apiKey() const
     return m_keyEdit->text().trimmed();
 }
 
+void LoginDialog::setAutoLogin(bool enabled)
+{
+    m_autoLogin = enabled;
+}
+
+bool LoginDialog::autoLogin()
+{
+    if (m_verifying)
+    {
+        return true;
+    }
+    if (apiKey().isEmpty() || apiSecret().isEmpty())
+    {
+        // No remembered credentials: show the normal login form.
+        return false;
+    }
+    onLoginClicked();
+    return true;
+}
+
 QString LoginDialog::apiSecret() const
 {
     return m_secretEdit->text().trimmed();
@@ -195,12 +215,25 @@ void LoginDialog::onVerifyFinished(const VerifyResult &result)
         const QString envPath = CredentialsStore::resolveEnvPath();
         if (false == CredentialsStore::saveToEnvFile(envPath, apiKey(), apiSecret()))
         {
-            // Non-fatal: the engine can still be launched from memory.
-            QMessageBox::warning(this, QStringLiteral("提示"),
-                QStringLiteral("凭证校验通过，但写入 .env 失败（%1）。\n"
-                               "本次会话仍可启动引擎，下次打开将不会自动填入。")
-                    .arg(envPath));
+            // Non-fatal: the engine can still be launched from memory. In
+            // auto-login mode a modal warning would block the launcher, so
+            // keep it silent and continue.
+            if (false == m_autoLogin)
+            {
+                QMessageBox::warning(this, QStringLiteral("提示"),
+                    QStringLiteral("凭证校验通过，但写入 .env 失败（%1）。\n"
+                                   "本次会话仍可启动引擎，下次打开将不会自动填入。")
+                        .arg(envPath));
+            }
         }
+    }
+
+    // Auto-login has no operator in front of the screen: skip the summary
+    // popup (which would block the launcher) and go straight to the window.
+    if (m_autoLogin)
+    {
+        accept();
+        return;
     }
 
     // Summary popup: account identity + balance + current gold price.
