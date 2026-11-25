@@ -135,7 +135,18 @@ Dialog {
                     font.pixelSize: Style.fontSizeSmall
                     color: Style.tertiaryText
                     elide: Text.ElideRight
-                    text: modelData.strategy || modelData.client_order_id || "—"
+                    text: {
+                        // Team fills carry xau_team:<member>:<seq>; show the
+                        // member. Otherwise fall back to the recorded strategy.
+                        const cid = String(modelData.client_order_id || "")
+                        if (cid.indexOf("xau_team:") === 0) {
+                            const parts = cid.split(":")
+                            if (parts.length > 1 && parts[1] !== "") {
+                                return parts[1]
+                            }
+                        }
+                        return modelData.strategy || cid || "—"
+                    }
                 }
             }
         }
