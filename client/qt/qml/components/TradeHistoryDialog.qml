@@ -63,16 +63,6 @@ Dialog {
                         .arg(Number(s.fees || 0).toFixed(2))
                 }
             }
-
-            // Language-neutral zoom controls: no new translatable strings.
-            MacButton {
-                text: "A−"
-                onClicked: root.zoom = Math.max(0.8, root.zoom - 0.1)
-            }
-            MacButton {
-                text: "A+"
-                onClicked: root.zoom = Math.min(1.8, root.zoom + 0.1)
-            }
         }
 
         ListView {
@@ -190,6 +180,24 @@ Dialog {
 
         RowLayout {
             Layout.fillWidth: true
+
+            // Zoom controls live here so they are impossible to miss.
+            MacButton {
+                text: "A−"
+                onClicked: root.zoom = Math.max(0.8, root.zoom - 0.1)
+            }
+            Text {
+                text: Math.round(root.zoom * 100) + "%"
+                color: Style.secondaryText
+                font.pixelSize: Style.fontSizeSmall
+                Layout.preferredWidth: 44
+                horizontalAlignment: Text.AlignHCenter
+            }
+            MacButton {
+                text: "A+"
+                onClicked: root.zoom = Math.min(1.8, root.zoom + 0.1)
+            }
+
             Item { Layout.fillWidth: true }
             MacButton {
                 text: qsTr("Refresh")
