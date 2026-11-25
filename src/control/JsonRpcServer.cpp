@@ -1059,6 +1059,10 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.syncPositions() };
     };
+    reg["get_trade_history"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.tradeHistory(params) };
+    };
     reg["modify_sl_tp"] = [&services](const nlohmann::json &params)
     {
         return RpcResult{ services.modifySlTp(params) };

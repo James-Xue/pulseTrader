@@ -993,6 +993,92 @@ nlohmann::json EngineServices::paramHistory() const
     return arr;
 }
 
+Result<nlohmann::json> EngineServices::tradeHistory(
+    const nlohmann::json &params) const
+{
+#ifdef PULSE_ENABLE_SQLITE
+    if (nullptr == m_tradeRecorder)
+    {
+        return PulseError{ ErrorCode::TradeRecorderNotOpen,
+                           "get_trade_history: trade recorder not wired "
+                           "(SQLite disabled?)" };
+    }
+
+    const std::string symbol = params.value("symbol", std::string{});
+    int limit = params.value("limit", 200);
+    limit = std::max(1, std::min(limit, 1000));
+
+    const auto trades = m_tradeRecorder->getTrades(symbol);
+    if (!ok(trades))
+    {
+        return error(trades);
+    }
+    const auto &all = value(trades);
+
+    // Summary over EVERY matched row, so the headline numbers do not change
+    // when the caller asks for a smaller page.
+    double net = 0.0;
+    double fees = 0.0;
+    int filled = 0;
+    int wins = 0;
+    for (const auto &trade : all)
+    {
+        if ("filled" != trade.final_status)
+        {
+            continue;
+        }
+        ++filled;
+        net += trade.pnl;
+        fees += trade.fees;
+        if (trade.pnl > 0.0)
+        {
+            ++wins;
+        }
+    }
+
+    nlohmann::json rows = nlohmann::json::array();
+    for (auto it = all.rbegin(); it != all.rend() && rows.size()
+             < static_cast<std::size_t>(limit);
+         ++it)
+    {
+        rows.push_back(nlohmann::json{
+            { "order_id", it->order_id },
+            { "client_order_id", it->client_order_id },
+            { "time_ms", it->timestamp_ns / 1'000'000LL },
+            { "symbol", it->symbol },
+            { "side", it->side },
+            { "quantity", it->filled_qty },
+            { "price", it->avg_fill_price },
+            { "fees", it->fees },
+            { "pnl", it->pnl },
+            { "status", it->final_status },
+            { "strategy", it->strategy_name },
+            { "market_type", it->market_type },
+        });
+    }
+
+    const nlohmann::json summary{
+        { "count", static_cast<std::int64_t>(all.size()) },
+        { "filled", filled },
+        { "wins", wins },
+        { "win_rate", (filled > 0) ? static_cast<double>(wins) / filled : 0.0 },
+        { "net_pnl", net },
+        { "fees", fees },
+    };
+
+    return nlohmann::json{
+        { "rows", rows },
+        { "summary", summary },
+        { "simulated", nullptr != m_paperVenue },
+    };
+#else
+    (void)params;
+    return PulseError{ ErrorCode::TradeRecorderNotOpen,
+                       "get_trade_history: this build has no SQLite trade "
+                       "recorder" };
+#endif
+}
+
 Result<nlohmann::json> EngineServices::strategyPerformance(int hours) const
 {
 #ifdef PULSE_ENABLE_SQLITE

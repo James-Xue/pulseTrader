@@ -56,6 +56,10 @@ class EngineController : public QObject
     Q_PROPERTY(QString mode READ mode NOTIFY statusChanged)
     /// True when the engine runs the in-process simulated venue.
     Q_PROPERTY(bool simulated READ simulated NOTIFY statusChanged)
+    /// Trade-history rows from get_trade_history (newest first).
+    Q_PROPERTY(QVariantList tradeHistory READ tradeHistory NOTIFY tradeHistoryChanged)
+    /// Aggregate over every matched row: count/filled/wins/win_rate/net_pnl/fees.
+    Q_PROPERTY(QVariantMap tradeHistorySummary READ tradeHistorySummary NOTIFY tradeHistoryChanged)
     Q_PROPERTY(bool tradingHalted READ tradingHalted NOTIFY statusChanged)
     Q_PROPERTY(QString activeMarket READ activeMarket NOTIFY statusChanged)
     Q_PROPERTY(QStringList symbols READ symbols NOTIFY statusChanged)
@@ -145,6 +149,11 @@ public:
     [[nodiscard]] double engineUptimeSec() const { return m_engineUptimeSec; }
     [[nodiscard]] QString network() const { return m_network; }
     [[nodiscard]] QString mode() const { return m_mode; }
+    [[nodiscard]] QVariantList tradeHistory() const { return m_tradeHistory; }
+    [[nodiscard]] QVariantMap tradeHistorySummary() const { return m_tradeHistorySummary; }
+
+    /// One-shot fetch of the persisted history (opens the dialog).
+    Q_INVOKABLE void fetchTradeHistory();
     [[nodiscard]] bool simulated() const { return m_simulated; }
     [[nodiscard]] bool tradingHalted() const { return m_tradingHalted; }
     [[nodiscard]] QString activeMarket() const { return m_activeMarket; }
@@ -192,6 +201,7 @@ public:
     [[nodiscard]] MarketFilterModel* futuresReports() const { return m_futuresReports; }
 
 signals:
+    void tradeHistoryChanged();
     void connectionStateChanged();
     void statusChanged();
     void lastErrorChanged();
@@ -219,6 +229,7 @@ private:
         Risk,
         StrategyParams,
         GoldTrader,
+        TradeHistory,
     };
 
     void startPolling();
@@ -289,6 +300,8 @@ private:
     QString m_network;
     QString m_mode{ QStringLiteral("live") };
     bool m_simulated{ false };
+    QVariantList m_tradeHistory;
+    QVariantMap m_tradeHistorySummary;
     bool m_tradingHalted = false;
     QString m_activeMarket;
     QStringList m_symbols;

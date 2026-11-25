@@ -258,6 +258,19 @@ nlohmann::json McpServer::toolDefinitions()
         "when, from what to what, via which channel (ai/manual).",
         nlohmann::json::object(), {});
 
+    add("get_trade_history",
+        "Row-level trade history from the trades database (newest first) with "
+        "a summary: count, filled, wins, win rate, net PnL and fees.",
+        nlohmann::json{
+            { "symbol", nlohmann::json{
+                  { "type", "string" },
+                  { "description", "Filter by symbol (empty = all)" } } },
+            { "limit", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "Maximum rows (default 200, max 1000)" } } },
+        },
+        {});
+
     add("get_strategy_performance",
         "Per-strategy trade performance over the last N hours (trades DB): "
         "trade count, total pnl, win rate, fees.",

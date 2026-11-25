@@ -782,7 +782,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../qml/Main.qml" line="27"/>
+        <location filename="../qml/Main.qml" line="28"/>
         <source>pulseTrader</source>
         <translation>pulseTrader</translation>
     </message>
@@ -790,83 +790,83 @@
 <context>
     <name>MarketPage</name>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="191"/>
+        <location filename="../qml/pages/MarketPage.qml" line="209"/>
         <source>or type a symbol</source>
         <translation>或直接输入交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="204"/>
+        <location filename="../qml/pages/MarketPage.qml" line="222"/>
         <source>auto</source>
         <translation>自动</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="231"/>
+        <location filename="../qml/pages/MarketPage.qml" line="249"/>
         <source>Stop</source>
         <translation>停止</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="231"/>
+        <location filename="../qml/pages/MarketPage.qml" line="249"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="440"/>
+        <location filename="../qml/pages/MarketPage.qml" line="508"/>
         <source>bid %1</source>
         <translation>买一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="445"/>
+        <location filename="../qml/pages/MarketPage.qml" line="513"/>
         <source>ask %1</source>
         <translation>卖一 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="472"/>
+        <location filename="../qml/pages/MarketPage.qml" line="557"/>
         <source>Collecting the first 1-second samples…</source>
         <translation>正在采集第一秒数据…</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="473"/>
+        <location filename="../qml/pages/MarketPage.qml" line="558"/>
         <source>Choose a symbol and press Start</source>
         <translation>选择交易对并点击开始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="529"/>
+        <location filename="../qml/pages/MarketPage.qml" line="614"/>
         <source>Show chart</source>
         <translation>显示K线图</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="541"/>
-        <location filename="../qml/pages/MarketPage.qml" line="601"/>
+        <location filename="../qml/pages/MarketPage.qml" line="626"/>
+        <location filename="../qml/pages/MarketPage.qml" line="686"/>
         <source>Terminal</source>
         <translation>命令行</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="558"/>
+        <location filename="../qml/pages/MarketPage.qml" line="643"/>
         <source>Samples %1</source>
         <translation>采样 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="563"/>
+        <location filename="../qml/pages/MarketPage.qml" line="648"/>
         <source>Candles %1</source>
         <translation>K线 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="568"/>
+        <location filename="../qml/pages/MarketPage.qml" line="653"/>
         <source>Period %1s</source>
         <translation>周期 %1 秒</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="573"/>
+        <location filename="../qml/pages/MarketPage.qml" line="658"/>
         <source>Last %1</source>
         <translation>最近 %1</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="593"/>
+        <location filename="../qml/pages/MarketPage.qml" line="678"/>
         <source>Raw</source>
         <translation>原始</translation>
     </message>
     <message>
-        <location filename="../qml/pages/MarketPage.qml" line="601"/>
+        <location filename="../qml/pages/MarketPage.qml" line="686"/>
         <source>Chart</source>
         <translation>K线图</translation>
     </message>
@@ -892,90 +892,95 @@
         <translation>%1 个活动 · %2 条最近</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="102"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="107"/>
         <source>All (%1)</source>
         <translation>全部 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="103"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="108"/>
         <source>Spot (%1)</source>
         <translation>现货 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="104"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="109"/>
         <source>CFD (%1)</source>
         <translation>CFD (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="105"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="110"/>
         <source>Futures (%1)</source>
         <translation>合约 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="115"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="120"/>
         <source>Active (%1)</source>
         <translation>活动 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="116"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="121"/>
         <source>Recent (%1)</source>
         <translation>最近 (%1)</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="90"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="95"/>
         <source>Refresh</source>
         <translation>刷新</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="140"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="236"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="90"/>
+        <source>History</source>
+        <translation>历史</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/OrdersPage.qml" line="145"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="241"/>
         <source>Symbol</source>
         <translation>交易对</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="141"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="146"/>
         <source>Side</source>
         <translation>方向</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="142"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="147"/>
         <source>Type</source>
         <translation>类型</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="143"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="148"/>
         <source>Filled / qty</source>
         <translation>成交 / 委托</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="144"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="237"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="149"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="242"/>
         <source>Status</source>
         <translation>状态</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="145"/>
-        <location filename="../qml/pages/OrdersPage.qml" line="239"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="150"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="244"/>
         <source>Market</source>
         <translation>市场</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="221"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="226"/>
         <source>No active orders</source>
         <translation>暂无活动订单</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="238"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="243"/>
         <source>Fill price</source>
         <translation>成交价</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="240"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="245"/>
         <source>Filled at</source>
         <translation>成交时间</translation>
     </message>
     <message>
-        <location filename="../qml/pages/OrdersPage.qml" line="312"/>
+        <location filename="../qml/pages/OrdersPage.qml" line="317"/>
         <source>No recent fills</source>
         <translation>暂无最近成交</translation>
     </message>
@@ -1411,10 +1416,10 @@
 <context>
     <name>StatusBar</name>
     <message>
+        <location filename="../qml/components/StatusBar.qml" line="40"/>
         <location filename="../tests/tst_translator.cpp" line="71"/>
         <location filename="../tests/tst_translator.cpp" line="86"/>
         <location filename="../tests/tst_translator.cpp" line="108"/>
-        <location filename="../qml/components/StatusBar.qml" line="40"/>
         <source>connected</source>
         <translation>已连接</translation>
     </message>
@@ -1434,9 +1439,92 @@
         <translation>已熔断</translation>
     </message>
     <message>
-        <location filename="../qml/components/StatusBar.qml" line="67"/>
+        <location filename="../qml/components/StatusBar.qml" line="75"/>
+        <source>PAPER</source>
+        <translation>PAPER</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/StatusBar.qml" line="85"/>
         <source>v%1 · %2 · %3</source>
         <translation>v%1 · %2 · %3</translation>
+    </message>
+</context>
+<context>
+    <name>TradeHistoryDialog</name>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="17"/>
+        <source>Trade History</source>
+        <translation>历史交易数据</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="43"/>
+        <source>No trades yet — fills appear here once recorded</source>
+        <translation>暂无交易记录（成交后会自动写入）</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="44"/>
+        <source>%1 trades · %2 filled · win rate %3% · net %4 · fees %5</source>
+        <translation>共 %1 笔 · 成交 %2 笔 · 胜率 %3% · 净盈亏 %4 · 手续费 %5</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="56"/>
+        <source>Time</source>
+        <translation>时间</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="56"/>
+        <source>Symbol</source>
+        <translation>交易对</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="56"/>
+        <source>Side</source>
+        <translation>方向</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="56"/>
+        <source>Qty</source>
+        <translation>数量</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="57"/>
+        <source>Price</source>
+        <translation>价格</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="57"/>
+        <source>PnL</source>
+        <translation>盈亏</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="57"/>
+        <source>Fees</source>
+        <translation>手续费</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="57"/>
+        <source>Status</source>
+        <translation>状态</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="58"/>
+        <source>Strategy</source>
+        <translation>策略</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="156"/>
+        <source>No trades yet</source>
+        <translation>暂无成交</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="163"/>
+        <source>Refresh</source>
+        <translation>刷新</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TradeHistoryDialog.qml" line="167"/>
+        <source>Close</source>
+        <translation>关闭</translation>
     </message>
 </context>
 <context>
@@ -1457,8 +1545,8 @@
         <translation>密码至少需要 %1 个字符。</translation>
     </message>
     <message>
-        <location filename="../tests/tst_translator.cpp" line="87"/>
         <location filename="../src/account/AccountService.cpp" line="134"/>
+        <location filename="../tests/tst_translator.cpp" line="87"/>
         <source>The two passwords do not match.</source>
         <translation>两次输入的密码不一致。</translation>
     </message>
@@ -1502,36 +1590,30 @@
     <name>pulse::client::EngineLauncher</name>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="274"/>
-        <location filename="../src/engine/EngineLauncher.cpp" line="274"/>
         <source>The engine is already running.</source>
         <translation>引擎已在运行。</translation>
     </message>
     <message>
-        <location filename="../src/engine/EngineLauncher.cpp" line="280"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="280"/>
         <source>Invalid control port.</source>
         <translation>控制端口无效。</translation>
     </message>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="288"/>
-        <location filename="../src/engine/EngineLauncher.cpp" line="288"/>
         <source>Engine binary not found. Set PULSE_ENGINE_BIN or build apps/pulsetrader.</source>
         <translation>找不到引擎可执行文件。请设置 PULSE_ENGINE_BIN 或构建 apps/pulsetrader。</translation>
     </message>
     <message>
-        <location filename="../src/engine/EngineLauncher.cpp" line="314"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="314"/>
         <source>Cannot write the engine config: </source>
         <translation>无法写入引擎配置：</translation>
     </message>
     <message>
         <location filename="../src/engine/EngineLauncher.cpp" line="363"/>
-        <location filename="../src/engine/EngineLauncher.cpp" line="363"/>
         <source>The engine failed to start: </source>
         <translation>引擎启动失败：</translation>
     </message>
     <message>
-        <location filename="../src/engine/EngineLauncher.cpp" line="421"/>
         <location filename="../src/engine/EngineLauncher.cpp" line="421"/>
         <source>The engine exited (code %1). See the runtime log.</source>
         <translation>引擎已退出（代码 %1）。请查看运行日志。</translation>
@@ -1542,22 +1624,16 @@
     <message>
         <location filename="../src/security/SecretStore.cpp" line="240"/>
         <location filename="../src/security/SecretStore.cpp" line="407"/>
-        <location filename="../src/security/SecretStore.cpp" line="240"/>
-        <location filename="../src/security/SecretStore.cpp" line="407"/>
         <source>system random generator unavailable</source>
         <translation>系统随机数发生器不可用</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="249"/>
         <location filename="../src/security/SecretStore.cpp" line="349"/>
-        <location filename="../src/security/SecretStore.cpp" line="249"/>
-        <location filename="../src/security/SecretStore.cpp" line="349"/>
         <source>key derivation failed</source>
         <translation>密钥派生失败</translation>
     </message>
     <message>
-        <location filename="../src/security/SecretStore.cpp" line="260"/>
-        <location filename="../src/security/SecretStore.cpp" line="417"/>
         <location filename="../src/security/SecretStore.cpp" line="260"/>
         <location filename="../src/security/SecretStore.cpp" line="417"/>
         <source>encryption failed</source>
@@ -1568,16 +1644,10 @@
         <location filename="../src/security/SecretStore.cpp" line="305"/>
         <location filename="../src/security/SecretStore.cpp" line="387"/>
         <location filename="../src/security/SecretStore.cpp" line="434"/>
-        <location filename="../src/security/SecretStore.cpp" line="279"/>
-        <location filename="../src/security/SecretStore.cpp" line="305"/>
-        <location filename="../src/security/SecretStore.cpp" line="387"/>
-        <location filename="../src/security/SecretStore.cpp" line="434"/>
         <source>cannot open vault: </source>
         <translation>无法打开档案库：</translation>
     </message>
     <message>
-        <location filename="../src/security/SecretStore.cpp" line="286"/>
-        <location filename="../src/security/SecretStore.cpp" line="440"/>
         <location filename="../src/security/SecretStore.cpp" line="286"/>
         <location filename="../src/security/SecretStore.cpp" line="440"/>
         <source>cannot write vault: </source>
@@ -1585,36 +1655,30 @@
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="317"/>
-        <location filename="../src/security/SecretStore.cpp" line="317"/>
         <source>vault is corrupt or not a pulseTrader vault</source>
         <translation>档案库已损坏或不是 pulseTrader 档案库</translation>
     </message>
     <message>
-        <location filename="../src/security/SecretStore.cpp" line="323"/>
         <location filename="../src/security/SecretStore.cpp" line="323"/>
         <source>unsupported vault version</source>
         <translation>不支持的档案库版本</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="331"/>
-        <location filename="../src/security/SecretStore.cpp" line="331"/>
         <source>vault header is corrupt</source>
         <translation>档案库文件头已损坏</translation>
     </message>
     <message>
-        <location filename="../src/security/SecretStore.cpp" line="358"/>
         <location filename="../src/security/SecretStore.cpp" line="358"/>
         <source>wrong password or corrupted vault</source>
         <translation>密码错误或档案库已损坏</translation>
     </message>
     <message>
         <location filename="../src/security/SecretStore.cpp" line="372"/>
-        <location filename="../src/security/SecretStore.cpp" line="372"/>
         <source>vault payload is not valid JSON</source>
         <translation>档案库内容不是有效的 JSON</translation>
     </message>
     <message>
-        <location filename="../src/security/SecretStore.cpp" line="396"/>
         <location filename="../src/security/SecretStore.cpp" line="396"/>
         <source>vault is corrupt</source>
         <translation>档案库已损坏</translation>

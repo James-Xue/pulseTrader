@@ -145,6 +145,15 @@ class EngineServices
     /// Never fatal: exchange failures return a summary with zeros.
     [[nodiscard]] nlohmann::json syncPositions();
 
+    /// Row-level trade history from the trades database (newest first).
+    ///
+    /// Params: `symbol` (empty = all), `limit` (default 200, max 1000).
+    /// Returns `rows` (persisted fills with PnL and fees) and `summary`
+    /// (count / wins / win_rate / net_pnl over every matched row, not just
+    /// the page). Requires PULSE_ENABLE_SQLITE and a wired recorder.
+    [[nodiscard]] Result<nlohmann::json>
+    tradeHistory(const nlohmann::json &params) const;
+
     /// Paper mode only: advance the simulated venue, refresh the engine's
     /// marks from it, and apply venue-initiated exits.
     ///

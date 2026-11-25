@@ -87,6 +87,11 @@ ColumnLayout {
             Item { Layout.fillWidth: true }
 
             MacButton {
+                text: qsTr("History")
+                onClicked: tradeHistoryDialog.open()
+            }
+
+            MacButton {
                 text: qsTr("Refresh")
                 onClicked: if (root.controller) root.controller.refreshAll()
             }
@@ -313,5 +318,10 @@ ColumnLayout {
                 }
             }
         }
+    }
+
+    TradeHistoryDialog {
+        id: tradeHistoryDialog
+        controller: root.controller
     }
 }
