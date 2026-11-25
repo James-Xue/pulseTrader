@@ -127,6 +127,12 @@ void PaperAccountStore::stop()
     m_thread.join();
 }
 
+void PaperAccountStore::detach()
+{
+    stop();
+    m_account = nullptr;
+}
+
 void PaperAccountStore::run(std::stop_token st)
 {
     while (!st.stop_requested())

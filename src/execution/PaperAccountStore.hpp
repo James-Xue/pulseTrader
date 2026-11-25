@@ -59,6 +59,11 @@ class PaperAccountStore
     /// Stop the writer (idempotent).
     void stop();
 
+    /// Stop the writer and forget the account, so the destructor performs no
+    /// further save. Call after the shutdown-time saveNow() and before the
+    /// logger is shut down (a destructor save would log into a dead logger).
+    void detach();
+
     /// Write one snapshot immediately (also used by the shutdown path).
     void saveNow(const PaperAccount &account);
 

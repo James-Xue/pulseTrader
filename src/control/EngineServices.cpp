@@ -506,7 +506,8 @@ EngineServices::EngineServices(
     const std::shared_ptr<market::SymbolRegistry> &registry,
     grid::GridManager *grid,
     core::ParamChangeLog *param_change_log,
-    trade_recorder::TradeRecorder *trade_recorder)
+    trade_recorder::TradeRecorder *trade_recorder,
+    execution::PaperVenue *paper_venue)
     : m_version{ std::move(version) }
     , m_engineStart{ engine_start }
     , m_cfg{ cfg }
@@ -529,6 +530,7 @@ EngineServices::EngineServices(
     , m_restMutex{ rest_mutex }
     , m_paramChangeLog{ param_change_log }
     , m_tradeRecorder{ trade_recorder }
+    , m_paperVenue{ paper_venue }
     , m_displayTz{ parseDisplayTimezone(cfg.control.displayTimezone)
                        .value_or(DisplayTimezone::local()) }
     , m_registry{ registry }
@@ -613,6 +615,40 @@ nlohmann::json EngineServices::account(bool include_spot_balances)
 {
     nlohmann::json j;
     j["available"] = false;
+
+    // Paper mode: the venue IS the account. An in-process snapshot must not
+    // serialize on the shared REST mutex (and the REST path is blocked by the
+    // paper guard anyway).
+    if (nullptr != m_paperVenue)
+    {
+        const auto snapshot = m_paperVenue->accountSnapshot();
+        j["available"] = true;
+        j["total"] = snapshot.futures.cash_usdt
+            + snapshot.futures.locked_margin_usdt
+            + snapshot.futures.unrealized_pnl_usdt;
+        j["available_balance"] = snapshot.futures.cash_usdt;
+        j["unrealised_pnl"] = snapshot.futures.unrealized_pnl_usdt;
+        j["position_margin"] = snapshot.futures.locked_margin_usdt;
+        j["order_margin"] = 0.0;
+        j["currency"] = "USDT";
+        j["spot"] = {
+            { "available", snapshot.spot.cash_usdt },
+            { "total", snapshot.spot.cash_usdt
+                           + snapshot.spot.locked_margin_usdt },
+            { "currency", "USDT" },
+        };
+        j["cfd"] = {
+            { "total", snapshot.cfd.cash_usdt + snapshot.cfd.locked_margin_usdt
+                           + snapshot.cfd.unrealized_pnl_usdt },
+            { "available", snapshot.cfd.cash_usdt },
+            { "margin", snapshot.cfd.locked_margin_usdt },
+            { "unrealised_pnl", snapshot.cfd.unrealized_pnl_usdt },
+            { "currency", "USD" },
+        };
+        j["simulated"] = true;
+        j["mode"] = "paper";
+        return j;
+    }
 
     std::lock_guard lock(m_restMutex);
 
@@ -1426,7 +1462,7 @@ EngineServices::openOrder(const nlohmann::json &params)
     if (MarketType::Cfd == req.market_type && req.sl_price.has_value()
         && m_cfg.risk.minAvailableAfterStopUsd.has_value()
         && m_cfg.risk.minAvailableAfterStopUsd.value() > 0.0
-        && nullptr != m_cfdRest)
+        && (nullptr != m_cfdRest || nullptr != m_paperVenue))
     {
         // Reference entry: the limit price when given, else the latest
         // CFD ticker (best effort for market orders).
@@ -1443,6 +1479,12 @@ EngineServices::openOrder(const nlohmann::json &params)
             }
         }
         double cfd_available = 0.0;
+        if (nullptr != m_paperVenue)
+        {
+            cfd_available =
+                m_paperVenue->freeMargin(execution::PaperLeg::Cfd);
+        }
+        else
         {
             std::lock_guard lock(m_restMutex);
             auto cfd = m_cfdRest->getCfdAssets();
@@ -1604,33 +1646,53 @@ EngineServices::closePosition(const nlohmann::json &params)
                       "by id)" };
         }
         const double close_qty = params.value("quantity", pos.quantity);
-        const int close_type = (close_qty >= pos.quantity - 1e-9) ? 2 : 1;
-        Result<nlohmann::json> res;
+        // Paper mode: the venue is the exchange. It performs the ledger close
+        // and returns the fill price; no REST call and no business-error body.
+        double venue_exit_price = 0.0;
+        if (nullptr != m_paperVenue)
         {
-            std::lock_guard lock(m_restMutex);
-            res = m_cfdRest->postCfdPositionClose(exchange_pid, close_type, close_qty);
+            const auto venue_close = m_paperVenue->closeCfdPosition(
+                exchange_pid, close_qty, pos.quantity);
+            if (!ok(venue_close))
+            {
+                return PulseError{ error(venue_close).code,
+                                   "paper CFD close failed for " + position_id
+                                       + ": " + error(venue_close).message };
+            }
+            venue_exit_price = value(venue_close).exit_price;
         }
-        if (!ok(res))
+        else
         {
-            return PulseError{ error(res).code,
-                               "CFD close failed for " + position_id + ": "
-                                   + error(res).message };
-        }
+            const int close_type = (close_qty >= pos.quantity - 1e-9) ? 2 : 1;
+            Result<nlohmann::json> res;
+            {
+                std::lock_guard lock(m_restMutex);
+                res = m_cfdRest->postCfdPositionClose(exchange_pid, close_type, close_qty);
+            }
+            if (!ok(res))
+            {
+                return PulseError{ error(res).code,
+                                   "CFD close failed for " + position_id + ": "
+                                       + error(res).message };
+            }
 
-        // A 2xx TradFi body can still be a business rejection
-        // ({"label","message"}). Treating it as a fill would erase the local
-        // position while the exchange still holds it — the gold trader's
-        // stop would then silently disappear.
-        if (auto business_error =
-                execution::OrderExecutor::cfdBusinessError(value(res)))
-        {
-            return PulseError{ business_error->code,
-                               "CFD close rejected for " + position_id + ": "
-                                   + business_error->message };
+            // A 2xx TradFi body can still be a business rejection
+            // ({"label","message"}). Treating it as a fill would erase the local
+            // position while the exchange still holds it — the gold trader's
+            // stop would then silently disappear.
+            if (auto business_error =
+                    execution::OrderExecutor::cfdBusinessError(value(res)))
+            {
+                return PulseError{ business_error->code,
+                                   "CFD close rejected for " + position_id + ": "
+                                       + business_error->message };
+            }
         }
-        // Local bookkeeping: exit at the latest known price (best effort).
-        const double exit_price = pos.current_price > 0.0
-                                      ? pos.current_price : pos.entry_price;
+        // Local bookkeeping. Paper uses the venue's fill; live falls back to
+        // the latest known price (best effort).
+        const double exit_price = (venue_exit_price > 0.0)
+            ? venue_exit_price
+            : (pos.current_price > 0.0 ? pos.current_price : pos.entry_price);
         const auto pnl = m_positionMgr.closePosition(
             position_id, close_qty, exit_price);
         const double realized = pnl.has_value() ? pnl.value() : 0.0;
@@ -1892,8 +1954,11 @@ double EngineServices::futuresPriceTick(const std::string &contract)
 
 int EngineServices::ensureFuturesStops()
 {
-    // 1. Feature gate: opt-in and requires a futures REST client.
-    if (!m_cfg.risk.exchange_stop.enabled || nullptr == m_futuresRest)
+    // 1. Feature gate: opt-in, a futures REST client, and NOT paper mode
+    //    (the venue holds no exchange-side triggers; calling REST here would
+    //    hit the paper guard on every loop iteration).
+    if (!m_cfg.risk.exchange_stop.enabled || nullptr == m_futuresRest
+        || nullptr != m_paperVenue)
     {
         return 0;
     }
@@ -2641,6 +2706,15 @@ nlohmann::json EngineServices::syncPositions()
         { "error", nullptr },
     };
 
+    if (nullptr != m_paperVenue)
+    {
+        // Paper mode: the venue is authoritative. Running the REST sync here
+        // would see an empty exchange and feed pruneGhostPositions, which
+        // liquidates every paper position after the 60 s grace.
+        summary["simulated"] = true;
+        return summary;
+    }
+
     if (m_futuresRest)
     {
         summary["futures_synced"] = syncFuturesPositionsFromExchange();
@@ -2653,6 +2727,96 @@ nlohmann::json EngineServices::syncPositions()
     }
 
     return summary;
+}
+
+void EngineServices::tickPaperVenue(std::int64_t now_ms)
+{
+    if (nullptr == m_paperVenue)
+    {
+        return;
+    }
+
+    // 1. Advance the venue: resting-order matching, protective stops and the
+    //    stop-out check all happen against fresh marks.
+    m_paperVenue->tick(now_ms);
+
+    // 2. Refresh the engine's marks. Without this a paper Position keeps
+    //    current_price == entry forever: the gold-trader updater is disabled,
+    //    protective exits are off and the exchange sync is short-circuited.
+    for (const auto &pos : m_positionMgr.getAllPositions())
+    {
+        if (MarketType::Cfd != pos.market_type)
+        {
+            continue;
+        }
+        const auto mark = m_paperVenue->markFor(pos.symbol, MarketType::Cfd);
+        if (mark.has_value() && mark->price > 0.0)
+        {
+            m_positionMgr.updatePrice(pos.position_id, mark->price);
+        }
+    }
+
+    // 3. Apply venue-initiated exits. Order matters: close PositionManager
+    //    FIRST, then recordExternalClose (which only audits). Reversing it
+    //    would leave the position open and double-count the PnL.
+    for (const auto &event : m_paperVenue->drainExitEvents())
+    {
+        const auto positions = m_positionMgr.getAllPositions();
+        const auto it = std::find_if(
+            positions.begin(), positions.end(),
+            [&event](const risk::Position &pos)
+            { return pos.exchange_position_id == event.exchange_position_id; });
+        if (it == positions.end())
+        {
+            PULSE_LOG_WARN("control",
+                           "paper exit for unknown venue position {} "
+                           "(reason={})",
+                           event.exchange_position_id,
+                           static_cast<int>(event.reason));
+            continue;
+        }
+
+        const auto pnl = m_positionMgr.closePosition(
+            it->position_id, event.closed_qty, event.fill_price);
+        if (!pnl.has_value())
+        {
+            PULSE_LOG_WARN("control",
+                           "paper exit closePosition failed for {} "
+                           "(already closed?)",
+                           it->position_id);
+            continue;
+        }
+
+        execution::ExecutionReport report;
+        ++m_paperExitSeq;
+        report.order_id = "paper_exit_" + event.exchange_position_id + "_"
+            + std::to_string(m_paperExitSeq);
+        report.client_order_id = report.order_id;
+        report.symbol = event.symbol;
+        report.side = opposite(event.position_side);
+        report.type = OrderType::Market;
+        report.requested_qty = event.closed_qty;
+        report.filled_qty = event.closed_qty;
+        report.avg_fill_price = event.fill_price;
+        report.submit_mid_price = event.fill_price;
+        report.slippage_bps = 0.0;
+        report.fees = event.fee;
+        report.latency = std::chrono::milliseconds{ 0 };
+        report.submit_time = event.fill_time;
+        report.fill_time = event.fill_time;
+        report.final_status = OrderStatus::Filled;
+        report.exchange_position_id = event.exchange_position_id;
+
+        m_orderFlow.recordExternalClose(report, pnl.value(),
+                                        it->market_type, it->leverage);
+
+        PULSE_LOG_INFO("control",
+                       "paper exit {} lots={:.2f} @ {:.2f} pnl={:.2f} "
+                       "reason={}",
+                       event.exchange_position_id, event.closed_qty,
+                       event.fill_price, pnl.value(),
+                       static_cast<int>(event.reason));
+    }
 }
 
 Result<nlohmann::json> EngineServices::modifySlTp(const nlohmann::json &params)
@@ -2728,6 +2892,42 @@ Result<nlohmann::json> EngineServices::modifySlTp(const nlohmann::json &params)
         return PulseError{ ErrorCode::InternalError,
                            "modify_sl_tp: position " + position_id
                                + " has no exchange position id" };
+    }
+
+    // Paper mode: the venue owns the protective prices. Resolve an omitted
+    // field from the venue book (not the engine copy) because the update
+    // rewrites both prices, then apply it and keep PositionManager in sync.
+    if (nullptr != m_paperVenue)
+    {
+        double venue_sl = has_sl ? params["sl_price"].get<double>() : 0.0;
+        double venue_tp = has_tp ? params["tp_price"].get<double>() : 0.0;
+        if (!has_sl || !has_tp)
+        {
+            const auto stops =
+                m_paperVenue->cfdStopState(pos.exchange_position_id);
+            if (!stops.has_value())
+            {
+                return PulseError{ ErrorCode::PositionLimitHit,
+                                   "modify_sl_tp: paper venue has no position "
+                                       + position_id };
+            }
+            if (!has_sl)
+            {
+                venue_sl = stops->sl_price;
+            }
+            if (!has_tp)
+            {
+                venue_tp = stops->tp_price;
+            }
+        }
+        const auto venue_result = m_paperVenue->modifyCfdStops(
+            pos.exchange_position_id, venue_sl, venue_tp);
+        if (!ok(venue_result))
+        {
+            return error(venue_result);
+        }
+        m_positionMgr.updateExchangeStops(position_id, venue_sl, venue_tp);
+        return value(venue_result);
     }
 
     // Omitted fields keep the currently attached value ("0" = no stop). The

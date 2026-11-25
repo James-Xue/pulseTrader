@@ -442,7 +442,7 @@ minAvailableAfterStopUsd = 6.0   # M22: CFD 带 SL 开仓后可用-保证金-止
 # unless this is enabled: the caller owns its software exit, so this trigger is
 # the only floor left if the GT process dies. 5% from entry is deliberately
 # wider than a 1h strategy stop so it never competes with the caller's exit.
-exchange_stop_enabled = true
+exchange_stop_enabled = false   # paper: the venue has no exchange-side triggers
 exchange_stop_pct     = 0.05
 
 [risk.stop_loss]

@@ -64,34 +64,48 @@ const PaperAccount::Wallet &PaperAccount::wallet(PaperLeg leg) const noexcept
 
 namespace
 {
-PaperWalletSnapshot snapshotOf(const auto &w)
+PaperWalletSnapshot snapshotOf(const auto &w, double unrealized)
 {
     PaperWalletSnapshot s;
     s.cash_usdt = w.cash;
     s.locked_margin_usdt = w.locked_margin;
     s.realized_pnl_usdt = w.realized_pnl;
     s.fees_paid_usdt = w.fees_paid;
+    s.unrealized_pnl_usdt = unrealized;
     s.margin_free_usdt = w.cash;
     return s;
 }
 } // namespace
 
-PaperAccountSnapshot PaperAccount::snapshot(double unrealized_pnl) const
+PaperAccountSnapshot PaperAccount::snapshot(double spot_unrealized,
+                                            double futures_unrealized,
+                                            double cfd_unrealized) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     PaperAccountSnapshot s;
     s.account_id = m_accountId;
-    s.unrealized_pnl_usdt = unrealized_pnl;
-    s.spot = snapshotOf(m_spot);
-    s.futures = snapshotOf(m_futures);
-    s.cfd = snapshotOf(m_cfd);
+    s.unrealized_pnl_usdt =
+        spot_unrealized + futures_unrealized + cfd_unrealized;
+    s.spot = snapshotOf(m_spot, spot_unrealized);
+    s.futures = snapshotOf(m_futures, futures_unrealized);
+    s.cfd = snapshotOf(m_cfd, cfd_unrealized);
     s.equity_usdt = m_spot.cash + m_spot.locked_margin + m_futures.cash
         + m_futures.locked_margin + m_cfd.cash + m_cfd.locked_margin
-        + unrealized_pnl;
+        + s.unrealized_pnl_usdt;
     s.peak_equity_usdt = m_peakEquity;
     s.daily_start_equity_usdt = m_dailyStartEquity;
     return s;
+}
+
+void PaperAccount::releaseOrphanedMargin()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (Wallet *w : { &m_spot, &m_futures, &m_cfd })
+    {
+        w->cash += w->locked_margin;
+        w->locked_margin = 0.0;
+    }
 }
 
 bool PaperAccount::canAfford(PaperLeg leg, double amount) const

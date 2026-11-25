@@ -47,6 +47,7 @@ struct PaperWalletSnapshot
     double locked_margin_usdt{ 0.0 }; ///< Margin held by open positions.
     double realized_pnl_usdt{ 0.0 };  ///< Net realized PnL since seeding.
     double fees_paid_usdt{ 0.0 };     ///< Cumulative fees/commissions.
+    double unrealized_pnl_usdt{ 0.0 };///< Supplied by the venue (runtime only).
     double margin_free_usdt{ 0.0 };   ///< cash_usdt (alias for clarity).
 };
 
@@ -74,9 +75,19 @@ class PaperAccount
     /// Seed every leg with `cfg.initial_balance_usdt` and adopt the fee model.
     explicit PaperAccount(const PaperConfig &cfg);
 
-    /// Current snapshot. `unrealized_pnl` is supplied by the venue (it owns the
-    /// marks); the ledger does not compute it.
-    [[nodiscard]] PaperAccountSnapshot snapshot(double unrealized_pnl = 0.0) const;
+    /// Current snapshot. Unrealized PnL is supplied per leg by the venue (it
+    /// owns the marks); the ledger never computes it.
+    [[nodiscard]] PaperAccountSnapshot snapshot(double spot_unrealized = 0.0,
+                                                double futures_unrealized = 0.0,
+                                                double cfd_unrealized = 0.0) const;
+
+    /// Move every leg's locked margin back into free cash.
+    ///
+    /// Recovery path only: v1 of the state store persists wallets but not
+    /// venue positions, so a restart after an open paper position leaves
+    /// locked margin with no position behind it. The caller invokes this once
+    /// when it starts a venue with an empty book.
+    void releaseOrphanedMargin();
 
     /// True when the leg can pay `amount` of margin + fee.
     [[nodiscard]] bool canAfford(PaperLeg leg, double amount) const;

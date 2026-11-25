@@ -17,6 +17,7 @@
 #include "exchange/GateRestClient.hpp"
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
+#include "execution/PaperVenue.hpp"
 #include "market/MarketFeed.hpp"
 #include "market/SymbolRegistry.hpp"
 #include "risk/PositionManager.hpp"
@@ -98,7 +99,8 @@ class EngineServices
                        nullptr,
                    grid::GridManager *grid = nullptr,
                    core::ParamChangeLog *param_change_log = nullptr,
-                   trade_recorder::TradeRecorder *trade_recorder = nullptr);
+                   trade_recorder::TradeRecorder *trade_recorder = nullptr,
+                   execution::PaperVenue *paper_venue = nullptr);
 
     // --- Queries (each returns ready-to-serialize JSON) ---
     [[nodiscard]] nlohmann::json status() const;
@@ -142,6 +144,13 @@ class EngineServices
     /// closes). Runs at startup, on a ~10s background tick, and on demand.
     /// Never fatal: exchange failures return a summary with zeros.
     [[nodiscard]] nlohmann::json syncPositions();
+
+    /// Paper mode only: advance the simulated venue, refresh the engine's
+    /// marks from it, and apply venue-initiated exits.
+    ///
+    /// No-op when no venue is attached. Must run on the main thread; it takes
+    /// no locks itself and tolerates "no marks yet".
+    void tickPaperVenue(std::int64_t now_ms);
 
     /// Dynamically adjust the protective stops on an open CFD position —
     /// `modify_sl_tp` (exchange-native price_sl/price_tp, "0" clears a stop).
@@ -474,6 +483,10 @@ class EngineServices
     std::mutex &m_restMutex;
     core::ParamChangeLog *m_paramChangeLog{ nullptr }; ///< Audit (nullable).
     trade_recorder::TradeRecorder *m_tradeRecorder{ nullptr }; ///< Stats (nullable).
+    /// In-process simulated exchange (nullable). Null = live Gate path.
+    execution::PaperVenue *m_paperVenue{ nullptr };
+    /// Monotonic counter for synthesized paper-exit report ids.
+    std::uint64_t m_paperExitSeq{ 0 };
 
     /// Display timezone for human-readable *_str timestamps in JSON output
     /// (from [control] display_timezone; default = machine local time).

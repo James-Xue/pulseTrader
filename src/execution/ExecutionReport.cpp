@@ -32,7 +32,10 @@ nlohmann::json ExecutionReport::to_json() const
         { "final_status",
             final_status == OrderStatus::Filled    ? "filled"
             : final_status == OrderStatus::Cancelled ? "cancelled"
-                                                     : "unknown" }
+                                                     : "unknown" },
+        // TradFi CFD only ("" elsewhere). Needed so a close/exit report can be
+        // correlated with the position it closed.
+        { "exchange_position_id", exchange_position_id }
     };
 }
 

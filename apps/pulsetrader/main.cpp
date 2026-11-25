@@ -45,6 +45,9 @@
 #include "risk/RiskManager.hpp"
 #include "execution/OrderExecutor.hpp"
 #include "execution/OrderTracker.hpp"
+#include "execution/PaperAccount.hpp"
+#include "execution/PaperAccountStore.hpp"
+#include "execution/PaperVenue.hpp"
 #include "strategy/StrategyManager.hpp"
 #include "strategy/StrategyRegistry.hpp"
 #include "strategy/signal/SignalAggregator.hpp"
@@ -965,6 +968,42 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
     const auto cfd_symbols = has_cfd
         ? symbols_for(MarketType::Cfd) : std::vector<std::string>{};
 
+    // Paper-mode composition. Declaration order is load-bearing: account ->
+    // venue -> store, so destruction runs store (final save) -> venue ->
+    // account, and no component outlives what it references.
+    std::unique_ptr<pulse::execution::PaperAccount> paper_account;
+    std::unique_ptr<pulse::execution::PaperVenue> paper_venue;
+    std::unique_ptr<pulse::execution::PaperAccountStore> paper_store;
+    if (paper_mode)
+    {
+        paper_account =
+            std::make_unique<pulse::execution::PaperAccount>(cfg.paper);
+        paper_venue = std::make_unique<pulse::execution::PaperVenue>(
+            cfg.paper,
+            std::vector<pulse::Symbol>(cfd_symbols.begin(), cfd_symbols.end()),
+            *paper_account);
+        paper_store = std::make_unique<pulse::execution::PaperAccountStore>(
+            cfg.paper.state_file, cfg.paper.snapshot_interval_ms);
+
+        const auto loaded = paper_store->load(*paper_account);
+        if (pulse::execution::PaperStoreLoad::Corrupt == loaded)
+        {
+            log->critical("paper state is corrupt; refusing to start (fix or "
+                          "remove {})",
+                          cfg.paper.state_file);
+            return 1;
+        }
+        if (pulse::execution::PaperStoreLoad::FirstRun == loaded)
+        {
+            log->warn("paper ledger seeded with {:.2f} USDT per leg",
+                      cfg.paper.initial_balance_usdt);
+        }
+        // v1 persists wallets but not venue positions: a restart after an open
+        // position would otherwise leave locked margin with nothing behind it.
+        paper_account->releaseOrphanedMargin();
+        paper_store->start(*paper_account);
+    }
+
     // Spot infrastructure.
     std::unique_ptr<pulse::exchange::GateRestClient> spot_rest;
     std::unique_ptr<pulse::exchange::GateWsClient>   spot_ws;
@@ -983,7 +1022,7 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
     std::unique_ptr<pulse::exchange::GateRestClient> cfd_rest;
     std::unique_ptr<pulse::market::MarketFeed>       cfd_feed;
     std::unique_ptr<pulse::execution::OrderExecutor>  cfd_executor;
-    std::unique_ptr<pulse::execution::OrderTracker>   cfd_tracker;
+    std::unique_ptr<pulse::execution::IOrderTracker>  cfd_tracker;
 
     if (has_spot)
     {
@@ -1041,6 +1080,39 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         cfd_tracker = std::make_unique<pulse::execution::OrderTracker>(
             nullptr, *cfd_rest, MarketType::Cfd, /*enable_ws=*/false);
         log->info("[L1] TradFi CFD exchange clients created (REST poll mode)");
+    }
+
+    if (paper_venue)
+    {
+        // Pull-based marks: a sink would fight MarketRecorder for the feed's
+        // single sink slot, and a provider is immune to main-loop stalls.
+        paper_venue->setMarkProvider(
+            [&cfd_feed, &cfg](const pulse::Symbol &symbol, pulse::MarketType)
+                -> std::optional<pulse::execution::PaperMark>
+            {
+                if (!cfd_feed)
+                {
+                    return std::nullopt;
+                }
+                const auto ticker = cfd_feed->tickerCache().get(symbol);
+                if (!ticker.has_value() || ticker->last <= 0.0
+                    || ticker->timestamp <= 0)
+                {
+                    return std::nullopt;
+                }
+                const auto now_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+                if (now_ms - ticker->timestamp > cfg.paper.max_mark_age_ms)
+                {
+                    return std::nullopt;
+                }
+                return pulse::execution::PaperMark{ ticker->last,
+                                                    ticker->timestamp,
+                                                    ticker->bid, ticker->ask };
+            });
+        log->info("[L1] Paper venue marks wired to the CFD ticker cache");
     }
 
     // Balance-only REST clients for markets with no strategies configured.
@@ -1434,7 +1506,7 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         futures_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
             *futures_executor);
     }
-    if (cfd_executor)
+    if (cfd_executor && !paper_mode)
     {
         cfd_placer_impl = std::make_unique<pulse::control::ExecutorOrderPlacer>(
             *cfd_executor);
@@ -1446,10 +1518,14 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         drawdownGuard,
         spot_placer_impl ? spot_placer_impl.get() : nullptr,
         futures_placer_impl ? futures_placer_impl.get() : nullptr,
-        cfd_placer_impl ? cfd_placer_impl.get() : nullptr,
+        paper_venue
+            ? static_cast<pulse::execution::IOrderPlacer *>(paper_venue.get())
+            : (cfd_placer_impl ? cfd_placer_impl.get() : nullptr),
         spot_tracker.get(),
         futures_tracker.get(),
-        cfd_tracker.get(),
+        paper_venue
+            ? static_cast<pulse::execution::IOrderTracker *>(paper_venue.get())
+            : cfd_tracker.get(),
         spot_feed ? &spot_feed->orderbookManager() : nullptr,
         futures_feed ? &futures_feed->orderbookManager() : nullptr,
         rest_mutex
@@ -1508,6 +1584,26 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
             log->warn("[L1] CFD symbol metadata load failed — CFD notional "
                       "falls back to qty x price (lots treated as units)");
         }
+    }
+    if (paper_venue && symbol_registry)
+    {
+        // The authenticated /tradfi/symbols/detail load is blocked in paper,
+        // so XAUUSD's quanto would stay 1.0 and every notional would be 100x
+        // off. Seed from [paper.contract_volume] / [paper.price_tick].
+        for (const auto &entry : cfg.paper.contract_volume)
+        {
+            pulse::market::SymbolInfo info{};
+            info.symbol = entry.first;
+            info.quanto_multiplier = entry.second;
+            const auto tick = cfg.paper.price_tick.find(entry.first);
+            info.tick_size =
+                (cfg.paper.price_tick.end() != tick) ? tick->second : 0.0;
+            info.trading_enabled = true;
+            info.market_type = pulse::MarketType::Cfd;
+            symbol_registry->upsert(info);
+        }
+        log->info("[L1] Paper venue seeded {} CFD contract size(s)",
+                  cfg.paper.contract_volume.size());
     }
     if (symbol_registry)
     {
@@ -1591,14 +1687,17 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         cfd_rest.get(),
         spot_tracker.get(),
         futures_tracker.get(),
-        cfd_tracker.get(),
+        paper_venue
+            ? static_cast<pulse::execution::IOrderTracker *>(paper_venue.get())
+            : cfd_tracker.get(),
         order_flow,
         *board,
         rest_mutex,
         symbol_registry,
         &grid_mgr,
         &param_change_log,
-        trade_recorder_ptr);
+        trade_recorder_ptr,
+        paper_venue.get());
 
     // Reconcile positions that already exist on the exchange (previous
     // engine run, manual trading) so risk limits and displays reflect the
@@ -2314,6 +2413,17 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
+        // Paper venue: advance matching/stops and apply venue exits BEFORE
+        // the maker sweep (which can re-issue a market order).
+        if (paper_venue)
+        {
+            const auto now_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+            services.tickPaperVenue(now_ms);
+        }
+
         // Maker-first sweep: cancel expired post-only attempts and re-issue
         // the remainder as market orders. Takes rest_mutex internally — the
         // loop body holds no locks at this point (logSystemHeartbeat locks
@@ -2512,6 +2622,16 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         log->info("[L8+] Trade recorder closed ({} trades recorded)", count);
     }
 #endif
+
+    if (paper_store)
+    {
+        paper_store->stop();
+        if (paper_account)
+        {
+            paper_store->saveNow(*paper_account);
+        }
+        paper_store->detach();
+    }
 
     log->info("pulseTrader stopped. Goodbye.");
 

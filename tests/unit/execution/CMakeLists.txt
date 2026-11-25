@@ -5,6 +5,7 @@ add_executable(test_execution_unit
     test_exchange_stop_plan.cpp
     test_paper_account.cpp
     test_paper_account_store.cpp
+    test_paper_venue.cpp
 )
 
 target_link_libraries(test_execution_unit
