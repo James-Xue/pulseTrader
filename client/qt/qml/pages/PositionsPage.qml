@@ -116,7 +116,7 @@ ColumnLayout {
                 Text {
                     text: model.unrealized_pnl === undefined ? ""
                           : Number(model.unrealized_pnl).toFixed(2)
-                    color: Number(model.unrealized_pnl) >= 0 ? Style.success : Style.danger
+                    color: Number(model.unrealized_pnl) >= 0 ? Style.danger : Style.success
                     font.pixelSize: 12
                     Layout.preferredWidth: 100
                 }

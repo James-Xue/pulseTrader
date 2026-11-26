@@ -452,7 +452,7 @@ ColumnLayout {
                     }
                     Text {
                         text: Number(modelData.pnl || 0).toFixed(2)
-                        color: Number(modelData.pnl || 0) >= 0 ? Style.success : Style.danger
+                        color: Number(modelData.pnl || 0) >= 0 ? Style.danger : Style.success
                         font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         horizontalAlignment: Text.AlignRight
