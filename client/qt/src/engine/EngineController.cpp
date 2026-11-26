@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QMap>
 #include <QSettings>
 #include <QVariantMap>
 
@@ -173,6 +174,12 @@ EngineController::EngineController(QObject* parent)
         {
             pollPositions();
             pollOrders();
+            // The Team page requests history on construction, typically
+            // before this socket is Ready; honour that request now.
+            if (m_tradeHistoryRequested)
+            {
+                fetchTradeHistory();
+            }
         }
     });
     connect(m_slow, &RpcClient::stateChanged, this, [this](RpcClient::State state)
@@ -417,6 +424,7 @@ void EngineController::pollAccount()
 
 void EngineController::fetchTradeHistory()
 {
+    m_tradeHistoryRequested = true;
     if (RpcClient::State::Ready != m_rest->state()
         || isInFlight(PollKind::TradeHistory))
     {
@@ -559,6 +567,9 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         m_mode = result.value(QStringLiteral("mode")).toString(
             QStringLiteral("live"));
         m_simulated = result.value(QStringLiteral("simulated")).toBool();
+        m_paperStatus = result.value(QStringLiteral("paper"))
+                            .toObject()
+                            .toVariantMap();
         m_tradingHalted = result.value(QStringLiteral("trading_halted")).toBool();
         m_activeMarket = result.value(QStringLiteral("active_market")).toString();
         m_openPositions = result.value(QStringLiteral("open_positions")).toInt();
@@ -580,6 +591,7 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         m_symbols = list;
 
         setLastError(QString());
+        rebuildTeam();
         emit statusChanged();
         break;
     }
@@ -591,11 +603,16 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
                                     .toObject()
                                     .toVariantMap();
         setLastError(QString());
+        rebuildTeam();
         emit tradeHistoryChanged();
         break;
     case PollKind::Positions:
         m_positionsModel->setRows(result.value(QStringLiteral("positions")).toArray());
+        m_positionsRaw = result.value(QStringLiteral("positions"))
+                             .toArray()
+                             .toVariantList();
         setLastError(QString());
+        rebuildTeam();
         break;
     case PollKind::Orders:
         m_ordersModel->setRows(result.value(QStringLiteral("activeOrders")).toArray());
@@ -649,6 +666,125 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         break;
     }
     }
+}
+
+void EngineController::rebuildTeam()
+{
+    // External traders are attributed by the client_order_id prefix the GT
+    // runtime writes: `xau_team:<member>:<seq>`. PT records it as the
+    // position's strategy_id and as the history row's client_order_id, so the
+    // same parser serves both. Rows without the prefix (engine strategies,
+    // venue exits) are deliberately excluded.
+    struct Row
+    {
+        QString member;
+        int openPositions = 0;
+        double notional = 0.0;
+        double unrealized = 0.0;
+        int entries = 0;
+        qint64 lastEntryMs = 0;
+        QStringList symbols;
+    };
+
+    const auto memberOf = [](const QString& id) -> QString
+    {
+        static const QString prefix = QStringLiteral("xau_team:");
+        if (!id.startsWith(prefix))
+        {
+            return {};
+        }
+        const QString rest = id.mid(prefix.size());
+        const int colon = rest.indexOf(QLatin1Char(':'));
+        return colon > 0 ? rest.left(colon) : rest;
+    };
+
+    QMap<QString, Row> byMember;
+
+    for (const QVariant& value : m_positionsRaw)
+    {
+        const QVariantMap position = value.toMap();
+        const QString member = memberOf(
+            position.value(QStringLiteral("strategy_id")).toString());
+        if (member.isEmpty())
+        {
+            continue;
+        }
+        Row& row = byMember[member];
+        row.member = member;
+        ++row.openPositions;
+        row.notional +=
+            position.value(QStringLiteral("notional_value")).toDouble();
+        row.unrealized +=
+            position.value(QStringLiteral("unrealized_pnl")).toDouble();
+        const QString symbol =
+            position.value(QStringLiteral("symbol")).toString();
+        if (!symbol.isEmpty() && !row.symbols.contains(symbol))
+        {
+            row.symbols.append(symbol);
+        }
+    }
+
+    for (const QVariant& value : m_tradeHistory)
+    {
+        const QVariantMap fill = value.toMap();
+        const QString member = memberOf(
+            fill.value(QStringLiteral("client_order_id")).toString());
+        if (member.isEmpty())
+        {
+            continue;
+        }
+        Row& row = byMember[member];
+        row.member = member;
+        ++row.entries;
+        const qint64 timeMs =
+            fill.value(QStringLiteral("time_ms")).toLongLong();
+        if (timeMs > row.lastEntryMs)
+        {
+            row.lastEntryMs = timeMs;
+        }
+    }
+
+    QVariantList rows;
+    int openPositions = 0;
+    int entries = 0;
+    double notional = 0.0;
+    double unrealized = 0.0;
+    for (const Row& row : byMember)
+    {
+        QVariantMap item;
+        item[QStringLiteral("member")] = row.member;
+        item[QStringLiteral("open_positions")] = row.openPositions;
+        item[QStringLiteral("notional")] = row.notional;
+        item[QStringLiteral("unrealized_pnl")] = row.unrealized;
+        item[QStringLiteral("entries")] = row.entries;
+        item[QStringLiteral("last_entry_ms")] = row.lastEntryMs;
+        item[QStringLiteral("symbols")] =
+            row.symbols.join(QStringLiteral(", "));
+        rows.append(item);
+
+        openPositions += row.openPositions;
+        entries += row.entries;
+        notional += row.notional;
+        unrealized += row.unrealized;
+    }
+
+    QVariantMap summary;
+    summary[QStringLiteral("members")] = rows.size();
+    summary[QStringLiteral("open_positions")] = openPositions;
+    summary[QStringLiteral("notional")] = notional;
+    summary[QStringLiteral("unrealized_pnl")] = unrealized;
+    summary[QStringLiteral("entries")] = entries;
+    summary[QStringLiteral("mode")] = m_mode;
+    summary[QStringLiteral("equity")] =
+        m_paperStatus.value(QStringLiteral("equity_usdt")).toDouble();
+    summary[QStringLiteral("cash")] =
+        m_paperStatus.value(QStringLiteral("cash_usdt")).toDouble();
+    summary[QStringLiteral("fees")] =
+        m_paperStatus.value(QStringLiteral("fees_paid_usdt")).toDouble();
+
+    m_teamRows = rows;
+    m_teamSummary = summary;
+    emit teamChanged();
 }
 
 void EngineController::handleArraySuccess(qint64 id, const QJsonArray& result)

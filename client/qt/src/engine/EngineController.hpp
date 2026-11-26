@@ -60,6 +60,11 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList tradeHistory READ tradeHistory NOTIFY tradeHistoryChanged)
     /// Aggregate over every matched row: count/filled/wins/win_rate/net_pnl/fees.
     Q_PROPERTY(QVariantMap tradeHistorySummary READ tradeHistorySummary NOTIFY tradeHistoryChanged)
+    /// External traders derived from `xau_team:<member>:<seq>` attribution:
+    /// one row per member with open positions, notional, uPnL and entries.
+    Q_PROPERTY(QVariantList teamRows READ teamRows NOTIFY teamChanged)
+    /// Team totals plus the paper account line (equity/cash/fees/mode).
+    Q_PROPERTY(QVariantMap teamSummary READ teamSummary NOTIFY teamChanged)
     Q_PROPERTY(bool tradingHalted READ tradingHalted NOTIFY statusChanged)
     Q_PROPERTY(QString activeMarket READ activeMarket NOTIFY statusChanged)
     Q_PROPERTY(QStringList symbols READ symbols NOTIFY statusChanged)
@@ -151,6 +156,8 @@ public:
     [[nodiscard]] QString mode() const { return m_mode; }
     [[nodiscard]] QVariantList tradeHistory() const { return m_tradeHistory; }
     [[nodiscard]] QVariantMap tradeHistorySummary() const { return m_tradeHistorySummary; }
+    [[nodiscard]] QVariantList teamRows() const { return m_teamRows; }
+    [[nodiscard]] QVariantMap teamSummary() const { return m_teamSummary; }
 
     /// One-shot fetch of the persisted history (opens the dialog).
     Q_INVOKABLE void fetchTradeHistory();
@@ -202,6 +209,8 @@ public:
 
 signals:
     void tradeHistoryChanged();
+    /// Rebuilt whenever positions, history or the paper status change.
+    void teamChanged();
     void connectionStateChanged();
     void statusChanged();
     void lastErrorChanged();
@@ -243,6 +252,8 @@ private:
     void pollRisk();
     void pollGoldTrader();
     void issueStrategyParams(const QString& strategyId);
+    /// Recompute the external-trader view from raw positions + history.
+    void rebuildTeam();
     void handleSuccess(qint64 id, const QJsonObject& result);
     void handleArraySuccess(qint64 id, const QJsonArray& result);
     void handleParamsFailure(const QString& strategyId, const RpcError& error);
@@ -302,6 +313,16 @@ private:
     bool m_simulated{ false };
     QVariantList m_tradeHistory;
     QVariantMap m_tradeHistorySummary;
+    /// Raw `get_positions` rows, kept for the team aggregation (the model
+    /// exposes roles but is awkward to iterate from C++).
+    QVariantList m_positionsRaw;
+    /// The Team page asks for history at startup, often before the REST socket
+    /// is Ready. Remember the request and issue it when that socket comes up.
+    bool m_tradeHistoryRequested = false;
+    /// `get_status.paper` (equity/cash/fees/margin); empty outside paper mode.
+    QVariantMap m_paperStatus;
+    QVariantList m_teamRows;
+    QVariantMap m_teamSummary;
     bool m_tradingHalted = false;
     QString m_activeMarket;
     QStringList m_symbols;

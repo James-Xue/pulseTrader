@@ -253,6 +253,7 @@ ApplicationWindow {
                             controller: engine
                             dataServer: dataServer
                         }
+                        TeamPage { controller: engine }
                         SettingsPage {
                             controller: engine
                             account: accounts

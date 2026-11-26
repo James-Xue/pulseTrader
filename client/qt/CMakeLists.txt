@@ -43,6 +43,7 @@ qt_add_qml_module(pulseTraderQt
         qml/pages/SignalsPage.qml
         qml/pages/MarketPage.qml
         qml/pages/GoldTradersPage.qml
+        qml/pages/TeamPage.qml
         qml/pages/SettingsPage.qml
         qml/components/TradeDetailDialog.qml
         qml/components/StatusBar.qml

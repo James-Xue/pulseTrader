@@ -1375,6 +1375,11 @@
     </message>
     <message>
         <location filename="../qml/components/Sidebar.qml" line="13"/>
+        <source>Team</source>
+        <translation>团队</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/Sidebar.qml" line="13"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
@@ -1682,6 +1687,84 @@
         <location filename="../src/security/SecretStore.cpp" line="396"/>
         <source>vault is corrupt</source>
         <translation>档案库已损坏</translation>
+    </message>
+</context>
+<context>
+    <name>TeamPage</name>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Team</source>
+        <translation>团队</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>%1 member(s) · %2 open · %3 entries</source>
+        <translation>%1 位成员 · %2 个持仓 · %3 笔入场</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Refresh</source>
+        <translation>刷新</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Mode</source>
+        <translation>模式</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Equity</source>
+        <translation>权益</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Cash</source>
+        <translation>现金</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Fees</source>
+        <translation>手续费</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Total notional</source>
+        <translation>总名义</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>uPnL</source>
+        <translation>浮动盈亏</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Member</source>
+        <translation>成员</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Open</source>
+        <translation>持仓</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Entries</source>
+        <translation>入场次数</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Last entry</source>
+        <translation>最近入场</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Symbols</source>
+        <translation>标的</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>No team traders — attributed xau_team orders appear here</source>
+        <translation>暂无团队交易员 — 带 xau_team 归因的外部订单会显示在这里</translation>
     </message>
 </context>
 </TS>
