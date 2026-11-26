@@ -10,8 +10,8 @@ import Pulse.Client
 ///    cursor and a selection model.
 /// 2. `selectByMouse` + `persistentSelection` allow drag-selection that stays
 ///    visible after focus moves elsewhere (typical while reading values).
-/// 3. Ctrl+C is handled by TextEdit itself; the right-click menu adds Copy and
-///    Select All for discoverability.
+/// 3. Selecting text copies it to the clipboard automatically (debounced until
+///    the drag settles); Ctrl+C and the right-click menu remain available.
 /// 4. `elide` is accepted for source compatibility with `Text` call sites but
 ///    has no effect - TextEdit cannot elide. `clip` truncates instead.
 ///
@@ -40,6 +40,28 @@ TextEdit {
     /// on TextEdit. Accepting the assignment keeps those call sites unchanged;
     /// the text is clipped instead of elided.
     property int elide: Text.ElideNone
+
+    // Copy-as-you-select. The timer restarts while the drag is still moving,
+    // so the clipboard receives the final selection rather than every
+    // intermediate one; an empty selection never overwrites the clipboard.
+    Timer {
+        id: autoCopy
+        interval: 300
+        repeat: false
+        onTriggered: {
+            if (root.selectedText.length > 0) {
+                root.copy()
+            }
+        }
+    }
+
+    onSelectedTextChanged: {
+        if (selectedText.length > 0) {
+            autoCopy.restart()
+        } else {
+            autoCopy.stop()
+        }
+    }
 
     // Right-click opens the copy menu. The MouseArea accepts only the right
     // button, so left-button drags fall through to TextEdit for selection.
