@@ -301,7 +301,13 @@ ApplicationWindow {
 
         contentItem: Text {
             id: toastLabel
-            anchors.centerIn: parent
+            // Popup resizes its contentItem to the available area, so centre
+            // the glyphs explicitly; anchors.centerIn alone would leave a
+            // stretched Text with left-aligned content.
+            width: parent ? parent.width : implicitWidth
+            height: parent ? parent.height : implicitHeight
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
             color: "white"
             font.pixelSize: Style.fontSizeSmall
         }
