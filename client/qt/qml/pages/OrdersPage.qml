@@ -426,15 +426,6 @@ ColumnLayout {
                     height: 30
                     color: "transparent"
 
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            tradeDetail.row = modelData
-                            tradeDetail.open()
-                        }
-                    }
-
                     RowLayout {
                         anchors.fill: parent
                         spacing: Style.gapSmall
@@ -505,6 +496,20 @@ ColumnLayout {
                         color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall
                         Layout.preferredWidth: root.historyColumns[8]
                     }
+                    }
+
+                    // Declared after the row so it sits above the SelectableText
+                    // cells: a TextEdit consumes mouse events, so a MouseArea
+                    // underneath would never see the click. Row selection is
+                    // traded for opening the detail dialog, whose fields are
+                    // selectable and copyable.
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            tradeDetail.row = modelData
+                            tradeDetail.open()
+                        }
                     }
                 }
                 }
