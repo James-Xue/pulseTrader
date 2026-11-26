@@ -758,6 +758,11 @@ void EngineController::onConnectionStateChanged()
     else if (ConnectionState::Disconnected == next)
     {
         stopPolling();
+        // A transport drop may leave a request id in the map forever (no
+        // callFailed arrives). Every poll refuses to stack while its kind is
+        // in flight, so a stale entry would freeze that panel until restart.
+        m_inFlight.clear();
+        m_paramsRequests.clear();
     }
 }
 

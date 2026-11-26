@@ -364,11 +364,19 @@ ColumnLayout {
                 }
             }
 
-            ListView {
-                id: historyList
+            // The list and the empty state share one plain Item: a ListView is
+            // a Layout item with no intrinsic height, and an EmptyState (a
+            // Text with anchors) placed directly in a ColumnLayout is
+            // undefined behaviour. The wrapper gives both a real box and lets
+            // the empty state centre over the viewport.
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
+
+                ListView {
+                    id: historyList
+                    anchors.fill: parent
+                    clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 contentWidth: root.historyTableWidth
@@ -413,9 +421,14 @@ ColumnLayout {
                            Layout.preferredWidth: root.historyColumns[8] }
                 }
 
-                delegate: RowLayout {
-                    width: Math.max(ListView.view.width, root.historyTableWidth)
-                    spacing: Style.gapSmall
+                // A ListView delegate needs an explicit height; a bare
+                // RowLayout here collapsed to zero rows even though the model
+                // had 63 entries. Mirror the working Recent delegate: a
+                // Rectangle with height + an inner RowLayout.
+                delegate: Rectangle {
+                    width: Math.max(historyList.width, root.historyTableWidth)
+                    height: 30
+                    color: "transparent"
 
                     MouseArea {
                         anchors.fill: parent
@@ -425,6 +438,10 @@ ColumnLayout {
                             tradeDetail.open()
                         }
                     }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: Style.gapSmall
 
                     Text {
                         text: new Date(Number(modelData.time_ms) || 0)
@@ -494,12 +511,27 @@ ColumnLayout {
                         elide: Text.ElideRight
                         Layout.preferredWidth: root.historyColumns[8]
                     }
+                    }
+                }
+                }
+
+                EmptyState {
+                    anchors.centerIn: parent
+                    visible: historyList.count === 0
+                    text: qsTr("No trades yet")
                 }
             }
+        }
+    }
 
-            EmptyState {
-                visible: historyList.count === 0
-                text: qsTr("No trades yet")
+    // The history fetch is on-demand (tab click / Refresh). If the click lands
+    // while the REST socket is still reconnecting, it is silently dropped —
+    // retry once the connection becomes ready so the tab never stays empty.
+    Connections {
+        target: root.controller
+        function onConnectionStateChanged() {
+            if (viewStack.currentIndex === 2) {
+                root.controller.fetchTradeHistory()
             }
         }
     }
