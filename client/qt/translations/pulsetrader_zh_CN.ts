@@ -1743,6 +1743,16 @@
     </message>
     <message>
         <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Budget</source>
+        <translation>预算</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Risk/trade</source>
+        <translation>单笔风险</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
         <source>Open</source>
         <translation>持仓</translation>
     </message>

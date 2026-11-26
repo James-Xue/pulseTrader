@@ -1,10 +1,16 @@
 #include "engine/EngineController.hpp"
 
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonValue>
 #include <QMap>
 #include <QSettings>
 #include <QVariantMap>
+
+#include <algorithm>
 
 #include "models/AccountModel.hpp"
 #include "models/OrdersModel.hpp"
@@ -424,6 +430,8 @@ void EngineController::pollAccount()
 
 void EngineController::fetchTradeHistory()
 {
+    loadTeamRoster();
+    rebuildTeam();
     m_tradeHistoryRequested = true;
     if (RpcClient::State::Ready != m_rest->state()
         || isInFlight(PollKind::TradeHistory))
@@ -668,6 +676,58 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
     }
 }
 
+void EngineController::loadTeamRoster()
+{
+    // The GT runner's team JSON is the only place the configured member list
+    // exists; the engine knows only client_order_id attribution. An absent
+    // file is not an error — the page falls back to attributed rows. The env
+    // override keeps other machines from needing this specific path.
+    QString path = qEnvironmentVariable("GT_TEAM_CONFIG");
+    if (path.isEmpty())
+    {
+        path = QDir::homePath()
+            + QStringLiteral(
+                "/1_Code/11_gold-trader-mind/config/team.paper.json");
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        m_teamRoster.clear();
+        return;
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    const QJsonArray members =
+        document.object().value(QStringLiteral("members")).toArray();
+    QVariantList roster;
+    for (const QJsonValue& value : members)
+    {
+        const QJsonObject entry = value.toObject();
+        if (!entry.value(QStringLiteral("enabled")).toBool(true))
+        {
+            continue;
+        }
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+        {
+            continue;
+        }
+        QVariantMap row;
+        row[QStringLiteral("member")] = name;
+        row[QStringLiteral("budget")] =
+            entry.value(QStringLiteral("budget_usdt")).toDouble();
+        row[QStringLiteral("risk_per_trade")] =
+            entry.value(QStringLiteral("risk_per_trade_usdt")).toDouble();
+        row[QStringLiteral("priority")] =
+            entry.value(QStringLiteral("priority")).toInt(100);
+        row[QStringLiteral("strategy")] =
+            entry.value(QStringLiteral("strategy")).toString();
+        row[QStringLiteral("description")] =
+            entry.value(QStringLiteral("description")).toString();
+        roster.append(row);
+    }
+    m_teamRoster = roster;
+}
+
 void EngineController::rebuildTeam()
 {
     // External traders are attributed by the client_order_id prefix the GT
@@ -684,6 +744,12 @@ void EngineController::rebuildTeam()
         int entries = 0;
         qint64 lastEntryMs = 0;
         QStringList symbols;
+        double budget = 0.0;
+        double riskPerTrade = 0.0;
+        int priority = 100;
+        QString strategy;
+        QString description;
+        bool configured = false;
     };
 
     const auto memberOf = [](const QString& id) -> QString
@@ -700,6 +766,29 @@ void EngineController::rebuildTeam()
 
     QMap<QString, Row> byMember;
 
+    // 1. Seed the configured roster first, so a member with no fills yet is
+    //    still visible (the engine only knows attribution, not the roster).
+    for (const QVariant& value : m_teamRoster)
+    {
+        const QVariantMap entry = value.toMap();
+        const QString member = entry.value(QStringLiteral("member")).toString();
+        if (member.isEmpty())
+        {
+            continue;
+        }
+        Row& row = byMember[member];
+        row.member = member;
+        row.budget = entry.value(QStringLiteral("budget")).toDouble();
+        row.riskPerTrade =
+            entry.value(QStringLiteral("risk_per_trade")).toDouble();
+        row.priority = entry.value(QStringLiteral("priority")).toInt();
+        row.strategy = entry.value(QStringLiteral("strategy")).toString();
+        row.description =
+            entry.value(QStringLiteral("description")).toString();
+        row.configured = true;
+    }
+
+    // 2. Merge open positions.
     for (const QVariant& value : m_positionsRaw)
     {
         const QVariantMap position = value.toMap();
@@ -749,8 +838,22 @@ void EngineController::rebuildTeam()
     int entries = 0;
     double notional = 0.0;
     double unrealized = 0.0;
-    for (const Row& row : byMember)
+    QStringList names = byMember.keys();
+    std::sort(
+        names.begin(), names.end(),
+        [&byMember](const QString& left, const QString& right)
+        {
+            const Row& a = byMember[left];
+            const Row& b = byMember[right];
+            if (a.priority != b.priority)
+            {
+                return a.priority < b.priority;
+            }
+            return left < right;
+        });
+    for (const QString& name : names)
     {
+        const Row& row = byMember[name];
         QVariantMap item;
         item[QStringLiteral("member")] = row.member;
         item[QStringLiteral("open_positions")] = row.openPositions;
@@ -760,6 +863,12 @@ void EngineController::rebuildTeam()
         item[QStringLiteral("last_entry_ms")] = row.lastEntryMs;
         item[QStringLiteral("symbols")] =
             row.symbols.join(QStringLiteral(", "));
+        item[QStringLiteral("budget")] = row.budget;
+        item[QStringLiteral("risk_per_trade")] = row.riskPerTrade;
+        item[QStringLiteral("priority")] = row.priority;
+        item[QStringLiteral("strategy")] = row.strategy;
+        item[QStringLiteral("description")] = row.description;
+        item[QStringLiteral("configured")] = row.configured;
         rows.append(item);
 
         openPositions += row.openPositions;

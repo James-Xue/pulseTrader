@@ -254,6 +254,8 @@ private:
     void issueStrategyParams(const QString& strategyId);
     /// Recompute the external-trader view from raw positions + history.
     void rebuildTeam();
+    /// Load the GT runner's member roster (optional external config).
+    void loadTeamRoster();
     void handleSuccess(qint64 id, const QJsonObject& result);
     void handleArraySuccess(qint64 id, const QJsonArray& result);
     void handleParamsFailure(const QString& strategyId, const RpcError& error);
@@ -323,6 +325,9 @@ private:
     QVariantMap m_paperStatus;
     QVariantList m_teamRows;
     QVariantMap m_teamSummary;
+    /// Configured members from the GT runner's team JSON; empty when the
+    /// file is absent (the page then shows only attributed traders).
+    QVariantList m_teamRoster;
     bool m_tradingHalted = false;
     QString m_activeMarket;
     QStringList m_symbols;

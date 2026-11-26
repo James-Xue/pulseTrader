@@ -124,16 +124,20 @@ ColumnLayout {
 
         Text { text: qsTr("Member"); color: Style.secondaryText
                font.pixelSize: 11; Layout.preferredWidth: 160 }
-        Text { text: qsTr("Open"); color: Style.secondaryText
-               font.pixelSize: 11; Layout.preferredWidth: 70 }
-        Text { text: qsTr("Total notional"); color: Style.secondaryText
-               font.pixelSize: 11; Layout.preferredWidth: 130 }
-        Text { text: qsTr("uPnL"); color: Style.secondaryText
-               font.pixelSize: 11; Layout.preferredWidth: 110 }
-        Text { text: qsTr("Entries"); color: Style.secondaryText
+        Text { text: qsTr("Budget"); color: Style.secondaryText
                font.pixelSize: 11; Layout.preferredWidth: 90 }
+        Text { text: qsTr("Risk/trade"); color: Style.secondaryText
+               font.pixelSize: 11; Layout.preferredWidth: 90 }
+        Text { text: qsTr("Open"); color: Style.secondaryText
+               font.pixelSize: 11; Layout.preferredWidth: 60 }
+        Text { text: qsTr("Total notional"); color: Style.secondaryText
+               font.pixelSize: 11; Layout.preferredWidth: 120 }
+        Text { text: qsTr("uPnL"); color: Style.secondaryText
+               font.pixelSize: 11; Layout.preferredWidth: 100 }
+        Text { text: qsTr("Entries"); color: Style.secondaryText
+               font.pixelSize: 11; Layout.preferredWidth: 80 }
         Text { text: qsTr("Last entry"); color: Style.secondaryText
-               font.pixelSize: 11; Layout.preferredWidth: 170 }
+               font.pixelSize: 11; Layout.preferredWidth: 160 }
         Text { text: qsTr("Symbols"); color: Style.secondaryText
                font.pixelSize: 11; Layout.fillWidth: true }
     }
@@ -167,29 +171,41 @@ ColumnLayout {
                     elide: Text.ElideRight
                 }
                 Text {
+                    text: Number(modelData.budget || 0).toFixed(2)
+                    color: Style.secondaryText
+                    font.pixelSize: 12
+                    Layout.preferredWidth: 90
+                }
+                Text {
+                    text: Number(modelData.risk_per_trade || 0).toFixed(2)
+                    color: Style.secondaryText
+                    font.pixelSize: 12
+                    Layout.preferredWidth: 90
+                }
+                Text {
                     text: String(modelData.open_positions || 0)
                     color: Style.text
                     font.pixelSize: 12
-                    Layout.preferredWidth: 70
+                    Layout.preferredWidth: 60
                 }
                 Text {
                     text: Number(modelData.notional || 0).toFixed(2)
                     color: Style.text
                     font.pixelSize: 12
-                    Layout.preferredWidth: 130
+                    Layout.preferredWidth: 120
                 }
                 Text {
                     text: Number(modelData.unrealized_pnl || 0).toFixed(2)
                     color: Number(modelData.unrealized_pnl || 0) >= 0
                            ? Style.danger : Style.success
                     font.pixelSize: 12
-                    Layout.preferredWidth: 110
+                    Layout.preferredWidth: 100
                 }
                 Text {
                     text: String(modelData.entries || 0)
                     color: Style.text
                     font.pixelSize: 12
-                    Layout.preferredWidth: 90
+                    Layout.preferredWidth: 80
                 }
                 Text {
                     text: modelData.last_entry_ms
@@ -198,7 +214,7 @@ ColumnLayout {
                           : "—"
                     color: Style.secondaryText
                     font.pixelSize: 12
-                    Layout.preferredWidth: 170
+                    Layout.preferredWidth: 160
                 }
                 Text {
                     text: modelData.symbols || "—"
