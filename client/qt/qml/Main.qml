@@ -276,4 +276,59 @@ ApplicationWindow {
         // is reported through the component's own signals.
         dataServer.start()
     }
+
+    /// Transient clipboard confirmation, parented to the window overlay so it
+    /// also appears above an open dialog. It never takes focus or input.
+    Popup {
+        id: copyToast
+
+        parent: Overlay.overlay
+        modal: false
+        focus: false
+        closePolicy: Popup.NoAutoClose
+        padding: 0
+        width: toastLabel.implicitWidth + 2 * Style.gap
+        height: toastLabel.implicitHeight + 2 * Style.gapSmall
+        x: parent ? Math.round((parent.width - width) / 2) : 0
+        y: parent ? Math.round(parent.height - height - 72) : 0
+
+        background: Rectangle {
+            radius: Style.radius
+            color: "#E6323236"
+            border.width: 1
+            border.color: Style.separator
+        }
+
+        contentItem: Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            color: "white"
+            font.pixelSize: Style.fontSizeSmall
+        }
+
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 180 }
+        }
+
+        Timer {
+            id: toastTimer
+            interval: 1400
+            repeat: false
+            onTriggered: copyToast.close()
+        }
+
+        function showCopied(chars) {
+            toastLabel.text = qsTr("Copied %1 chars to clipboard").arg(chars)
+            open()
+            toastTimer.restart()
+        }
+    }
+
+    Connections {
+        target: ClipboardNotifier
+        function onCopied(chars) { copyToast.showCopied(chars) }
+    }
 }

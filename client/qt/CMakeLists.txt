@@ -24,6 +24,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 
 # A pragma Singleton QML file must be declared or qmlcachegen rejects it.
 set_source_files_properties(qml/Style.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/components/ClipboardNotifier.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_executable(pulseTraderQt MANUAL_FINALIZATION
     main.cpp
@@ -50,6 +51,7 @@ qt_add_qml_module(pulseTraderQt
         qml/components/StatusBar.qml
         qml/components/MetricTile.qml
         qml/components/SelectableText.qml
+        qml/components/ClipboardNotifier.qml
         qml/components/StaleBadge.qml
         qml/components/ErrorBanner.qml
         qml/components/SignalCard.qml

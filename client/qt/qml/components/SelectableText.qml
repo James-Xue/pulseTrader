@@ -41,6 +41,17 @@ TextEdit {
     /// the text is clipped instead of elided.
     property int elide: Text.ElideNone
 
+    /// Copy the current selection and tell the window to show a confirmation
+    /// toast. Every copy path (auto-copy, context menu) goes through here so
+    /// the feedback is consistent; the character count is the selection length.
+    function copyAndNotify() {
+        const chars = selectedText.length
+        if (chars > 0) {
+            copy()
+            ClipboardNotifier.notifyCopied(chars)
+        }
+    }
+
     // Copy-as-you-select. The timer restarts while the drag is still moving,
     // so the clipboard receives the final selection rather than every
     // intermediate one; an empty selection never overwrites the clipboard.
@@ -48,11 +59,7 @@ TextEdit {
         id: autoCopy
         interval: 300
         repeat: false
-        onTriggered: {
-            if (root.selectedText.length > 0) {
-                root.copy()
-            }
-        }
+        onTriggered: root.copyAndNotify()
     }
 
     onSelectedTextChanged: {
@@ -79,7 +86,7 @@ TextEdit {
         MenuItem {
             text: qsTr("Copy")
             enabled: root.selectedText.length > 0
-            onTriggered: root.copy()
+            onTriggered: root.copyAndNotify()
         }
         MenuItem {
             text: qsTr("Select All")

@@ -786,6 +786,11 @@
         <source>pulseTrader</source>
         <translation>pulseTrader</translation>
     </message>
+    <message>
+        <location filename="../qml/Main.qml"/>
+        <source>Copied %1 chars to clipboard</source>
+        <translation>已复制 %1 个字符到剪贴板</translation>
+    </message>
 </context>
 <context>
     <name>MarketPage</name>
