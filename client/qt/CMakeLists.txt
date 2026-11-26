@@ -46,6 +46,7 @@ qt_add_qml_module(pulseTraderQt
         qml/pages/TeamPage.qml
         qml/pages/SettingsPage.qml
         qml/components/TradeDetailDialog.qml
+        qml/components/TeamMemberDialog.qml
         qml/components/StatusBar.qml
         qml/components/MetricTile.qml
         qml/components/StaleBadge.qml

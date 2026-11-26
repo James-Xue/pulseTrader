@@ -241,6 +241,16 @@ ColumnLayout {
                         Layout.preferredWidth: root.weights[0]
                         Layout.minimumWidth: 0
                         elide: Text.ElideRight
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                memberDialog.member = modelData
+                                memberDialog.mode = 0
+                                memberDialog.open()
+                            }
+                        }
                     }
                     Text {
                         text: Number(modelData.budget || 0).toFixed(2)
@@ -327,5 +337,10 @@ ColumnLayout {
             visible: list.count === 0
             text: qsTr("No team traders — attributed xau_team orders appear here")
         }
+    }
+
+    // Skill-card details: click a member name to open it.
+    TeamMemberDialog {
+        id: memberDialog
     }
 }

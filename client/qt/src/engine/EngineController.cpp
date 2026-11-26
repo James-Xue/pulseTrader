@@ -723,6 +723,20 @@ void EngineController::loadTeamRoster()
             entry.value(QStringLiteral("strategy")).toString();
         row[QStringLiteral("description")] =
             entry.value(QStringLiteral("description")).toString();
+        row[QStringLiteral("summary")] =
+            entry.value(QStringLiteral("summary")).toString();
+        row[QStringLiteral("details")] =
+            entry.value(QStringLiteral("details")).toString();
+        QStringList indicators;
+        for (const QJsonValue& indicator :
+             entry.value(QStringLiteral("indicators")).toArray())
+        {
+            if (indicator.isString())
+            {
+                indicators.append(indicator.toString());
+            }
+        }
+        row[QStringLiteral("indicators")] = indicators;
         roster.append(row);
     }
     m_teamRoster = roster;
@@ -749,6 +763,9 @@ void EngineController::rebuildTeam()
         int priority = 100;
         QString strategy;
         QString description;
+        QString summary;
+        QString details;
+        QStringList indicators;
         bool configured = false;
     };
 
@@ -785,6 +802,14 @@ void EngineController::rebuildTeam()
         row.strategy = entry.value(QStringLiteral("strategy")).toString();
         row.description =
             entry.value(QStringLiteral("description")).toString();
+        row.summary = entry.value(QStringLiteral("summary")).toString();
+        row.details = entry.value(QStringLiteral("details")).toString();
+        const QVariantList indicators =
+            entry.value(QStringLiteral("indicators")).toList();
+        for (const QVariant& indicator : indicators)
+        {
+            row.indicators.append(indicator.toString());
+        }
         row.configured = true;
     }
 
@@ -868,6 +893,9 @@ void EngineController::rebuildTeam()
         item[QStringLiteral("priority")] = row.priority;
         item[QStringLiteral("strategy")] = row.strategy;
         item[QStringLiteral("description")] = row.description;
+        item[QStringLiteral("summary")] = row.summary;
+        item[QStringLiteral("details")] = row.details;
+        item[QStringLiteral("indicators")] = row.indicators;
         item[QStringLiteral("configured")] = row.configured;
         rows.append(item);
 

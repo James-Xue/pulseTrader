@@ -1777,4 +1777,32 @@
         <translation>暂无团队交易员 — 带 xau_team 归因的外部订单会显示在这里</translation>
     </message>
 </context>
+<context>
+    <name>TeamMemberDialog</name>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Brief</source>
+        <translation>简要</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Detailed</source>
+        <translation>详细</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Budget</source>
+        <translation>预算</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Risk/trade</source>
+        <translation>单笔风险</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+</context>
 </TS>
