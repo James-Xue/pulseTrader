@@ -293,11 +293,11 @@ PulseError validateConfig(const PulseConfig &cfg)
                           "risk.minAvailableAfterStopUsd must be >= 0"};
     }
 
-    // Futures-specific risk limits (CFD leverage ladder goes up to 500).
-    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 500.0)
+    // Futures-specific risk limits (paper CFD ladder goes up to 1000).
+    if (cfg.risk.max_leverage < 1.0 || cfg.risk.max_leverage > 1000.0)
     {
         return PulseError{ErrorCode::ConfigValidationError,
-                          "risk.max_leverage must be in [1.0, 500.0]"};
+                          "risk.max_leverage must be in [1.0, 1000.0]"};
     }
 
     if (cfg.risk.max_margin_used < 0.0 || cfg.risk.max_margin_used > 1.0)

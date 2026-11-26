@@ -432,7 +432,7 @@ maxOrdersPerSec     = 5
 # 单币种名义上限:ETH 网格峰值(~805)+ SNDK(~5099)任意其一 + 用户仓余量。
 # 08-19 教训:5500 按 SNDK 单币种算,ETH 网格加入后击穿。
 maxSymbolNotional   = 6500
-max_leverage        = 500.0        # CFD ladder: 20/50/100/200/500 (futures use 10)
+max_leverage        = 1000.0       # paper CFD ladder: .../500/1000 (futures use 10)
 max_margin_used     = 0.5
 minAvailableAfterStopUsd = 6.0   # M22: CFD 带 SL 开仓后可用-保证金-止损 ≥ 6 USD,防薄账户一笔止损耗尽交易能力
 
