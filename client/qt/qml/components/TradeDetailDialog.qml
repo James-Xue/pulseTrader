@@ -79,7 +79,6 @@ Dialog {
                     font.family: "monospace"
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    textInteractionFlags: Text.TextSelectableByMouse
                 }
             }
         }
