@@ -29,32 +29,32 @@ ColumnLayout {
         columnSpacing: Style.gap
         rowSpacing: Style.gap
 
-        Text { text: qsTr("Exchange"); color: Style.secondaryText; font.pixelSize: 12 }
-        Text { text: qsTr("Gate.io"); color: Style.text; font.pixelSize: 13 }
+        SelectableText { text: qsTr("Exchange"); color: Style.secondaryText; font.pixelSize: 12 }
+        SelectableText { text: qsTr("Gate.io"); color: Style.text; font.pixelSize: 13 }
 
-        Text { text: qsTr("Network"); color: Style.secondaryText; font.pixelSize: 12 }
-        Text {
+        SelectableText { text: qsTr("Network"); color: Style.secondaryText; font.pixelSize: 12 }
+        SelectableText {
             text: root.account ? root.account.profileNetwork : "—"
             color: Style.text
             font.pixelSize: 13
         }
 
-        Text { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 12 }
-        Text {
+        SelectableText { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 12 }
+        SelectableText {
             text: root.account ? root.account.profileMarket : "—"
             color: Style.text
             font.pixelSize: 13
         }
 
-        Text { text: qsTr("Engine process"); color: Style.secondaryText; font.pixelSize: 12 }
-        Text {
+        SelectableText { text: qsTr("Engine process"); color: Style.secondaryText; font.pixelSize: 12 }
+        SelectableText {
             text: root.launcher && root.launcher.running ? qsTr("running") : qsTr("stopped")
             color: root.launcher && root.launcher.running ? Style.success : Style.secondaryText
             font.pixelSize: 13
         }
 
-        Text { text: qsTr("Control socket"); color: Style.secondaryText; font.pixelSize: 12 }
-        Text {
+        SelectableText { text: qsTr("Control socket"); color: Style.secondaryText; font.pixelSize: 12 }
+        SelectableText {
             text: qsTr("State: %1").arg(root.controller
                   ? (root.controller.connectionState === EngineController.Ready
                      ? qsTr("ready") : qsTr("not ready"))
@@ -99,7 +99,7 @@ ColumnLayout {
                                                         : Style.danger)
                 }
 
-                Text {
+                SelectableText {
                     text: qsTr("Data server")
                     color: Style.text
                     font.pixelSize: Style.sectionTitleSize
@@ -108,7 +108,7 @@ ColumnLayout {
 
                 Item { Layout.fillWidth: true }
 
-                Text {
+                SelectableText {
                     text: !root.dataServer
                           ? qsTr("unavailable")
                           : (root.dataServer.listening
@@ -125,24 +125,24 @@ ColumnLayout {
                 columnSpacing: Style.gapLarge
                 rowSpacing: 2
 
-                Text {
+                SelectableText {
                     text: qsTr("Engine feed")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: root.dataServer && root.dataServer.engineReady
                           ? qsTr("ready") : qsTr("waiting")
                     color: root.dataServer && root.dataServer.engineReady
                            ? Style.success : Style.warning
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("Consumers")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: root.dataServer
                           ? qsTr("%1 / %2").arg(root.dataServer.connectedCount)
                                           .arg(root.dataServer.maxClients)
@@ -152,7 +152,7 @@ ColumnLayout {
                 }
             }
 
-            Text {
+            SelectableText {
                 Layout.fillWidth: true
                 text: qsTr("XAUUSD · CFD · 1m · 500 candles · updates at 2 Hz")
                 color: Style.tertiaryText
@@ -175,22 +175,20 @@ ColumnLayout {
                         width: parent.width
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             width: 140
                             text: modelData.client_id
                             color: Style.text
                             font.pixelSize: Style.fontSizeSmall
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             width: 160
                             text: modelData.strategy.length > 0
                                   ? modelData.strategy : qsTr("(no strategy)")
                             color: Style.secondaryText
                             font.pixelSize: Style.fontSizeSmall
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             text: qsTr("last seen %1").arg(
                                       Qt.formatTime(new Date(modelData.last_seen_ms),
                                                     "hh:mm:ss"))
@@ -201,7 +199,7 @@ ColumnLayout {
                 }
             }
 
-            Text {
+            SelectableText {
                 Layout.fillWidth: true
                 visible: !root.dataServer || root.dataServer.connectedCount === 0
                 text: qsTr("No consumers connected.")
@@ -228,7 +226,7 @@ ColumnLayout {
             }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             text: qsTr("Prices every held coin with extra REST calls; turn off "
                        + "for faster balance updates.")

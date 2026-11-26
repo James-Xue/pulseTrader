@@ -148,14 +148,14 @@ Flickable {
             Layout.fillWidth: true
             spacing: Style.gap
 
-            Text {
+            SelectableText {
                 text: qsTr("Gold Traders")
                 color: Style.text
                 font.pixelSize: Style.titleSize
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            SelectableText {
                 text: qsTr("%1 of %2 strategies").arg(root.goldCount).arg(root.totalCount)
                 color: Style.secondaryText
                 font.pixelSize: Style.fontSizeSmall
@@ -203,7 +203,7 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         text: qsTr("L7 dynamic stop")
                         color: Style.text
                         font.pixelSize: Style.fontSize
@@ -216,7 +216,7 @@ Flickable {
                         radius: 4
                         color: goldCard.armed ? Style.success : Style.tertiaryText
 
-                        Text {
+                        SelectableText {
                             id: armedLabel
                             anchors.centerIn: parent
                             text: goldCard.armed ? qsTr("Armed") : qsTr("Disabled")
@@ -226,7 +226,7 @@ Flickable {
                         }
                     }
 
-                    Text {
+                    SelectableText {
                         text: qsTr("XAUUSD CFD · USD thresholds")
                         color: Style.tertiaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -234,13 +234,12 @@ Flickable {
 
                     Item { Layout.fillWidth: true }
 
-                    Text {
+                    SelectableText {
                         visible: !goldCard.armed
                         text: goldCard.gold && goldCard.gold.reason
                               ? goldCard.gold.reason : qsTr("Not armed")
                         color: Style.warning
                         font.pixelSize: Style.fontSizeSmall
-                        elide: Text.ElideRight
                     }
                 }
 
@@ -250,48 +249,48 @@ Flickable {
                     columnSpacing: Style.gap
                     rowSpacing: Style.gapSmall
 
-                    Text { text: qsTr("Hard stop"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("Break-even after"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("Peak give-back"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("Give-back arms"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Hard stop"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Break-even after"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Peak give-back"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Give-back arms"); color: Style.secondaryText; font.pixelSize: 11 }
 
-                    Text {
+                    SelectableText {
                         text: root.fmtU(goldCard.goldConfig.hard_stop_usd)
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: root.fmtU(goldCard.goldConfig.breakeven_trigger_usd)
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: root.fmtU(goldCard.goldConfig.peak_drawdown_usd)
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: root.fmtU(goldCard.goldConfig.peak_trail_arm_usd)
                         color: Style.text; font.pixelSize: 13
                     }
 
-                    Text { text: qsTr("SuperTrend"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("ST buffer"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("Contract volume"); color: Style.secondaryText; font.pixelSize: 11 }
-                    Text { text: qsTr("Exchange stop"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("SuperTrend"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("ST buffer"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Contract volume"); color: Style.secondaryText; font.pixelSize: 11 }
+                    SelectableText { text: qsTr("Exchange stop"); color: Style.secondaryText; font.pixelSize: 11 }
 
-                    Text {
+                    SelectableText {
                         text: qsTr("%1 × %2")
                                   .arg(root.fmtNum(goldCard.goldConfig.supertrend_period))
                                   .arg(root.fmtNum(goldCard.goldConfig.supertrend_multiplier))
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: root.fmtU(goldCard.goldConfig.supertrend_buffer_usd)
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: qsTr("%1 oz/lot").arg(root.fmtNum(goldCard.goldConfig.contract_volume))
                         color: Style.text; font.pixelSize: 13
                     }
-                    Text {
+                    SelectableText {
                         text: goldCard.goldConfig.exchange_stop ? qsTr("On") : qsTr("Off")
                         color: goldCard.goldConfig.exchange_stop
                                ? Style.success : Style.secondaryText
@@ -305,14 +304,14 @@ Flickable {
                     color: Style.separator
                 }
 
-                Text {
+                SelectableText {
                     text: qsTr("Managed positions (%1)")
                               .arg(goldCard.goldPositions.length)
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: 0 === goldCard.goldPositions.length
                     text: qsTr("No open XAUUSD CFD position. The supervisor arms when one appears.")
@@ -332,23 +331,22 @@ Flickable {
                             Layout.fillWidth: true
                             spacing: Style.gap
 
-                            Text {
+                            SelectableText {
                                 text: modelData.position_id === undefined
                                       ? "" : modelData.position_id
                                 color: Style.text
                                 font.pixelSize: 12
                                 font.weight: Font.DemiBold
-                                elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("%1 · %2 lots")
                                           .arg(modelData.side === undefined ? "" : modelData.side)
                                           .arg(root.fmtNum(modelData.quantity))
                                 color: Style.secondaryText
                                 font.pixelSize: 11
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("entry %1 → %2")
                                           .arg(root.fmtPrice(modelData.entry_price))
                                           .arg(root.fmtPrice(modelData.mark_price))
@@ -361,23 +359,23 @@ Flickable {
                             Layout.fillWidth: true
                             spacing: Style.gap
 
-                            Text {
+                            SelectableText {
                                 text: qsTr("PnL %1").arg(root.fmtU(modelData.unrealized_pnl))
                                 color: Number(modelData.unrealized_pnl) >= 0
                                        ? Style.success : Style.danger
                                 font.pixelSize: 11
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("peak %1").arg(root.fmtU(modelData.peak_pnl))
                                 color: Style.secondaryText
                                 font.pixelSize: 11
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("stop %1").arg(root.fmtPrice(modelData.effective_stop))
                                 color: Style.text
                                 font.pixelSize: 11
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("exchange %1").arg(root.fmtPrice(modelData.exchange_stop))
                                 color: Style.secondaryText
                                 font.pixelSize: 11
@@ -408,7 +406,7 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Traders")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -416,7 +414,7 @@ Flickable {
 
                     Item { Layout.fillWidth: true }
 
-                    Text {
+                    SelectableText {
                         visible: root.hiddenCount > 0
                         text: qsTr("%1 non-gold hidden").arg(root.hiddenCount)
                         color: Style.tertiaryText
@@ -428,25 +426,25 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 200
                         text: qsTr("Instance")
                         color: Style.secondaryText
                         font.pixelSize: 11
                     }
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 130
                         text: qsTr("Strategy")
                         color: Style.secondaryText
                         font.pixelSize: 11
                     }
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 80
                         text: qsTr("Symbol")
                         color: Style.secondaryText
                         font.pixelSize: 11
                     }
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 70
                         text: qsTr("Poll")
                         color: Style.secondaryText
@@ -476,27 +474,25 @@ Flickable {
                             anchors.rightMargin: 10
                             spacing: Style.gap
 
-                            Text {
+                            SelectableText {
                                 Layout.preferredWidth: 200
                                 text: model.id === undefined ? "" : model.id
                                 color: Style.text
                                 font.pixelSize: 12
-                                elide: Text.ElideRight
                             }
-                            Text {
+                            SelectableText {
                                 Layout.preferredWidth: 130
                                 text: model.name === undefined ? "" : model.name
                                 color: Style.secondaryText
                                 font.pixelSize: 12
-                                elide: Text.ElideRight
                             }
-                            Text {
+                            SelectableText {
                                 Layout.preferredWidth: 80
                                 text: model.symbol === undefined ? "" : model.symbol
                                 color: Style.secondaryText
                                 font.pixelSize: 12
                             }
-                            Text {
+                            SelectableText {
                                 Layout.preferredWidth: 70
                                 text: model.poll_interval_ms === undefined
                                       ? "" : qsTr("%1 ms").arg(model.poll_interval_ms)
@@ -506,13 +502,13 @@ Flickable {
 
                             Item { Layout.fillWidth: true }
 
-                            Text {
+                            SelectableText {
                                 visible: model.paused === true
                                 text: qsTr("paused")
                                 color: Style.warning
                                 font.pixelSize: 11
                             }
-                            Text {
+                            SelectableText {
                                 visible: model.auto_trade === true
                                 text: qsTr("auto")
                                 color: Style.accent
@@ -528,7 +524,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: 0 === root.goldCount
                     text: root.controller
@@ -538,7 +534,7 @@ Flickable {
                     font.pixelSize: Style.fontSizeSmall
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: 0 === root.goldCount && root.controller
                     text: qsTr("A client-launched engine configures BTC_USDT instances only.")
@@ -566,7 +562,7 @@ Flickable {
                 anchors.margins: Style.pad
                 spacing: Style.gapSmall
 
-                Text {
+                SelectableText {
                     text: qsTr("Identity & connection")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
@@ -578,17 +574,17 @@ Flickable {
                     columnSpacing: Style.gap
                     rowSpacing: Style.gap
 
-                    Text { text: qsTr("Instance"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text { text: root.selected.id === undefined ? "—" : root.selected.id; color: Style.text; font.pixelSize: 13 }
+                    SelectableText { text: qsTr("Instance"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText { text: root.selected.id === undefined ? "—" : root.selected.id; color: Style.text; font.pixelSize: 13 }
 
-                    Text { text: qsTr("Strategy class"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text { text: root.selected.name === undefined ? "—" : root.selected.name; color: Style.text; font.pixelSize: 13 }
+                    SelectableText { text: qsTr("Strategy class"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText { text: root.selected.name === undefined ? "—" : root.selected.name; color: Style.text; font.pixelSize: 13 }
 
-                    Text { text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text { text: root.selected.symbol === undefined ? "—" : root.selected.symbol; color: Style.text; font.pixelSize: 13 }
+                    SelectableText { text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText { text: root.selected.symbol === undefined ? "—" : root.selected.symbol; color: Style.text; font.pixelSize: 13 }
 
-                    Text { text: qsTr("Poll interval"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Poll interval"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.selected.poll_interval_ms === undefined
                               ? "—" : qsTr("%1 ms").arg(root.selected.poll_interval_ms)
                         color: Style.text
@@ -597,35 +593,35 @@ Flickable {
 
                     // list_strategies carries no market_type, so the market is
                     // reported engine-wide rather than inferred per instance.
-                    Text { text: qsTr("Market (engine-wide)"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Market (engine-wide)"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.controller ? root.controller.activeMarket : "—"
                         color: Style.text
                         font.pixelSize: 13
                     }
 
-                    Text { text: qsTr("Enabled"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text { text: root.yesNo(root.selected.enabled === true); color: Style.text; font.pixelSize: 13 }
+                    SelectableText { text: qsTr("Enabled"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText { text: root.yesNo(root.selected.enabled === true); color: Style.text; font.pixelSize: 13 }
 
-                    Text { text: qsTr("Running"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text { text: root.yesNo(root.selected.running === true); color: Style.text; font.pixelSize: 13 }
+                    SelectableText { text: qsTr("Running"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText { text: root.yesNo(root.selected.running === true); color: Style.text; font.pixelSize: 13 }
 
-                    Text { text: qsTr("Paused"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Paused"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.yesNo(root.selected.paused === true)
                         color: root.selected.paused === true ? Style.warning : Style.text
                         font.pixelSize: 13
                     }
 
-                    Text { text: qsTr("Auto trade"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Auto trade"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.yesNo(root.selected.auto_trade === true)
                         color: root.selected.auto_trade === true ? Style.accent : Style.text
                         font.pixelSize: 13
                     }
 
-                    Text { text: qsTr("Data server"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Data server"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.dataServer
                               ? qsTr("%1 / %2").arg(root.dataServer.connectedCount)
                                               .arg(root.dataServer.maxClients)
@@ -634,8 +630,8 @@ Flickable {
                         font.pixelSize: 13
                     }
 
-                    Text { text: qsTr("Data feed"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Data feed"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.dataServer && root.dataServer.engineReady
                               ? qsTr("ready") : qsTr("waiting")
                         color: root.dataServer && root.dataServer.engineReady
@@ -644,7 +640,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.topMargin: Style.gapSmall
                     text: qsTr("Attached consumers")
                     color: Style.secondaryText
@@ -664,29 +660,27 @@ Flickable {
                             width: parent.width
                             spacing: Style.gap
 
-                            Text {
+                            SelectableText {
                                 width: 140
                                 text: modelData.client_id
                                 color: Style.text
                                 font.pixelSize: Style.fontSizeSmall
-                                elide: Text.ElideRight
                             }
-                            Text {
+                            SelectableText {
                                 width: 160
                                 text: modelData.strategy && modelData.strategy.length > 0
                                       ? modelData.strategy : qsTr("(no strategy)")
                                 color: Style.secondaryText
                                 font.pixelSize: Style.fontSizeSmall
-                                elide: Text.ElideRight
                             }
-                            Text {
+                            SelectableText {
                                 text: qsTr("last seen %1").arg(
                                           Qt.formatTime(new Date(modelData.last_seen_ms),
                                                         "hh:mm:ss"))
                                 color: Style.tertiaryText
                                 font.pixelSize: Style.fontSizeSmall
                             }
-                            Text {
+                            SelectableText {
                                 // The hello's strategy field is free text; the
                                 // gold bot sends the instance id it consumes.
                                 visible: modelData.strategy === root.controller.selectedStrategyId
@@ -698,7 +692,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: !root.dataServer || root.dataServer.connectedCount === 0
                     text: qsTr("No consumers connected.")
@@ -724,13 +718,13 @@ Flickable {
                 anchors.margins: Style.pad
                 spacing: Style.gapSmall
 
-                Text {
+                SelectableText {
                     text: qsTr("Parameters")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
 
-                Text {
+                SelectableText {
                     visible: !root.hasSelection
                     text: qsTr("Select a trader to see its parameters.")
                     color: Style.tertiaryText
@@ -743,7 +737,7 @@ Flickable {
                              && root.paramsModel.error.length > 0
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.fillWidth: true
                         text: root.paramsModel
                               ? qsTr("Parameters unavailable: %1").arg(root.paramsModel.error)
@@ -762,7 +756,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     visible: root.paramsModel ? root.paramsModel.pending : false
                     text: qsTr("Loading…")
                     color: Style.secondaryText
@@ -783,15 +777,14 @@ Flickable {
                             width: paramsGrid.width
                             spacing: Style.gap
 
-                            Text {
+                            SelectableText {
                                 width: 200
                                 text: root.paramLabel(modelData.key)
                                 color: Style.secondaryText
                                 font.pixelSize: 12
-                                elide: Text.ElideRight
                             }
 
-                            Text {
+                            SelectableText {
                                 text: modelData.value === undefined
                                       ? "—" : String(modelData.value)
                                 color: Style.text
@@ -801,7 +794,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     visible: root.paramsModel ? root.paramsModel.present : false
                     Layout.topMargin: Style.gapSmall
                     text: qsTr("Read-only view. Changing parameters is not available in this version.")
@@ -828,7 +821,7 @@ Flickable {
                 anchors.margins: Style.pad
                 spacing: Style.gapSmall
 
-                Text {
+                SelectableText {
                     text: qsTr("Risk & execution")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
@@ -876,7 +869,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     visible: root.risk ? root.risk.rateLimiterExhausted : false
                     text: qsTr("Order rate limiter exhausted")
                     color: Style.warning
@@ -890,37 +883,37 @@ Flickable {
                     columnSpacing: Style.gap
                     rowSpacing: 4
 
-                    Text { text: qsTr("Open positions"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Open positions"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.risk ? String(root.risk.portfolioOpenPositions) : "—"
                         color: Style.text
                         font.pixelSize: 12
                     }
 
-                    Text { text: qsTr("Total notional"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Total notional"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.risk ? root.fmtMoney(root.risk.portfolioNotional) : "—"
                         color: Style.text
                         font.pixelSize: 12
                     }
 
-                    Text { text: qsTr("Unrealized PnL"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Unrealized PnL"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.risk ? root.fmtMoney(root.risk.portfolioUnrealizedPnl) : "—"
                         color: root.risk && root.risk.portfolioUnrealizedPnl < 0
                                ? Style.danger : Style.success
                         font.pixelSize: 12
                     }
 
-                    Text { text: qsTr("Net exposure"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Net exposure"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.risk ? root.fmtMoney(root.risk.portfolioNetExposure) : "—"
                         color: Style.text
                         font.pixelSize: 12
                     }
 
-                    Text { text: qsTr("Halt reason"); color: Style.secondaryText; font.pixelSize: 12 }
-                    Text {
+                    SelectableText { text: qsTr("Halt reason"); color: Style.secondaryText; font.pixelSize: 12 }
+                    SelectableText {
                         text: root.risk && root.risk.present
                               ? root.haltReasonLabel(root.risk.haltReasonCode) : "—"
                         color: Style.text
@@ -928,7 +921,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: root.controller
                              && root.controller.connectionState !== EngineController.Ready

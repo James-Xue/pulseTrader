@@ -39,15 +39,14 @@ Dialog {
             Layout.margins: Style.pad
             spacing: Style.gap
 
-            Text {
+            SelectableText {
                 text: root.member.member || "—"
                 color: Style.text
                 font.pixelSize: Style.titleSize
                 font.weight: Font.DemiBold
-                elide: Text.ElideRight
                 Layout.fillWidth: true
             }
-            Text {
+            SelectableText {
                 text: qsTr("Budget") + " "
                       + Number(root.member.budget || 0).toFixed(0)
                       + "  ·  " + qsTr("Risk/trade") + " "
@@ -65,7 +64,7 @@ Dialog {
             onActivated: function (index) { root.mode = index }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.leftMargin: Style.pad
             Layout.rightMargin: Style.pad
@@ -94,7 +93,7 @@ Dialog {
                     implicitWidth: chipText.implicitWidth + 2 * Style.gapSmall
                     implicitHeight: chipText.implicitHeight + Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         id: chipText
                         anchors.centerIn: parent
                         text: modelData
@@ -111,7 +110,7 @@ Dialog {
             Layout.margins: Style.pad
             clip: true
 
-            Text {
+            SelectableText {
                 width: parent.width
                 text: root.mode === 0
                       ? (root.member.summary || root.member.description || "")

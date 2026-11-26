@@ -1805,4 +1805,17 @@
         <translation>关闭</translation>
     </message>
 </context>
+<context>
+    <name>SelectableText</name>
+    <message>
+        <location filename="../qml/components/SelectableText.qml"/>
+        <source>Copy</source>
+        <translation>复制</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/SelectableText.qml"/>
+        <source>Select All</source>
+        <translation>全选</translation>
+    </message>
+</context>
 </TS>

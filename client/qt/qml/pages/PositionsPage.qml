@@ -34,7 +34,7 @@ ColumnLayout {
         Layout.margins: Style.pad
         spacing: Style.gap
 
-        Text {
+        SelectableText {
             text: qsTr("Positions: %1").arg(root.count)
             color: Style.text
             font.pixelSize: Style.fontSize
@@ -87,40 +87,39 @@ ColumnLayout {
                 anchors.rightMargin: 10
                 spacing: Style.gap
 
-                Text {
+                SelectableText {
                     text: model.symbol === undefined ? "" : model.symbol
                     color: Style.text
                     font.pixelSize: 12
                     Layout.preferredWidth: 140
-                    elide: Text.ElideRight
                 }
-                Text {
+                SelectableText {
                     text: model.side === undefined ? "" : model.side
                     // The engine serializes lowercase "buy" / "sell".
                     color: "buy" === model.side ? Style.success : Style.danger
                     font.pixelSize: 12
                     Layout.preferredWidth: 60
                 }
-                Text {
+                SelectableText {
                     text: model.quantity === undefined ? "" : String(model.quantity)
                     color: Style.text
                     font.pixelSize: 12
                     Layout.preferredWidth: 90
                 }
-                Text {
+                SelectableText {
                     text: model.entry_price === undefined ? "" : String(model.entry_price)
                     color: Style.text
                     font.pixelSize: 12
                     Layout.preferredWidth: 110
                 }
-                Text {
+                SelectableText {
                     text: model.unrealized_pnl === undefined ? ""
                           : Number(model.unrealized_pnl).toFixed(2)
                     color: Number(model.unrealized_pnl) >= 0 ? Style.danger : Style.success
                     font.pixelSize: 12
                     Layout.preferredWidth: 100
                 }
-                Text {
+                SelectableText {
                     text: model.market_type === undefined ? "" : model.market_type
                     color: Style.secondaryText
                     font.pixelSize: 11
@@ -138,11 +137,11 @@ ColumnLayout {
     component HeaderRow: RowLayout {
         spacing: Style.gap
 
-        Text { text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 140 }
-        Text { text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 60 }
-        Text { text: qsTr("Qty"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 90 }
-        Text { text: qsTr("Entry"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 110 }
-        Text { text: qsTr("uPnL"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 100 }
-        Text { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 11; Layout.fillWidth: true }
+        SelectableText { text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 140 }
+        SelectableText { text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 60 }
+        SelectableText { text: qsTr("Qty"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 90 }
+        SelectableText { text: qsTr("Entry"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 110 }
+        SelectableText { text: qsTr("uPnL"); color: Style.secondaryText; font.pixelSize: 11; Layout.preferredWidth: 100 }
+        SelectableText { text: qsTr("Market"); color: Style.secondaryText; font.pixelSize: 11; Layout.fillWidth: true }
     }
 }

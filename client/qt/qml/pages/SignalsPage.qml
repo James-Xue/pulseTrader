@@ -17,7 +17,7 @@ ColumnLayout {
         Layout.margins: Style.pad
         spacing: Style.gap
 
-        Text {
+        SelectableText {
             text: qsTr("Signals: %1").arg(
                       root.controller ? root.controller.signalsModel.rowCount() : 0)
             color: Style.text

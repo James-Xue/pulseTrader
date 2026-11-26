@@ -22,18 +22,17 @@ Rectangle {
         anchors.margins: Style.pad
         spacing: 6
 
-        Text {
+        SelectableText {
             text: root.label
             color: Style.secondaryText
             font.pixelSize: 11
         }
 
-        Text {
+        SelectableText {
             text: root.present ? root.value : qsTr("unknown")
             color: root.present ? root.valueColor : Style.secondaryText
             font.pixelSize: 20
             font.bold: true
-            elide: Text.ElideRight
             width: parent.width
         }
     }

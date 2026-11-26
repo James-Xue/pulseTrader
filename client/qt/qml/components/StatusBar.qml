@@ -33,7 +33,7 @@ Row {
         }
     }
 
-    Text {
+    SelectableText {
         anchors.verticalCenter: parent.verticalCenter
         text: root.controller
               ? (root.controller.connectionState === EngineController.Ready
@@ -51,7 +51,7 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
         color: Style.danger
 
-        Text {
+        SelectableText {
             id: haltedLabel
             anchors.centerIn: parent
             text: qsTr("HALTED")
@@ -69,7 +69,7 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
         color: "#7C3AED"
 
-        Text {
+        SelectableText {
             id: paperLabel
             anchors.centerIn: parent
             text: qsTr("PAPER")
@@ -79,7 +79,7 @@ Row {
         }
     }
 
-    Text {
+    SelectableText {
         anchors.verticalCenter: parent.verticalCenter
         text: root.controller
               ? qsTr("v%1 · %2 · %3")

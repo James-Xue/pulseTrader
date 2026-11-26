@@ -167,7 +167,7 @@ Flickable {
             Layout.topMargin: Style.gapSmall
             spacing: Style.gap
 
-            Text {
+            SelectableText {
                 text: qsTr("Market")
                 color: Style.secondaryText
                 font.pixelSize: 12
@@ -309,7 +309,7 @@ Flickable {
             }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             visible: root.controller && !root.marketPresent
             text: qsTr("The engine did not report a %1 balance yet.")
@@ -319,7 +319,7 @@ Flickable {
         }
 
         // -- Open positions, one market only ---------------------------------
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.topMargin: Style.gapSmall
             text: qsTr("Positions · %1 (%2)")
@@ -347,11 +347,11 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text { Layout.preferredWidth: 130; text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 60; text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 100; text: qsTr("Qty"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 110; text: qsTr("Entry"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 110; text: qsTr("uPnL"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 130; text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 60; text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 100; text: qsTr("Qty"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 110; text: qsTr("Entry"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 110; text: qsTr("uPnL"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
                     Item { Layout.fillWidth: true }
                 }
 
@@ -362,32 +362,31 @@ Flickable {
                         Layout.fillWidth: true
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 130
                             text: model.symbol === undefined ? "" : model.symbol
                             color: Style.text
                             font.pixelSize: 12
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 60
                             text: model.side === undefined ? "" : model.side
                             color: "buy" === model.side ? Style.success : Style.danger
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 100
                             text: model.quantity === undefined ? "" : String(model.quantity)
                             color: Style.text
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 110
                             text: model.entry_price === undefined ? "" : String(model.entry_price)
                             color: Style.text
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 110
                             text: model.unrealized_pnl === undefined
                                   ? "" : Number(model.unrealized_pnl).toFixed(2)
@@ -398,7 +397,7 @@ Flickable {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: 0 === root.positionCount
                     text: qsTr("No open positions on this market")
@@ -409,7 +408,7 @@ Flickable {
         }
 
         // -- Open orders, one market only ------------------------------------
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.topMargin: Style.gapSmall
             text: qsTr("Open orders · %1 (%2)")
@@ -437,11 +436,11 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text { Layout.preferredWidth: 130; text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 60; text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 80; text: qsTr("Type"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.preferredWidth: 110; text: qsTr("Filled / qty"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
-                    Text { Layout.fillWidth: true; text: qsTr("Status"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 130; text: qsTr("Symbol"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 60; text: qsTr("Side"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 80; text: qsTr("Type"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.preferredWidth: 110; text: qsTr("Filled / qty"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
+                    SelectableText { Layout.fillWidth: true; text: qsTr("Status"); color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall }
                 }
 
                 Repeater {
@@ -451,26 +450,25 @@ Flickable {
                         Layout.fillWidth: true
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 130
                             text: model.symbol === undefined ? "" : model.symbol
                             color: Style.text
                             font.pixelSize: 12
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 60
                             text: model.side === undefined ? "" : model.side
                             color: "buy" === model.side ? Style.success : Style.danger
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 80
                             text: model.type === undefined ? "" : model.type
                             color: Style.secondaryText
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 110
                             text: model.filled_qty === undefined
                                   ? "" : "%1 / %2".arg(Number(model.filled_qty))
@@ -478,17 +476,16 @@ Flickable {
                             color: Style.text
                             font.pixelSize: 12
                         }
-                        Text {
+                        SelectableText {
                             Layout.fillWidth: true
                             text: model.status === undefined ? "" : model.status
                             color: Style.secondaryText
                             font.pixelSize: 12
-                            elide: Text.ElideRight
                         }
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.fillWidth: true
                     visible: 0 === root.orderCount
                     text: qsTr("No open orders on this market")
@@ -499,7 +496,7 @@ Flickable {
         }
 
         // -- Spot holdings (spot tab only) -----------------------------------
-        Text {
+        SelectableText {
             visible: root.spotSelected && root.spotHoldings.length > 0
             text: qsTr("Spot holdings")
             color: Style.secondaryText
@@ -526,14 +523,14 @@ Flickable {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 96
                         text: qsTr("Currency")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
                     }
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 180
                         text: qsTr("Amount")
                         color: Style.secondaryText
@@ -542,7 +539,7 @@ Flickable {
 
                     Item { Layout.fillWidth: true }
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Value")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -557,7 +554,7 @@ Flickable {
                         Layout.fillWidth: true
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 96
                             text: modelData.currency
                             color: Style.text
@@ -565,7 +562,7 @@ Flickable {
                             font.weight: Font.DemiBold
                         }
 
-                        Text {
+                        SelectableText {
                             Layout.preferredWidth: 180
                             text: root.formatAmount(modelData.total)
                             color: Style.secondaryText
@@ -574,7 +571,7 @@ Flickable {
 
                         Item { Layout.fillWidth: true }
 
-                        Text {
+                        SelectableText {
                             text: modelData.hasValue
                                   ? root.formatValue(modelData.valueUsdt) + " USDT"
                                   : "—"

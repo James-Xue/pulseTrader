@@ -53,13 +53,13 @@ ColumnLayout {
         Layout.margins: Style.pad
         spacing: Style.gap
 
-        Text {
+        SelectableText {
             text: qsTr("Team")
             color: Style.text
             font.pixelSize: Style.titleSize
             font.weight: Font.DemiBold
         }
-        Text {
+        SelectableText {
             text: qsTr("%1 member(s) · %2 open · %3 entries")
                   .arg(Number(root.summary.members || 0))
                   .arg(Number(root.summary.open_positions || 0))
@@ -98,24 +98,24 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Style.gap * 2
 
-                Text {
+                SelectableText {
                     text: qsTr("Mode") + ": " + (root.summary.mode || "—")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("Equity") + ": "
                           + Number(root.summary.equity || 0).toFixed(2)
                     color: Style.text
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("Cash") + ": "
                           + Number(root.summary.cash || 0).toFixed(2)
                     color: Style.text
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("Fees") + ": "
                           + Number(root.summary.fees || 0).toFixed(2)
                     color: Style.secondaryText
@@ -128,13 +128,13 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Style.gap * 2
 
-                Text {
+                SelectableText {
                     text: qsTr("Total notional") + ": "
                           + Number(root.summary.notional || 0).toFixed(2)
                     color: Style.text
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("uPnL") + ": "
                           + Number(root.summary.unrealized_pnl || 0).toFixed(2)
                     color: Number(root.summary.unrealized_pnl || 0) >= 0
@@ -165,60 +165,60 @@ ColumnLayout {
                 height: 24
                 spacing: Style.gapSmall
 
-                Text { text: qsTr("Member"); color: Style.secondaryText
+                SelectableText { text: qsTr("Member"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[0]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Budget"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Budget"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[1]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Risk/trade"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Risk/trade"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[2]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Open"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Open"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[3]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Total notional"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Total notional"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[4]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("uPnL"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("uPnL"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[5]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Entries"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Entries"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[6]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Last entry"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Last entry"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[7]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
-                Text { text: qsTr("Symbols"); color: Style.secondaryText
+}
+                SelectableText { text: qsTr("Symbols"); color: Style.secondaryText
                        font.pixelSize: 11
                        Layout.fillWidth: true
                        Layout.preferredWidth: root.weights[8]
                        Layout.minimumWidth: 0
-                       elide: Text.ElideRight }
+}
             }
 
             delegate: Rectangle {
@@ -233,14 +233,13 @@ ColumnLayout {
                     anchors.rightMargin: 10
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: modelData.member || "—"
                         color: Style.text
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[0]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
 
                         MouseArea {
                             anchors.fill: parent
@@ -252,43 +251,39 @@ ColumnLayout {
                             }
                         }
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.budget || 0).toFixed(2)
                         color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[1]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.risk_per_trade || 0).toFixed(2)
                         color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[2]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: String(modelData.open_positions || 0)
                         color: Style.text
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[3]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.notional || 0).toFixed(2)
                         color: Style.text
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[4]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.unrealized_pnl || 0).toFixed(2)
                         color: Number(modelData.unrealized_pnl || 0) >= 0
                                ? Style.danger : Style.success
@@ -296,18 +291,16 @@ ColumnLayout {
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[5]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: String(modelData.entries || 0)
                         color: Style.text
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[6]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: modelData.last_entry_ms
                               ? new Date(Number(modelData.last_entry_ms))
                                     .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
@@ -317,16 +310,14 @@ ColumnLayout {
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[7]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
-                    Text {
+                    SelectableText {
                         text: modelData.symbols || "—"
                         color: Style.secondaryText
                         font.pixelSize: 11
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[8]
                         Layout.minimumWidth: 0
-                        elide: Text.ElideRight
                     }
                 }
             }

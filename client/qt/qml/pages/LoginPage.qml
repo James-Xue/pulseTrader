@@ -75,7 +75,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: Style.gapSmall
 
-            Text {
+            SelectableText {
                 Layout.alignment: Qt.AlignHCenter
                 text: qsTr("pulseTrader")
                 color: Style.text
@@ -83,7 +83,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            SelectableText {
                 Layout.alignment: Qt.AlignHCenter
                 text: root.createMode
                       ? qsTr("Create a local account")
@@ -112,7 +112,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Username")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -129,7 +129,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Password")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -151,7 +151,7 @@ Rectangle {
                     spacing: Style.gapSmall
                     visible: root.createMode
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Confirm password")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -175,7 +175,7 @@ Rectangle {
             }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             visible: root.visibleError.length > 0
@@ -186,7 +186,7 @@ Rectangle {
             wrapMode: Text.WordWrap
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             text: root.createMode

@@ -82,14 +82,14 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Style.gap
 
-            Text {
+            SelectableText {
                 text: qsTr("Orders")
                 color: Style.text
                 font.pixelSize: Style.titleSize
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            SelectableText {
                 text: qsTr("%1 active · %2 recent")
                       .arg(root.activeCount).arg(root.reportCount)
                 color: Style.secondaryText
@@ -161,12 +161,12 @@ ColumnLayout {
                 Layout.rightMargin: Style.pad + 10
                 spacing: Style.gap
 
-                Text { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
-                Text { text: qsTr("Side"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 60 }
-                Text { text: qsTr("Type"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 80 }
-                Text { text: qsTr("Filled / qty"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 120 }
-                Text { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
-                Text { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
+                SelectableText { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
+                SelectableText { text: qsTr("Side"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 60 }
+                SelectableText { text: qsTr("Type"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 80 }
+                SelectableText { text: qsTr("Filled / qty"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 120 }
+                SelectableText { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
+                SelectableText { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
             }
 
             ListView {
@@ -196,27 +196,26 @@ ColumnLayout {
                         anchors.rightMargin: 10
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             text: model.symbol === undefined ? "" : model.symbol
                             color: Style.text
                             font.pixelSize: 12
                             Layout.preferredWidth: 130
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             text: model.side === undefined ? "" : model.side
                             // The engine serializes lowercase "buy" / "sell".
                             color: "buy" === model.side ? Style.success : Style.danger
                             font.pixelSize: 12
                             Layout.preferredWidth: 60
                         }
-                        Text {
+                        SelectableText {
                             text: model.type === undefined ? "" : model.type
                             color: Style.secondaryText
                             font.pixelSize: 12
                             Layout.preferredWidth: 80
                         }
-                        Text {
+                        SelectableText {
                             text: model.filled_qty === undefined ? ""
                                   : "%1 / %2".arg(Number(model.filled_qty))
                                                    .arg(Number(model.requested_qty))
@@ -224,18 +223,17 @@ ColumnLayout {
                             font.pixelSize: 12
                             Layout.preferredWidth: 120
                         }
-                        Text {
+                        SelectableText {
                             text: model.status === undefined ? "" : model.status
                             color: root.statusColor(model.status === undefined ? "" : model.status)
                             font.pixelSize: 11
                             Layout.preferredWidth: 90
                         }
-                        Text {
+                        SelectableText {
                             text: model.market_type === undefined ? "" : model.market_type
                             color: Style.tertiaryText
                             font.pixelSize: 11
                             Layout.fillWidth: true
-                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -257,11 +255,11 @@ ColumnLayout {
                 Layout.rightMargin: Style.pad + 10
                 spacing: Style.gap
 
-                Text { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
-                Text { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
-                Text { text: qsTr("Fill price"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 110 }
-                Text { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
-                Text { text: qsTr("Filled at"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
+                SelectableText { text: qsTr("Symbol"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 130 }
+                SelectableText { text: qsTr("Status"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
+                SelectableText { text: qsTr("Fill price"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 110 }
+                SelectableText { text: qsTr("Market"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.preferredWidth: 90 }
+                SelectableText { text: qsTr("Filled at"); color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall; Layout.fillWidth: true }
             }
 
             ListView {
@@ -291,14 +289,13 @@ ColumnLayout {
                         anchors.rightMargin: 10
                         spacing: Style.gap
 
-                        Text {
+                        SelectableText {
                             text: model.symbol === undefined ? "" : model.symbol
                             color: Style.text
                             font.pixelSize: 12
                             Layout.preferredWidth: 130
-                            elide: Text.ElideRight
                         }
-                        Text {
+                        SelectableText {
                             // ExecutionReport serializes `final_status`, not
                             // `status`.
                             text: model.final_status === undefined ? "" : model.final_status
@@ -307,26 +304,25 @@ ColumnLayout {
                             font.pixelSize: 12
                             Layout.preferredWidth: 90
                         }
-                        Text {
+                        SelectableText {
                             text: model.avg_fill_price === undefined ? ""
                                   : String(model.avg_fill_price)
                             color: Style.text
                             font.pixelSize: 12
                             Layout.preferredWidth: 110
                         }
-                        Text {
+                        SelectableText {
                             text: model.market_type === undefined ? "" : model.market_type
                             color: Style.tertiaryText
                             font.pixelSize: 11
                             Layout.preferredWidth: 90
                         }
-                        Text {
+                        SelectableText {
                             text: model.fill_time_str === undefined ? ""
                                   : model.fill_time_str
                             color: Style.secondaryText
                             font.pixelSize: 11
                             Layout.fillWidth: true
-                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -347,7 +343,7 @@ ColumnLayout {
             Layout.fillHeight: true
             spacing: Style.gapSmall
 
-            Text {
+            SelectableText {
                 Layout.fillWidth: true
                 color: Style.secondaryText
                 font.pixelSize: Style.fontSizeSmall
@@ -388,35 +384,35 @@ ColumnLayout {
                 header: RowLayout {
                     width: Math.max(ListView.view.width, root.historyTableWidth)
                     spacing: Style.gapSmall
-                    Text { text: qsTr("Time"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Time"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            Layout.preferredWidth: root.historyColumns[0] }
-                    Text { text: qsTr("Symbol"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Symbol"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            Layout.preferredWidth: root.historyColumns[1] }
-                    Text { text: qsTr("Side"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Side"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            Layout.preferredWidth: root.historyColumns[2] }
-                    Text { text: qsTr("Qty"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Qty"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            horizontalAlignment: Text.AlignRight
                            Layout.preferredWidth: root.historyColumns[3] }
-                    Text { text: qsTr("Price"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Price"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            horizontalAlignment: Text.AlignRight
                            Layout.preferredWidth: root.historyColumns[4] }
-                    Text { text: qsTr("PnL"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("PnL"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            horizontalAlignment: Text.AlignRight
                            Layout.preferredWidth: root.historyColumns[5] }
-                    Text { text: qsTr("Fees"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Fees"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            horizontalAlignment: Text.AlignRight
                            Layout.preferredWidth: root.historyColumns[6] }
-                    Text { text: qsTr("Status"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Status"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            Layout.preferredWidth: root.historyColumns[7] }
-                    Text { text: qsTr("Strategy"); color: Style.tertiaryText
+                    SelectableText { text: qsTr("Strategy"); color: Style.tertiaryText
                            font.pixelSize: Style.fontSizeSmall
                            Layout.preferredWidth: root.historyColumns[8] }
                 }
@@ -443,40 +439,39 @@ ColumnLayout {
                         anchors.fill: parent
                         spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: new Date(Number(modelData.time_ms) || 0)
                                   .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
                         color: Style.text; font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         Layout.preferredWidth: root.historyColumns[0]
                     }
-                    Text {
+                    SelectableText {
                         text: modelData.symbol
                         color: Style.text; font.pixelSize: Style.fontSizeSmall
-                        elide: Text.ElideRight
                         Layout.preferredWidth: root.historyColumns[1]
                     }
-                    Text {
+                    SelectableText {
                         text: modelData.side
                         color: modelData.side === "buy" ? Style.success : Style.danger
                         font.pixelSize: Style.fontSizeSmall
                         Layout.preferredWidth: root.historyColumns[2]
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.quantity || 0).toFixed(4)
                         color: Style.text; font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         horizontalAlignment: Text.AlignRight
                         Layout.preferredWidth: root.historyColumns[3]
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.price || 0).toFixed(2)
                         color: Style.text; font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         horizontalAlignment: Text.AlignRight
                         Layout.preferredWidth: root.historyColumns[4]
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.pnl || 0).toFixed(2)
                         color: Number(modelData.pnl || 0) >= 0 ? Style.danger : Style.success
                         font.pixelSize: Style.fontSizeSmall
@@ -484,19 +479,19 @@ ColumnLayout {
                         horizontalAlignment: Text.AlignRight
                         Layout.preferredWidth: root.historyColumns[5]
                     }
-                    Text {
+                    SelectableText {
                         text: Number(modelData.fees || 0).toFixed(2)
                         color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         horizontalAlignment: Text.AlignRight
                         Layout.preferredWidth: root.historyColumns[6]
                     }
-                    Text {
+                    SelectableText {
                         text: modelData.status
                         color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
                         Layout.preferredWidth: root.historyColumns[7]
                     }
-                    Text {
+                    SelectableText {
                         text: {
                             const cid = String(modelData.client_order_id || "")
                             if (cid.indexOf("xau_team:") === 0) {
@@ -508,7 +503,6 @@ ColumnLayout {
                             return modelData.strategy || cid || "—"
                         }
                         color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall
-                        elide: Text.ElideRight
                         Layout.preferredWidth: root.historyColumns[8]
                     }
                     }

@@ -11,7 +11,7 @@ Rectangle {
     implicitHeight: 32
     color: "#3a1f22"
 
-    Text {
+    SelectableText {
         anchors.fill: parent
         anchors.leftMargin: Style.pad
         anchors.rightMargin: Style.pad
@@ -19,6 +19,5 @@ Rectangle {
         text: root.message
         color: Style.danger
         font.pixelSize: 12
-        elide: Text.ElideRight
     }
 }

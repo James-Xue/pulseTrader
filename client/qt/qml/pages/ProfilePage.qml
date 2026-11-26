@@ -160,7 +160,7 @@ Rectangle {
         width: Math.min(root.width - 4 * Style.pad, 440)
         spacing: Style.gapLarge
 
-        Text {
+        SelectableText {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Connect an exchange")
             color: Style.text
@@ -168,7 +168,7 @@ Rectangle {
             font.weight: Font.DemiBold
         }
 
-        Text {
+        SelectableText {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Gate.io · read-only monitor")
             color: Style.secondaryText
@@ -194,14 +194,14 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 88
                         text: qsTr("Exchange")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
                     }
 
-                    Text {
+                    SelectableText {
                         Layout.fillWidth: true
                         text: qsTr("Gate.io")
                         color: Style.text
@@ -214,7 +214,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 88
                         text: qsTr("Network")
                         color: Style.secondaryText
@@ -235,7 +235,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gap
 
-                    Text {
+                    SelectableText {
                         Layout.preferredWidth: 88
                         text: qsTr("Market")
                         color: Style.secondaryText
@@ -252,7 +252,7 @@ Rectangle {
                     }
                 }
 
-                Text {
+                SelectableText {
                     Layout.leftMargin: 100
                     visible: root.testnet
                     text: qsTr("Gate.io testnet is futures-only.")
@@ -264,7 +264,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("API key")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -288,7 +288,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("API secret")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -315,7 +315,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Proxy (optional)")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -333,7 +333,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Style.gapSmall
 
-                    Text {
+                    SelectableText {
                         text: qsTr("Watch symbols")
                         color: Style.secondaryText
                         font.pixelSize: Style.fontSizeSmall
@@ -346,7 +346,7 @@ Rectangle {
                         placeholderText: qsTr("BTC_USDT, ETH_USDT, XAU_USDT")
                     }
 
-                    Text {
+                    SelectableText {
                         // The card has a fixed 440 px outer width, so the hint
                         // must take the column width (and wrap) instead of its
                         // own unwrapped implicit width — otherwise it overflows
@@ -390,7 +390,7 @@ Rectangle {
             }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             visible: root.visibleError.length > 0
@@ -413,7 +413,7 @@ Rectangle {
             }
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Keys are stored in an encrypted local vault (AES-256-GCM). "

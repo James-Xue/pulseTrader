@@ -67,18 +67,17 @@ Dialog {
 
             Repeater {
                 model: root.fields
-                Text {
+                SelectableText {
                     text: modelData[0]
                     color: Style.tertiaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: modelData[1]
                     color: Style.text
                     font.pixelSize: Style.fontSizeSmall
                     font.family: "monospace"
                     Layout.fillWidth: true
-                    elide: Text.ElideRight
                 }
             }
         }

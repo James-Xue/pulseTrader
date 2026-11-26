@@ -25,7 +25,7 @@ Rectangle {
         Row {
             spacing: 8
 
-            Text {
+            SelectableText {
                 text: root.source
                 color: Style.text
                 font.pixelSize: Style.fontSize
@@ -46,7 +46,7 @@ Rectangle {
                     return Style.controlBackgroundPressed
                 }
 
-                Text {
+                SelectableText {
                     id: typeLabel
                     anchors.centerIn: parent
                     text: root.signalType
@@ -55,22 +55,21 @@ Rectangle {
                 }
             }
 
-            Text {
+            SelectableText {
                 text: qsTr("conf %1").arg(root.confidence.toFixed(2))
                 color: Style.secondaryText
                 font.pixelSize: 11
             }
         }
 
-        Text {
+        SelectableText {
             width: parent.width
             text: root.reason
             color: Style.secondaryText
             font.pixelSize: 11
-            elide: Text.ElideRight
         }
 
-        Text {
+        SelectableText {
             text: root.publishedAt
             color: Style.secondaryText
             font.pixelSize: 10

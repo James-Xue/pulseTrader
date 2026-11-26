@@ -493,7 +493,7 @@ ColumnLayout {
             spacing: 0
             visible: !root.terminalMode
 
-            Text {
+            SelectableText {
                 text: root.fmtPrice(root.stream ? root.stream.lastPrice : 0)
                 color: (root.stream && root.stream.changePct < 0)
                        ? Style.danger : Style.success
@@ -504,17 +504,17 @@ ColumnLayout {
             Row {
                 spacing: Style.gap
 
-                Text {
+                SelectableText {
                     text: qsTr("bid %1").arg(root.fmtPrice(root.stream ? root.stream.bid : 0))
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: qsTr("ask %1").arg(root.fmtPrice(root.stream ? root.stream.ask : 0))
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: root.stream
                           ? ((root.stream.changePct >= 0 ? "+" : "")
                              + root.stream.changePct.toFixed(2) + "%")
@@ -523,7 +523,7 @@ ColumnLayout {
                            ? Style.danger : Style.success
                     font.pixelSize: Style.fontSizeSmall
                 }
-                Text {
+                SelectableText {
                     text: (root.stream && root.stream.engineReady && !root.stream.stale)
                           ? "● LIVE" : "● WAITING"
                     color: (root.stream && root.stream.engineReady && !root.stream.stale)
@@ -539,7 +539,7 @@ ColumnLayout {
                 Repeater {
                     model: root.emaPeriods
 
-                    Text {
+                    SelectableText {
                         required property int modelData
                         required property int index
                         text: "EMA" + modelData + " " + root.emaText(modelData)
@@ -550,7 +550,7 @@ ColumnLayout {
             }
         }
 
-        Text {
+        SelectableText {
             anchors.centerIn: parent
             visible: !root.terminalMode && root.candleCount === 0
             text: (root.stream && root.stream.streaming)
@@ -569,7 +569,7 @@ ColumnLayout {
             anchors.bottomMargin: 10
             visible: root.terminalMode
 
-            Text {
+            SelectableText {
                 id: terminalHeader
                 anchors.top: parent.top
                 anchors.left: parent.left
@@ -583,7 +583,6 @@ ColumnLayout {
                 color: Style.tertiaryText
                 font.family: "monospace"
                 font.pixelSize: 11
-                elide: Text.ElideRight
             }
 
             ListView {
@@ -598,13 +597,12 @@ ColumnLayout {
                 spacing: 2
                 model: tickerLog
 
-                delegate: Text {
+                delegate: SelectableText {
                     width: terminalList.width
                     text: model.line
                     color: model.up ? Style.success : Style.danger
                     font.family: "monospace"
                     font.pixelSize: 12
-                    elide: Text.ElideRight
                 }
             }
 
@@ -639,22 +637,22 @@ ColumnLayout {
         Layout.bottomMargin: Style.pad
         spacing: Style.gap
 
-        Text {
+        SelectableText {
             text: qsTr("Samples %1").arg(root.stream ? root.stream.sampleCount : 0)
             color: Style.secondaryText
             font.pixelSize: Style.fontSizeSmall
         }
-        Text {
+        SelectableText {
             text: qsTr("Candles %1").arg(root.candleCount)
             color: Style.secondaryText
             font.pixelSize: Style.fontSizeSmall
         }
-        Text {
+        SelectableText {
             text: qsTr("Period %1s").arg(root.stream ? root.stream.candlePeriodSec : 10)
             color: Style.secondaryText
             font.pixelSize: Style.fontSizeSmall
         }
-        Text {
+        SelectableText {
             text: qsTr("Last %1").arg(root.lastSampleText)
             color: Style.secondaryText
             font.pixelSize: Style.fontSizeSmall
@@ -664,14 +662,13 @@ ColumnLayout {
             visible: root.stream && root.stream.streaming && root.stream.stale
         }
 
-        Text {
+        SelectableText {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             text: root.stream ? root.stream.lastError : ""
             color: Style.danger
             font.pixelSize: Style.fontSizeSmall
             horizontalAlignment: Text.AlignRight
-            elide: Text.ElideRight
         }
 
         MacSwitch {
@@ -710,7 +707,7 @@ ColumnLayout {
             contentHeight: rawText.implicitHeight
             clip: true
 
-            Text {
+            SelectableText {
                 id: rawText
                 text: root.stream ? JSON.stringify(root.stream.rawTicker, null, 2) : ""
                 color: Style.text
