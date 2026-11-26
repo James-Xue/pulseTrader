@@ -38,6 +38,16 @@ ColumnLayout {
         }
     }
 
+    // Positions poll at 500 ms, but Entries / Last entry come from the trade
+    // history, which is fetched on demand. Without this timer a fill that
+    // happens while the page is open stays invisible until Refresh is clicked.
+    Timer {
+        interval: 10000
+        running: true
+        repeat: true
+        onTriggered: if (root.controller) root.controller.fetchTradeHistory()
+    }
+
     RowLayout {
         Layout.fillWidth: true
         Layout.margins: Style.pad
