@@ -417,6 +417,15 @@ ColumnLayout {
                     width: Math.max(ListView.view.width, root.historyTableWidth)
                     spacing: Style.gapSmall
 
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            tradeDetail.row = modelData
+                            tradeDetail.open()
+                        }
+                    }
+
                     Text {
                         text: new Date(Number(modelData.time_ms) || 0)
                                   .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
@@ -493,5 +502,9 @@ ColumnLayout {
                 text: qsTr("No trades yet")
             }
         }
+    }
+
+    TradeDetailDialog {
+        id: tradeDetail
     }
 }
