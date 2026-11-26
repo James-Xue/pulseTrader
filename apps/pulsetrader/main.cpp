@@ -927,9 +927,19 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         }
 
         // A market wired by [execution] with no strategy instance needs its
-        // symbols from somewhere: [execution].symbols wins over the global
-        // symbol list, because the global list may contain names that do not
-        // exist on this venue (the same hazard the CFD note below describes).
+        // symbols from somewhere. A per-market list wins: the single
+        // [execution].symbols list cannot describe two venues at once
+        // (XAUUSD exists on CFD, BTC_USDT on futures), and a foreign name
+        // fails the registry detail load.
+        const auto by_market = cfg.execution.symbols_by_market.find(
+            std::string{ toString(mt) });
+        if (syms.empty() && by_market != cfg.execution.symbols_by_market.end()
+            && !by_market->second.empty())
+        {
+            return by_market->second;
+        }
+
+        // Fall back to the shared list for the historical single-market case.
         const bool execution_market =
             std::find(cfg.execution.markets.begin(),
                       cfg.execution.markets.end(),
@@ -1406,13 +1416,25 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
         strategy_mgr.registerStrategy(std::move(strat));
     }
 
-    // A strategy-free engine is valid when the gold trader is enabled: the
-    // supervisor manages positions that may have been opened manually.
-    if (0 == strategy_mgr.strategyCount() && !cfg.gold_trader.enabled)
+    // A strategy-free engine is valid when the gold trader is enabled (it
+    // supervises manually opened positions) or when [execution] wires a
+    // market for an external runtime (GT): the control plane, feeds and
+    // executor are the product then, and there is simply nothing to trade
+    // internally.
+    if (0 == strategy_mgr.strategyCount()
+        && !cfg.gold_trader.enabled
+        && cfg.execution.markets.empty())
     {
         log->error("No strategies registered. Exiting.");
         pulse::logging::Logger::shutdown();
         return 1;
+    }
+
+    if (0 == strategy_mgr.strategyCount())
+    {
+        log->info("[L6] No strategy instances enabled — running as an "
+                  "external-runtime executor ([execution] markets: {})",
+                  cfg.execution.markets.size());
     }
 
     // Signal board: every raw signal (with its indicator snapshot) and every

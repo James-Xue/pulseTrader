@@ -1540,5 +1540,42 @@ markets = ["futures", "options"]
               error(result).message.find("unknown market"));
 }
 
+TEST(ConfigLoader, ParseExecution_PerMarketSymbols)
+{
+    // Each wired venue gets its own list: a shared list would put XAUUSD in
+    // the futures feed and BTC_USDT in the CFD feed.
+    TempToml tmp(R"(
+[execution]
+markets = ["futures", "cfd"]
+[execution.symbols_by_market]
+futures = ["BTC_USDT"]
+cfd = ["XAUUSD"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_TRUE(ok(result)) << error(result).message;
+
+    const auto &execution = value(result).execution;
+    ASSERT_EQ(2u, execution.symbols_by_market.size());
+    ASSERT_EQ(1u, execution.symbols_by_market.at("futures").size());
+    EXPECT_EQ("BTC_USDT", execution.symbols_by_market.at("futures")[0]);
+    ASSERT_EQ(1u, execution.symbols_by_market.at("cfd").size());
+    EXPECT_EQ("XAUUSD", execution.symbols_by_market.at("cfd")[0]);
+}
+
+TEST(ConfigLoader, ParseExecution_UnknownPerMarketKeyRejected)
+{
+    TempToml tmp(R"(
+[execution]
+[execution.symbols_by_market]
+options = ["BTC_USDT"]
+)");
+
+    auto result = loadConfigFile(tmp.path());
+    ASSERT_FALSE(ok(result));
+    EXPECT_NE(std::string::npos,
+              error(result).message.find("unknown market"));
+}
+
 } // namespace
 } // namespace pulse

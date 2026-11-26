@@ -597,6 +597,13 @@ struct ExecutionConfig
     /// symbol makes that market's registry detail load fail and can leave a
     /// contract multiplier unresolved.
     std::vector<std::string> symbols;
+
+    /// Per-market symbol lists, e.g. `[execution.symbols_by_market]`
+    /// `futures = ["BTC_USDT"]` / `cfd = ["XAUUSD"]`. Preferred over the
+    /// single `symbols` list when a wired market has no enabled strategy:
+    /// one shared list cannot describe two venues (XAUUSD exists on CFD,
+    /// BTC_USDT on futures), and a foreign name poisons the registry load.
+    std::map<std::string, std::vector<std::string>> symbols_by_market;
 };
 
 // ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ symbols = ["BTC_USDT", "XAUUSD", "SNDK_USDT", "UNITREE_USDT", "ETH_USDT", "XAGUS
 # Streamed through the ACTIVE-market watchlist only — it creates no strategy
 # instance, so manual open_order can price/size it while the CFD side keeps
 # its own feed. Futures-only name: never add it to the CFD subscription.
-watch_symbols = ["XAU_USDT"]
+watch_symbols = []
 
 # ── Active trading direction ──────────────────────────────────────────
 # Only ONE direction trades at a time. The other direction's strategies are
@@ -65,7 +65,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1                # Contract size (1 contract = 0.0001 BTC)
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -76,7 +76,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -87,7 +87,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -98,7 +98,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── BTC_USDT 扩展信号源 (2026-09-04, 与 ETH 同款信号覆盖) ────────────────
@@ -118,7 +118,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 custom_params = { eth_spike_filter_usd = 2000, eth_spike_filter_pct = 1.5, eth_spike_filter_atr = 3.0, eth_atr_step = 0.05, eth_min_confidence_scale = 20.0 }
 
@@ -130,7 +130,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 1
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 custom_params = { res_ema_p1 = 7, res_ema_p2 = 14, res_ema_p3 = 30, res_ema_p4 = 60, res_ema_p5 = 200, res_conf_scale = 2.0 }
 
@@ -175,7 +175,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -186,7 +186,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -197,7 +197,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── UNITREE_USDT futures instances (2026-08-19, 宇树做空 scalping 信号源) ──
@@ -212,7 +212,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 10
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -223,7 +223,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 10
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -234,7 +234,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 10
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── ETH_USDT futures instances (2026-08-19, 以太坊子代理信号源) ──────────
@@ -249,7 +249,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -260,7 +260,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -271,7 +271,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── eth_scalper (M26, 2026-08-21 v2) — 币种专属策略:ETH 追空信号源 ─────
@@ -288,7 +288,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 # custom_params 语义:eth_spike_filter_usd/pct/atr=暴拉过滤三口径(任一触发即
 # 过滤,设 0 禁用);eth_atr_step=止盈提示(成交价-0.05×ATR);
@@ -314,7 +314,7 @@ leverage        = 10
 margin_mode     = "cross"
 order_quantity  = 20
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 # custom_params 语义:res_ema_p1..p5=五条 EMA 周期(默认 7/14/30/60/200),
 # res_conf_scale=置信度缩放。2026-08-23:1.0→2.0 —— 首条真信号实测
@@ -337,7 +337,7 @@ leverage        = 500
 margin_mode     = "cross"
 order_quantity  = 0.01             # Min lot (0.001 default would be rejected)
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -348,7 +348,7 @@ leverage        = 500
 margin_mode     = "cross"
 order_quantity  = 0.01
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 [[strategy.instances]]
@@ -359,7 +359,7 @@ leverage        = 500
 margin_mode     = "cross"
 order_quantity  = 0.01
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── XAGUSD CFD (2026-08-19, 银金背离信号源) ─────────────────────────────
@@ -373,7 +373,7 @@ leverage        = 500
 margin_mode     = "cross"
 order_quantity  = 0.01             # 仅信息性——下单由代理经 MCP 手动执行
 min_confidence  = 0.6
-enabled         = true
+enabled         = false
 poll_interval_ms = 500
 
 # ── Gold trader: USD dynamic stop ladder (strategy 1, 2026-11-13) ────────
@@ -512,10 +512,12 @@ poll_sec = 1800      # 30 分钟轮询
 # 供 GT 通过控制面 subscribe_market 取行情、open_order 下单。
 # ---------------------------------------------------------------------------
 [execution]
-markets = ["futures"]
+markets = ["futures", "cfd"]
 symbols = ["BTC_USDT"]
+[execution.symbols_by_market]
+futures = ["BTC_USDT"]
+cfd = ["XAUUSD"]
 
-# ── Paper trading (simulated venue) ───────────────────────────────────
 [paper]
 enabled                  = true
 account_id               = "paper-default"

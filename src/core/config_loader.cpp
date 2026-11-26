@@ -954,6 +954,47 @@ PulseError parseExecution(const toml::value &root, ExecutionConfig &out)
         }
     }
 
+    out.symbols_by_market.clear();
+    if (sec.contains("symbols_by_market"))
+    {
+        const auto &by_market = sec.at("symbols_by_market");
+        if (!by_market.is_table())
+        {
+            return PulseError{ ErrorCode::ConfigInvalidValue,
+                               "[execution] symbols_by_market must be a table "
+                               "of market = [symbols]" };
+        }
+        for (const auto &entry : by_market.as_table())
+        {
+            const std::string &market = entry.first;
+            if ("spot" != market && "futures" != market && "cfd" != market)
+            {
+                return PulseError{ ErrorCode::ConfigInvalidValue,
+                                   "[execution] symbols_by_market: unknown "
+                                   "market '" + market
+                                       + "' (expected spot|futures|cfd)" };
+            }
+            if (!entry.second.is_array())
+            {
+                return PulseError{ ErrorCode::ConfigInvalidValue,
+                                   "[execution] symbols_by_market." + market
+                                       + " must be an array of strings" };
+            }
+            std::vector<std::string> symbols;
+            for (const auto &elem : entry.second.as_array())
+            {
+                if (!elem.is_string())
+                {
+                    return PulseError{ ErrorCode::ConfigInvalidValue,
+                                       "[execution] symbols_by_market." + market
+                                           + " array elements must be strings" };
+                }
+                symbols.push_back(elem.as_string());
+            }
+            out.symbols_by_market[market] = std::move(symbols);
+        }
+    }
+
     return {};
 }
 
