@@ -200,6 +200,42 @@
         <source>Value</source>
         <translation>市值</translation>
     </message>
+    <message>
+        <source>Paper ledger · reconciliation</source>
+        <translation>纸面账本 · 对账</translation>
+    </message>
+    <message>
+        <source>identity holds</source>
+        <translation>恒等式成立</translation>
+    </message>
+    <message>
+        <source>residual detected</source>
+        <translation>检测到残差</translation>
+    </message>
+    <message>
+        <source>Leg</source>
+        <translation>腿</translation>
+    </message>
+    <message>
+        <source>Locked</source>
+        <translation>冻结</translation>
+    </message>
+    <message>
+        <source>Deposits</source>
+        <translation>入金</translation>
+    </message>
+    <message>
+        <source>Realized</source>
+        <translation>已实现</translation>
+    </message>
+    <message>
+        <source>Residual</source>
+        <translation>残差</translation>
+    </message>
+    <message>
+        <source>%1 capital events · last: %2</source>
+        <translation>%1 条资本事件 · 最近:%2</translation>
+    </message>
 </context>
 <context>
     <name>EmptyState</name>
@@ -1044,6 +1080,30 @@
     <message>
         <source>Showing %1 orders on %2 · closed %3 · net %4 · fees %5</source>
         <translation>显示 %2 的 %1 笔订单 · 已平 %3 · 净额 %4 · 费用 %5</translation>
+    </message>
+    <message>
+        <source>Jump to date</source>
+        <translation>跳转到日期</translation>
+    </message>
+    <message>
+        <source>YYYY-MM-DD</source>
+        <translation>如 2026-11-27</translation>
+    </message>
+    <message>
+        <source>Go</source>
+        <translation>跳转</translation>
+    </message>
+    <message>
+        <source>Load older</source>
+        <translation>加载更早</translation>
+    </message>
+    <message>
+        <source>unpaired</source>
+        <translation>未配对</translation>
+    </message>
+    <message>
+        <source>Legacy fill without a venue id — cannot be paired</source>
+        <translation>旧成交没有场地 id,无法配对</translation>
     </message>
     <message>
         <source>Showing %1 of %2 orders for %3 · net %4 · fees %5</source>

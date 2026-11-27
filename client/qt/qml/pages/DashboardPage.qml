@@ -161,6 +161,173 @@ Flickable {
             }
         }
 
+        // -- Paper ledger reconciliation (paper mode only) -------------------
+        // The 2026-11-27 audit's account identity, made visible: every leg must
+        // satisfy cash + locked == deposits + realized - fees. A non-zero
+        // residual turns red instead of silently drifting.
+        Rectangle {
+            id: ledgerCard
+            Layout.fillWidth: true
+            visible: root.controller && root.controller.simulated
+                     && root.controller.paperLedger
+                     && root.controller.paperLedger.legs !== undefined
+            implicitHeight: ledgerColumn.implicitHeight + 2 * Style.pad
+            radius: Style.radius
+            color: Style.contentBackground
+            border.width: 1
+            border.color: Style.separator
+
+            readonly property var ledger: root.controller
+                ? root.controller.paperLedger : ({})
+            readonly property var legs: ledger.legs || ({})
+
+            ColumnLayout {
+                id: ledgerColumn
+                anchors.fill: parent
+                anchors.margins: Style.pad
+                spacing: Style.gapSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    SelectableText {
+                        text: qsTr("Paper ledger · reconciliation")
+                        color: Style.text
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    SelectableText {
+                        text: ledgerCard.ledger.identity_ok
+                              ? qsTr("identity holds")
+                              : qsTr("residual detected")
+                        color: ledgerCard.ledger.identity_ok
+                               ? Style.success : Style.danger
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gapSmall
+
+                    SelectableText { text: qsTr("Leg"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           Layout.preferredWidth: 70 }
+                    SelectableText { text: qsTr("Cash"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 90 }
+                    SelectableText { text: qsTr("Locked"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 80 }
+                    SelectableText { text: qsTr("Deposits"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 90 }
+                    SelectableText { text: qsTr("Realized"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 90 }
+                    SelectableText { text: qsTr("Fees"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 80 }
+                    SelectableText { text: qsTr("Residual"); color: Style.tertiaryText
+                           font.pixelSize: Style.fontSizeSmall
+                           horizontalAlignment: Text.AlignRight
+                           Layout.preferredWidth: 110 }
+                }
+
+                Repeater {
+                    model: ["spot", "futures", "cfd"]
+
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.gapSmall
+
+                        readonly property var leg: ledgerCard.legs[modelData] || ({})
+                        readonly property real residual:
+                            Number(leg.identity_residual_usdt || 0)
+
+                        SelectableText {
+                            text: modelData
+                            color: Style.text
+                            font.pixelSize: Style.fontSizeSmall
+                            Layout.preferredWidth: 70
+                        }
+                        SelectableText {
+                            text: Number(leg.cash_usdt || 0).toFixed(2)
+                            color: Style.text
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 90
+                        }
+                        SelectableText {
+                            text: Number(leg.locked_margin_usdt || 0).toFixed(2)
+                            color: Style.text
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 80
+                        }
+                        SelectableText {
+                            text: Number(leg.deposits_usdt || 0).toFixed(2)
+                            color: Style.secondaryText
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 90
+                        }
+                        SelectableText {
+                            text: Number(leg.realized_pnl_usdt || 0).toFixed(2)
+                            color: Number(leg.realized_pnl_usdt || 0) >= 0
+                                   ? Style.upColor : Style.downColor
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 90
+                        }
+                        SelectableText {
+                            text: Number(leg.fees_paid_usdt || 0).toFixed(2)
+                            color: Style.secondaryText
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 80
+                        }
+                        SelectableText {
+                            text: residual.toFixed(4)
+                            color: Math.abs(residual) <= 0.005
+                                   ? Style.success : Style.danger
+                            font.pixelSize: Style.fontSizeSmall
+                            font.family: "monospace"
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: 110
+                        }
+                    }
+                }
+
+                SelectableText {
+                    Layout.fillWidth: true
+                    visible: (ledgerCard.ledger.capital_events || []).length > 0
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                    text: {
+                        const events = ledgerCard.ledger.capital_events || []
+                        if (!events.length) return ""
+                        const last = events[events.length - 1]
+                        return qsTr("%1 capital events · last: %2")
+                            .arg(events.length).arg(last.kind)
+                    }
+                }
+            }
+        }
+
         // -- Market tabs -----------------------------------------------------
         RowLayout {
             Layout.fillWidth: true

@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QMap>
+#include <QSet>
 #include <QSettings>
 #include <QTimeZone>
 #include <QVariantMap>
@@ -485,10 +486,58 @@ void EngineController::fetchTradeHistory()
             dayWindow = true;
         }
     }
-    params[QStringLiteral("limit")] = dayWindow ? 1000 : 500;
+    m_historyRequestedLimit = dayWindow ? 1000 : 500;
+    params[QStringLiteral("limit")] = m_historyRequestedLimit;
     const qint64 id =
         m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
     m_inFlight.insert(id, PollKind::TradeHistory);
+}
+
+void EngineController::fetchOlderTradeHistory()
+{
+    if (m_tradeHistory.isEmpty()
+        || RpcClient::State::Ready != m_rest->state()
+        || isInFlight(PollKind::HistoryOlder)
+        || isInFlight(PollKind::TradeHistory))
+    {
+        return;
+    }
+    // The oldest fill currently shown anchors the next page: ask for rows
+    // strictly before it so pages cannot overlap.
+    qint64 oldestMs = 0;
+    for (const QVariant& item : m_tradeHistory)
+    {
+        const qint64 ms = item.toMap()
+                              .value(QStringLiteral("time_ms"))
+                              .toLongLong();
+        if (0 < ms && (0 == oldestMs || ms < oldestMs))
+        {
+            oldestMs = ms;
+        }
+    }
+    if (0 >= oldestMs)
+    {
+        return;
+    }
+
+    QJsonObject params;
+    params[QStringLiteral("limit")] = 500;
+    params[QStringLiteral("to_ms")] = static_cast<double>(oldestMs - 1);
+    if (!m_historyDate.isEmpty())
+    {
+        const QDate day =
+            QDate::fromString(m_historyDate, QStringLiteral("yyyy-MM-dd"));
+        if (day.isValid())
+        {
+            const QDateTime start(day, QTime(0, 0),
+                                  QTimeZone::systemTimeZone());
+            params[QStringLiteral("from_ms")] =
+                static_cast<double>(start.toMSecsSinceEpoch());
+        }
+    }
+    const qint64 id =
+        m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
+    m_inFlight.insert(id, PollKind::HistoryOlder);
 }
 
 QVariantList EngineController::mergedTradeHistory() const
@@ -608,6 +657,11 @@ QVariantList EngineController::mergedTradeHistory() const
         order[QStringLiteral("client_order_id")] =
             entry.value(QStringLiteral("client_order_id"));
         order[QStringLiteral("sort_ms")] = exits.isEmpty() ? entryMs : exitMs;
+        // A fill from before the v2 schema has no venue id, so it cannot be
+        // paired with its counterpart; the UI labels it instead of pretending
+        // it is a complete round trip.
+        order[QStringLiteral("unpaired")] =
+            group.first.startsWith(QStringLiteral("row:"));
         order[QStringLiteral("legs")] = legs;
         orders.append(order);
     }
@@ -812,6 +866,8 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         m_tradeHistorySummary = result.value(QStringLiteral("summary"))
                                     .toObject()
                                     .toVariantMap();
+        m_historyHasMore =
+            m_tradeHistory.size() >= m_historyRequestedLimit;
         if (m_historyDate.isEmpty())
         {
             // Only an unfiltered answer can teach the picker its day list; a
@@ -853,6 +909,35 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
             fetchTradeHistory();
         }
         break;
+    case PollKind::HistoryOlder:
+    {
+        // Append, never replace: the anchor row is already on screen. A
+        // defensive id check keeps an overlapping page from duplicating rows.
+        QSet<QString> seen;
+        for (const QVariant& item : m_tradeHistory)
+        {
+            seen.insert(item.toMap().value(QStringLiteral("order_id")).toString());
+        }
+        const QVariantList page =
+            result.value(QStringLiteral("rows")).toArray().toVariantList();
+        QVariantList merged = m_tradeHistory;
+        for (const QVariant& item : page)
+        {
+            const QString orderId =
+                item.toMap().value(QStringLiteral("order_id")).toString();
+            if (orderId.isEmpty() || seen.contains(orderId))
+            {
+                continue;
+            }
+            seen.insert(orderId);
+            merged.append(item);
+        }
+        m_tradeHistory = merged;
+        m_historyHasMore = page.size() >= 500;
+        setLastError(QString());
+        emit tradeHistoryChanged();
+        break;
+    }
     case PollKind::Positions:
         m_positionsModel->setRows(result.value(QStringLiteral("positions")).toArray());
         m_positionsRaw = result.value(QStringLiteral("positions"))
@@ -872,6 +957,9 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         break;
     case PollKind::Account:
         m_accountModel->setFromJson(result);
+        m_paperLedger =
+            result.value(QStringLiteral("paper_ledger")).toObject().toVariantMap();
+        emit paperLedgerChanged();
         setLastError(QString());
         break;
     case PollKind::Market:

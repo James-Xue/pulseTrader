@@ -69,11 +69,17 @@ class EngineController : public QObject
     Q_PROPERTY(QString historyDate READ historyDate NOTIFY historyDateChanged)
     /// Days (newest first) present in the newest UNFILTERED history fetch.
     Q_PROPERTY(QStringList historyDates READ historyDates NOTIFY historyDatesChanged)
+    /// True when the last history page was full, i.e. older rows may exist.
+    Q_PROPERTY(bool canLoadOlderHistory READ canLoadOlderHistory
+               NOTIFY tradeHistoryChanged)
     /// External traders derived from `xau_team:<member>:<seq>` attribution:
     /// one row per member with open positions, notional, uPnL and entries.
     Q_PROPERTY(QVariantList teamRows READ teamRows NOTIFY teamChanged)
     /// Team totals plus the paper account line (equity/cash/fees/mode).
     Q_PROPERTY(QVariantMap teamSummary READ teamSummary NOTIFY teamChanged)
+    /// Paper mode only: per-leg capital identity from get_account and the
+    /// recent capital events. Empty for a live engine.
+    Q_PROPERTY(QVariantMap paperLedger READ paperLedger NOTIFY paperLedgerChanged)
     Q_PROPERTY(bool tradingHalted READ tradingHalted NOTIFY statusChanged)
     Q_PROPERTY(QString activeMarket READ activeMarket NOTIFY statusChanged)
     Q_PROPERTY(QStringList symbols READ symbols NOTIFY statusChanged)
@@ -183,6 +189,7 @@ public:
     [[nodiscard]] QStringList historyDates() const { return m_historyDates; }
     [[nodiscard]] QVariantList teamRows() const { return m_teamRows; }
     [[nodiscard]] QVariantMap teamSummary() const { return m_teamSummary; }
+    [[nodiscard]] QVariantMap paperLedger() const { return m_paperLedger; }
 
     /// One-shot fetch of the persisted history (opens the dialog).
     Q_INVOKABLE void fetchTradeHistory();
@@ -190,6 +197,11 @@ public:
     /// Filter the persisted history to one LOCAL calendar day ("yyyy-MM-dd");
     /// an empty string restores every date. A malformed day is ignored.
     Q_INVOKABLE void setHistoryDate(const QString& day);
+
+    /// Append the next older page (bounded by the oldest loaded fill). No-op
+    /// while a request is in flight or when the last page was short.
+    Q_INVOKABLE void fetchOlderTradeHistory();
+    [[nodiscard]] bool canLoadOlderHistory() const { return m_historyHasMore; }
     [[nodiscard]] bool simulated() const { return m_simulated; }
     [[nodiscard]] bool tradingHalted() const { return m_tradingHalted; }
     [[nodiscard]] QString activeMarket() const { return m_activeMarket; }
@@ -244,6 +256,7 @@ signals:
     void historyDatesChanged();
     /// Rebuilt whenever positions, history or the paper status change.
     void teamChanged();
+    void paperLedgerChanged();
     void connectionStateChanged();
     void statusChanged();
     void lastErrorChanged();
@@ -274,6 +287,8 @@ private:
         StrategyParams,
         GoldTrader,
         TradeHistory,
+        /// Older history page (appended, never replaces the current one).
+        HistoryOlder,
     };
 
     void startPolling();
@@ -356,6 +371,10 @@ private:
     /// A date change arrived while a history request was in flight; re-fetch
     /// once it lands instead of dropping the new window.
     bool m_historyDirty = false;
+    /// The last history page was full, so an older page may exist.
+    bool m_historyHasMore = false;
+    /// Limit of the last request, used to decide `m_historyHasMore`.
+    int m_historyRequestedLimit = 500;
     QVariantMap m_tradeHistorySummary;
     /// Raw `get_positions` rows, kept for the team aggregation (the model
     /// exposes roles but is awkward to iterate from C++).
@@ -367,6 +386,7 @@ private:
     QVariantMap m_paperStatus;
     QVariantList m_teamRows;
     QVariantMap m_teamSummary;
+    QVariantMap m_paperLedger;
     /// Configured members from the GT runner's team JSON; empty when the
     /// file is absent (the page then shows only attributed traders).
     QVariantList m_teamRoster;

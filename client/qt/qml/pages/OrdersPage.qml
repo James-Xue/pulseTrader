@@ -66,12 +66,34 @@ ColumnLayout {
         return Qt.formatDate(day, "yyyy-MM-dd ddd")
     }
 
-    /// "" (all dates) plus every day seen in the newest unfiltered fetch.
+    /// "" (all dates) plus every day seen in the newest unfiltered fetch. A
+    /// manually entered day is kept even when that page does not list it.
     readonly property var dateKeys: {
         const days = root.controller ? root.controller.historyDates : []
-        return [""].concat(days)
+        const keys = [""].concat(days)
+        if (root.historyDate !== "" && keys.indexOf(root.historyDate) < 0) {
+            keys.push(root.historyDate)
+        }
+        return keys
     }
     readonly property var dateOptions: root.dateKeys.map(root.dateLabel)
+
+    /// Manual date entry, for days older than anything the picker has seen.
+    property string dateInput: ""
+    property bool dateInputInvalid: false
+
+    function applyDateInput() {
+        if (!root.controller) return
+        const value = root.dateInput.trim()
+        const valid = /^\d{4}-\d{2}-\d{2}$/.test(value)
+                      && !isNaN(Date.parse(value + "T00:00:00"))
+        if (!valid) {
+            root.dateInputInvalid = true
+            return
+        }
+        root.dateInputInvalid = false
+        root.controller.setHistoryDate(value)
+    }
 
     /// A day that vanished from the list (e.g. a new day rolled over) must
     /// not leave the page silently filtered by an unselectable date.
@@ -535,6 +557,41 @@ ColumnLayout {
                 }
             }
 
+            // Manual date entry: the picker only lists days present in the
+            // newest fetch, so an older day must be typed.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.gapSmall
+
+                SelectableText {
+                    text: qsTr("Jump to date")
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
+                }
+                MacTextField {
+                    Layout.preferredWidth: 130
+                    placeholderText: qsTr("YYYY-MM-DD")
+                    text: root.dateInput
+                    onTextChanged: root.dateInput = text
+                    onAccepted: root.applyDateInput()
+                    color: root.dateInputInvalid ? Style.danger : Style.text
+                }
+                MacButton {
+                    text: qsTr("Go")
+                    onClicked: root.applyDateInput()
+                }
+                MacButton {
+                    text: qsTr("All dates")
+                    enabled: root.historyDate !== ""
+                    onClicked: {
+                        if (root.controller) root.controller.setHistoryDate("")
+                        root.dateInput = ""
+                        root.dateInputInvalid = false
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
+
             // The list and the empty state share one plain Item: a ListView is
             // a Layout item with no intrinsic height, and an EmptyState (a
             // Text with anchors) placed directly in a ColumnLayout is
@@ -618,7 +675,8 @@ ColumnLayout {
                 delegate: Rectangle {
                     width: Math.max(historyList.width, root.historyTableWidth)
                     height: orderExpanded
-                        ? 30 + orderRow.order.legs.length * 24 + 6
+                        ? 30 + orderRow.order.legs.length * 24
+                          + (orderRow.order.unpaired ? 22 : 0) + 6
                         : 30
                     color: orderExpanded ? Style.controlBackgroundHover
                                          : "transparent"
@@ -699,8 +757,10 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[6]
                             }
                             SelectableText {
-                                text: orderRow.order.status === "closed"
-                                      ? qsTr("closed") : qsTr("open")
+                                text: orderRow.order.unpaired
+                                      ? qsTr("unpaired")
+                                      : (orderRow.order.status === "closed"
+                                         ? qsTr("closed") : qsTr("open"))
                                 color: Style.secondaryText
                                 font.pixelSize: Style.fontSizeSmall
                                 Layout.preferredWidth: root.historyColumns[7]
@@ -784,7 +844,22 @@ ColumnLayout {
                                     font.family: "monospace"
                                     Layout.preferredWidth: 90
                                 }
+                                SelectableText {
+                                    text: String(modelData.order_id || "")
+                                    color: Style.tertiaryText
+                                    font.pixelSize: Style.fontSizeSmall - 1
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 190
+                                }
                             }
+                        }
+
+                        SelectableText {
+                            Layout.fillWidth: true
+                            visible: orderRow.order.unpaired === true
+                            text: qsTr("Legacy fill without a venue id — cannot be paired")
+                            color: Style.tertiaryText
+                            font.pixelSize: Style.fontSizeSmall
                         }
                     }
 
@@ -808,6 +883,16 @@ ColumnLayout {
                     anchors.centerIn: parent
                     visible: historyList.count === 0
                     text: qsTr("No trades yet")
+                }
+            }
+
+            MacButton {
+                Layout.alignment: Qt.AlignHCenter
+                visible: root.controller
+                         && root.controller.canLoadOlderHistory
+                text: qsTr("Load older")
+                onClicked: {
+                    if (root.controller) root.controller.fetchOlderTradeHistory()
                 }
             }
         }

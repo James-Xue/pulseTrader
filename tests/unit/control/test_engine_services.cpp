@@ -2401,6 +2401,19 @@ TEST_F(PaperEngineServicesTest, PaperCapitalAppliesAndMirrorsToTheJournal)
     std::getline(journal, line);
     EXPECT_NE(line.find("topup"), std::string::npos);
     EXPECT_FALSE(std::getline(journal, line)); // exactly one line
+
+    // get_account exposes the same identity the startup check uses.
+    const auto account = m_services->account(false);
+    ASSERT_TRUE(account.contains("paper_ledger"));
+    const auto &ledger = account["paper_ledger"];
+    EXPECT_TRUE(ledger["identity_ok"].get<bool>());
+    EXPECT_NEAR(125.0, ledger["legs"]["cfd"]["deposits_usdt"].get<double>(),
+                1e-9);
+    EXPECT_NEAR(0.0,
+                ledger["legs"]["cfd"]["identity_residual_usdt"].get<double>(),
+                1e-9);
+    ASSERT_EQ(1u, ledger["capital_events"].size());
+    EXPECT_EQ("topup", ledger["capital_events"][0]["kind"].get<std::string>());
 }
 
 TEST_F(PaperEngineServicesTest, PaperCapitalResetRequiresAFlatBook)

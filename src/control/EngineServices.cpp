@@ -704,6 +704,60 @@ nlohmann::json EngineServices::account(bool include_spot_balances)
             { "unrealised_pnl", snapshot.cfd.unrealized_pnl_usdt },
             { "currency", "USD" },
         };
+
+        // P4 operator view: the account identity per leg and the capital-event
+        // history. cash + locked == deposits + realized - fees; a non-zero
+        // residual is surfaced instead of hidden (2026-11-27 audit P4).
+        auto &ledger = m_paperVenue->account();
+        const auto leg_json = [&ledger](const execution::PaperWalletSnapshot &w,
+                                        execution::PaperLeg leg)
+        {
+            return nlohmann::json{
+                { "cash_usdt", w.cash_usdt },
+                { "locked_margin_usdt", w.locked_margin_usdt },
+                { "realized_pnl_usdt", w.realized_pnl_usdt },
+                { "fees_paid_usdt", w.fees_paid_usdt },
+                { "deposits_usdt", ledger.netDeposits(leg) },
+                { "identity_residual_usdt", ledger.identityResidual(leg) },
+            };
+        };
+        nlohmann::json legs{
+            { "spot", leg_json(snapshot.spot, execution::PaperLeg::Spot) },
+            { "futures", leg_json(snapshot.futures,
+                                  execution::PaperLeg::Futures) },
+            { "cfd", leg_json(snapshot.cfd, execution::PaperLeg::Cfd) },
+        };
+        bool identity_ok = true;
+        for (const auto leg : { execution::PaperLeg::Spot,
+                                execution::PaperLeg::Futures,
+                                execution::PaperLeg::Cfd })
+        {
+            if (0.005 < std::abs(ledger.identityResidual(leg)))
+            {
+                identity_ok = false;
+            }
+        }
+        const auto events = ledger.capitalEvents();
+        nlohmann::json event_tail = nlohmann::json::array();
+        const std::size_t first =
+            events.size() > 20 ? events.size() - 20 : 0;
+        for (std::size_t index = first; index < events.size(); ++index)
+        {
+            const auto &event = events[index];
+            event_tail.push_back(nlohmann::json{
+                { "id", event.id },
+                { "ts_ms", event.ts_ms },
+                { "leg", event.leg },
+                { "kind", event.kind },
+                { "amount_usdt", event.amount_usdt },
+                { "note", event.note },
+            });
+        }
+        j["paper_ledger"] = {
+            { "legs", legs },
+            { "identity_ok", identity_ok },
+            { "capital_events", event_tail },
+        };
         j["simulated"] = true;
         j["mode"] = "paper";
         return j;

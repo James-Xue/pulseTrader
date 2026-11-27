@@ -665,7 +665,11 @@ std::optional<Kline> MarketFeed::parseCfdKline(const nlohmann::json &obj)
     kline.low   = low.value();
     kline.close = close.value();
     kline.volume = 0.0; // TradFi klines carry no volume field.
-    kline.closed = true;
+    // TradFi's REST list includes the still-forming candle. Marking it closed
+    // here pushed a half-formed OHLC to the sink/listener as if it were final
+    // (2026-11-27 audit: the CFD REST path never notified closed-bar
+    // consumers, and this flag was the other half of the problem).
+    kline.closed = nowMs() >= kline.close_time;
     return kline;
 }
 
@@ -783,14 +787,36 @@ void MarketFeed::pollLoop(std::stop_token stoken)
         auto &buffer = getKlineBuffer(symbol);
         for (const auto &kline : parsed)
         {
-            if (!buffer.updateOrPush(kline))
+            if (buffer.updateOrPush(kline))
             {
-                continue; // refreshed an existing bar or out-of-order
+                m_klineCount.fetch_add(1, std::memory_order_relaxed);
             }
-            m_klineCount.fetch_add(1, std::memory_order_relaxed);
+
+            // Emit exactly one event per bar, once it is final — the same
+            // contract as the WebSocket path. The forming candle is stored in
+            // the buffer (its OHLC converges on later polls) but must not be
+            // pushed to strategy runtimes or persisted as a closed bar.
+            // Emission cannot be keyed on updateOrPush(): the bar is usually
+            // first stored while forming, and the poll after its close only
+            // refreshes it (updateOrPush returns false).
+            if (!kline.closed)
+            {
+                continue;
+            }
+            auto emitted = m_lastEmittedKline.find(symbol);
+            if (emitted != m_lastEmittedKline.end()
+                && emitted->second >= kline.open_time)
+            {
+                continue;
+            }
+            m_lastEmittedKline[symbol] = kline.open_time;
             if (m_dataSink)
             {
                 m_dataSink->onKline(symbol, m_marketType, kline);
+            }
+            if (m_klineListener)
+            {
+                m_klineListener(symbol, m_marketType, kline);
             }
         }
 
