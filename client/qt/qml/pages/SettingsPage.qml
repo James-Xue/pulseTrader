@@ -236,11 +236,37 @@ ColumnLayout {
         }
     }
 
+    RowLayout {
+        Layout.fillWidth: true
+        Layout.leftMargin: Style.pad
+        Layout.rightMargin: Style.pad
+        spacing: Style.gap
+
+        MacCheckBox {
+            id: redUpCheck
+            text: qsTr("Red = up, green = down")
+            checked: root.controller ? root.controller.redUp : true
+            onToggled: if (root.controller) root.controller.setRedUp(checked)
+        }
+
+        SelectableText {
+            Layout.fillWidth: true
+            text: qsTr("Colours price direction and PnL for the Chinese convention; uncheck for green-up / red-down.")
+            color: Style.tertiaryText
+            font.pixelSize: Style.fontSizeSmall
+            wrapMode: Text.WordWrap
+        }
+    }
+
     Connections {
         target: root.controller
 
         function onSpotHoldingsEnabledChanged() {
             holdingsSwitch.checked = root.controller.spotHoldingsEnabled
+        }
+
+        function onRedUpChanged() {
+            redUpCheck.checked = root.controller.redUp
         }
     }
 

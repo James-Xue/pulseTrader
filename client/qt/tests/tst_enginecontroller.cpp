@@ -27,6 +27,7 @@ private slots:
     void initTestCase();
     void goldTradersAndSelection();
     void teamRosterIncludesTheLeader();
+    void redUpSettingRoundTrips();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -204,6 +205,21 @@ void TestEngineController::teamRosterIncludesTheLeader()
              1);
 
     qunsetenv("GT_TEAM_CONFIG");
+}
+
+void TestEngineController::redUpSettingRoundTrips()
+{
+    // The Settings checkbox persists through QSettings; the test harness
+    // redirects QSettings to a temporary directory.
+    EngineController first;
+    const bool original = first.redUp();
+    first.setRedUp(!original);
+    QCOMPARE(first.redUp(), !original);
+
+    EngineController second;
+    QCOMPARE(second.redUp(), !original);
+
+    first.setRedUp(original);
 }
 
 void TestEngineController::goldTradersAndSelection()

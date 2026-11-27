@@ -158,7 +158,7 @@ ColumnLayout {
                     text: qsTr("uPnL") + ": "
                           + Number(root.summary.unrealized_pnl || 0).toFixed(2)
                     color: Number(root.summary.unrealized_pnl || 0) >= 0
-                           ? Style.danger : Style.success
+                           ? Style.upColor : Style.downColor
                     font.pixelSize: Style.fontSizeSmall
                 }
                 Item { Layout.fillWidth: true }
@@ -306,7 +306,7 @@ ColumnLayout {
                     SelectableText {
                         text: Number(modelData.unrealized_pnl || 0).toFixed(2)
                         color: Number(modelData.unrealized_pnl || 0) >= 0
-                               ? Style.danger : Style.success
+                               ? Style.upColor : Style.downColor
                         font.pixelSize: 12
                         Layout.fillWidth: true
                         Layout.preferredWidth: root.weights[5]

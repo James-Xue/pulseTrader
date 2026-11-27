@@ -464,7 +464,7 @@ ColumnLayout {
                     }
                     SelectableText {
                         text: Number(modelData.pnl || 0).toFixed(2)
-                        color: Number(modelData.pnl || 0) >= 0 ? Style.danger : Style.success
+                        color: Number(modelData.pnl || 0) >= 0 ? Style.upColor : Style.downColor
                         font.pixelSize: Style.fontSizeSmall
                         font.family: "monospace"
                         horizontalAlignment: Text.AlignRight

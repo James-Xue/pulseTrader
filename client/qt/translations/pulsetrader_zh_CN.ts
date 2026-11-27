@@ -1345,6 +1345,16 @@
         <source>Stop engine &amp; sign out</source>
         <translation>停止引擎并退出登录</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/SettingsPage.qml"/>
+        <source>Red = up, green = down</source>
+        <translation>红涨绿跌</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SettingsPage.qml"/>
+        <source>Colours price direction and PnL for the Chinese convention; uncheck for green-up / red-down.</source>
+        <translation>上涨/盈利显示红色、下跌/亏损显示绿色；取消勾选则相反（绿涨红跌）。</translation>
+    </message>
 </context>
 <context>
     <name>Sidebar</name>

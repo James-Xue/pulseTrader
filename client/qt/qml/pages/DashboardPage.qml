@@ -305,7 +305,7 @@ Flickable {
                 label: qsTr("Unrealised PnL")
                 present: root.marketPresent
                 value: root.account ? root.unrealised.toFixed(2) : "—"
-                valueColor: root.unrealised >= 0 ? Style.danger : Style.success
+                valueColor: root.unrealised >= 0 ? Style.upColor : Style.downColor
             }
         }
 
@@ -390,7 +390,7 @@ Flickable {
                             Layout.preferredWidth: 110
                             text: model.unrealized_pnl === undefined
                                   ? "" : Number(model.unrealized_pnl).toFixed(2)
-                            color: Number(model.unrealized_pnl) >= 0 ? Style.danger : Style.success
+                            color: Number(model.unrealized_pnl) >= 0 ? Style.upColor : Style.downColor
                             font.pixelSize: 12
                         }
                         Item { Layout.fillWidth: true }

@@ -391,7 +391,7 @@ ColumnLayout {
                     const candle = candles[i]
                     const x = padLeft + (i + 0.5) * slot
                     const up = candle.c >= candle.o
-                    const color = up ? Style.success : Style.danger
+                    const color = up ? Style.upColor : Style.downColor
 
                     // The forming candle is translucent so the newest bar is
                     // visually distinguishable from closed history.
@@ -496,7 +496,7 @@ ColumnLayout {
             SelectableText {
                 text: root.fmtPrice(root.stream ? root.stream.lastPrice : 0)
                 color: (root.stream && root.stream.changePct < 0)
-                       ? Style.danger : Style.success
+                       ? Style.downColor : Style.upColor
                 font.pixelSize: 28
                 font.bold: true
             }
@@ -520,7 +520,7 @@ ColumnLayout {
                              + root.stream.changePct.toFixed(2) + "%")
                           : "—"
                     color: (root.stream && root.stream.changePct < 0)
-                           ? Style.danger : Style.success
+                           ? Style.downColor : Style.upColor
                     font.pixelSize: Style.fontSizeSmall
                 }
                 SelectableText {
@@ -600,7 +600,7 @@ ColumnLayout {
                 delegate: SelectableText {
                     width: terminalList.width
                     text: model.line
-                    color: model.up ? Style.success : Style.danger
+                    color: model.up ? Style.upColor : Style.downColor
                     font.family: "monospace"
                     font.pixelSize: 12
                 }

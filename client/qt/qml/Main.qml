@@ -58,6 +58,14 @@ ApplicationWindow {
         objectName: "engineController"
     }
 
+    // The Settings page toggles the red-up / green-up convention; every page
+    // reads Style.upColor / downColor, so one binding flips the whole UI.
+    Binding {
+        target: Style
+        property: "redUp"
+        value: engine.redUp
+    }
+
     /// Local account vault and the engine process the client owns. Both are
     /// destroyed with the window, and the launcher stops the engine in its
     /// destructor.

@@ -362,7 +362,7 @@ Flickable {
                             SelectableText {
                                 text: qsTr("PnL %1").arg(root.fmtU(modelData.unrealized_pnl))
                                 color: Number(modelData.unrealized_pnl) >= 0
-                                       ? Style.success : Style.danger
+                                       ? Style.upColor : Style.downColor
                                 font.pixelSize: 11
                             }
                             SelectableText {
@@ -901,7 +901,7 @@ Flickable {
                     SelectableText {
                         text: root.risk ? root.fmtMoney(root.risk.portfolioUnrealizedPnl) : "—"
                         color: root.risk && root.risk.portfolioUnrealizedPnl < 0
-                               ? Style.danger : Style.success
+                               ? Style.downColor : Style.upColor
                         font.pixelSize: 12
                     }
 

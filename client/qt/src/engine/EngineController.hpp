@@ -75,6 +75,8 @@ class EngineController : public QObject
     Q_PROPERTY(bool pollingEnabled READ pollingEnabled NOTIFY pollingEnabledChanged)
     Q_PROPERTY(bool spotHoldingsEnabled READ spotHoldingsEnabled
                NOTIFY spotHoldingsEnabledChanged)
+    /// Colour convention for price direction / PnL (Settings page checkbox).
+    Q_PROPERTY(bool redUp READ redUp WRITE setRedUp NOTIFY redUpChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect CONSTANT)
 
     Q_PROPERTY(pulse::client::PositionsModel* positionsModel READ positionsModel CONSTANT)
@@ -149,6 +151,9 @@ public:
     /// every other REST consumer. The setting persists in the UI layer.
     Q_INVOKABLE void setSpotHoldingsEnabled(bool enabled);
 
+    /// Persisted UI preference: true = red for up/profit, green for down/loss.
+    Q_INVOKABLE void setRedUp(bool enabled);
+
     [[nodiscard]] ConnectionState connectionState() const { return m_connectionState; }
     [[nodiscard]] QString engineVersion() const { return m_engineVersion; }
     [[nodiscard]] double engineUptimeSec() const { return m_engineUptimeSec; }
@@ -171,6 +176,7 @@ public:
     [[nodiscard]] QString lastError() const { return m_lastError; }
     [[nodiscard]] bool pollingEnabled() const { return m_pollingEnabled; }
     [[nodiscard]] bool spotHoldingsEnabled() const { return m_spotHoldingsEnabled; }
+    [[nodiscard]] bool redUp() const { return m_redUp; }
 
     /// True when PULSE_CLIENT_HOST was set at startup, in which case the
     /// controller connected without waiting for the dialog. Used by smoke
@@ -216,6 +222,7 @@ signals:
     void lastErrorChanged();
     void pollingEnabledChanged();
     void spotHoldingsEnabledChanged();
+    void redUpChanged();
     /// Fires on select, on selection loss, and on every strategies refresh.
     void selectedStrategyChanged();
     /// Fires on every successful `get_gold_trader` reply.
@@ -342,6 +349,7 @@ private:
     QString m_lastError;
     bool m_pollingEnabled = true;
     bool m_spotHoldingsEnabled = true;
+    bool m_redUp = true;
     bool m_autoConnect = false;
 };
 

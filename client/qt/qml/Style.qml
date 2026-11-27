@@ -35,6 +35,16 @@ QtObject {
     readonly property color warning: dark ? "#FFD60A" : "#E5A000"
     readonly property color danger: "#FF453A"
 
+    // -- Market direction ---------------------------------------------------
+    //
+    // Chinese markets colour rises red and falls green; western markets the
+    // reverse. SettingsPage toggles `redUp`; Main.qml binds it to the saved
+    // preference. Every price-direction and PnL colour goes through upColor /
+    // downColor so one switch flips the whole UI.
+    property bool redUp: true
+    readonly property color upColor: redUp ? danger : success
+    readonly property color downColor: redUp ? success : danger
+
     // -- Shape --------------------------------------------------------------
     readonly property int radiusSmall: 5
     readonly property int radius: 8
