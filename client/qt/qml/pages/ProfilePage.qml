@@ -47,6 +47,11 @@ Rectangle {
                                  || (root.engine
                                      && root.engine.connectionState === EngineController.Connecting)
 
+    /// Auto-connect fires once per unlock when a saved profile exists, so the
+    /// operator no longer has to click Connect after typing the password.
+    /// Reset by signOut(); a failed attempt leaves the form visible.
+    property bool autoConnectTried: false
+
     /// Copy the decrypted profile into the form.
     ///
     /// This must run when the page becomes visible, not only at construction:
@@ -73,6 +78,15 @@ Rectangle {
     onVisibleChanged: {
         if (visible) {
             root.reloadProfile()
+            if (!root.autoConnectTried
+                && root.engine
+                && root.engine.connectionState === EngineController.Disconnected
+                && root.account
+                && root.account.profileApiKey.length > 0
+                && root.account.profileApiSecret.length > 0) {
+                root.autoConnectTried = true
+                Qt.callLater(function() { root.connectNow() })
+            }
         }
     }
 
@@ -130,6 +144,7 @@ Rectangle {
 
     /// Stop the engine and wipe the in-memory vault key.
     function signOut() {
+        root.autoConnectTried = false
         if (root.launcher) {
             root.launcher.stop()
         }

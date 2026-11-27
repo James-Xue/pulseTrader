@@ -46,12 +46,11 @@ ApplicationWindow {
     palette.toolTipBase: Style.controlBackground
     palette.toolTipText: Style.text
 
-    /// Show the shell once the aggregate connection state is Ready. The
-    /// auto-connect path (PULSE_CLIENT_HOST) keeps the shell visible from the
-    /// first frame so headless captures and scripts never record the login
-    /// form; the login view is only for interactive launches.
+    /// Show the shell as soon as a connection has been requested. The pages
+    /// populate as the sockets come up; waiting for Ready kept the operator
+    /// on the profile screen for the whole engine boot.
     readonly property bool showShell: engine.autoConnect
-                                      || engine.connectionState === EngineController.Ready
+                                      || engine.connectionState !== EngineController.Disconnected
 
     EngineController {
         id: engine
