@@ -2327,4 +2327,54 @@ TEST_F(PaperEngineServicesTest, PostFillOpenFailureAdoptsVenuePosition)
     EXPECT_DOUBLE_EQ(4500.0, positions[0].entry_price);
 }
 
+TEST_F(PaperEngineServicesTest, TradeHistoryReturnsNewestPageAndTimeFilter)
+{
+    // Audit 2026-11-27 §4.4: get_trade_history iterated rbegin() over a
+    // DESC result, returning the OLDEST page, and had no time window. Three
+    // rows one second apart pin both behaviours.
+    const auto base = Timestamp::clock::now();
+    for (int i = 0; i < 3; ++i)
+    {
+        execution::ExecutionReport report;
+        report.order_id = "hist-" + std::to_string(i);
+        report.client_order_id = "hist-client-" + std::to_string(i);
+        report.symbol = "XAUUSD";
+        report.side = Side::Buy;
+        report.type = OrderType::Market;
+        report.requested_qty = 0.01;
+        report.filled_qty = 0.01;
+        report.avg_fill_price = 4000.0 + i;
+        report.fees = 0.06;
+        report.submit_time = base + std::chrono::seconds(i);
+        report.fill_time = report.submit_time;
+        report.final_status = OrderStatus::Filled;
+        report.exchange_position_id = "pp-hist-" + std::to_string(i);
+        m_flow->recordExternalClose(report,
+                                    static_cast<double>(i),
+                                    MarketType::Cfd, 1000.0, 100.0);
+    }
+
+    const auto page = m_services->tradeHistory(nlohmann::json{ { "limit", 2 } });
+    ASSERT_TRUE(ok(page)) << error(page).message;
+    const auto &rows = value(page).at("rows");
+    ASSERT_EQ(2u, rows.size());
+    EXPECT_EQ("hist-2", rows[0].at("order_id"));
+    EXPECT_EQ("hist-1", rows[1].at("order_id"));
+    EXPECT_EQ("pp-hist-2", rows[0].at("exchange_position_id"));
+    EXPECT_EQ(0, rows[0].at("epoch"));
+
+    // Time window around the middle row: only it is returned.
+    const auto middle_ns = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               (base + std::chrono::seconds(1)).time_since_epoch())
+                               .count();
+    const auto window = m_services->tradeHistory(nlohmann::json{
+        { "from_ms", middle_ns - 1 },
+        { "to_ms", middle_ns + 1 },
+    });
+    ASSERT_TRUE(ok(window)) << error(window).message;
+    const auto &window_rows = value(window).at("rows");
+    ASSERT_EQ(1u, window_rows.size());
+    EXPECT_EQ("hist-1", window_rows[0].at("order_id"));
+}
+
 #endif // PULSE_ENABLE_SQLITE

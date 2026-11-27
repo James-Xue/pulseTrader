@@ -77,7 +77,11 @@ CREATE TABLE IF NOT EXISTS trades (
     strategy_name   TEXT    DEFAULT '',
     market_type     TEXT    NOT NULL DEFAULT 'spot',
     leverage        REAL    NOT NULL DEFAULT 0,
-    quanto_multiplier REAL  NOT NULL DEFAULT 1
+    quanto_multiplier REAL  NOT NULL DEFAULT 1,
+    -- v2 (2026-11-27 audit P3): venue linkage + capital epoch. Appended after
+    -- index 19 so a v1 binary keeps reading every existing column.
+    exchange_position_id TEXT DEFAULT '',
+    epoch           INTEGER NOT NULL DEFAULT 0
 );
 )";
 
@@ -181,31 +185,53 @@ Result<bool> TradeRecorder::migrateSchema()
 {
     try
     {
-        const int version = m_db->execAndGet("PRAGMA user_version").getInt();
-        if (version >= 1)
+        int version = m_db->execAndGet("PRAGMA user_version").getInt();
+        if (version < 1)
         {
-            return true;
+            // A fresh database created by the current DDL already has the new
+            // columns but user_version == 0 — only ALTER when they are missing.
+            const int has_market_type = m_db->execAndGet(
+                "SELECT COUNT(*) FROM pragma_table_info('trades') "
+                "WHERE name='market_type'")
+                                            .getInt();
+            if (0 == has_market_type)
+            {
+                m_db->exec("BEGIN");
+                m_db->exec("ALTER TABLE trades ADD COLUMN "
+                           "market_type TEXT NOT NULL DEFAULT 'spot'");
+                m_db->exec("ALTER TABLE trades ADD COLUMN "
+                           "leverage REAL NOT NULL DEFAULT 0");
+                m_db->exec("ALTER TABLE trades ADD COLUMN "
+                           "quanto_multiplier REAL NOT NULL DEFAULT 1");
+                m_db->exec("COMMIT");
+            }
+
+            m_db->exec("PRAGMA user_version = 1");
+            version = 1;
         }
 
-        // A fresh database created by the current DDL already has the new
-        // columns but user_version == 0 — only ALTER when they are missing.
-        const int has_market_type = m_db->execAndGet(
-            "SELECT COUNT(*) FROM pragma_table_info('trades') "
-            "WHERE name='market_type'")
-                                        .getInt();
-        if (0 == has_market_type)
+        if (version < 2)
         {
-            m_db->exec("BEGIN");
-            m_db->exec("ALTER TABLE trades ADD COLUMN "
-                       "market_type TEXT NOT NULL DEFAULT 'spot'");
-            m_db->exec("ALTER TABLE trades ADD COLUMN "
-                       "leverage REAL NOT NULL DEFAULT 0");
-            m_db->exec("ALTER TABLE trades ADD COLUMN "
-                       "quanto_multiplier REAL NOT NULL DEFAULT 1");
-            m_db->exec("COMMIT");
+            // v2 adds the venue linkage and the capital epoch. Append-only:
+            // every v1 column keeps its index, so an old binary that binds the
+            // first 19 columns by position still reads a v2 file. The DDL above
+            // already creates them on a fresh file.
+            const int has_exchange_position_id = m_db->execAndGet(
+                "SELECT COUNT(*) FROM pragma_table_info('trades') "
+                "WHERE name='exchange_position_id'")
+                                                     .getInt();
+            if (0 == has_exchange_position_id)
+            {
+                m_db->exec("BEGIN");
+                m_db->exec("ALTER TABLE trades ADD COLUMN "
+                           "exchange_position_id TEXT DEFAULT ''");
+                m_db->exec("ALTER TABLE trades ADD COLUMN "
+                           "epoch INTEGER NOT NULL DEFAULT 0");
+                m_db->exec("COMMIT");
+            }
+            m_db->exec("PRAGMA user_version = 2");
         }
 
-        m_db->exec("PRAGMA user_version = 1");
         return true;
     }
     catch (const SQLite::Exception &e)
@@ -252,9 +278,9 @@ Result<bool> TradeRecorder::recordTrade(
             "order_type, requested_qty, filled_qty, avg_fill_price, "
             "submit_mid_price, slippage_bps, fees, pnl, latency_ms, "
             "final_status, strategy_name, market_type, leverage, "
-            "quanto_multiplier) "
+            "quanto_multiplier, exchange_position_id, epoch) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?)");
+            "?, ?, ?, ?, ?)");
 
         stmt.bind(1, report.order_id);
         stmt.bind(2, report.client_order_id);
@@ -275,6 +301,9 @@ Result<bool> TradeRecorder::recordTrade(
         stmt.bind(17, toString(market_type));
         stmt.bind(18, eff_leverage);
         stmt.bind(19, quanto_multiplier);
+        // v2: venue linkage + capital epoch (audit 2026-11-27 P3/P4).
+        stmt.bind(20, report.exchange_position_id);
+        stmt.bind(21, static_cast<std::int64_t>(m_epoch.load(std::memory_order_relaxed)));
 
         stmt.exec();
 
@@ -390,6 +419,8 @@ Result<std::vector<TradeRecord>> TradeRecorder::getTrades(
             rec.market_type = stmt.getColumn(17).getString();
             rec.leverage = stmt.getColumn(18).getDouble();
             rec.quanto_multiplier = stmt.getColumn(19).getDouble();
+            rec.exchange_position_id = stmt.getColumn(20).getString();
+            rec.epoch = stmt.getColumn(21).getInt64();
             results.push_back(std::move(rec));
         }
 
@@ -444,6 +475,8 @@ Result<std::vector<TradeRecord>> TradeRecorder::getTradesByStrategy(
             rec.market_type = stmt.getColumn(17).getString();
             rec.leverage = stmt.getColumn(18).getDouble();
             rec.quanto_multiplier = stmt.getColumn(19).getDouble();
+            rec.exchange_position_id = stmt.getColumn(20).getString();
+            rec.epoch = stmt.getColumn(21).getInt64();
             results.push_back(std::move(rec));
         }
 

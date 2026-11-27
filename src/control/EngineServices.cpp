@@ -1035,7 +1035,20 @@ Result<nlohmann::json> EngineServices::tradeHistory(
     int limit = params.value("limit", 200);
     limit = std::max(1, std::min(limit, 1000));
 
-    const auto trades = m_tradeRecorder->getTrades(symbol);
+    // Optional window (audit 2026-11-27 P3). The control plane speaks
+    // milliseconds (like every other *_ms field); the recorder stores ns.
+    std::int64_t from_ns = 0;
+    std::int64_t to_ns = 0;
+    if (params.contains("from_ms") && params["from_ms"].is_number())
+    {
+        from_ns = params["from_ms"].get<std::int64_t>() * 1'000'000LL;
+    }
+    if (params.contains("to_ms") && params["to_ms"].is_number())
+    {
+        to_ns = params["to_ms"].get<std::int64_t>() * 1'000'000LL;
+    }
+
+    const auto trades = m_tradeRecorder->getTrades(symbol, from_ns, to_ns);
     if (!ok(trades))
     {
         return error(trades);
@@ -1064,7 +1077,9 @@ Result<nlohmann::json> EngineServices::tradeHistory(
     }
 
     nlohmann::json rows = nlohmann::json::array();
-    for (auto it = all.rbegin(); it != all.rend() && rows.size()
+    // getTrades() returns newest-first; take the head of that order. Iterating
+    // from rbegin() here returned the OLDEST page instead (audit §4.4).
+    for (auto it = all.begin(); it != all.end() && rows.size()
              < static_cast<std::size_t>(limit);
          ++it)
     {
@@ -1081,6 +1096,8 @@ Result<nlohmann::json> EngineServices::tradeHistory(
             { "status", it->final_status },
             { "strategy", it->strategy_name },
             { "market_type", it->market_type },
+            { "exchange_position_id", it->exchange_position_id },
+            { "epoch", it->epoch },
         });
     }
 

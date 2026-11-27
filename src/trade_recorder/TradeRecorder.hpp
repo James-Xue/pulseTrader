@@ -9,6 +9,7 @@
 #include "execution/ExecutionReport.hpp"
 #include "trade_recorder/TradeRecord.hpp"
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -91,6 +92,19 @@ class TradeRecorder
     /// Total number of recorded trades.
     [[nodiscard]] std::int64_t tradeCount() const;
 
+    /// Capital epoch stamped on every new row (2026-11-27 audit P3/P4).
+    /// 0 = the pre-audit epoch; the control plane bumps it on a capital event.
+    /// Atomic: callers are the control thread, readers are the recorder itself.
+    void setEpoch(std::int64_t epoch) noexcept
+    {
+        m_epoch.store(epoch, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] std::int64_t epoch() const noexcept
+    {
+        return m_epoch.load(std::memory_order_relaxed);
+    }
+
     /// Flush WAL frames to main DB file (call before shutdown).
     void checkpoint();
 
@@ -102,12 +116,14 @@ class TradeRecorder
 
     [[nodiscard]] Result<bool> createSchema();
 
-    /// Versioned schema migration (v0 → v1: market_type/leverage/quanto
-    /// columns). Idempotent — safe on fresh and already-migrated databases.
+    /// Versioned schema migration (v0 → v1: market_type/leverage/quanto;
+    /// v1 → v2: exchange_position_id/epoch). Idempotent — safe on fresh and
+    /// already-migrated databases.
     [[nodiscard]] Result<bool> migrateSchema();
 
     mutable std::mutex m_mutex;
     std::unique_ptr<SQLite::Database> m_db;
+    std::atomic<std::int64_t> m_epoch{ 0 };
 };
 
 } // namespace pulse::trade_recorder

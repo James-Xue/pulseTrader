@@ -313,7 +313,7 @@ TEST(TradeRecorder, FreshDatabaseSetsUserVersion)
     SQLite::Database db(path, SQLite::OPEN_READONLY);
     SQLite::Statement stmt(db, "PRAGMA user_version");
     ASSERT_TRUE(stmt.executeStep());
-    EXPECT_EQ(1, stmt.getColumn(0).getInt64());
+    EXPECT_EQ(2, stmt.getColumn(0).getInt64());
 }
 
 TEST(TradeRecorder, MigrationUpgradesOldSchema)
@@ -370,12 +370,15 @@ VALUES ('OLD001', '', 123, 'BTC_USDT', 'buy', 'market', 0.001, 0.001,
     EXPECT_EQ("spot", t.market_type);
     EXPECT_DOUBLE_EQ(0.0, t.leverage);
     EXPECT_DOUBLE_EQ(1.0, t.quanto_multiplier);
+    EXPECT_EQ("", t.exchange_position_id); // v2 default
+    EXPECT_EQ(0, t.epoch);                 // v2 default
 
     // New inserts work after migration.
     EXPECT_TRUE(ok(rec.recordTrade(make_report("NEW001"), 1.0, "s")));
     EXPECT_EQ(2, rec.tradeCount());
 
-    // Schema now has 20 columns (17 + market_type/leverage/quanto).
+    // Schema now has 22 columns (17 + market_type/leverage/quanto +
+    // exchange_position_id/epoch).
     SQLite::Database db(path, SQLite::OPEN_READONLY);
     SQLite::Statement col_stmt(db, "PRAGMA table_info(trades)");
     int ncols = 0;
@@ -383,7 +386,7 @@ VALUES ('OLD001', '', 123, 'BTC_USDT', 'buy', 'market', 0.001, 0.001,
     {
         ++ncols;
     }
-    EXPECT_EQ(20, ncols);
+    EXPECT_EQ(22, ncols);
 }
 
 TEST(TradeRecorder, MigrationIdempotentReopen)
@@ -407,4 +410,83 @@ TEST(TradeRecorder, MigrationIdempotentReopen)
         EXPECT_TRUE(ok(rec.recordTrade(make_report("V1B"), 2.0, "s")));
         EXPECT_EQ(2, rec.tradeCount());
     }
+}
+
+TEST(TradeRecorder, MigrateV1AppendsExchangePositionIdAndEpoch)
+{
+    // v1 -> v2 (audit 2026-11-27 #14): append every existing column keeps its
+    // index, the old row is preserved, and a legacy 20-column reader still
+    // works against the v2 file.
+    const std::string path = "/tmp/test_pulse_v1_to_v2.db";
+    std::filesystem::remove(path);
+    {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+        db.exec(R"(
+CREATE TABLE trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id        TEXT    NOT NULL UNIQUE,
+    client_order_id TEXT    DEFAULT '',
+    timestamp       INTEGER NOT NULL,
+    symbol          TEXT    NOT NULL,
+    side            TEXT    NOT NULL,
+    order_type      TEXT    NOT NULL,
+    requested_qty   REAL    NOT NULL,
+    filled_qty      REAL    NOT NULL,
+    avg_fill_price  REAL    NOT NULL,
+    submit_mid_price REAL   DEFAULT 0,
+    slippage_bps    REAL    DEFAULT 0,
+    fees            REAL    NOT NULL,
+    pnl             REAL    DEFAULT 0,
+    latency_ms      INTEGER NOT NULL,
+    final_status    TEXT    NOT NULL,
+    strategy_name   TEXT    DEFAULT '',
+    market_type     TEXT    NOT NULL DEFAULT 'spot',
+    leverage        REAL    NOT NULL DEFAULT 0,
+    quanto_multiplier REAL  NOT NULL DEFAULT 1
+);
+PRAGMA user_version = 1;
+INSERT INTO trades (order_id, timestamp, symbol, side, order_type,
+                    requested_qty, filled_qty, avg_fill_price, fees,
+                    latency_ms, final_status)
+VALUES ('V1ROW', 123, 'BTC_USDT', 'buy', 'market', 0.001, 0.001,
+        65000, 0.26, 120, 'filled');
+)");
+    }
+
+    auto result = TradeRecorder::open(path);
+    ASSERT_TRUE(ok(result)) << error(result).message;
+    auto &rec = value(result);
+
+    // The legacy row keeps its data and gets the v2 defaults.
+    auto query = rec.getTrades("BTC_USDT");
+    ASSERT_TRUE(ok(query));
+    ASSERT_EQ(1u, value(query).size());
+    EXPECT_EQ("V1ROW", value(query)[0].order_id);
+    EXPECT_EQ("", value(query)[0].exchange_position_id);
+    EXPECT_EQ(0, value(query)[0].epoch);
+
+    // A new row stamps the venue id and the current epoch.
+    rec.setEpoch(3);
+    auto report = make_report("V2ROW");
+    report.exchange_position_id = "pp-276";
+    ASSERT_TRUE(ok(rec.recordTrade(report, -3.77, "member")));
+
+    auto rows = rec.getTrades("BTC_USDT");
+    ASSERT_TRUE(ok(rows));
+    ASSERT_EQ(2u, value(rows).size());
+    ASSERT_EQ("V2ROW", value(rows)[0].order_id); // newest first
+    EXPECT_EQ("pp-276", value(rows)[0].exchange_position_id);
+    EXPECT_EQ(3, value(rows)[0].epoch);
+
+    // Legacy reader: exactly the 20 v1 columns, by position.
+    SQLite::Database db(path, SQLite::OPEN_READONLY);
+    SQLite::Statement stmt(db,
+        "SELECT id, order_id, client_order_id, timestamp, symbol, side, "
+        "order_type, requested_qty, filled_qty, avg_fill_price, "
+        "submit_mid_price, slippage_bps, fees, pnl, latency_ms, "
+        "final_status, strategy_name, market_type, leverage, "
+        "quanto_multiplier FROM trades WHERE order_id = 'V1ROW'");
+    ASSERT_TRUE(stmt.executeStep());
+    EXPECT_EQ("V1ROW", stmt.getColumn(1).getString());
+    EXPECT_DOUBLE_EQ(1.0, stmt.getColumn(19).getDouble());
 }

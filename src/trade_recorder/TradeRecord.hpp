@@ -35,6 +35,8 @@ struct TradeRecord
     std::string market_type;     ///< "spot", "futures", or "cfd".
     double leverage;             ///< 1.0 for spot / unset.
     double quanto_multiplier;
+    std::string exchange_position_id; ///< Venue id ("pp-276"); v2 column.
+    std::int64_t epoch;               ///< Capital epoch; v2 column.
 };
 
 // ---------------------------------------------------------------------------
