@@ -1766,6 +1766,8 @@ EngineServices::closePosition(const nlohmann::json &params)
         // Paper mode: the venue is the exchange. It performs the ledger close
         // and returns the fill price; no REST call and no business-error body.
         double venue_exit_price = 0.0;
+        double venue_realized = 0.0;
+        double venue_fee = 0.0;
         if (nullptr != m_paperVenue)
         {
             const auto venue_close = m_paperVenue->closeCfdPosition(
@@ -1777,6 +1779,10 @@ EngineServices::closePosition(const nlohmann::json &params)
                                        + ": " + error(venue_close).message };
             }
             venue_exit_price = value(venue_close).exit_price;
+            // Venue truth: the commission is charged on the closing BUY leg and
+            // was previously dropped on the floor (audit §4.3).
+            venue_realized = value(venue_close).realized_pnl;
+            venue_fee = value(venue_close).fee;
         }
         else
         {
@@ -1812,7 +1818,11 @@ EngineServices::closePosition(const nlohmann::json &params)
             : (pos.current_price > 0.0 ? pos.current_price : pos.entry_price);
         const auto pnl = m_positionMgr.closePosition(
             position_id, close_qty, exit_price);
-        const double realized = pnl.has_value() ? pnl.value() : 0.0;
+        // Paper: the venue's realized number wins; the mirrored book may have
+        // drifted (imported entry price, netting). Live keeps the PM number.
+        const double realized = (nullptr != m_paperVenue)
+            ? venue_realized
+            : (pnl.has_value() ? pnl.value() : 0.0);
 
         // Synthesize a terminal fill report for the close side and route it
         // through the shared record pipeline (completed reports, drawdown
@@ -1829,13 +1839,14 @@ EngineServices::closePosition(const nlohmann::json &params)
         report.avg_fill_price      = exit_price;
         report.submit_mid_price    = exit_price;
         report.slippage_bps        = 0.0;
-        report.fees                = 0.0;
+        report.fees                = venue_fee; // 0 on the live path (venue_fee stays 0)
         report.latency             = std::chrono::milliseconds{ 0 };
         report.submit_time         = now();
         report.fill_time           = now();
         report.final_status        = OrderStatus::Filled;
         report.exchange_position_id = exchange_pid;
-        m_orderFlow.recordCfdClose(report, realized, pos.leverage);
+        m_orderFlow.recordCfdClose(report, realized, pos.leverage,
+                                   pos.quanto_multiplier);
 
         execution::OrderResponse resp;
         resp.order_id = position_id;
@@ -2767,7 +2778,7 @@ int EngineServices::traceExternalGhostClose(const risk::Position &pos)
     report.final_status      = OrderStatus::Filled;
     report.exchange_position_id = pos.exchange_position_id;
     m_orderFlow.recordExternalClose(report, realized, pos.market_type,
-                                    pos.leverage);
+                                    pos.leverage, pos.quanto_multiplier);
 
     PULSE_LOG_INFO("app",
         "Position sync: pruned ghost {} (absent from exchange; "
@@ -2878,6 +2889,9 @@ void EngineServices::tickPaperVenue(std::int64_t now_ms)
     //    would leave the position open and double-count the PnL.
     for (const auto &event : m_paperVenue->drainExitEvents())
     {
+        // 1. Close the engine's mirror position when it still holds this venue
+        //    id. Even then the venue's numbers are authoritative: it applied the
+        //    ledger close before the event was queued (audit §4.1).
         const auto positions = m_positionMgr.getAllPositions();
         const auto it = std::find_if(
             positions.begin(), positions.end(),
@@ -2885,30 +2899,49 @@ void EngineServices::tickPaperVenue(std::int64_t now_ms)
             { return pos.exchange_position_id == event.exchange_position_id; });
         if (it == positions.end())
         {
+            // The engine never had (or already lost) this position. Dropping
+            // the row here is what lost -2.49 PnL and -0.48 fees across the
+            // 18 exits the audit found: the venue had already booked them.
             PULSE_LOG_WARN("control",
                            "paper exit for unknown venue position {} "
-                           "(reason={})",
+                           "(reason={}); recording the venue row only",
                            event.exchange_position_id,
                            static_cast<int>(event.reason));
-            continue;
         }
-
-        const auto pnl = m_positionMgr.closePosition(
-            it->position_id, event.closed_qty, event.fill_price);
-        if (!pnl.has_value())
+        else
         {
-            PULSE_LOG_WARN("control",
-                           "paper exit closePosition failed for {} "
-                           "(already closed?)",
-                           it->position_id);
-            continue;
+            const auto engine_pnl = m_positionMgr.closePosition(
+                it->position_id, event.closed_qty, event.fill_price);
+            if (!engine_pnl.has_value())
+            {
+                PULSE_LOG_WARN("control",
+                               "paper exit closePosition failed for {} "
+                               "(recording the venue row anyway)",
+                               it->position_id);
+            }
+            else if (1e-6 < std::abs(engine_pnl.value() - event.realized_pnl))
+            {
+                // Never let a mirrored-book discrepancy change the ledger: the
+                // venue owns the money. Surface it so the drift is visible.
+                PULSE_LOG_WARN("control",
+                               "paper exit {} engine pnl {:.4f} != venue pnl "
+                               "{:.4f}; recording the venue number",
+                               event.exchange_position_id, engine_pnl.value(),
+                               event.realized_pnl);
+            }
         }
 
+        // 2. One economic close -> exactly one PnL-bearing trade row, for known
+        //    and unknown engine positions alike.
         execution::ExecutionReport report;
         ++m_paperExitSeq;
         report.order_id = "paper_exit_" + event.exchange_position_id + "_"
             + std::to_string(m_paperExitSeq);
-        report.client_order_id = report.order_id;
+        // Keep the entry order's tag so per-member attribution survives; the
+        // synthetic order id stays unique for the recorder's dedup key.
+        report.client_order_id = event.client_order_id.empty()
+            ? report.order_id
+            : event.client_order_id;
         report.symbol = event.symbol;
         report.side = opposite(event.position_side);
         report.type = OrderType::Market;
@@ -2924,14 +2957,15 @@ void EngineServices::tickPaperVenue(std::int64_t now_ms)
         report.final_status = OrderStatus::Filled;
         report.exchange_position_id = event.exchange_position_id;
 
-        m_orderFlow.recordExternalClose(report, pnl.value(),
-                                        it->market_type, it->leverage);
+        m_orderFlow.recordExternalClose(report, event.realized_pnl,
+                                        event.market_type, event.leverage,
+                                        event.quanto);
 
         PULSE_LOG_INFO("control",
                        "paper exit {} lots={:.2f} @ {:.2f} pnl={:.2f} "
                        "reason={}",
                        event.exchange_position_id, event.closed_qty,
-                       event.fill_price, pnl.value(),
+                       event.fill_price, event.realized_pnl,
                        static_cast<int>(event.reason));
     }
 }

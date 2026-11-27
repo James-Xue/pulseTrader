@@ -7,6 +7,7 @@
 #include "core/TimeUtil.hpp"
 #include "strategy/signal/SignalBoard.hpp"
 #include "execution/OrderTracker.hpp"
+#include "execution/PaperVenue.hpp"
 #include "trade_recorder/TradeRecorder.hpp"
 #include "exchange/GateRestClient.hpp"
 #include "exchange/GateWsClient.hpp"
@@ -1860,3 +1861,213 @@ TEST_F(EngineServicesTest, SetStrategyTradingRegisteredInMethodRegistry)
         { "enabled", "yes" } });
     EXPECT_TRUE(std::holds_alternative<PulseError>(bad));
 }
+
+#ifdef PULSE_ENABLE_SQLITE
+// ---------------------------------------------------------------------------
+// P1 of the 2026-11-27 paper-team reconciliation audit.
+//
+// The paper venue is the exchange: it owns the positions and the money. These
+// tests wire a real PaperVenue to a real TradeRecorder and assert that every
+// venue economic event reaches the trades table exactly once, with the venue's
+// own PnL and fee — not the engine's recomputation.
+// ---------------------------------------------------------------------------
+class PaperEngineServicesTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        m_paperCfg.initial_balance_usdt = 100.0;
+        m_paperCfg.contract_volume["XAUUSD"] = 100.0;
+        m_stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+
+        m_account = std::make_unique<execution::PaperAccount>(m_paperCfg);
+        m_venue = std::make_unique<execution::PaperVenue>(
+            m_paperCfg, std::vector<Symbol>{ "XAUUSD" }, *m_account);
+        m_venue->setMarkProvider(
+            [this](const Symbol &, MarketType) -> std::optional<execution::PaperMark>
+            { return execution::PaperMark{ m_price, m_stamp, m_price, m_price }; });
+
+        // One database per test so a parallel ctest run cannot collide.
+        const auto *test_info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        m_dbPath = (std::filesystem::temp_directory_path()
+                    / (std::string("pulse_paper_") + test_info->name() + ".db"))
+                       .string();
+        cleanupDb();
+        auto recorder = trade_recorder::TradeRecorder::open(m_dbPath);
+        ASSERT_TRUE(ok(recorder)) << error(recorder).message;
+        m_recorder = std::make_unique<trade_recorder::TradeRecorder>(
+            std::move(value(recorder)));
+
+        // One 0.01-lot XAUUSD leg is 3,621 notional at 3621.38; the default
+        // 1000/500 caps would reject the mirror position in the close test.
+        m_riskCfg.maxPositionNotional = 8000.0;
+        m_riskCfg.maxSymbolNotional = 8000.0;
+        m_riskCfg.maxPositionNotionalCfd = 8000.0;
+
+        m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
+        m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
+        m_rateLimiter =
+            std::make_unique<OrderRateLimiter>(m_riskCfg.maxOrdersPerSec);
+        m_riskMgr = std::make_unique<RiskManager>(
+            m_riskCfg, *m_positionMgr, *m_drawdownGuard, *m_rateLimiter);
+        m_board = std::make_unique<SignalBoard>(
+            m_strategyCfg.signal_aggregator_threshold);
+        // Only there to satisfy close_position's "CFD infrastructure" guard; the
+        // paper branch never calls REST.
+        m_restClient = std::make_unique<GateRestClient>(m_exchangeCfg);
+
+        m_flow = std::make_unique<OrderFlowExecutor>(
+            m_strategyCfg, *m_riskMgr, *m_positionMgr, *m_drawdownGuard,
+            nullptr, nullptr, m_venue.get(),
+            nullptr, nullptr, m_venue.get(),
+            nullptr, nullptr, m_restMutex, m_recorder.get());
+
+        m_services = std::make_unique<EngineServices>(
+            "test", m_start, m_cfg, m_strategyMgr, *m_riskMgr, *m_positionMgr,
+            nullptr, nullptr, nullptr,
+            nullptr, nullptr, m_restClient.get(),
+            nullptr, nullptr, m_venue.get(),
+            *m_flow, *m_board, m_restMutex,
+            nullptr, nullptr, nullptr, m_recorder.get(), m_venue.get());
+    }
+
+    void TearDown() override
+    {
+        m_services.reset();
+        m_flow.reset();
+        m_recorder.reset();
+        cleanupDb();
+    }
+
+    void cleanupDb()
+    {
+        std::error_code ec;
+        std::filesystem::remove(m_dbPath, ec);
+        std::filesystem::remove(m_dbPath + "-wal", ec);
+        std::filesystem::remove(m_dbPath + "-shm", ec);
+    }
+
+    /// Inject a venue position through the startup-restore path. No completion
+    /// callback fires, so the engine never learns about it — exactly the
+    /// "unknown PositionManager position" case the audit found 18 times (the
+    /// venue restored the position, but the engine import failed or netted it).
+    std::string restoreVenueShort(double entry, double sl)
+    {
+        m_price = entry;
+        nlohmann::json state{
+            { "seq", 1 },
+            { "positions",
+              nlohmann::json::array({ nlohmann::json{
+                  { "exchange_position_id", "pp-1" },
+                  { "symbol", "XAUUSD" },
+                  { "side", "sell" },
+                  { "lots", 0.01 },
+                  { "entry_price", entry },
+                  { "leverage", 1000.0 },
+                  { "quanto", 100.0 },
+                  { "locked_margin", 0.01 * 100.0 * entry / 1000.0 },
+                  { "sl_price", sl },
+                  { "tp_price", 0.0 },
+                  { "open_time_ms", m_stamp },
+                  { "client_order_id", "xau_team:xau_bouncy:000001" },
+              } }) },
+        };
+        EXPECT_TRUE(m_venue->restore(state));
+
+        const auto rows = m_venue->openPositions(MarketType::Cfd);
+        EXPECT_EQ(1u, rows.size());
+        return rows.empty() ? std::string{} : rows.back().exchange_position_id;
+    }
+
+    PaperConfig m_paperCfg;
+    ExchangeConfig m_exchangeCfg;
+    PulseConfig m_cfg;
+    RiskConfig m_riskCfg;
+    StrategyConfig m_strategyCfg;
+    StrategyManager m_strategyMgr;
+    std::chrono::steady_clock::time_point m_start =
+        std::chrono::steady_clock::now();
+
+    std::unique_ptr<execution::PaperAccount> m_account;
+    std::unique_ptr<execution::PaperVenue> m_venue;
+    std::unique_ptr<trade_recorder::TradeRecorder> m_recorder;
+    std::unique_ptr<PositionManager> m_positionMgr;
+    std::unique_ptr<DrawdownGuard> m_drawdownGuard;
+    std::unique_ptr<OrderRateLimiter> m_rateLimiter;
+    std::unique_ptr<RiskManager> m_riskMgr;
+    std::unique_ptr<SignalBoard> m_board;
+    std::unique_ptr<GateRestClient> m_restClient;
+    std::unique_ptr<OrderFlowExecutor> m_flow;
+    std::unique_ptr<EngineServices> m_services;
+    std::mutex m_restMutex;
+
+    double m_price{ 3621.38 };
+    std::int64_t m_stamp{ 0 };
+    std::string m_dbPath;
+};
+
+TEST_F(PaperEngineServicesTest, PaperExitUnknownPositionRecordsTheVenueRow)
+{
+    // A venue position the engine never imported: no PositionManager row, no
+    // entry trade row. The stop fires; the venue has already realized the PnL
+    // and charged the commission, so dropping the exit loses real money.
+    const std::string pid = restoreVenueShort(3621.38, 3625.00);
+    ASSERT_EQ(1u, m_venue->openPositionCount());
+    ASSERT_TRUE(m_positionMgr->getAllPositions().empty());
+
+    m_price = 3625.15;
+    m_services->tickPaperVenue(m_stamp + 1);
+
+    const auto trades = m_recorder->getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades)) << error(trades).message;
+    const auto &rows = value(trades);
+    ASSERT_EQ(1u, rows.size());
+    const auto &row = rows[0];
+    EXPECT_EQ(0u, row.order_id.rfind("paper_exit_" + pid + "_", 0));
+    EXPECT_EQ("xau_team:xau_bouncy:000001", row.client_order_id);
+    EXPECT_NEAR(-3.77, row.pnl, 1e-9);
+    EXPECT_NEAR(0.06, row.fees, 1e-9);
+    EXPECT_EQ("cfd", row.market_type);
+    EXPECT_NEAR(1000.0, row.leverage, 1e-12);
+    EXPECT_NEAR(100.0, row.quanto_multiplier, 1e-12);
+
+    // No engine position was invented, and a second tick must not duplicate the
+    // row (the venue erased the position on the first pass).
+    EXPECT_TRUE(m_positionMgr->getAllPositions().empty());
+    m_services->tickPaperVenue(m_stamp + 2);
+    EXPECT_EQ(1u, value(m_recorder->getTrades("XAUUSD")).size());
+}
+
+TEST_F(PaperEngineServicesTest, ClosePositionRecordsTheVenueFee)
+{
+    // The control-plane close path synthesizes a "close_" report. It must use
+    // the venue's realized PnL and commission, not hard-code fees = 0.
+    const std::string pid = restoreVenueShort(3621.38, 0.0);
+
+    // Mirror the venue position into PositionManager, as importPaperPositions
+    // does at startup.
+    const auto opened = m_positionMgr->openPosition(
+        "XAUUSD", Side::Sell, 0.01, 3621.38, std::string{}, MarketType::Cfd,
+        1000.0, MarginMode::Cross, 100.0, 0.005, 0.0, 0.0);
+    ASSERT_TRUE(ok(opened)) << error(opened).message;
+    const std::string position_id = value(opened);
+    m_positionMgr->setExchangePositionId(position_id, pid);
+
+    m_price = 3625.15;
+    const auto closed = m_services->closePosition(
+        nlohmann::json{ { "position_id", position_id } });
+    ASSERT_TRUE(ok(closed)) << error(closed).message;
+
+    const auto trades = m_recorder->getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades)) << error(trades).message;
+    const auto &rows = value(trades);
+    ASSERT_EQ(1u, rows.size());
+    EXPECT_EQ("close_" + position_id, rows[0].order_id);
+    EXPECT_NEAR(-3.77, rows[0].pnl, 1e-9);
+    EXPECT_NEAR(0.06, rows[0].fees, 1e-9);
+    EXPECT_TRUE(m_positionMgr->getAllPositions().empty());
+}
+#endif // PULSE_ENABLE_SQLITE

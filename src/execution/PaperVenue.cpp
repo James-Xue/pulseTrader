@@ -926,6 +926,14 @@ double PaperVenue::closePositionLocked(PaperPosition &position, double lots,
         event.fee = fee;
         event.fill_time = now;
         event.reason = reason;
+        // Economics must be copied here: tick() erases the position right after
+        // this call returns, so a downstream reader has nothing left to ask.
+        event.realized_pnl = realized;
+        event.entry_price = position.entry_price;
+        event.client_order_id = position.client_order_id;
+        event.market_type = MarketType::Cfd; // PaperVenue's only market (scope P2).
+        event.leverage = position.leverage;
+        event.quanto = position.quanto;
         m_exits.push_back(std::move(event));
     }
 

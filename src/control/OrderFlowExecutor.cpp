@@ -892,7 +892,8 @@ void OrderFlowExecutor::onOrderComplete(
 }
 
 void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,
-                                       double pnl, double leverage)
+                                       double pnl, double leverage,
+                                       double quanto_multiplier)
 {
     auto log_app = logging::Logger::get("app");
 
@@ -912,12 +913,15 @@ void OrderFlowExecutor::recordCfdClose(const execution::ExecutionReport &report,
 
     recordCompletedTrade(report, pnl, MarketType::Cfd,
                          leverage > 0.0 ? leverage : 1.0,
-                         quantoMultiplierFor(report.symbol));
+                         quanto_multiplier > 0.0
+                             ? quanto_multiplier
+                             : quantoMultiplierFor(report.symbol));
 }
 
 void OrderFlowExecutor::recordExternalClose(const execution::ExecutionReport &report,
                                             double pnl, MarketType market_type,
-                                            double leverage)
+                                            double leverage,
+                                            double quanto_multiplier)
 {
     auto log_app = logging::Logger::get("app");
 
@@ -953,7 +957,9 @@ void OrderFlowExecutor::recordExternalClose(const execution::ExecutionReport &re
 
     recordCompletedTrade(report, pnl, market_type,
                          leverage > 0.0 ? leverage : 1.0,
-                         quantoMultiplierFor(report.symbol));
+                         quanto_multiplier > 0.0
+                             ? quanto_multiplier
+                             : quantoMultiplierFor(report.symbol));
 }
 
 void OrderFlowExecutor::recordCompletedTrade(

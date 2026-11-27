@@ -89,6 +89,12 @@ enum class PaperExitReason : std::uint8_t
 };
 
 /// A venue-initiated exit, drained by L9 (tickPaperVenue).
+///
+/// Venue truth: by the time this event exists the venue has already applied the
+/// ledger close (realized PnL, margin release, commission), and `tick()` erases
+/// the position immediately afterwards. Anything the trade ledger or the GT
+/// bridge needs must therefore be captured here — recomputing it downstream
+/// reads state that no longer exists (2026-11-27 reconciliation audit, P1).
 struct PaperExitEvent
 {
     std::string exchange_position_id;
@@ -99,6 +105,14 @@ struct PaperExitEvent
     double fee{ 0.0 };
     Timestamp fill_time{};
     PaperExitReason reason{ PaperExitReason::StopLoss };
+
+    // Venue-truth economics, snapshotted before the position is erased.
+    double realized_pnl{ 0.0 };  ///< Already booked into PaperAccount.
+    double entry_price{ 0.0 };   ///< Position entry, for the ledger row.
+    std::string client_order_id; ///< Member/strategy tag of the entry order.
+    MarketType market_type{ MarketType::Cfd }; ///< PaperVenue is CFD-only.
+    double leverage{ 1.0 };
+    double quanto{ 1.0 };        ///< Contract multiplier (100 for 0.01-lot XAUUSD).
 };
 
 class PaperVenue final : public IOrderPlacer, public IOrderTracker

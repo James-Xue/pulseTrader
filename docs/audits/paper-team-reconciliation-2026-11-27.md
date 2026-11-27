@@ -534,3 +534,49 @@ FROM trades GROUP BY ep;
 
 *This is an engineering audit, not investment advice. All amounts are paper
 USDT; no real-money order was placed by this work.*
+
+---
+
+## 12. Fixing-session log
+
+### 2026-11-27 — P0 complete
+
+- Frozen the E0..E3 contract in `tests/unit/control/reconciliation_epochs.hpp`
+  (PT) and `tests/reconciliation_epochs.py` (GT). Boundaries convert civil time
+  at a fixed +08:00 offset, so the contract also holds on the MSVC build, which
+  ships no IANA tzdata.
+- Committed read-only fixtures: `tests/fixtures/reconciliation/` (four
+  `paper-state` snapshots plus a 90 KB trades-only trim, 210 rows, Σpnl −99.22,
+  Σfees 6.18, `user_version` 1) and the GT ledger fixture in
+  `11_gold-trader-mind/tests/fixtures/reconciliation/`. The trade rows are
+  byte-identical to the 12:53 CST snapshot.
+- Canaries: PT 6/6 under SQLite and 4 pass + 1 skip with
+  `PULSE_ENABLE_SQLITE=OFF` (clean under `-Werror`); GT 7/7; GT suite
+  362 passed / 4 skipped.
+- §10 decisions confirmed: **venue truth** (§10.1) and **CFD 1:1 with venue
+  positions plus a raised notional cap** (§10.2).
+
+### 2026-11-27 — P1 complete (engine venue ledger)
+
+- `PaperExitEvent` now carries `realized_pnl`, `entry_price`,
+  `client_order_id`, `market_type`, `leverage` and `quanto`, populated in
+  `closePositionLocked` before `tick()` erases the position.
+- `tickPaperVenue` records exactly one PnL-bearing row per venue exit,
+  including exits whose PositionManager position is missing (the previous
+  `continue` lost 18 exits, −2.49 PnL and −0.48 fees). The row uses the venue's
+  PnL, fee, leverage and quanto; a known-position mismatch is logged, and a
+  failed mirror close no longer suppresses the venue row.
+- `close_position` records `PaperCfdClose.fee` (and the venue realized PnL)
+  instead of a hard-coded `fees = 0`; the live path still records 0.
+- `recordCfdClose` / `recordExternalClose` take an optional
+  `quanto_multiplier`; 0 keeps the registry fallback.
+- Tests: `ExitEventCarriesRealizedPnlAndEntryPrice`,
+  `ShortCloseChargesBuyLegCommission`, `LongCloseChargesNoCommission`,
+  `TwoExitsSamePositionPartialClose`, `PaperExitUnknownPositionRecordsTheVenueRow`,
+  `ClosePositionRecordsTheVenueFee`.
+
+**Known transient state.** P1 is not sufficient on its own. Entry rows can
+still carry netting PnL until P2 makes CFD 1:1 with the venue; running a
+P1-only binary against live state would double-count those netting PnLs
+against the newly recorded venue exits. The running paper engine must stay on
+the pre-P1 binary until the P2 tests pass on a copy (§0.5).

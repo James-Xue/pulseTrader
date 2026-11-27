@@ -223,8 +223,13 @@ class OrderFlowExecutor
     /// emits an order fill, so close_position synthesizes the terminal report
     /// and calls this instead of onOrderComplete — that path would re-close
     /// positions and consume a reservation that never existed.
+    ///
+    /// `quanto_multiplier` <= 0 falls back to the symbol registry, which yields
+    /// 1.0 when the registry is not wired (a 100x under-scale for 0.01-lot
+    /// XAUUSD). Venue-truth callers pass the position's own multiplier.
     void recordCfdClose(const execution::ExecutionReport &report,
-                        double pnl, double leverage);
+                        double pnl, double leverage,
+                        double quanto_multiplier = 0.0);
 
     /// Record an EXTERNAL close (user manual close in the app, or an
     /// exchange-side stop-loss/take-profit fill) into the shared record
@@ -234,7 +239,8 @@ class OrderFlowExecutor
     /// market_type picks the tracker; leverage/quanto come from the position.
     void recordExternalClose(const execution::ExecutionReport &report,
                              double pnl, MarketType market_type,
-                             double leverage);
+                             double leverage,
+                             double quanto_multiplier = 0.0);
 
     /// Cancel an open order; probes cfd tracker first, then futures, then spot.
     /// Must be called with the shared rest_mutex held.

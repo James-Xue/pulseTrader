@@ -270,4 +270,104 @@ TEST_F(PaperVenueTest, RestoreRejectsMalformedPayload)
                                              { nlohmann::json::object() }) } }));
 }
 
+// ---------------------------------------------------------------------------
+// P1 of the 2026-11-27 paper-team reconciliation audit: the exit event is the
+// ledger's only venue-truth source, so it must carry the economics, not just
+// the fill price. These tests are red on the pre-P1 struct (it has no
+// realized_pnl / entry_price / client_order_id / market_type / leverage /
+// quanto fields).
+// ---------------------------------------------------------------------------
+
+TEST_F(PaperVenueTest, ExitEventCarriesRealizedPnlAndEntryPrice)
+{
+    // Short 0.01 lot at 3621.38. The protective stop sits at 3625.00 and the
+    // mark gaps to 3625.15, so the venue exits at the observed mark (a gap is
+    // not forgiven).
+    price = 3621.38;
+    OrderRequest req = marketOrder(Side::Sell, 0.01, 3625.00, 0.0);
+    req.leverage = 1000.0;
+    req.client_order_id = "xau_team:xau_bouncy:000001";
+    placeAndFill(req);
+    ASSERT_EQ(1u, venue.openPositionCount());
+
+    price = 3625.15;
+    venue.tick(stamp + 1);
+
+    const auto exits = venue.drainExitEvents();
+    ASSERT_EQ(1u, exits.size());
+    const PaperExitEvent &exit = exits[0];
+
+    // -3.77 = (3621.38 - 3625.15) * 0.01 lot * 100 oz/lot. The ledger must use
+    // the venue's number, not recompute it from PositionManager.
+    EXPECT_NEAR(-3.77, exit.realized_pnl, 1e-9);
+    EXPECT_DOUBLE_EQ(3621.38, exit.entry_price);
+    EXPECT_NEAR(0.06, exit.fee, 1e-9); // closing a short is the BUY leg
+    EXPECT_EQ("xau_team:xau_bouncy:000001", exit.client_order_id);
+    EXPECT_EQ(MarketType::Cfd, exit.market_type);
+    EXPECT_DOUBLE_EQ(1000.0, exit.leverage);
+    EXPECT_DOUBLE_EQ(100.0, exit.quanto);
+}
+
+TEST_F(PaperVenueTest, ShortCloseChargesBuyLegCommission)
+{
+    // Gate TradFi bills the commission on the BUY leg only: opening a short is
+    // free, closing it costs 6 USDT per lot.
+    price = 3600.0;
+    placeAndFill(marketOrder(Side::Sell, 0.01));
+    ASSERT_EQ(1u, venue.openPositionCount());
+
+    const auto rows = venue.openPositions(MarketType::Cfd);
+    ASSERT_EQ(1u, rows.size());
+    const auto closed = venue.closeCfdPosition(rows[0].exchange_position_id,
+                                               0.01, 0.01);
+    ASSERT_TRUE(ok(closed));
+    EXPECT_NEAR(0.06, value(closed).fee, 1e-9);
+    EXPECT_NEAR(0.06, account.snapshot().cfd.fees_paid_usdt, 1e-9);
+}
+
+TEST_F(PaperVenueTest, LongCloseChargesNoCommission)
+{
+    // The mirror case: entry pays 0.06, the SELL close leg is free.
+    price = 3600.0;
+    placeAndFill(marketOrder(Side::Buy, 0.01));
+    ASSERT_EQ(1u, venue.openPositionCount());
+
+    const auto rows = venue.openPositions(MarketType::Cfd);
+    ASSERT_EQ(1u, rows.size());
+    const auto closed = venue.closeCfdPosition(rows[0].exchange_position_id,
+                                               0.01, 0.01);
+    ASSERT_TRUE(ok(closed));
+    EXPECT_NEAR(0.0, value(closed).fee, 1e-12);
+    EXPECT_NEAR(0.06, account.snapshot().cfd.fees_paid_usdt, 1e-9);
+}
+
+TEST_F(PaperVenueTest, TwoExitsSamePositionPartialClose)
+{
+    // Two 0.005 closes must each charge a pro-rata commission and release a
+    // pro-rata margin, and the second must retire the position cleanly.
+    price = 3600.0;
+    placeAndFill(marketOrder(Side::Sell, 0.01));
+    const auto rows = venue.openPositions(MarketType::Cfd);
+    ASSERT_EQ(1u, rows.size());
+    const std::string pid = rows[0].exchange_position_id;
+    const double full_margin = rows[0].locked_margin;
+
+    const auto first = venue.closeCfdPosition(pid, 0.005, 0.01);
+    ASSERT_TRUE(ok(first));
+    EXPECT_NEAR(0.03, value(first).fee, 1e-9);
+    EXPECT_NEAR(full_margin / 2.0, value(first).margin_released, 1e-9);
+    {
+        const auto partial = venue.openPositions(MarketType::Cfd);
+        ASSERT_EQ(1u, partial.size());
+        EXPECT_NEAR(0.005, partial[0].lots, 1e-12);
+        EXPECT_NEAR(full_margin / 2.0, partial[0].locked_margin, 1e-9);
+    }
+
+    const auto second = venue.closeCfdPosition(pid, 0.005, 0.005);
+    ASSERT_TRUE(ok(second));
+    EXPECT_NEAR(0.03, value(second).fee, 1e-9);
+    EXPECT_EQ(0u, venue.openPositionCount());
+    EXPECT_NEAR(0.06, account.snapshot().cfd.fees_paid_usdt, 1e-9);
+}
+
 } // namespace
