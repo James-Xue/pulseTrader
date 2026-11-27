@@ -2121,7 +2121,7 @@ TEST_F(PaperEngineServicesTest, ClosePositionRecordsTheVenueFee)
     ASSERT_TRUE(ok(trades)) << error(trades).message;
     const auto &rows = value(trades);
     ASSERT_EQ(1u, rows.size());
-    EXPECT_EQ("close_" + position_id, rows[0].order_id);
+    EXPECT_EQ("close_" + pid, rows[0].order_id);
     EXPECT_NEAR(-3.77, rows[0].pnl, 1e-9);
     EXPECT_NEAR(0.06, rows[0].fees, 1e-9);
     EXPECT_TRUE(m_positionMgr->getAllPositions().empty());

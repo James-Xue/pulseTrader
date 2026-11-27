@@ -659,3 +659,24 @@ restarts it (§0.5); P1–P2 are now both green on a copy.
   RPC page is taken from one connection, so no partial import is visible.
 - Coverage: every §7 red-first test is implemented in P1–P4 or covered by the
   frozen fixtures; the 2026-11-27 coverage gate statement stands.
+
+### 2026-11-27 — restart verification (post-P5)
+
+- Paper engine restarted on the P1–P5 binary: `trades-paper.db` migrated to
+  v2, the four legacy adjustments were recorded exactly once, the legacy state
+  file's deposits were derived once from the identity, and the residual is 0
+  on all three legs. The GT runner and GT app restarted; the GT ledger
+  migrated to v2 and dropped one phantom open row the flat engine does not
+  list.
+- The live round trip found a real defect: the synthesized close report used
+  the ENGINE position id (`close_XAUUSD_Buy_1`), which restarts every process,
+  so the row collided with a previous session's `UNIQUE(order_id)` and was
+  silently dropped. The close row is now keyed by the VENUE id
+  (`close_pp-300`), which persists across restarts; the verification entry
+  (`paper-cfd-299`) and close (`close_pp-300`) both carry `pp-300` in
+  `exchange_position_id`.
+- Identity after the round trip: residual 0 on every leg (`cfd` cash 93.59).
+- Two orphan rows remain in the GT ledger from the manual verification exits;
+  they are deliberately left in the explicit unallocated bucket as evidence.
+- Full PT suite after the fix: **1341/1341** (one known WarmupSeeder flake on
+  the first pass, clean on re-run).

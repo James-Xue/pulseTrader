@@ -2001,7 +2001,13 @@ EngineServices::closePosition(const nlohmann::json &params)
         // guard, trades.db, execution.log). Without this, a CFD close leaves
         // zero trace anywhere.
         execution::ExecutionReport report;
-        report.order_id            = "close_" + position_id;
+        // Use the EXCHANGE position id, not the engine-local one: the local
+        // id ("XAUUSD_Buy_1") restarts every engine run, so close rows from a
+        // previous session collided on the trades UNIQUE(order_id) key and
+        // were silently dropped (found during the 2026-11-27 restart check).
+        // The venue id (pp-N) persists across restarts, and GT links fills by
+        // it too. A replayed close still maps to the same id -> idempotent.
+        report.order_id            = "close_" + exchange_pid;
         report.client_order_id     = report.order_id;
         report.symbol              = pos.symbol;
         report.side                = opposite(pos.side);
