@@ -371,6 +371,7 @@ static void logSystemHeartbeat(
     pulse::exchange::GateRestClient* rest_client,
     pulse::exchange::GateRestClient* spot_rest_client,
     pulse::exchange::GateRestClient* cfd_rest_client,
+    const pulse::execution::PaperAccount* paper_account,
     pulse::risk::DrawdownGuard* drawdown_guard,
     std::mutex& rest_mutex)
 {
@@ -588,20 +589,30 @@ static void logSystemHeartbeat(
         // Failed fetch → cfd_equity stays unset → incomplete snapshot.
     }
 
-    // Feed the circuit breaker once per heartbeat. updateEquity() also rolls
-    // the daily baseline at the UTC day boundary, so no separate reset call is
-    // needed. Skip the update entirely when any fetch failed — see above.
+    // Feed the circuit breaker once per heartbeat. In paper mode the
+    // simulated ledger is the only account — the REST clients are absent —
+    // so its equity (including the venue's open-position marks) is fed
+    // directly. Live mode keeps the all-or-nothing REST aggregation below.
     if (nullptr != drawdown_guard)
     {
-        const auto dd_equity = pulse::risk::computeDrawdownEquity(dd_inputs);
-        if (dd_equity.complete)
+        if (nullptr != paper_account)
         {
-            drawdown_guard->updateEquity(dd_equity.total);
+            const auto paper_snapshot = paper_account->snapshot(
+                0.0, 0.0, portfolio.total_unrealized_pnl);
+            drawdown_guard->updateEquity(paper_snapshot.equity_usdt);
         }
         else
         {
-            PULSE_LOG_DEBUG("system",
-                "Skipping drawdown equity update — an account balance fetch failed");
+            const auto dd_equity = pulse::risk::computeDrawdownEquity(dd_inputs);
+            if (dd_equity.complete)
+            {
+                drawdown_guard->updateEquity(dd_equity.total);
+            }
+            else
+            {
+                PULSE_LOG_DEBUG("system",
+                    "Skipping drawdown equity update — an account balance fetch failed");
+            }
         }
     }
 
@@ -2587,6 +2598,7 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
                 futures_rest ? futures_rest.get() : spot_rest.get(),
                 spot_rest ? spot_rest.get() : nullptr,
                 cfd_rest ? cfd_rest.get() : nullptr,
+                paper_account.get(),
                 &drawdownGuard,
                 rest_mutex);
         }

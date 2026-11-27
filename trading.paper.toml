@@ -422,8 +422,9 @@ maxPositionNotionalCfd = 8000     # 2026-11-27: per-position cap for the 5-membe
                                   # paper team (0.01-lot XAUUSD ~3,600-4,700 USDT)
 maxOpenPositions    = 80  # SNDK 20-slot + ETH 20-slot grids (each resting order
                           # reserves a slot) + user App orders + positions (08-19)
-maxDailyDrawdown    = 0.02
-maxDrawdown         = 0.05
+maxDailyDrawdown    = 0.20       # 2026-11-27: 100 USD paper account; the old 2%
+                                # would halt after 2 USD. Team brake: 20 USD/day.
+maxDrawdown         = 0.40       # peak-to-valley backstop (40 USD at 100 USD)
 # Engine-side protective exits (percentage stop-loss / take-profit supervisor).
 # false = the engine NEVER closes a position on its own; exits belong to the
 # strategy or the operator. The drawdown breaker still blocks new entries.
