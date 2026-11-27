@@ -1793,3 +1793,85 @@ TEST(ClientOrderId, EmptyStrategyFallsBackToAuto)
     const auto id = makeClientOrderId("", 0, 0);
     EXPECT_EQ(0u, id.rfind("auto-", 0)) << id;
 }
+
+// ---------------------------------------------------------------------------
+// P2 of the 2026-11-27 paper-team reconciliation audit: CFD is 1:1 with venue
+// positions. The venue opens a position per order and never nets, so an
+// opposite-side entry must not close anyone else's position.
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderFlowTest, CrossMemberOppositeCfdFillKeepsBothPositions)
+{
+    // Member A buys, member B sells. Before P2 the sell closed A's long and
+    // credited its PnL to B's entry; the venue had opened two positions.
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest member_a;
+    member_a.symbol = "XAUUSD";
+    member_a.side = Side::Buy;
+    member_a.type = OrderType::Market;
+    member_a.quantity = 0.01;
+    member_a.market_type = MarketType::Cfd;
+    member_a.leverage = 500.0;
+    member_a.quanto_multiplier = 100.0;
+    member_a.client_order_id = "xau_team:xau_a:000001";
+
+    const auto a_placed = m_flow->placeOrder(member_a);
+    ASSERT_TRUE(ok(a_placed)) << error(a_placed).message;
+    completeCfdOrder(value(a_placed).order_id, 0.01, 4400.0);
+    ASSERT_EQ(1, m_positionMgr->openPositionCount());
+
+    OrderRequest member_b = member_a;
+    member_b.side = Side::Sell;
+    member_b.client_order_id = "xau_team:xau_b:000001";
+
+    const auto b_placed = m_flow->placeOrder(member_b);
+    ASSERT_TRUE(ok(b_placed)) << error(b_placed).message;
+    completeCfdOrder(value(b_placed).order_id, 0.01, 4401.0);
+
+    const auto positions = m_positionMgr->getPositionsBySymbol("XAUUSD");
+    ASSERT_EQ(2u, positions.size());
+    int longs = 0;
+    int shorts = 0;
+    for (const auto &pos : positions)
+    {
+        if (Side::Buy == pos.side)
+        {
+            ++longs;
+        }
+        else
+        {
+            ++shorts;
+        }
+    }
+    EXPECT_EQ(1, longs);
+    EXPECT_EQ(1, shorts);
+}
+
+TEST_F(OrderFlowTest, EmptyClientIdCfdOpensDoNotNet)
+{
+    // Manual/API opens with no client tag are still two economic opens. An
+    // empty id must never be treated as "same trade".
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    OrderRequest open_long;
+    open_long.symbol = "XAUUSD";
+    open_long.side = Side::Buy;
+    open_long.type = OrderType::Market;
+    open_long.quantity = 0.01;
+    open_long.market_type = MarketType::Cfd;
+    open_long.leverage = 500.0;
+    open_long.quanto_multiplier = 100.0;
+
+    const auto long_placed = m_flow->placeOrder(open_long);
+    ASSERT_TRUE(ok(long_placed)) << error(long_placed).message;
+    completeCfdOrder(value(long_placed).order_id, 0.01, 4400.0);
+
+    OrderRequest open_short = open_long;
+    open_short.side = Side::Sell;
+    const auto short_placed = m_flow->placeOrder(open_short);
+    ASSERT_TRUE(ok(short_placed)) << error(short_placed).message;
+    completeCfdOrder(value(short_placed).order_id, 0.01, 4401.0);
+
+    EXPECT_EQ(2u, m_positionMgr->getPositionsBySymbol("XAUUSD").size());
+}

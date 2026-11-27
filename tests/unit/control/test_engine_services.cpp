@@ -1903,9 +1903,11 @@ class PaperEngineServicesTest : public ::testing::Test
 
         // One 0.01-lot XAUUSD leg is 3,621 notional at 3621.38; the default
         // 1000/500 caps would reject the mirror position in the close test.
-        m_riskCfg.maxPositionNotional = 8000.0;
-        m_riskCfg.maxSymbolNotional = 8000.0;
-        m_riskCfg.maxPositionNotionalCfd = 8000.0;
+        // 20k lets the audit's four concurrent legs fit (P2 §10.2).
+        m_riskCfg.maxPositionNotional = 20000.0;
+        m_riskCfg.maxSymbolNotional = 20000.0;
+        m_riskCfg.maxPositionNotionalCfd = 20000.0;
+        m_riskCfg.maxOpenPositions = 5;
 
         m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
         m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
@@ -1980,6 +1982,26 @@ class PaperEngineServicesTest : public ::testing::Test
         const auto rows = m_venue->openPositions(MarketType::Cfd);
         EXPECT_EQ(1u, rows.size());
         return rows.empty() ? std::string{} : rows.back().exchange_position_id;
+    }
+
+    /// Place a market order through the engine's order flow. The paper venue
+    /// fills it on the immediate poll, so the completion callback runs and the
+    /// entry row is recorded before this returns.
+    void placeThroughFlow(Side side, const std::string &member, double price)
+    {
+        m_price = price;
+        execution::OrderRequest req;
+        req.symbol = "XAUUSD";
+        req.side = side;
+        req.type = OrderType::Market;
+        req.quantity = 0.01;
+        req.market_type = MarketType::Cfd;
+        req.leverage = 1000.0;
+        req.quanto_multiplier = 100.0;
+        req.client_order_id = member;
+
+        const auto placed = m_flow->placeOrder(req);
+        ASSERT_TRUE(ok(placed)) << error(placed).message;
     }
 
     PaperConfig m_paperCfg;
@@ -2069,5 +2091,29 @@ TEST_F(PaperEngineServicesTest, ClosePositionRecordsTheVenueFee)
     EXPECT_NEAR(-3.77, rows[0].pnl, 1e-9);
     EXPECT_NEAR(0.06, rows[0].fees, 1e-9);
     EXPECT_TRUE(m_positionMgr->getAllPositions().empty());
+}
+
+TEST_F(PaperEngineServicesTest, CfdEntryRowsCarryNoPnl)
+{
+    // A's buy and B's sell are two economic opens at the venue, so they must be
+    // two engine positions and two entry rows with pnl == 0. Before P2 the
+    // sell closed A's long and carried the netting PnL (+1.00) on its entry
+    // row, cross-crediting member B.
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    placeThroughFlow(Side::Buy, "xau_team:xau_a:000001", 4400.0);
+    placeThroughFlow(Side::Sell, "xau_team:xau_b:000001", 4401.0);
+
+    EXPECT_EQ(2u, m_positionMgr->getPositionsBySymbol("XAUUSD").size());
+    EXPECT_EQ(2u, m_venue->openPositionCount());
+
+    const auto trades = m_recorder->getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades)) << error(trades).message;
+    const auto &rows = value(trades);
+    ASSERT_EQ(2u, rows.size());
+    for (const auto &row : rows)
+    {
+        EXPECT_NEAR(0.0, row.pnl, 1e-12) << row.order_id;
+    }
 }
 #endif // PULSE_ENABLE_SQLITE

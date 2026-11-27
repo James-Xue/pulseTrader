@@ -580,3 +580,32 @@ still carry netting PnL until P2 makes CFD 1:1 with the venue; running a
 P1-only binary against live state would double-count those netting PnLs
 against the newly recorded venue exits. The running paper engine must stay on
 the pre-P1 binary until the P2 tests pass on a copy (§0.5).
+
+### 2026-11-27 — P2 partial (CFD 1:1 with venue positions)
+
+Done:
+
+- `onOrderComplete` no longer nets CFD fills: a fill never closes another
+  member's (or an earlier) CFD position. Futures and spot keep the historical
+  netting — the `SellFillClosesPositionWithPnl` canary is unchanged.
+- CFD entry rows now carry `pnl = 0`; the +7.58 netting PnL disappears at the
+  source instead of being attributed to an entry.
+- `trading.paper.toml`: `maxPositionNotionalCfd` 8000 → 20000, and the comment
+  corrected from "per-position" to "per-market total". The old value silently
+  allowed only two concurrent 0.01-lot legs (§4.6); 20000 fits four plus one.
+- Tests: `CrossMemberOppositeCfdFillKeepsBothPositions`,
+  `EmptyClientIdCfdOpensDoNotNet`, `CfdEntryRowsCarryNoPnl`.
+  Order flow 62/62, engine services 80/80, execution 125/125.
+
+**P2 is NOT closed.** Still open, in gate order:
+
+1. Reference-price API: `reserveNotional` must take an explicit reference price
+   for market orders, `OrderRequest.price` must keep its meaning (fingerprint
+   stability), and a market order with neither must fail closed (§6 P2, §7 #13).
+2. Post-fill `openPosition` failure must adopt the venue leg through
+   `syncPositionFromExchange`, idempotent by `exchange_position_id` (§7 #12).
+3. Fifth-concurrent-leg rejection test: the fifth 0.01-lot leg must be rejected
+   pre-trade and leave no venue leg (§6 P2 last bullet).
+4. Synthetic E1 replay: 74 entries / 74 PnL rows, Σpnl −74.55, Σfees 4.44 (§7 #8).
+
+The running paper engine remains on the pre-P1 binary (§0.5).

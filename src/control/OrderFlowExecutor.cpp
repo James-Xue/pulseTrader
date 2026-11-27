@@ -771,28 +771,43 @@ void OrderFlowExecutor::onOrderComplete(
     // The open-remainder branch matters for shorts: a SELL fill with no long
     // to close must record the short, or the risk gate stays blind to real
     // short exposure.
+    // Market metadata from the reservation's request (defaults = spot). Needed
+    // before the netting loop: the CFD policy below depends on it.
+    const MarketType mt = reservation.request.market_type;
+
     double pnl = 0.0;
     double remaining = report.filled_qty;
-    auto positions = m_positionMgr.getPositionsBySymbol(report.symbol);
-    for (const auto &pos : positions)
+
+    // CFD is 1:1 with venue positions (audit P2, 2026-11-27). PaperVenue — and
+    // Gate's TradFi book — opens one position per order and never nets, so an
+    // opposite-side fill must NOT close another member's (or an earlier) CFD
+    // position. The engine's netting here was the root of the +7.58 PnL that
+    // was written onto entry rows and cross-credited between members.
+    //
+    // Futures and spot keep the historical netting: a sell fill closes longs.
+    if (MarketType::Cfd != mt)
     {
-        if (pos.side == report.side)
+        auto positions = m_positionMgr.getPositionsBySymbol(report.symbol);
+        for (const auto &pos : positions)
         {
-            continue;   // Same direction — not a close.
-        }
-        const double closed_qty = std::min(remaining, pos.quantity);
-        auto close_result = m_positionMgr.closePosition(
-            pos.position_id, closed_qty, report.avg_fill_price);
-        if (close_result.has_value())
-        {
-            pnl += close_result.value();
-            remaining -= closed_qty;
-            log_app->info("Closed position {} (realized PnL: {:.4f})",
-                          pos.position_id, close_result.value());
-        }
-        else
-        {
-            log_app->warn("Failed to close position {}", pos.position_id);
+            if (pos.side == report.side)
+            {
+                continue;   // Same direction — not a close.
+            }
+            const double closed_qty = std::min(remaining, pos.quantity);
+            auto close_result = m_positionMgr.closePosition(
+                pos.position_id, closed_qty, report.avg_fill_price);
+            if (close_result.has_value())
+            {
+                pnl += close_result.value();
+                remaining -= closed_qty;
+                log_app->info("Closed position {} (realized PnL: {:.4f})",
+                              pos.position_id, close_result.value());
+            }
+            else
+            {
+                log_app->warn("Failed to close position {}", pos.position_id);
+            }
         }
     }
 
@@ -801,7 +816,6 @@ void OrderFlowExecutor::onOrderComplete(
     {
         // Leverage-backed markets (futures + CFD) record the requested
         // leverage on the position for margin/PnL math; spot uses 1.0.
-        const MarketType mt = reservation.request.market_type;
         const bool leverage_market =
             (MarketType::Futures == mt || MarketType::Cfd == mt);
         auto open_result = m_positionMgr.openPosition(
@@ -859,7 +873,6 @@ void OrderFlowExecutor::onOrderComplete(
     m_drawdownGuard.recordPnl(pnl);
 
     // Market metadata from the reservation's request (defaults = spot).
-    const MarketType mt = reservation.request.market_type;
     const double lev = (MarketType::Spot == mt
                         || reservation.request.leverage <= 0.0)
                            ? 1.0
