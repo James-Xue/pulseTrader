@@ -418,7 +418,8 @@ maxPositionNotional = 6000        # fallback cap (markets without an override)
 # + 预留。08-19 教训:6000 被 ETH 网格名义击穿(9103),循环冻结+4 格裸奔
 # (复盘 eth-review-20260821-grid-v1.md)。reduce-only 买单也按新增名义计不抵扣。
 maxPositionNotionalFutures = 12000
-maxPositionNotionalCfd = 6000     # CFD cap: 0.01-lot XAUUSD (~4392 USDT) fits
+maxPositionNotionalCfd = 8000     # 2026-11-27: per-position cap for the 5-member
+                                  # paper team (0.01-lot XAUUSD ~3,600-4,700 USDT)
 maxOpenPositions    = 80  # SNDK 20-slot + ETH 20-slot grids (each resting order
                           # reserves a slot) + user App orders + positions (08-19)
 maxDailyDrawdown    = 0.02
@@ -431,7 +432,8 @@ protective_exit_enabled = false
 maxOrdersPerSec     = 5
 # 单币种名义上限:ETH 网格峰值(~805)+ SNDK(~5099)任意其一 + 用户仓余量。
 # 08-19 教训:5500 按 SNDK 单币种算,ETH 网格加入后击穿。
-maxSymbolNotional   = 6500
+maxSymbolNotional   = 20000      # 2026-11-27: allow up to 5 concurrent 0.01-lot
+                                 # XAUUSD CFD positions (paper team); was 6500
 max_leverage        = 1000.0       # paper CFD ladder: .../500/1000 (futures use 10)
 max_margin_used     = 0.5
 minAvailableAfterStopUsd = 6.0   # M22: CFD 带 SL 开仓后可用-保证金-止损 ≥ 6 USD,防薄账户一笔止损耗尽交易能力
