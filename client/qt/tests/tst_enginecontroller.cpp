@@ -34,6 +34,7 @@ private slots:
     void redUpSettingRoundTrips();
     void paperModeSettingRoundTrips();
     void tradeHistoryDateWindow();
+    void mergedHistoryPairsLegs();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -484,6 +485,164 @@ void TestEngineController::tradeHistoryDateWindow()
         return false;
     }()), 5000);
     QVERIFY(sawUnfiltered);
+}
+
+
+void TestEngineController::mergedHistoryPairsLegs()
+{
+    // get_trade_history returns raw fills. The UI needs one row per round
+    // trip: the entry and exit legs of a venue position must fold into one
+    // order, while a pre-v2 row with no venue id stays on its own.
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    const QJsonArray rows{
+        QJsonObject{ { QStringLiteral("order_id"), QStringLiteral("paper-cfd-9") },
+                     { QStringLiteral("client_order_id"),
+                       QStringLiteral("xau_team:m1:000009") },
+                     { QStringLiteral("symbol"), QStringLiteral("XAUUSD") },
+                     { QStringLiteral("side"), QStringLiteral("buy") },
+                     { QStringLiteral("quantity"), 0.01 },
+                     { QStringLiteral("price"), 3600.0 },
+                     { QStringLiteral("time_ms"), 1000000 },
+                     { QStringLiteral("fees"), 0.06 },
+                     { QStringLiteral("pnl"), 0.0 },
+                     { QStringLiteral("status"), QStringLiteral("filled") },
+                     { QStringLiteral("strategy"),
+                       QStringLiteral("xau_team:m1:000009") },
+                     { QStringLiteral("market_type"), QStringLiteral("cfd") },
+                     { QStringLiteral("exchange_position_id"),
+                       QStringLiteral("pp-9") } },
+        QJsonObject{ { QStringLiteral("order_id"),
+                       QStringLiteral("paper_exit_pp-9_1") },
+                     { QStringLiteral("client_order_id"),
+                       QStringLiteral("paper_exit_pp-9_1") },
+                     { QStringLiteral("symbol"), QStringLiteral("XAUUSD") },
+                     { QStringLiteral("side"), QStringLiteral("sell") },
+                     { QStringLiteral("quantity"), 0.01 },
+                     { QStringLiteral("price"), 3610.0 },
+                     { QStringLiteral("time_ms"), 2000000 },
+                     { QStringLiteral("fees"), 0.0 },
+                     { QStringLiteral("pnl"), 10.0 },
+                     { QStringLiteral("status"), QStringLiteral("filled") },
+                     { QStringLiteral("strategy"),
+                       QStringLiteral("paper_exit") },
+                     { QStringLiteral("market_type"), QStringLiteral("cfd") },
+                     { QStringLiteral("exchange_position_id"),
+                       QStringLiteral("pp-9") } },
+        QJsonObject{ { QStringLiteral("order_id"),
+                       QStringLiteral("close_XAUUSD_Buy_1") },
+                     { QStringLiteral("client_order_id"),
+                       QStringLiteral("close_XAUUSD_Buy_1") },
+                     { QStringLiteral("symbol"), QStringLiteral("XAUUSD") },
+                     { QStringLiteral("side"), QStringLiteral("sell") },
+                     { QStringLiteral("quantity"), 0.01 },
+                     { QStringLiteral("price"), 3550.0 },
+                     { QStringLiteral("time_ms"), 500000 },
+                     { QStringLiteral("fees"), 0.0 },
+                     { QStringLiteral("pnl"), 2.0 },
+                     { QStringLiteral("status"), QStringLiteral("filled") },
+                     { QStringLiteral("strategy"),
+                       QStringLiteral("close_XAUUSD_Buy_1") },
+                     { QStringLiteral("market_type"), QStringLiteral("cfd") },
+                     { QStringLiteral("exchange_position_id"), QString() } },
+    };
+
+    QHash<QTcpSocket*, QByteArray> buffers;
+    QObject context;
+    connect(&server, &QTcpServer::newConnection, &context, [&]()
+    {
+        while (server.hasPendingConnections())
+        {
+            QTcpSocket* peer = server.nextPendingConnection();
+            buffers.insert(peer, QByteArray{});
+            connect(peer, &QTcpSocket::readyRead, &context, [peer, &buffers, rows]()
+            {
+                QByteArray& buffer = buffers[peer];
+                buffer.append(peer->readAll());
+                int newline = buffer.indexOf('\n');
+                while (newline >= 0)
+                {
+                    const QByteArray line = buffer.left(newline);
+                    buffer.remove(0, newline + 1);
+                    newline = buffer.indexOf('\n');
+                    if (line.trimmed().isEmpty())
+                    {
+                        continue;
+                    }
+                    const QJsonObject request =
+                        QJsonDocument::fromJson(line).object();
+                    QJsonObject reply;
+                    reply[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+                    reply[QStringLiteral("id")] =
+                        request.value(QStringLiteral("id"));
+                    if (request.value(QStringLiteral("method")).toString()
+                        == QStringLiteral("get_trade_history"))
+                    {
+                        reply[QStringLiteral("result")] = QJsonObject{
+                            { QStringLiteral("rows"), rows },
+                            { QStringLiteral("summary"),
+                              QJsonObject{ { QStringLiteral("count"), 3 } } },
+                        };
+                    }
+                    else
+                    {
+                        QJsonValue result;
+                        if (resultFor(request, result))
+                        {
+                            reply[QStringLiteral("result")] = result;
+                        }
+                        else
+                        {
+                            reply[QStringLiteral("error")] = QJsonObject{
+                                { QStringLiteral("code"), -32601 },
+                                { QStringLiteral("message"),
+                                  QStringLiteral("method not found") },
+                            };
+                        }
+                    }
+                    peer->write(
+                        QJsonDocument(reply).toJson(QJsonDocument::Compact)
+                        + '\n');
+                    peer->flush();
+                }
+            });
+        }
+    });
+
+    EngineController controller;
+    controller.connectToEngine(QStringLiteral("127.0.0.1"),
+                               server.serverPort(), false, QString());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connectionState()
+                                 == EngineController::ConnectionState::Ready,
+                             5000);
+    controller.fetchTradeHistory();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.mergedTradeHistory().size() == 2, 5000);
+
+    const QVariantList orders = controller.mergedTradeHistory();
+    const QVariantMap paired = orders.at(0).toMap();
+    QCOMPARE(paired.value(QStringLiteral("key")).toString(),
+             QStringLiteral("pp-9"));
+    QCOMPARE(paired.value(QStringLiteral("side")).toString(),
+             QStringLiteral("buy"));
+    QCOMPARE(paired.value(QStringLiteral("status")).toString(),
+             QStringLiteral("closed"));
+    QCOMPARE(paired.value(QStringLiteral("entry_price")).toDouble(), 3600.0);
+    QCOMPARE(paired.value(QStringLiteral("exit_price")).toDouble(), 3610.0);
+    QCOMPARE(paired.value(QStringLiteral("pnl")).toDouble(), 10.0);
+    QCOMPARE(paired.value(QStringLiteral("fees")).toDouble(), 0.06);
+    const QVariantList legs = paired.value(QStringLiteral("legs")).toList();
+    QCOMPARE(legs.size(), 2);
+    QCOMPARE(legs.at(0).toMap().value(QStringLiteral("side")).toString(),
+             QStringLiteral("buy"));
+    QCOMPARE(legs.at(0).toMap().value(QStringLiteral("is_exit")).toBool(),
+             false);
+    QCOMPARE(legs.at(1).toMap().value(QStringLiteral("is_exit")).toBool(),
+             true);
+
+    // The id-less legacy exit is its own single-leg order.
+    const QVariantMap unpaired = orders.at(1).toMap();
+    QCOMPARE(unpaired.value(QStringLiteral("legs")).toList().size(), 1);
 }
 
 QTEST_MAIN(TestEngineController)

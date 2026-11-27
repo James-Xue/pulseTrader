@@ -58,6 +58,11 @@ class EngineController : public QObject
     Q_PROPERTY(bool simulated READ simulated NOTIFY statusChanged)
     /// Trade-history rows from get_trade_history (newest first).
     Q_PROPERTY(QVariantList tradeHistory READ tradeHistory NOTIFY tradeHistoryChanged)
+    /// The same fills folded into round-trip ORDERS: one entry per venue
+    /// position (entry + exit legs), or one per unpaired fill. Each order
+    /// carries entry/exit prices and times plus a `legs` list for expansion.
+    Q_PROPERTY(QVariantList mergedTradeHistory READ mergedTradeHistory
+               NOTIFY tradeHistoryChanged)
     /// Aggregate over every matched row: count/filled/wins/win_rate/net_pnl/fees.
     Q_PROPERTY(QVariantMap tradeHistorySummary READ tradeHistorySummary NOTIFY tradeHistoryChanged)
     /// Local calendar day ("yyyy-MM-dd") the history is filtered to; empty = all.
@@ -171,6 +176,8 @@ public:
     [[nodiscard]] QString network() const { return m_network; }
     [[nodiscard]] QString mode() const { return m_mode; }
     [[nodiscard]] QVariantList tradeHistory() const { return m_tradeHistory; }
+    /// Pair the raw fills into round-trip orders (see the property comment).
+    [[nodiscard]] QVariantList mergedTradeHistory() const;
     [[nodiscard]] QVariantMap tradeHistorySummary() const { return m_tradeHistorySummary; }
     [[nodiscard]] QString historyDate() const { return m_historyDate; }
     [[nodiscard]] QStringList historyDates() const { return m_historyDates; }

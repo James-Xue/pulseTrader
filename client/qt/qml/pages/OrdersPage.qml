@@ -46,10 +46,10 @@ ColumnLayout {
     }
 
     readonly property var strategyKeys: {
-        const rows = root.controller ? root.controller.tradeHistory : []
+        const orders = root.controller ? root.controller.mergedTradeHistory : []
         const seen = {}
-        for (let i = 0; i < rows.length; ++i) {
-            const key = root.strategyKey(rows[i])
+        for (let i = 0; i < orders.length; ++i) {
+            const key = root.strategyKey(orders[i])
             if (key.length > 0) seen[key] = true
         }
         return Object.keys(seen).sort()
@@ -92,27 +92,59 @@ ColumnLayout {
         }
     }
 
+    /// Which merged order is expanded (its `key`); "" = none.
+    property string expandedKey: ""
+
+    /// Trade-history fills folded into round-trip orders. Filtering happens on
+    /// the order (the exit's day, else the entry's), so a buy and its sell
+    /// never appear as two rows.
     readonly property var filteredHistory: {
-        const rows = root.controller ? root.controller.tradeHistory : []
+        const orders = root.controller ? root.controller.mergedTradeHistory : []
         const out = []
-        for (let i = 0; i < rows.length; ++i) {
-            const row = rows[i]
+        for (let i = 0; i < orders.length; ++i) {
+            const order = orders[i]
             if (root.strategyFilter !== ""
-                && root.strategyKey(row) !== root.strategyFilter) {
+                && root.strategyKey(order) !== root.strategyFilter) {
                 continue
             }
-            const when = Number(row.time_ms) || 0
+            const when = Number(order.exit_time_ms)
+                         || Number(order.entry_time_ms) || 0
             const day = Qt.formatDate(new Date(when), "yyyy-MM-dd")
             if (root.historyDate !== "" && day !== root.historyDate) {
                 continue
             }
             // The engine's page has no date section role, so inject one for
             // the ListView section headers.
-            const copy = Object.assign({}, row)
+            const copy = Object.assign({}, order)
             copy.dateKey = day
             out.push(copy)
         }
         return out
+    }
+
+    /// Stats over the merged orders: counting fills would count every entry
+    /// and every exit, so the trade count and the win rate were meaningless.
+    readonly property var orderStats: {
+        const orders = root.filteredHistory
+        let closed = 0
+        let wins = 0
+        let net = 0
+        let fees = 0
+        for (let i = 0; i < orders.length; ++i) {
+            fees += Number(orders[i].fees || 0)
+            if (orders[i].status !== "closed") continue
+            closed += 1
+            net += Number(orders[i].pnl || 0)
+            if (Number(orders[i].pnl || 0) > 0) wins += 1
+        }
+        return {
+            count: orders.length,
+            closed: closed,
+            wins: wins,
+            net: net,
+            fees: fees,
+            winRate: closed > 0 ? wins / closed : 0
+        }
     }
 
     readonly property var activeModels: root.controller
@@ -137,7 +169,7 @@ ColumnLayout {
     readonly property int reportCount: root.reportModel ? root.reportModel.count : 0
     readonly property int historyCount: root.filteredHistory.length
     readonly property int historyTotal: root.controller
-        ? root.controller.tradeHistory.length : 0
+        ? root.controller.mergedTradeHistory.length : 0
 
     /// Fixed column widths, shared by the header and every row so they stay
     /// aligned; the table can be wider than the viewport and scroll sideways.
@@ -474,25 +506,32 @@ ColumnLayout {
                 font.pixelSize: Style.fontSizeSmall
                 wrapMode: Text.WordWrap
                 text: {
+                    const stats = root.orderStats
+                    if (stats.count === 0) {
+                        return qsTr("No trades yet — fills appear here once recorded")
+                    }
                     if (root.historyDate !== "") {
-                        return qsTr("Showing %1 trades on %2")
-                            .arg(root.filteredHistory.length)
+                        return qsTr("Showing %1 orders on %2 · closed %3 · net %4 · fees %5")
+                            .arg(stats.count)
                             .arg(root.dateLabel(root.historyDate))
+                            .arg(stats.closed)
+                            .arg(stats.net.toFixed(2))
+                            .arg(stats.fees.toFixed(2))
                     }
                     if (root.strategyFilter !== "") {
-                        return qsTr("Showing %1 of %2 trades for %3")
-                            .arg(root.filteredHistory.length)
+                        return qsTr("Showing %1 of %2 orders for %3 · net %4 · fees %5")
+                            .arg(stats.count)
                             .arg(root.historyTotal)
                             .arg(root.strategyLabel(root.strategyFilter))
+                            .arg(stats.net.toFixed(2))
+                            .arg(stats.fees.toFixed(2))
                     }
-                    const s = root.controller ? root.controller.tradeHistorySummary : null
-                    if (!s || !s.count)
-                        return qsTr("No trades yet — fills appear here once recorded")
-                    return qsTr("%1 trades · %2 filled · win rate %3% · net %4 · fees %5")
-                        .arg(s.count).arg(s.filled)
-                        .arg(((s.win_rate || 0) * 100).toFixed(1))
-                        .arg(Number(s.net_pnl || 0).toFixed(2))
-                        .arg(Number(s.fees || 0).toFixed(2))
+                    return qsTr("%1 orders · %2 closed · win rate %3% · net %4 · fees %5")
+                        .arg(stats.count)
+                        .arg(stats.closed)
+                        .arg((stats.winRate * 100).toFixed(1))
+                        .arg(stats.net.toFixed(2))
+                        .arg(stats.fees.toFixed(2))
                 }
             }
 
@@ -573,101 +612,196 @@ ColumnLayout {
                            Layout.preferredWidth: root.historyColumns[8] }
                 }
 
-                // A ListView delegate needs an explicit height; a bare
-                // RowLayout here collapsed to zero rows even though the model
-                // had 63 entries. Mirror the working Recent delegate: a
-                // Rectangle with height + an inner RowLayout.
+                // One row per ROUND TRIP. The fills behind it are paired in
+                // C++ by exchange_position_id, so a buy and its sell are one
+                // order; clicking expands the entry and exit legs.
                 delegate: Rectangle {
                     width: Math.max(historyList.width, root.historyTableWidth)
-                    height: 30
-                    color: "transparent"
+                    height: orderExpanded
+                        ? 30 + orderRow.order.legs.length * 24 + 6
+                        : 30
+                    color: orderExpanded ? Style.controlBackgroundHover
+                                         : "transparent"
+                    radius: orderExpanded ? Style.radius : 0
 
-                    RowLayout {
+                    readonly property var order: modelData
+                    readonly property bool orderExpanded:
+                        root.expandedKey === String(modelData.key)
+
+                    ColumnLayout {
                         anchors.fill: parent
-                        spacing: Style.gapSmall
+                        anchors.leftMargin: 4
+                        anchors.rightMargin: 4
+                        spacing: 0
 
-                    SelectableText {
-                        text: new Date(Number(modelData.time_ms) || 0)
-                                  .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
-                        color: Style.text; font.pixelSize: Style.fontSizeSmall
-                        font.family: "monospace"
-                        Layout.preferredWidth: root.historyColumns[0]
-                    }
-                    SelectableText {
-                        text: modelData.symbol
-                        color: Style.text; font.pixelSize: Style.fontSizeSmall
-                        Layout.preferredWidth: root.historyColumns[1]
-                    }
-                    SelectableText {
-                        text: modelData.side
-                        color: modelData.side === "buy" ? Style.success : Style.danger
-                        font.pixelSize: Style.fontSizeSmall
-                        Layout.preferredWidth: root.historyColumns[2]
-                    }
-                    SelectableText {
-                        text: Number(modelData.quantity || 0).toFixed(4)
-                        color: Style.text; font.pixelSize: Style.fontSizeSmall
-                        font.family: "monospace"
-                        horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: root.historyColumns[3]
-                    }
-                    SelectableText {
-                        text: Number(modelData.price || 0).toFixed(2)
-                        color: Style.text; font.pixelSize: Style.fontSizeSmall
-                        font.family: "monospace"
-                        horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: root.historyColumns[4]
-                    }
-                    SelectableText {
-                        text: Number(modelData.pnl || 0).toFixed(2)
-                        color: Number(modelData.pnl || 0) >= 0 ? Style.upColor : Style.downColor
-                        font.pixelSize: Style.fontSizeSmall
-                        font.family: "monospace"
-                        horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: root.historyColumns[5]
-                    }
-                    SelectableText {
-                        text: Number(modelData.fees || 0).toFixed(2)
-                        color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
-                        font.family: "monospace"
-                        horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: root.historyColumns[6]
-                    }
-                    SelectableText {
-                        text: modelData.status
-                        color: Style.secondaryText; font.pixelSize: Style.fontSizeSmall
-                        Layout.preferredWidth: root.historyColumns[7]
-                    }
-                    SelectableText {
-                        text: {
-                            const cid = String(modelData.client_order_id || "")
-                            if (cid.indexOf("xau_team:") === 0) {
-                                const parts = cid.split(":")
-                                if (parts.length > 1 && parts[1] !== "") {
-                                    return parts[1]
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 30
+                            spacing: Style.gapSmall
+
+                            SelectableText {
+                                text: (orderRow.orderExpanded ? "▾ " : "▸ ")
+                                    + new Date(Number(orderRow.order.exit_time_ms)
+                                               || Number(orderRow.order.entry_time_ms) || 0)
+                                          .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
+                                color: Style.text
+                                font.pixelSize: Style.fontSizeSmall
+                                font.family: "monospace"
+                                Layout.preferredWidth: root.historyColumns[0]
+                            }
+                            SelectableText {
+                                text: orderRow.order.symbol
+                                color: Style.text
+                                font.pixelSize: Style.fontSizeSmall
+                                Layout.preferredWidth: root.historyColumns[1]
+                            }
+                            SelectableText {
+                                text: String(orderRow.order.side) === "buy"
+                                      ? qsTr("Buy") : qsTr("Sell")
+                                color: String(orderRow.order.side) === "buy"
+                                       ? Style.success : Style.danger
+                                font.pixelSize: Style.fontSizeSmall
+                                Layout.preferredWidth: root.historyColumns[2]
+                            }
+                            SelectableText {
+                                text: Number(orderRow.order.quantity || 0).toFixed(4)
+                                color: Style.text
+                                font.pixelSize: Style.fontSizeSmall
+                                font.family: "monospace"
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: root.historyColumns[3]
+                            }
+                            SelectableText {
+                                text: Number(orderRow.order.status === "closed"
+                                              ? orderRow.order.exit_price
+                                              : orderRow.order.entry_price).toFixed(2)
+                                color: Style.text
+                                font.pixelSize: Style.fontSizeSmall
+                                font.family: "monospace"
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: root.historyColumns[4]
+                            }
+                            SelectableText {
+                                text: Number(orderRow.order.pnl || 0).toFixed(2)
+                                color: Number(orderRow.order.pnl || 0) >= 0
+                                       ? Style.upColor : Style.downColor
+                                font.pixelSize: Style.fontSizeSmall
+                                font.family: "monospace"
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: root.historyColumns[5]
+                            }
+                            SelectableText {
+                                text: Number(orderRow.order.fees || 0).toFixed(2)
+                                color: Style.secondaryText
+                                font.pixelSize: Style.fontSizeSmall
+                                font.family: "monospace"
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: root.historyColumns[6]
+                            }
+                            SelectableText {
+                                text: orderRow.order.status === "closed"
+                                      ? qsTr("closed") : qsTr("open")
+                                color: Style.secondaryText
+                                font.pixelSize: Style.fontSizeSmall
+                                Layout.preferredWidth: root.historyColumns[7]
+                            }
+                            SelectableText {
+                                text: {
+                                    const cid = String(orderRow.order.client_order_id || "")
+                                    if (cid.indexOf("xau_team:") === 0) {
+                                        const parts = cid.split(":")
+                                        if (parts.length > 1 && parts[1] !== "") {
+                                            return parts[1]
+                                        }
+                                    }
+                                    return orderRow.order.strategy || cid || "—"
+                                }
+                                color: Style.tertiaryText
+                                font.pixelSize: Style.fontSizeSmall
+                                Layout.preferredWidth: root.historyColumns[8]
+                            }
+                        }
+
+                        // The two legs, revealed on click: buy time/price and
+                        // sell time/price (order is chronological, so the
+                        // entry leg always comes first).
+                        Repeater {
+                            model: orderRow.order.legs
+
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 24
+                                spacing: Style.gapSmall
+
+                                SelectableText {
+                                    text: String(modelData.side) === "buy"
+                                          ? qsTr("Buy") : qsTr("Sell")
+                                    color: String(modelData.side) === "buy"
+                                           ? Style.success : Style.danger
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.bold: true
+                                    Layout.preferredWidth: 48
+                                }
+                                SelectableText {
+                                    text: new Date(Number(modelData.time_ms) || 0)
+                                              .toLocaleString(Qt.locale(),
+                                                              "yyyy-MM-dd HH:mm:ss")
+                                    color: Style.secondaryText
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 160
+                                }
+                                SelectableText {
+                                    text: qsTr("price %1").arg(
+                                              Number(modelData.price || 0).toFixed(2))
+                                    color: Style.text
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 110
+                                }
+                                SelectableText {
+                                    text: "×" + Number(modelData.quantity || 0).toFixed(4)
+                                    color: Style.text
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 90
+                                }
+                                SelectableText {
+                                    text: qsTr("fee %1").arg(
+                                              Number(modelData.fees || 0).toFixed(2))
+                                    color: Style.secondaryText
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 80
+                                }
+                                SelectableText {
+                                    visible: modelData.is_exit === true
+                                    text: qsTr("PnL %1").arg(
+                                              Number(modelData.pnl || 0).toFixed(2))
+                                    color: Number(modelData.pnl || 0) >= 0
+                                           ? Style.upColor : Style.downColor
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: 90
                                 }
                             }
-                            return modelData.strategy || cid || "—"
                         }
-                        color: Style.tertiaryText; font.pixelSize: Style.fontSizeSmall
-                        Layout.preferredWidth: root.historyColumns[8]
-                    }
                     }
 
-                    // Declared after the row so it sits above the SelectableText
-                    // cells: a TextEdit consumes mouse events, so a MouseArea
-                    // underneath would never see the click. Row selection is
-                    // traded for opening the detail dialog, whose fields are
-                    // selectable and copyable.
+                    // Declared last so it sits above the SelectableText cells
+                    // (a TextEdit consumes clicks). Clicking toggles the legs
+                    // instead of opening a separate dialog.
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            tradeDetail.row = modelData
-                            tradeDetail.open()
+                            const key = String(modelData.key)
+                            root.expandedKey =
+                                (root.expandedKey === key) ? "" : key
                         }
                     }
                 }
+
                 }
 
                 EmptyState {
@@ -691,7 +825,4 @@ ColumnLayout {
         }
     }
 
-    TradeDetailDialog {
-        id: tradeDetail
-    }
 }

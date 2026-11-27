@@ -1017,6 +1017,42 @@
         <source>Showing %1 trades on %2</source>
         <translation>显示 %2 的 %1 笔成交</translation>
     </message>
+    <message>
+        <source>Buy</source>
+        <translation>买入</translation>
+    </message>
+    <message>
+        <source>Sell</source>
+        <translation>卖出</translation>
+    </message>
+    <message>
+        <source>closed</source>
+        <translation>已平</translation>
+    </message>
+    <message>
+        <source>open</source>
+        <translation>持仓中</translation>
+    </message>
+    <message>
+        <source>price %1</source>
+        <translation>价格 %1</translation>
+    </message>
+    <message>
+        <source>fee %1</source>
+        <translation>费用 %1</translation>
+    </message>
+    <message>
+        <source>Showing %1 orders on %2 · closed %3 · net %4 · fees %5</source>
+        <translation>显示 %2 的 %1 笔订单 · 已平 %3 · 净额 %4 · 费用 %5</translation>
+    </message>
+    <message>
+        <source>Showing %1 of %2 orders for %3 · net %4 · fees %5</source>
+        <translation>显示 %3 的 %1 / %2 笔订单 · 净额 %4 · 费用 %5</translation>
+    </message>
+    <message>
+        <source>%1 orders · %2 closed · win rate %3% · net %4 · fees %5</source>
+        <translation>%1 笔订单 · 已平 %2 · 胜率 %3% · 净额 %4 · 费用 %5</translation>
+    </message>
 </context>
 <context>
     <name>PositionsPage</name>

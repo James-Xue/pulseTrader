@@ -491,6 +491,141 @@ void EngineController::fetchTradeHistory()
     m_inFlight.insert(id, PollKind::TradeHistory);
 }
 
+QVariantList EngineController::mergedTradeHistory() const
+{
+    // Exit fills are the ones the engine tags with one of these prefixes
+    // (2026-11-27 audit P1); every other fill opened a position.
+    const auto isExitFill = [](const QString& orderId)
+    {
+        return orderId.startsWith(QStringLiteral("paper_exit_"))
+            || orderId.startsWith(QStringLiteral("close_"))
+            || orderId.startsWith(QStringLiteral("ext_close_"));
+    };
+
+    // 1. Group by venue position id. Fills recorded before the v2 schema have
+    //    no id and can only be shown on their own.
+    QVector<QPair<QString, QVariantList>> groups;
+    QHash<QString, int> groupIndex;
+    for (const QVariant& item : m_tradeHistory)
+    {
+        const QVariantMap row = item.toMap();
+        const QString orderId = row.value(QStringLiteral("order_id")).toString();
+        const QString venueId =
+            row.value(QStringLiteral("exchange_position_id")).toString();
+        if (orderId.isEmpty() && venueId.isEmpty())
+        {
+            continue;
+        }
+        const QString key =
+            venueId.isEmpty() ? QStringLiteral("row:") + orderId : venueId;
+        int at = groupIndex.value(key, -1);
+        if (at < 0)
+        {
+            groups.append({ key, QVariantList{} });
+            at = groups.size() - 1;
+            groupIndex.insert(key, at);
+        }
+        // Annotate the leg so the expanded row can label entry vs exit
+        // without re-deriving the prefix rule in QML.
+        QVariantMap leg = row;
+        leg[QStringLiteral("is_exit")] = isExitFill(orderId);
+        groups[at].second.append(leg);
+    }
+
+    // 2. Fold each group into one order, legs oldest first.
+    QVariantList orders;
+    for (const auto& group : groups)
+    {
+        QVariantList legs = group.second;
+        std::sort(legs.begin(), legs.end(),
+                  [](const QVariant& a, const QVariant& b)
+                  {
+                      return a.toMap()
+                                 .value(QStringLiteral("time_ms"))
+                                 .toLongLong()
+                          < b.toMap()
+                                .value(QStringLiteral("time_ms"))
+                                .toLongLong();
+                  });
+
+        QVariantMap entry;
+        QVariantList exits;
+        for (const QVariant& legValue : legs)
+        {
+            const QVariantMap leg = legValue.toMap();
+            if (leg.value(QStringLiteral("is_exit")).toBool())
+            {
+                exits.append(leg);
+            }
+            else if (entry.isEmpty())
+            {
+                entry = leg;
+            }
+        }
+        if (entry.isEmpty())
+        {
+            // An orphan exit: the earliest leg is the display anchor.
+            entry = legs.first().toMap();
+        }
+
+        double fees = 0.0;
+        for (const QVariant& legValue : legs)
+        {
+            fees += legValue.toMap().value(QStringLiteral("fees")).toDouble();
+        }
+        double exitPrice = 0.0;
+        double pnl = 0.0;
+        qint64 exitMs = 0;
+        for (const QVariant& legValue : exits)
+        {
+            const QVariantMap leg = legValue.toMap();
+            pnl += leg.value(QStringLiteral("pnl")).toDouble();
+            exitPrice = leg.value(QStringLiteral("price")).toDouble();
+            exitMs = leg.value(QStringLiteral("time_ms")).toLongLong();
+        }
+
+        const qint64 entryMs =
+            entry.value(QStringLiteral("time_ms")).toLongLong();
+        QVariantMap order;
+        order[QStringLiteral("key")] = group.first;
+        order[QStringLiteral("symbol")] =
+            entry.value(QStringLiteral("symbol"));
+        order[QStringLiteral("side")] = entry.value(QStringLiteral("side"));
+        order[QStringLiteral("quantity")] =
+            entry.value(QStringLiteral("quantity"));
+        order[QStringLiteral("entry_price")] =
+            entry.value(QStringLiteral("price"));
+        order[QStringLiteral("entry_time_ms")] = entryMs;
+        order[QStringLiteral("exit_price")] = exitPrice;
+        order[QStringLiteral("exit_time_ms")] = exitMs;
+        order[QStringLiteral("pnl")] = pnl;
+        order[QStringLiteral("fees")] = fees;
+        order[QStringLiteral("status")] =
+            exits.isEmpty() ? QStringLiteral("open")
+                            : QStringLiteral("closed");
+        order[QStringLiteral("strategy")] =
+            entry.value(QStringLiteral("strategy"));
+        order[QStringLiteral("client_order_id")] =
+            entry.value(QStringLiteral("client_order_id"));
+        order[QStringLiteral("sort_ms")] = exits.isEmpty() ? entryMs : exitMs;
+        order[QStringLiteral("legs")] = legs;
+        orders.append(order);
+    }
+
+    // 3. Newest first by the leg that defines the row (exit, else entry).
+    std::sort(orders.begin(), orders.end(),
+              [](const QVariant& a, const QVariant& b)
+              {
+                  return a.toMap()
+                             .value(QStringLiteral("sort_ms"))
+                             .toLongLong()
+                      > b.toMap()
+                            .value(QStringLiteral("sort_ms"))
+                            .toLongLong();
+              });
+    return orders;
+}
+
 void EngineController::setHistoryDate(const QString& day)
 {
     const QString normalized = day.trimmed();
