@@ -67,17 +67,6 @@ Dialog {
             onActivated: function (index) { root.mode = index }
         }
 
-        SelectableText {
-            Layout.fillWidth: true
-            Layout.leftMargin: Style.pad
-            Layout.rightMargin: Style.pad
-            Layout.topMargin: Style.pad
-            text: root.member.summary || root.member.description || ""
-            color: Style.text
-            font.pixelSize: Style.fontSize
-            wrapMode: Text.WordWrap
-        }
-
         // Key indicators as compact chips; the same list in both modes.
         Flow {
             Layout.fillWidth: true
