@@ -1,0 +1,30 @@
+{
+  "account": {
+    "account_id": "paper-default",
+    "cfd": {
+      "cash_usdt": 9965.350000000006,
+      "fees_paid_usdt": 1.8600000000000012,
+      "locked_margin_usdt": 0.0,
+      "realized_pnl_usdt": -32.789999999998145
+    },
+    "daily_start_equity_usdt": 30000.0,
+    "futures": {
+      "cash_usdt": 10000.0,
+      "fees_paid_usdt": 0.0,
+      "locked_margin_usdt": 0.0,
+      "realized_pnl_usdt": 0.0
+    },
+    "peak_equity_usdt": 30000.0,
+    "spot": {
+      "cash_usdt": 10000.0,
+      "fees_paid_usdt": 0.0,
+      "locked_margin_usdt": 0.0,
+      "realized_pnl_usdt": 0.0
+    }
+  },
+  "schema_version": 2,
+  "venue": {
+    "positions": [],
+    "seq": 62
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "account": {
+    "account_id": "paper-default",
+    "cfd": {
+      "cash_usdt": 88.24249999999925,
+      "fees_paid_usdt": 0.42,
+      "locked_margin_usdt": 3.6375,
+      "realized_pnl_usdt": -7.700000000000728
+    },
+    "daily_start_equity_usdt": 100.0,
+    "futures": {
+      "cash_usdt": 0.0,
+      "fees_paid_usdt": 0.0,
+      "locked_margin_usdt": 0.0,
+      "realized_pnl_usdt": 0.0
+    },
+    "peak_equity_usdt": 100.0,
+    "spot": {
+      "cash_usdt": 0.0,
+      "fees_paid_usdt": 0.0,
+      "locked_margin_usdt": 0.0,
+      "realized_pnl_usdt": 0.0
+    }
+  },
+  "schema_version": 2,
+  "venue": {
+    "positions": [
+      {
+        "client_order_id": "xau_team:xau_bouncy:000001",
+        "entry_price": 3637.5,
+        "exchange_position_id": "pp-276",
+        "leverage": 1000.0,
+        "locked_margin": 3.6375,
+        "lots": 0.01,
+        "open_time_ms": 1795755065427,
+        "quanto": 100.0,
+        "side": "sell",
+        "sl_price": 3637.4,
+        "symbol": "XAUUSD",
+        "tp_price": 3631.47
+      }
+    ],
+    "seq": 276
+  }
+}

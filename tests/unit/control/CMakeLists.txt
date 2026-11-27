@@ -118,6 +118,29 @@ target_link_libraries(test_control_auth
 include(GoogleTest)
 gtest_discover_tests(test_control_auth)
 
+# P0 of the 2026-11-27 paper-team reconciliation audit: the frozen epoch contract and
+# the read-only evidence fixtures. These are canary tests (they assert the committed
+# fixtures, not live behaviour), so they intentionally do not link a pulse layer.
+add_executable(test_reconciliation_contract
+    test_reconciliation_contract.cpp
+)
+target_link_libraries(test_reconciliation_contract
+    PRIVATE
+        nlohmann_json::nlohmann_json
+        GTest::gtest_main
+)
+target_compile_features(test_reconciliation_contract PRIVATE cxx_std_20)
+target_compile_definitions(test_reconciliation_contract
+    PRIVATE
+        PULSE_RECONCILIATION_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/reconciliation"
+)
+if(PULSE_ENABLE_SQLITE)
+    target_compile_definitions(test_reconciliation_contract PRIVATE PULSE_ENABLE_SQLITE=1)
+    target_link_libraries(test_reconciliation_contract PRIVATE SQLiteCpp)
+endif()
+include(GoogleTest)
+gtest_discover_tests(test_reconciliation_contract)
+
 add_executable(test_decision_intake
     test_decision_intake.cpp
 )
