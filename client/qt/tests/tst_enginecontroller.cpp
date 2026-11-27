@@ -35,6 +35,7 @@ private slots:
     void paperModeSettingRoundTrips();
     void tradeHistoryDateWindow();
     void mergedHistoryPairsLegs();
+    void historyPaginationAppendsOlderRows();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -664,6 +665,175 @@ void TestEngineController::mergedHistoryPairsLegs()
     // The id-less legacy exit is its own single-leg order.
     const QVariantMap unpaired = orders.at(1).toMap();
     QCOMPARE(unpaired.value(QStringLiteral("legs")).toList().size(), 1);
+}
+
+
+void TestEngineController::historyPaginationAppendsOlderRows()
+{
+    // The history page is capped at 500 rows. "Load older" must ask for rows
+    // strictly before the oldest one shown and APPEND them, never replace the
+    // current page.
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    QVector<QJsonObject> requests;
+    QHash<QTcpSocket*, QByteArray> buffers;
+    QObject context;
+    connect(&server, &QTcpServer::newConnection, &context, [&]()
+    {
+        while (server.hasPendingConnections())
+        {
+            QTcpSocket* peer = server.nextPendingConnection();
+            buffers.insert(peer, QByteArray{});
+            connect(peer, &QTcpSocket::readyRead, &context,
+                    [peer, &buffers, &requests]()
+            {
+                QByteArray& buffer = buffers[peer];
+                buffer.append(peer->readAll());
+                int newline = buffer.indexOf('\n');
+                while (newline >= 0)
+                {
+                    const QByteArray line = buffer.left(newline);
+                    buffer.remove(0, newline + 1);
+                    newline = buffer.indexOf('\n');
+                    if (line.trimmed().isEmpty())
+                    {
+                        continue;
+                    }
+                    const QJsonObject request =
+                        QJsonDocument::fromJson(line).object();
+                    requests.append(request);
+                    QJsonObject reply;
+                    reply[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+                    reply[QStringLiteral("id")] =
+                        request.value(QStringLiteral("id"));
+                    if (request.value(QStringLiteral("method")).toString()
+                        == QStringLiteral("get_trade_history"))
+                    {
+                        const QJsonObject params =
+                            request.value(QStringLiteral("params")).toObject();
+                        QJsonArray rows;
+                        if (params.contains(QStringLiteral("to_ms")))
+                        {
+                            // Older page: a single row below the anchor.
+                            rows.append(QJsonObject{
+                                { QStringLiteral("order_id"),
+                                  QStringLiteral("old-1") },
+                                { QStringLiteral("time_ms"), 500000 },
+                                { QStringLiteral("symbol"),
+                                  QStringLiteral("XAUUSD") },
+                                { QStringLiteral("side"),
+                                  QStringLiteral("buy") },
+                                { QStringLiteral("quantity"), 0.01 },
+                                { QStringLiteral("price"), 3500.0 },
+                                { QStringLiteral("fees"), 0.06 },
+                                { QStringLiteral("pnl"), 0.0 },
+                                { QStringLiteral("status"),
+                                  QStringLiteral("filled") },
+                                { QStringLiteral("strategy"), QString() },
+                                { QStringLiteral("market_type"),
+                                  QStringLiteral("cfd") },
+                                { QStringLiteral("exchange_position_id"),
+                                  QString() },
+                            });
+                        }
+                        else
+                        {
+                            for (int i = 0; i < 500; ++i)
+                            {
+                                rows.append(QJsonObject{
+                                    { QStringLiteral("order_id"),
+                                      QStringLiteral("row-")
+                                          + QString::number(i) },
+                                    { QStringLiteral("time_ms"),
+                                      1000000 - i * 1000 },
+                                    { QStringLiteral("symbol"),
+                                      QStringLiteral("XAUUSD") },
+                                    { QStringLiteral("side"),
+                                      QStringLiteral("buy") },
+                                    { QStringLiteral("quantity"), 0.01 },
+                                    { QStringLiteral("price"), 3500.0 },
+                                    { QStringLiteral("fees"), 0.06 },
+                                    { QStringLiteral("pnl"), 0.0 },
+                                    { QStringLiteral("status"),
+                                      QStringLiteral("filled") },
+                                    { QStringLiteral("strategy"), QString() },
+                                    { QStringLiteral("market_type"),
+                                      QStringLiteral("cfd") },
+                                    { QStringLiteral("exchange_position_id"),
+                                      QString() },
+                                });
+                            }
+                        }
+                        reply[QStringLiteral("result")] = QJsonObject{
+                            { QStringLiteral("rows"), rows },
+                            { QStringLiteral("summary"),
+                              QJsonObject{ { QStringLiteral("count"),
+                                             rows.size() } } },
+                        };
+                    }
+                    else
+                    {
+                        QJsonValue result;
+                        if (resultFor(request, result))
+                        {
+                            reply[QStringLiteral("result")] = result;
+                        }
+                        else
+                        {
+                            reply[QStringLiteral("error")] = QJsonObject{
+                                { QStringLiteral("code"), -32601 },
+                                { QStringLiteral("message"),
+                                  QStringLiteral("method not found") },
+                            };
+                        }
+                    }
+                    peer->write(
+                        QJsonDocument(reply).toJson(QJsonDocument::Compact)
+                        + '\n');
+                    peer->flush();
+                }
+            });
+        }
+    });
+
+    EngineController controller;
+    controller.connectToEngine(QStringLiteral("127.0.0.1"),
+                               server.serverPort(), false, QString());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connectionState()
+                                 == EngineController::ConnectionState::Ready,
+                             5000);
+    controller.fetchTradeHistory();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.tradeHistory().size() == 500, 5000);
+    QVERIFY(controller.canLoadOlderHistory());
+
+    controller.fetchOlderTradeHistory();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.tradeHistory().size() == 501, 5000);
+    QVERIFY(!controller.canLoadOlderHistory());
+
+    // The second page was requested strictly below the oldest shown row
+    // (1_000_000 - 499*1000 = 501_000).
+    bool sawWindow = false;
+    for (const QJsonObject& request : requests)
+    {
+        if (request.value(QStringLiteral("method")).toString()
+            != QStringLiteral("get_trade_history"))
+        {
+            continue;
+        }
+        const QJsonObject params =
+            request.value(QStringLiteral("params")).toObject();
+        if (params.contains(QStringLiteral("to_ms"))
+            && qint64(params.value(QStringLiteral("to_ms")).toDouble())
+                   == 500999)
+        {
+            sawWindow = true;
+        }
+    }
+    QVERIFY(sawWindow);
+    QCOMPARE(controller.tradeHistory().last().toMap()
+                 .value(QStringLiteral("order_id")).toString(),
+             QStringLiteral("old-1"));
 }
 
 QTEST_MAIN(TestEngineController)

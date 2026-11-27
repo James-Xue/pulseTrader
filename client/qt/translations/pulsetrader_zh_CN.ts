@@ -1082,6 +1082,30 @@
         <translation>显示 %2 的 %1 笔订单 · 已平 %3 · 净额 %4 · 费用 %5</translation>
     </message>
     <message>
+        <source>Jump to date</source>
+        <translation>跳转到日期</translation>
+    </message>
+    <message>
+        <source>YYYY-MM-DD</source>
+        <translation>如 2026-11-27</translation>
+    </message>
+    <message>
+        <source>Go</source>
+        <translation>跳转</translation>
+    </message>
+    <message>
+        <source>Load older</source>
+        <translation>加载更早</translation>
+    </message>
+    <message>
+        <source>unpaired</source>
+        <translation>未配对</translation>
+    </message>
+    <message>
+        <source>Legacy fill without a venue id — cannot be paired</source>
+        <translation>旧成交没有场地 id,无法配对</translation>
+    </message>
+    <message>
         <source>Showing %1 of %2 orders for %3 · net %4 · fees %5</source>
         <translation>显示 %3 的 %1 / %2 笔订单 · 净额 %4 · 费用 %5</translation>
     </message>
