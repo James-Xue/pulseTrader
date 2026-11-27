@@ -639,3 +639,23 @@ restarts it (§0.5); P1–P2 are now both green on a copy.
   `PaperCapitalResetRequiresAFlatBook`,
   `DuplicateExitRowIsSuppressedByOrderId` (crash-window replay).
   Full PT suite: **1340/1340**.
+
+### 2026-11-27 — P5 complete (CI / integration gates)
+
+- `tests/integration` is enabled for SQLite builds and carries a real
+  L9→L8→venue→recorder flow: control order → venue fill → engine position →
+  TP exit → `get_trade_history` (entry pnl 0 / fee 0.06, exit pnl +10 / fee 0)
+  → account identity 109.94. It runs in `ctest`.
+- `scripts/ci/no-sqlite.sh` configures, builds and tests
+  `PULSE_ENABLE_SQLITE=OFF`; the reconciliation contract test compiles its
+  SQLite case out and skips it, clean under `-Werror`.
+- The GT repo carries `scripts/ci/test.sh` (unittest baseline, no Qt import).
+- Tool-count assertions, `AGENTS.md`, the MCP schema and `docs/paper-trading.md`
+  are updated for `paper_capital` (**37 tools / 41 socket methods**).
+- Migration: `MigrateV1AppendsExchangePositionIdAndEpoch` (append-only, old
+  row preserved, legacy 20-column reader verified).
+- Backfill reads go through the engine's single WAL connection
+  (`busy_timeout=5000`); nothing opens the live DB with `immutable=1`, and the
+  RPC page is taken from one connection, so no partial import is visible.
+- Coverage: every §7 red-first test is implemented in P1–P4 or covered by the
+  frozen fixtures; the 2026-11-27 coverage gate statement stands.
