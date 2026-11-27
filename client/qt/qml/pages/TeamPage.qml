@@ -30,7 +30,9 @@ ColumnLayout {
     function memberLabel(row) {
         if (!row) return "—"
         if (row.role === "leader") {
-            return row.member + " · " + qsTr("Leader")
+            // Role name only: "xau_team · 组长" mixed an ASCII id with the
+            // localized badge.
+            return qsTr("Leader")
         }
         return row.member
     }

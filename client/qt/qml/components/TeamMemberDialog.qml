@@ -41,7 +41,7 @@ Dialog {
 
             SelectableText {
                 text: root.member.role === "leader"
-                      ? (root.member.member + " · " + qsTr("Leader"))
+                      ? qsTr("Leader")
                       : (root.member.member || "—")
                 color: Style.text
                 font.pixelSize: Style.titleSize
