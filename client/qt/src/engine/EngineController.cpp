@@ -696,9 +696,40 @@ void EngineController::loadTeamRoster()
         return;
     }
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    const QJsonArray members =
-        document.object().value(QStringLiteral("members")).toArray();
+    const QJsonObject root = document.object();
     QVariantList roster;
+
+    // The `team` block is the leader: it allocates capital and owns team
+    // risk but never trades. Show it first with no budget/risk; the QML
+    // renders those columns as dashes and the totals as the team's.
+    const QJsonObject team = root.value(QStringLiteral("team")).toObject();
+    const QString teamName = team.value(QStringLiteral("name")).toString();
+    if (!teamName.isEmpty())
+    {
+        QVariantMap leader;
+        leader[QStringLiteral("member")] = teamName;
+        leader[QStringLiteral("role")] = QStringLiteral("leader");
+        leader[QStringLiteral("budget")] = 0.0;
+        leader[QStringLiteral("risk_per_trade")] = 0.0;
+        leader[QStringLiteral("priority")] = -1;
+        leader[QStringLiteral("strategy")] =
+            QStringLiteral("app.team.leader:TEAM");
+        leader[QStringLiteral("description")] = QStringLiteral(
+            "Leader: capital allocation, conflict arbitration and team-level "
+            "risk; does not trade.");
+        leader[QStringLiteral("summary")] =
+            leader.value(QStringLiteral("description"));
+        leader[QStringLiteral("details")] = QStringLiteral(
+            "The leader owns the team budget, arbitrates same-symbol "
+            "conflicts, enforces the daily-loss, peak-drawdown and kill "
+            "brakes, and attributes every fill to a member. It never places "
+            "an order of its own.");
+        leader[QStringLiteral("indicators")] = QStringList{};
+        roster.append(leader);
+    }
+
+    const QJsonArray members =
+        root.value(QStringLiteral("members")).toArray();
     for (const QJsonValue& value : members)
     {
         const QJsonObject entry = value.toObject();
@@ -713,6 +744,7 @@ void EngineController::loadTeamRoster()
         }
         QVariantMap row;
         row[QStringLiteral("member")] = name;
+        row[QStringLiteral("role")] = QStringLiteral("member");
         row[QStringLiteral("budget")] =
             entry.value(QStringLiteral("budget_usdt")).toDouble();
         row[QStringLiteral("risk_per_trade")] =
@@ -767,6 +799,7 @@ void EngineController::rebuildTeam()
         QString details;
         QStringList indicators;
         bool configured = false;
+        QString role;
     };
 
     const auto memberOf = [](const QString& id) -> QString
@@ -782,12 +815,23 @@ void EngineController::rebuildTeam()
     };
 
     QMap<QString, Row> byMember;
+    QVariantMap leaderEntry;
+    bool hasLeader = false;
 
     // 1. Seed the configured roster first, so a member with no fills yet is
     //    still visible (the engine only knows attribution, not the roster).
+    //    The leader is display-only and never enters byMember: it has no
+    //    fills, and its row shows the team totals instead.
     for (const QVariant& value : m_teamRoster)
     {
         const QVariantMap entry = value.toMap();
+        if (entry.value(QStringLiteral("role")).toString()
+            == QStringLiteral("leader"))
+        {
+            leaderEntry = entry;
+            hasLeader = true;
+            continue;
+        }
         const QString member = entry.value(QStringLiteral("member")).toString();
         if (member.isEmpty())
         {
@@ -795,6 +839,7 @@ void EngineController::rebuildTeam()
         }
         Row& row = byMember[member];
         row.member = member;
+        row.role = QStringLiteral("member");
         row.budget = entry.value(QStringLiteral("budget")).toDouble();
         row.riskPerTrade =
             entry.value(QStringLiteral("risk_per_trade")).toDouble();
@@ -863,6 +908,8 @@ void EngineController::rebuildTeam()
     int entries = 0;
     double notional = 0.0;
     double unrealized = 0.0;
+    qint64 teamLastEntryMs = 0;
+    QStringList teamSymbols;
     QStringList names = byMember.keys();
     std::sort(
         names.begin(), names.end(),
@@ -881,6 +928,7 @@ void EngineController::rebuildTeam()
         const Row& row = byMember[name];
         QVariantMap item;
         item[QStringLiteral("member")] = row.member;
+        item[QStringLiteral("role")] = row.role;
         item[QStringLiteral("open_positions")] = row.openPositions;
         item[QStringLiteral("notional")] = row.notional;
         item[QStringLiteral("unrealized_pnl")] = row.unrealized;
@@ -903,10 +951,57 @@ void EngineController::rebuildTeam()
         entries += row.entries;
         notional += row.notional;
         unrealized += row.unrealized;
+        if (row.lastEntryMs > teamLastEntryMs)
+        {
+            teamLastEntryMs = row.lastEntryMs;
+        }
+        for (const QString& symbol : row.symbols)
+        {
+            if (!teamSymbols.contains(symbol))
+            {
+                teamSymbols.append(symbol);
+            }
+        }
+    }
+
+    // The leader is a display-only first row: no budget/risk of its own, and
+    // the open/notional/PnL/entries columns show the team totals.
+    if (hasLeader)
+    {
+        QVariantMap item;
+        item[QStringLiteral("member")] =
+            leaderEntry.value(QStringLiteral("member")).toString();
+        item[QStringLiteral("role")] = QStringLiteral("leader");
+        item[QStringLiteral("open_positions")] = openPositions;
+        item[QStringLiteral("notional")] = notional;
+        item[QStringLiteral("unrealized_pnl")] = unrealized;
+        item[QStringLiteral("entries")] = entries;
+        item[QStringLiteral("last_entry_ms")] = teamLastEntryMs;
+        item[QStringLiteral("symbols")] =
+            teamSymbols.join(QStringLiteral(", "));
+        item[QStringLiteral("budget")] = 0.0;
+        item[QStringLiteral("risk_per_trade")] = 0.0;
+        item[QStringLiteral("priority")] = -1;
+        item[QStringLiteral("strategy")] =
+            leaderEntry.value(QStringLiteral("strategy")).toString();
+        item[QStringLiteral("description")] =
+            leaderEntry.value(QStringLiteral("description")).toString();
+        item[QStringLiteral("summary")] =
+            leaderEntry.value(QStringLiteral("summary")).toString();
+        item[QStringLiteral("details")] =
+            leaderEntry.value(QStringLiteral("details")).toString();
+        item[QStringLiteral("indicators")] =
+            leaderEntry.value(QStringLiteral("indicators")).toList();
+        item[QStringLiteral("configured")] = true;
+        rows.prepend(item);
     }
 
     QVariantMap summary;
-    summary[QStringLiteral("members")] = rows.size();
+    summary[QStringLiteral("members")] =
+        rows.size() - (hasLeader ? 1 : 0);
+    summary[QStringLiteral("leader")] =
+        hasLeader ? leaderEntry.value(QStringLiteral("member")).toString()
+                  : QString();
     summary[QStringLiteral("open_positions")] = openPositions;
     summary[QStringLiteral("notional")] = notional;
     summary[QStringLiteral("unrealized_pnl")] = unrealized;

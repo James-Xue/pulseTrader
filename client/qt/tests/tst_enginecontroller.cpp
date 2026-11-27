@@ -7,6 +7,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
 
 #include "engine/EngineController.hpp"
 
@@ -25,6 +26,7 @@ class TestEngineController : public QObject
 private slots:
     void initTestCase();
     void goldTradersAndSelection();
+    void teamRosterIncludesTheLeader();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -166,6 +168,42 @@ static bool resultFor(const QJsonObject& request, QJsonValue& result)
         return true;
     }
     return false;
+}
+
+void TestEngineController::teamRosterIncludesTheLeader()
+{
+    // The GT team JSON's `team` block is the leader: display-only, first in
+    // the Team page, with no budget/risk of its own and the team totals in
+    // the open/notional/PnL/entries columns.
+    QTemporaryFile teamFile;
+    QVERIFY(teamFile.open());
+    teamFile.write(R"({
+        "team": {"name": "xau_team", "max_open_positions": 4},
+        "members": [
+            {"name": "m1", "strategy": "x:1", "budget_usdt": 5000,
+             "risk_per_trade_usdt": 8, "priority": 1}
+        ]
+    })");
+    teamFile.close();
+    qputenv("GT_TEAM_CONFIG", teamFile.fileName().toUtf8());
+
+    EngineController controller;
+    controller.fetchTradeHistory();
+
+    const QVariantList rows = controller.teamRows();
+    QVERIFY(!rows.isEmpty());
+    const QVariantMap leader = rows.first().toMap();
+    QCOMPARE(leader.value(QStringLiteral("role")).toString(),
+             QStringLiteral("leader"));
+    QCOMPARE(leader.value(QStringLiteral("member")).toString(),
+             QStringLiteral("xau_team"));
+    QCOMPARE(leader.value(QStringLiteral("budget")).toDouble(), 0.0);
+    QCOMPARE(controller.teamSummary().value(QStringLiteral("leader")).toString(),
+             QStringLiteral("xau_team"));
+    QCOMPARE(controller.teamSummary().value(QStringLiteral("members")).toInt(),
+             1);
+
+    qunsetenv("GT_TEAM_CONFIG");
 }
 
 void TestEngineController::goldTradersAndSelection()

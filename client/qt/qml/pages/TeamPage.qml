@@ -25,6 +25,24 @@ ColumnLayout {
     /// Relative column weights, shared by the header and every row.
     readonly property var weights: [1.8, 1.1, 1.1, 0.7, 1.4, 1.2, 1.0, 2.0, 2.6]
 
+    /// The leader row is identified by role; its budget/risk cells are dashes
+    /// because it allocates capital instead of trading.
+    function memberLabel(row) {
+        if (!row) return "—"
+        if (row.role === "leader") {
+            return row.member + " · " + qsTr("Leader")
+        }
+        return row.member
+    }
+    function budgetText(row) {
+        return row && row.role === "leader"
+               ? "—" : Number(row.budget || 0).toFixed(2)
+    }
+    function riskText(row) {
+        return row && row.role === "leader"
+               ? "—" : Number(row.risk_per_trade || 0).toFixed(2)
+    }
+
     spacing: 0
 
     Component.onCompleted: if (root.controller) root.controller.fetchTradeHistory()
@@ -234,7 +252,7 @@ ColumnLayout {
                     spacing: Style.gapSmall
 
                     SelectableText {
-                        text: modelData.member || "—"
+                        text: root.memberLabel(modelData)
                         color: Style.text
                         font.pixelSize: 12
                         Layout.fillWidth: true
@@ -252,7 +270,7 @@ ColumnLayout {
                         }
                     }
                     SelectableText {
-                        text: Number(modelData.budget || 0).toFixed(2)
+                        text: root.budgetText(modelData)
                         color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.fillWidth: true
@@ -260,7 +278,7 @@ ColumnLayout {
                         Layout.minimumWidth: 0
                     }
                     SelectableText {
-                        text: Number(modelData.risk_per_trade || 0).toFixed(2)
+                        text: root.riskText(modelData)
                         color: Style.secondaryText
                         font.pixelSize: 12
                         Layout.fillWidth: true

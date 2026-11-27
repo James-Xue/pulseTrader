@@ -1778,6 +1778,11 @@
     </message>
     <message>
         <location filename="../qml/pages/TeamPage.qml"/>
+        <source>Leader</source>
+        <translation>组长</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/TeamPage.qml"/>
         <source>No team traders — attributed xau_team orders appear here</source>
         <translation>暂无团队交易员 — 带 xau_team 归因的外部订单会显示在这里</translation>
     </message>
@@ -1808,6 +1813,11 @@
         <location filename="../qml/components/TeamMemberDialog.qml"/>
         <source>Close</source>
         <translation>关闭</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/TeamMemberDialog.qml"/>
+        <source>Leader</source>
+        <translation>组长</translation>
     </message>
 </context>
 <context>

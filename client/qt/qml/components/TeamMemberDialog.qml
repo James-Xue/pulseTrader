@@ -40,13 +40,16 @@ Dialog {
             spacing: Style.gap
 
             SelectableText {
-                text: root.member.member || "—"
+                text: root.member.role === "leader"
+                      ? (root.member.member + " · " + qsTr("Leader"))
+                      : (root.member.member || "—")
                 color: Style.text
                 font.pixelSize: Style.titleSize
                 font.weight: Font.DemiBold
                 Layout.fillWidth: true
             }
             SelectableText {
+                visible: root.member.role !== "leader"
                 text: qsTr("Budget") + " "
                       + Number(root.member.budget || 0).toFixed(0)
                       + "  ·  " + qsTr("Risk/trade") + " "
