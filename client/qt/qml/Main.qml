@@ -48,8 +48,11 @@ ApplicationWindow {
 
     /// Show the shell as soon as a connection has been requested. The pages
     /// populate as the sockets come up; waiting for Ready kept the operator
-    /// on the profile screen for the whole engine boot.
+    /// on the profile screen for the whole engine boot, and RpcClient's retry
+    /// backoff briefly reports Disconnected — without the latch the shell
+    /// would bounce back to the profile form between attempts.
     readonly property bool showShell: engine.autoConnect
+                                      || profile.connectRequested
                                       || engine.connectionState !== EngineController.Disconnected
 
     EngineController {

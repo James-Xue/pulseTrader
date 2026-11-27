@@ -52,6 +52,12 @@ Rectangle {
     /// Reset by signOut(); a failed attempt leaves the form visible.
     property bool autoConnectTried: false
 
+    /// Once a connection has been requested the shell stays visible even
+    /// while RpcClient backs off between retries: those retries briefly
+    /// report Disconnected, which used to bounce the operator back to this
+    /// page and made the engine boot look like a hang.
+    property bool connectRequested: false
+
     /// Copy the decrypted profile into the form.
     ///
     /// This must run when the page becomes visible, not only at construction:
@@ -128,6 +134,10 @@ Rectangle {
             return
         }
 
+        // Commit to the shell before the launcher's synchronous start wait:
+        // the dashboard appears at once and fills in as the sockets retry.
+        root.connectRequested = true
+
         if (!root.launcher.start(root.account.profileApiKey,
                                  root.account.profileApiSecret,
                                  root.network, root.market,
@@ -145,6 +155,7 @@ Rectangle {
     /// Stop the engine and wipe the in-memory vault key.
     function signOut() {
         root.autoConnectTried = false
+        root.connectRequested = false
         if (root.launcher) {
             root.launcher.stop()
         }
