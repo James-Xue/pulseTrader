@@ -410,8 +410,21 @@ bool PaperAccount::restore(const nlohmann::json &j)
         out.locked_margin = w.at("locked_margin_usdt").get<double>();
         out.realized_pnl = w.at("realized_pnl_usdt").get<double>();
         out.fees_paid = w.at("fees_paid_usdt").get<double>();
-        // v2 files predate deposits: default to the configured seed.
-        out.deposits = w.value("deposits_usdt", 0.0);
+        // v2 files predate the deposits counter. Derive the implied deposit
+        // from the identity ONCE (cash + locked - realized + fees): the
+        // historical hand-edits are not reconstructable, and the legacy
+        // adjustments already document their gap. The derived value is
+        // persisted by the next snapshot, so the check is meaningful from
+        // then on instead of warning forever with the configured seed.
+        if (w.contains("deposits_usdt"))
+        {
+            out.deposits = w.at("deposits_usdt").get<double>();
+        }
+        else
+        {
+            out.deposits = out.cash + out.locked_margin - out.realized_pnl
+                + out.fees_paid;
+        }
         return true;
     };
 
@@ -431,15 +444,6 @@ bool PaperAccount::restore(const nlohmann::json &j)
     m_cfd = cfd;
     m_peakEquity = j.value("peak_equity_usdt", m_peakEquity);
     m_dailyStartEquity = j.value("daily_start_equity_usdt", m_dailyStartEquity);
-    if (0.0 == m_spot.deposits && 0.0 == m_futures.deposits
-        && 0.0 == m_cfd.deposits)
-    {
-        // Legacy v2 file without the counter: fall back to the configured
-        // seed so the identity is meaningful instead of always failing.
-        m_spot.deposits = m_initialBalance;
-        m_futures.deposits = m_initialBalance;
-        m_cfd.deposits = m_initialBalance;
-    }
     m_capitalEvents.clear();
     if (j.contains("capital_events") && j["capital_events"].is_array())
     {
