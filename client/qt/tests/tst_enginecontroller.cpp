@@ -28,6 +28,7 @@ private slots:
     void goldTradersAndSelection();
     void teamRosterIncludesTheLeader();
     void redUpSettingRoundTrips();
+    void paperModeSettingRoundTrips();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -220,6 +221,19 @@ void TestEngineController::redUpSettingRoundTrips()
     QCOMPARE(second.redUp(), !original);
 
     first.setRedUp(original);
+}
+
+void TestEngineController::paperModeSettingRoundTrips()
+{
+    EngineController first;
+    const bool original = first.paperMode();
+    first.setPaperMode(!original);
+    QCOMPARE(first.paperMode(), !original);
+
+    EngineController second;
+    QCOMPARE(second.paperMode(), !original);
+
+    first.setPaperMode(original);
 }
 
 void TestEngineController::goldTradersAndSelection()

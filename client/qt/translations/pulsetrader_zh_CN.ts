@@ -1205,6 +1205,36 @@
         <source>Keys are stored in an encrypted local vault (AES-256-GCM). The engine runs in signal-only mode and places no orders.</source>
         <translation>密钥保存在本地加密档案库（AES-256-GCM）中。引擎以仅发信号模式运行，不会下单。</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Mode</source>
+        <translation>模式</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Live</source>
+        <translation>实盘</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Paper</source>
+        <translation>纸面</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Connect (paper)</source>
+        <translation>连接纸面</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Paper engine · 127.0.0.1:8082</source>
+        <translation>纸面引擎 · 127.0.0.1:8082</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/ProfilePage.qml"/>
+        <source>Attaches to the paper engine on 127.0.0.1:8082 (trading.paper.toml). Start it with ./run.sh paper; the GT team runs on the same engine.</source>
+        <translation>连接到 127.0.0.1:8082 上运行的纸面引擎（trading.paper.toml）。先用 ./run.sh paper 启动；GT 团队也连同一引擎。</translation>
+    </message>
 </context>
 <context>
     <name>SettingsPage</name>

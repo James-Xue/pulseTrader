@@ -77,6 +77,9 @@ class EngineController : public QObject
                NOTIFY spotHoldingsEnabledChanged)
     /// Colour convention for price direction / PnL (Settings page checkbox).
     Q_PROPERTY(bool redUp READ redUp WRITE setRedUp NOTIFY redUpChanged)
+    /// Live (launch 8081) vs paper (attach to the running 8082 engine).
+    Q_PROPERTY(bool paperMode READ paperMode WRITE setPaperMode
+               NOTIFY paperModeChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect CONSTANT)
 
     Q_PROPERTY(pulse::client::PositionsModel* positionsModel READ positionsModel CONSTANT)
@@ -154,6 +157,10 @@ public:
     /// Persisted UI preference: true = red for up/profit, green for down/loss.
     Q_INVOKABLE void setRedUp(bool enabled);
 
+    /// Persisted profile mode: false = live engine on 8081, true = attach to
+    /// the paper engine on 8082 (no engine launch, no credentials).
+    Q_INVOKABLE void setPaperMode(bool enabled);
+
     [[nodiscard]] ConnectionState connectionState() const { return m_connectionState; }
     [[nodiscard]] QString engineVersion() const { return m_engineVersion; }
     [[nodiscard]] double engineUptimeSec() const { return m_engineUptimeSec; }
@@ -177,6 +184,7 @@ public:
     [[nodiscard]] bool pollingEnabled() const { return m_pollingEnabled; }
     [[nodiscard]] bool spotHoldingsEnabled() const { return m_spotHoldingsEnabled; }
     [[nodiscard]] bool redUp() const { return m_redUp; }
+    [[nodiscard]] bool paperMode() const { return m_paperMode; }
 
     /// True when PULSE_CLIENT_HOST was set at startup, in which case the
     /// controller connected without waiting for the dialog. Used by smoke
@@ -223,6 +231,7 @@ signals:
     void pollingEnabledChanged();
     void spotHoldingsEnabledChanged();
     void redUpChanged();
+    void paperModeChanged();
     /// Fires on select, on selection loss, and on every strategies refresh.
     void selectedStrategyChanged();
     /// Fires on every successful `get_gold_trader` reply.
@@ -350,6 +359,7 @@ private:
     bool m_pollingEnabled = true;
     bool m_spotHoldingsEnabled = true;
     bool m_redUp = true;
+    bool m_paperMode = false;
     bool m_autoConnect = false;
 };
 

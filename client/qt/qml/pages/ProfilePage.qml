@@ -17,9 +17,11 @@ Rectangle {
     property var launcher
     property var engine
 
-    /// Control socket port. The launcher owns the process and the port, so a
-    /// single value here is enough.
-    property int controlPort: 8081
+    /// Live launches its own engine on 8081; paper attaches to the already
+    /// running paper engine on 8082 (no launch, no credentials). The choice is
+    /// persisted by EngineController (ui/paperMode).
+    readonly property bool paperMode: root.engine ? root.engine.paperMode : false
+    readonly property int controlPort: root.paperMode ? 8082 : 8081
 
     color: Style.windowBackground
     bottomLeftRadius: Style.windowRadius
@@ -88,8 +90,9 @@ Rectangle {
                 && root.engine
                 && root.engine.connectionState === EngineController.Disconnected
                 && root.account
-                && root.account.profileApiKey.length > 0
-                && root.account.profileApiSecret.length > 0) {
+                && (root.paperMode
+                    || (root.account.profileApiKey.length > 0
+                        && root.account.profileApiSecret.length > 0))) {
                 root.autoConnectTried = true
                 Qt.callLater(function() { root.connectNow() })
             }
@@ -125,6 +128,15 @@ Rectangle {
     /// Each step reports its own failure through the shared error line.
     function connectNow() {
         if (!root.account || !root.launcher || !root.engine) {
+            return
+        }
+
+        if (root.paperMode) {
+            // Paper mode attaches to the engine the team already runs
+            // (`./run.sh paper`, 8082). Nothing is launched and the saved
+            // live credentials are untouched.
+            root.connectRequested = true
+            root.engine.connectToEngine("127.0.0.1", root.controlPort, false, "")
             return
         }
 
@@ -196,7 +208,9 @@ Rectangle {
 
         SelectableText {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Gate.io · read-only monitor")
+            text: root.paperMode
+                  ? qsTr("Paper engine · 127.0.0.1:8082")
+                  : qsTr("Gate.io · read-only monitor")
             color: Style.secondaryText
             font.pixelSize: Style.fontSize
         }
@@ -215,6 +229,41 @@ Rectangle {
                 anchors.fill: parent
                 anchors.margins: Style.pad
                 spacing: Style.gap
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.gap
+
+                    SelectableText {
+                        Layout.preferredWidth: 88
+                        text: qsTr("Mode")
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                    }
+
+                    MacSegmentedControl {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 26
+                        items: [qsTr("Live"), qsTr("Paper")]
+                        currentIndex: root.paperMode ? 1 : 0
+                        enabled: !root.busy
+                        onActivated: function (index) {
+                            if (root.engine) {
+                                root.engine.setPaperMode(index === 1)
+                            }
+                        }
+                    }
+                }
+
+                SelectableText {
+                    Layout.leftMargin: 100
+                    Layout.fillWidth: true
+                    visible: root.paperMode
+                    text: qsTr("Attaches to the paper engine on 127.0.0.1:8082 (trading.paper.toml). Start it with ./run.sh paper; the GT team runs on the same engine.")
+                    color: Style.tertiaryText
+                    font.pixelSize: Style.fontSizeSmall
+                    wrapMode: Text.WordWrap
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -252,7 +301,7 @@ Rectangle {
                         Layout.preferredHeight: 26
                         items: [qsTr("Mainnet"), qsTr("Testnet")]
                         currentIndex: root.networkIndex
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         onActivated: function (index) { root.networkIndex = index }
                     }
                 }
@@ -273,7 +322,7 @@ Rectangle {
                         Layout.preferredHeight: 26
                         items: [qsTr("Spot"), qsTr("Futures"), qsTr("CFD")]
                         currentIndex: root.testnet ? 1 : root.marketIndex
-                        enabled: !root.testnet && !root.busy
+                        enabled: !root.paperMode && !root.testnet && !root.busy
                         onActivated: function (index) { root.marketIndex = index }
                     }
                 }
@@ -299,7 +348,7 @@ Rectangle {
                     MacTextField {
                         id: keyField
                         Layout.fillWidth: true
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         // The key identifies the account rather than
                         // authorising it, but it is still masked by default so
                         // a screenshot or a passer-by cannot read it. The
@@ -323,7 +372,7 @@ Rectangle {
                     MacTextField {
                         id: secretField
                         Layout.fillWidth: true
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         echoMode: revealBox.checked ? TextInput.Normal
                                                     : TextInput.Password
                         placeholderText: qsTr("Gate.io API secret")
@@ -333,7 +382,7 @@ Rectangle {
 
                 MacCheckBox {
                     id: revealBox
-                    enabled: !root.busy
+                    enabled: !root.paperMode && !root.busy
                     text: qsTr("Show API key and secret")
                 }
 
@@ -350,7 +399,7 @@ Rectangle {
                     MacTextField {
                         id: proxyField
                         Layout.fillWidth: true
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         placeholderText: qsTr("http://127.0.0.1:7897")
                     }
                 }
@@ -368,7 +417,7 @@ Rectangle {
                     MacTextField {
                         id: symbolsField
                         Layout.fillWidth: true
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         placeholderText: qsTr("BTC_USDT, ETH_USDT, XAU_USDT")
                     }
 
@@ -396,7 +445,7 @@ Rectangle {
                     // combination, so make it a single action.
                     MacButton {
                         text: qsTr("Gold preset")
-                        enabled: !root.busy
+                        enabled: !root.paperMode && !root.busy
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Mainnet · CFD · XAUUSD")
                         onClicked: root.applyGoldPreset()
@@ -406,10 +455,13 @@ Rectangle {
                         Layout.fillWidth: true
                         primary: true
                         enabled: !root.busy
-                        text: root.starting
-                              ? qsTr("Starting engine…")
-                              : (root.engine && root.engine.connectionState === EngineController.Connecting
-                                 ? qsTr("Connecting…") : qsTr("Connect"))
+                        text: root.paperMode
+                              ? (root.engine && root.engine.connectionState === EngineController.Connecting
+                                 ? qsTr("Connecting…") : qsTr("Connect (paper)"))
+                              : (root.starting
+                                 ? qsTr("Starting engine…")
+                                 : (root.engine && root.engine.connectionState === EngineController.Connecting
+                                    ? qsTr("Connecting…") : qsTr("Connect")))
                         onClicked: root.connectNow()
                     }
                 }

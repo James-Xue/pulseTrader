@@ -224,6 +224,7 @@ EngineController::EngineController(QObject* parent)
                                 .value(QStringLiteral("dashboard/spotHoldings"), true)
                                 .toBool();
     m_redUp = settings.value(QStringLiteral("ui/redUp"), true).toBool();
+    m_paperMode = settings.value(QStringLiteral("ui/paperMode"), false).toBool();
 
     // 3. Optional headless auto-connect. PULSE_CLIENT_HOST turns the dialog off
     //    and connects at startup, which is what the smoke test uses.
@@ -301,6 +302,17 @@ void EngineController::setPollingEnabled(bool enabled)
         // asked the client to stop polling would contradict the setting.
         m_marketStream->stop();
     }
+}
+
+void EngineController::setPaperMode(bool enabled)
+{
+    if (enabled == m_paperMode)
+    {
+        return;
+    }
+    m_paperMode = enabled;
+    QSettings().setValue(QStringLiteral("ui/paperMode"), enabled);
+    emit paperModeChanged();
 }
 
 void EngineController::setRedUp(bool enabled)
