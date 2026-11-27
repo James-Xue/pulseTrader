@@ -96,6 +96,36 @@ void DrawdownGuard::updateEquity(double equity)
     updateEquity(equity, static_cast<std::int64_t>(utc_day));
 }
 
+void DrawdownGuard::seedEquity(double peak_equity, double daily_start_equity)
+{
+    // Restore the persisted baselines (paper mode restart):
+    // 1. Reject non-finite/non-positive values — they are not balances
+    // 2. Restore peak and daily-start, with the current equity at the daily
+    //    start until the first fresh snapshot arrives
+    // 3. Align the day key so the next update does not roll the baseline
+    // 4. Clear any pending plausibility steps from a previous process
+    if (!std::isfinite(peak_equity) || peak_equity <= 0.0
+        || !std::isfinite(daily_start_equity) || daily_start_equity <= 0.0)
+    {
+        PULSE_LOG_WARN("risk",
+            "Ignoring invalid drawdown seed (peak {:.2f}, daily {:.2f})",
+            peak_equity, daily_start_equity);
+        return;
+    }
+
+    std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+    m_peakEquity = peak_equity;
+    m_dailyStartEquity = daily_start_equity;
+    m_currentEquity = daily_start_equity;
+    const auto since_epoch = std::chrono::system_clock::now().time_since_epoch();
+    m_dayKey = std::chrono::duration_cast<std::chrono::hours>(since_epoch).count() / 24;
+    clearPendingSteps();
+
+    PULSE_LOG_INFO("risk",
+        "Seeded drawdown baselines — peak {:.2f}, daily start {:.2f}",
+        m_peakEquity, m_dailyStartEquity);
+}
+
 bool DrawdownGuard::acceptSnapshotLocked(double equity)
 {
     // Classify one equity snapshot before it can move any baseline.

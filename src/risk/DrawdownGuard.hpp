@@ -111,6 +111,15 @@ class DrawdownGuard
     /// number (days since 1970-01-01) instead of reading the system clock.
     void updateEquity(double equity, std::int64_t utc_day);
 
+    /// Seed the persisted high-water marks after a restart.
+    ///
+    /// Without this, the first snapshot after every restart becomes the new
+    /// baseline, so a mid-day drawdown silently resets to zero. Paper mode
+    /// persists peak and daily-start equity in the paper state file; the
+    /// caller seeds them before the first heartbeat. No thresholds are
+    /// evaluated here — the next updateEquity() does that.
+    void seedEquity(double peak_equity, double daily_start_equity);
+
     // --- Circuit breaker queries ---
 
     /// Returns true if trading is halted (any threshold breached).

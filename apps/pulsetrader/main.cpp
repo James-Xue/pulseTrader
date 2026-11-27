@@ -1192,6 +1192,14 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
     // ------------------------------------------------------------------
     pulse::risk::PositionManager   position_mgr(cfg.risk);
     pulse::risk::DrawdownGuard     drawdownGuard(cfg.risk);
+    // Paper mode: restore the persisted peak / daily-start equity so an engine
+    // restart does not silently reset today's drawdown baseline.
+    if (paper_mode && paper_account)
+    {
+        drawdownGuard.seedEquity(
+            paper_account->peakEquity(),
+            paper_account->dailyStartEquity());
+    }
     pulse::risk::OrderRateLimiter  rateLimiter(cfg.risk.maxOrdersPerSec);
     pulse::risk::RiskManager       risk_mgr(cfg.risk, position_mgr,
                                             drawdownGuard, rateLimiter);

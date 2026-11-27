@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <limits>
 
 using namespace pulse;
@@ -68,6 +69,32 @@ TEST(DrawdownGuard, DrawdownDoesNotGoNegative)
     guard.updateEquity(10500.0); // Above peak — drawdown should be 0.
 
     EXPECT_DOUBLE_EQ(0.0, guard.maxDrawdown());
+}
+
+TEST(DrawdownGuard, SeedRestoresPeakAndDailyBaselines)
+{
+    // Paper mode persists both baselines; a restart must not reset them to
+    // the first post-restart snapshot.
+    DrawdownGuard guard(make_config(0.20, 0.40));
+    guard.seedEquity(10500.0, 10000.0);
+
+    const auto day = std::chrono::duration_cast<std::chrono::hours>(
+        std::chrono::system_clock::now().time_since_epoch()).count() / 24;
+    guard.updateEquity(9500.0, day);
+
+    EXPECT_NEAR(0.05, guard.dailyDrawdown(), 1e-9);
+    EXPECT_NEAR((10500.0 - 9500.0) / 10500.0, guard.maxDrawdown(), 1e-9);
+    EXPECT_FALSE(guard.isHalted());
+}
+
+TEST(DrawdownGuard, SeedIgnoresInvalidValues)
+{
+    DrawdownGuard guard(make_config());
+    guard.seedEquity(0.0, 10000.0);
+    guard.seedEquity(10000.0, -1.0);
+
+    EXPECT_DOUBLE_EQ(0.0, guard.maxDrawdown());
+    EXPECT_FALSE(guard.isHalted());
 }
 
 // ---------------------------------------------------------------------------
