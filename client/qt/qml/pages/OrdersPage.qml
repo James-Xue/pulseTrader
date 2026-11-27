@@ -20,6 +20,57 @@ ColumnLayout {
     /// 0 = all, 1 = spot, 2 = cfd, 3 = futures.
     property int marketIndex: 0
 
+    /// History strategy filter. Empty = all rows. Keys are derived from the
+    /// engine's `strategy` field: team entries collapse to
+    /// `xau_team:<member>`, venue SL/TP exits to `paper_exit`, everything
+    /// else keeps its engine strategy name.
+    property string strategyFilter: ""
+
+    function strategyKey(row) {
+        const raw = String(row.strategy || row.client_order_id || "")
+        if (raw.startsWith("xau_team:")) {
+            const parts = raw.split(":")
+            return parts.length >= 2 ? "xau_team:" + parts[1] : raw
+        }
+        if (raw.startsWith("paper_exit_")) {
+            return "paper_exit"
+        }
+        return raw
+    }
+
+    function strategyLabel(key) {
+        if (!key) return qsTr("All strategies")
+        if (key.startsWith("xau_team:")) return key.substring(9)
+        if (key === "paper_exit") return qsTr("Venue exits")
+        return key
+    }
+
+    readonly property var strategyKeys: {
+        const rows = root.controller ? root.controller.tradeHistory : []
+        const seen = {}
+        for (let i = 0; i < rows.length; ++i) {
+            const key = root.strategyKey(rows[i])
+            if (key.length > 0) seen[key] = true
+        }
+        return Object.keys(seen).sort()
+    }
+    readonly property var strategyOptions: [""].concat(root.strategyKeys)
+
+    onStrategyKeysChanged: {
+        if (root.strategyFilter !== ""
+            && root.strategyKeys.indexOf(root.strategyFilter) < 0) {
+            root.strategyFilter = ""
+        }
+    }
+
+    readonly property var filteredHistory: {
+        const rows = root.controller ? root.controller.tradeHistory : []
+        if (root.strategyFilter === "") return rows
+        return rows.filter(function(row) {
+            return root.strategyKey(row) === root.strategyFilter
+        })
+    }
+
     readonly property var activeModels: root.controller
         ? [root.controller.ordersModel,
            root.controller.spotOrders,
@@ -40,7 +91,8 @@ ColumnLayout {
 
     readonly property int activeCount: root.activeModel ? root.activeModel.count : 0
     readonly property int reportCount: root.reportModel ? root.reportModel.count : 0
-    readonly property int historyCount: root.controller
+    readonly property int historyCount: root.filteredHistory.length
+    readonly property int historyTotal: root.controller
         ? root.controller.tradeHistory.length : 0
 
     /// Fixed column widths, shared by the header and every row so they stay
@@ -97,6 +149,21 @@ ColumnLayout {
             }
 
             Item { Layout.fillWidth: true }
+
+            MacComboBox {
+                visible: viewStack.currentIndex === 2
+                Layout.preferredWidth: 200
+                model: root.strategyOptions.map(function(key) {
+                    return root.strategyLabel(key)
+                })
+                currentIndex: {
+                    const index = root.strategyOptions.indexOf(root.strategyFilter)
+                    return index >= 0 ? index : 0
+                }
+                onActivated: function(index) {
+                    root.strategyFilter = root.strategyOptions[index] || ""
+                }
+            }
 
             MacButton {
                 text: qsTr("Refresh")
@@ -349,6 +416,12 @@ ColumnLayout {
                 font.pixelSize: Style.fontSizeSmall
                 wrapMode: Text.WordWrap
                 text: {
+                    if (root.strategyFilter !== "") {
+                        return qsTr("Showing %1 of %2 trades for %3")
+                            .arg(root.filteredHistory.length)
+                            .arg(root.historyTotal)
+                            .arg(root.strategyLabel(root.strategyFilter))
+                    }
                     const s = root.controller ? root.controller.tradeHistorySummary : null
                     if (!s || !s.count)
                         return qsTr("No trades yet — fills appear here once recorded")
@@ -376,7 +449,7 @@ ColumnLayout {
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 contentWidth: root.historyTableWidth
-                model: root.controller ? root.controller.tradeHistory : []
+                model: root.filteredHistory
 
                 ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOn }
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }

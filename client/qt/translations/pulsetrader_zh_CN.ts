@@ -989,6 +989,26 @@
         <source>No recent fills</source>
         <translation>暂无最近成交</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/OrdersPage.qml"/>
+        <source>Strategy</source>
+        <translation>策略</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/OrdersPage.qml"/>
+        <source>All strategies</source>
+        <translation>全部策略</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/OrdersPage.qml"/>
+        <source>Venue exits</source>
+        <translation>交易所平仓</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/OrdersPage.qml"/>
+        <source>Showing %1 of %2 trades for %3</source>
+        <translation>显示 %3 的 %1 / %2 笔成交</translation>
+    </message>
 </context>
 <context>
     <name>PositionsPage</name>
