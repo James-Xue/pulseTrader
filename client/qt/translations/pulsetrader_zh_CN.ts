@@ -1009,6 +1009,14 @@
         <source>Showing %1 of %2 trades for %3</source>
         <translation>显示 %3 的 %1 / %2 笔成交</translation>
     </message>
+    <message>
+        <source>All dates</source>
+        <translation>全部日期</translation>
+    </message>
+    <message>
+        <source>Showing %1 trades on %2</source>
+        <translation>显示 %2 的 %1 笔成交</translation>
+    </message>
 </context>
 <context>
     <name>PositionsPage</name>

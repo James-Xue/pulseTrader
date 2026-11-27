@@ -56,6 +56,35 @@ ColumnLayout {
     }
     readonly property var strategyOptions: [""].concat(root.strategyKeys)
 
+    /// History date filter, mirroring the controller ("yyyy-MM-dd", "" = all).
+    readonly property string historyDate: root.controller
+        ? root.controller.historyDate : ""
+
+    function dateLabel(key) {
+        if (!key) return qsTr("All dates")
+        const day = new Date(key + "T00:00:00")
+        return Qt.formatDate(day, "yyyy-MM-dd ddd")
+    }
+
+    /// "" (all dates) plus every day seen in the newest unfiltered fetch.
+    readonly property var dateKeys: {
+        const days = root.controller ? root.controller.historyDates : []
+        return [""].concat(days)
+    }
+    readonly property var dateOptions: root.dateKeys.map(root.dateLabel)
+
+    /// A day that vanished from the list (e.g. a new day rolled over) must
+    /// not leave the page silently filtered by an unselectable date.
+    Connections {
+        target: root.controller
+        function onHistoryDatesChanged() {
+            if (root.historyDate !== ""
+                && root.dateKeys.indexOf(root.historyDate) < 0) {
+                root.controller.setHistoryDate("")
+            }
+        }
+    }
+
     onStrategyKeysChanged: {
         if (root.strategyFilter !== ""
             && root.strategyKeys.indexOf(root.strategyFilter) < 0) {
@@ -65,10 +94,25 @@ ColumnLayout {
 
     readonly property var filteredHistory: {
         const rows = root.controller ? root.controller.tradeHistory : []
-        if (root.strategyFilter === "") return rows
-        return rows.filter(function(row) {
-            return root.strategyKey(row) === root.strategyFilter
-        })
+        const out = []
+        for (let i = 0; i < rows.length; ++i) {
+            const row = rows[i]
+            if (root.strategyFilter !== ""
+                && root.strategyKey(row) !== root.strategyFilter) {
+                continue
+            }
+            const when = Number(row.time_ms) || 0
+            const day = Qt.formatDate(new Date(when), "yyyy-MM-dd")
+            if (root.historyDate !== "" && day !== root.historyDate) {
+                continue
+            }
+            // The engine's page has no date section role, so inject one for
+            // the ListView section headers.
+            const copy = Object.assign({}, row)
+            copy.dateKey = day
+            out.push(copy)
+        }
+        return out
     }
 
     readonly property var activeModels: root.controller
@@ -162,6 +206,20 @@ ColumnLayout {
                 }
                 onActivated: function(index) {
                     root.strategyFilter = root.strategyOptions[index] || ""
+                }
+            }
+
+            // Date filter: one local calendar day at a time. The day list
+            // comes from the newest unfiltered fetch, so picking a day does
+            // not shrink the choices to that day.
+            MacComboBox {
+                visible: viewStack.currentIndex === 2
+                Layout.preferredWidth: 180
+                model: root.dateOptions
+                currentIndex: Math.max(0, root.dateKeys.indexOf(root.historyDate))
+                onActivated: function(index) {
+                    if (!root.controller) return
+                    root.controller.setHistoryDate(root.dateKeys[index] || "")
                 }
             }
 
@@ -416,6 +474,11 @@ ColumnLayout {
                 font.pixelSize: Style.fontSizeSmall
                 wrapMode: Text.WordWrap
                 text: {
+                    if (root.historyDate !== "") {
+                        return qsTr("Showing %1 trades on %2")
+                            .arg(root.filteredHistory.length)
+                            .arg(root.dateLabel(root.historyDate))
+                    }
                     if (root.strategyFilter !== "") {
                         return qsTr("Showing %1 of %2 trades for %3")
                             .arg(root.filteredHistory.length)
@@ -450,6 +513,26 @@ ColumnLayout {
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 contentWidth: root.historyTableWidth
                 model: root.filteredHistory
+
+                // Group by local calendar day. Section headers make the
+                // per-day blocks obvious without leaving the table view.
+                section.property: "dateKey"
+                section.criteria: ViewSection.FullString
+                section.delegate: Rectangle {
+                    width: Math.max(historyList.width, root.historyTableWidth)
+                    height: 28
+                    color: Style.contentBackground
+
+                    SelectableText {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.dateLabel(section)
+                        color: Style.secondaryText
+                        font.pixelSize: Style.fontSizeSmall
+                        font.bold: true
+                    }
+                }
 
                 ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOn }
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }

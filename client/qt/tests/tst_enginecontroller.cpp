@@ -1,5 +1,7 @@
 #include <QtTest>
 
+#include <QDate>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,6 +10,8 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QTimeZone>
+#include <QVector>
 
 #include "engine/EngineController.hpp"
 
@@ -29,6 +33,7 @@ private slots:
     void teamRosterIncludesTheLeader();
     void redUpSettingRoundTrips();
     void paperModeSettingRoundTrips();
+    void tradeHistoryDateWindow();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -153,6 +158,15 @@ static bool resultFor(const QJsonObject& request, QJsonValue& result)
                   { QStringLiteral("contract_volume"), 100.0 },
               } },
             { QStringLiteral("tracked_positions"), QJsonArray{} },
+        };
+        return true;
+    }
+    if (QStringLiteral("get_trade_history") == method)
+    {
+        result = QJsonObject{
+            { QStringLiteral("rows"), QJsonArray{} },
+            { QStringLiteral("summary"),
+              QJsonObject{ { QStringLiteral("count"), 0 } } },
         };
         return true;
     }
@@ -338,6 +352,138 @@ void TestEngineController::goldTradersAndSelection()
                        .value(QStringLiteral("value")).toDouble());
 
     controller.disconnectFromEngine();
+}
+
+
+void TestEngineController::tradeHistoryDateWindow()
+{
+    // The date picker must reach the engine as a LOCAL-midnight window, not as
+    // a client-side filter: a day older than the newest page would otherwise
+    // stay invisible.
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    QVector<QJsonObject> requests;
+    QHash<QTcpSocket*, QByteArray> buffers;
+    QObject context;
+    connect(&server, &QTcpServer::newConnection, &context, [&]()
+    {
+        while (server.hasPendingConnections())
+        {
+            QTcpSocket* peer = server.nextPendingConnection();
+            buffers.insert(peer, QByteArray{});
+            connect(peer, &QTcpSocket::readyRead, &context, [peer, &buffers, &requests]()
+            {
+                QByteArray& buffer = buffers[peer];
+                buffer.append(peer->readAll());
+                int newline = buffer.indexOf('\n');
+                while (newline >= 0)
+                {
+                    const QByteArray line = buffer.left(newline);
+                    buffer.remove(0, newline + 1);
+                    newline = buffer.indexOf('\n');
+                    if (line.trimmed().isEmpty())
+                    {
+                        continue;
+                    }
+                    const QJsonObject request =
+                        QJsonDocument::fromJson(line).object();
+                    requests.append(request);
+                    QJsonValue result;
+                    QJsonObject reply;
+                    reply[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+                    reply[QStringLiteral("id")] =
+                        request.value(QStringLiteral("id"));
+                    if (resultFor(request, result))
+                    {
+                        reply[QStringLiteral("result")] = result;
+                    }
+                    else
+                    {
+                        reply[QStringLiteral("error")] = QJsonObject{
+                            { QStringLiteral("code"), -32601 },
+                            { QStringLiteral("message"),
+                              QStringLiteral("method not found") },
+                        };
+                    }
+                    peer->write(
+                        QJsonDocument(reply).toJson(QJsonDocument::Compact)
+                        + '\n');
+                    peer->flush();
+                }
+            });
+        }
+    });
+
+    EngineController controller;
+    controller.connectToEngine(QStringLiteral("127.0.0.1"),
+                               server.serverPort(), false, QString());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connectionState()
+                                 == EngineController::ConnectionState::Ready,
+                             5000);
+
+    const QDate day(2026, 11, 27);
+    const QDateTime start(day, QTime(0, 0), QTimeZone::systemTimeZone());
+    const qint64 expectedFrom = start.toMSecsSinceEpoch();
+    const qint64 expectedTo =
+        start.addDays(1).toMSecsSinceEpoch() - 1;
+
+    controller.setHistoryDate(day.toString(QStringLiteral("yyyy-MM-dd")));
+
+    bool sawWindow = false;
+    QTRY_VERIFY_WITH_TIMEOUT(([&]()
+    {
+        for (const QJsonObject& request : requests)
+        {
+            if (request.value(QStringLiteral("method")).toString()
+                != QStringLiteral("get_trade_history"))
+            {
+                continue;
+            }
+            const QJsonObject params =
+                request.value(QStringLiteral("params")).toObject();
+            if (!params.contains(QStringLiteral("from_ms")))
+            {
+                continue;
+            }
+            const qint64 from = static_cast<qint64>(
+                params.value(QStringLiteral("from_ms")).toDouble());
+            const qint64 to = static_cast<qint64>(
+                params.value(QStringLiteral("to_ms")).toDouble());
+            if (from == expectedFrom && to == expectedTo)
+            {
+                sawWindow = true;
+                return true;
+            }
+        }
+        return false;
+    }()), 5000);
+    QVERIFY(sawWindow);
+
+    // Clearing the filter requests the newest page again (no from_ms).
+    controller.setHistoryDate(QString());
+    bool sawUnfiltered = false;
+    QTRY_VERIFY_WITH_TIMEOUT(([&]()
+    {
+        for (const QJsonObject& request : requests)
+        {
+            if (request.value(QStringLiteral("method")).toString()
+                != QStringLiteral("get_trade_history"))
+            {
+                continue;
+            }
+            const QJsonObject params =
+                request.value(QStringLiteral("params")).toObject();
+            if (!params.contains(QStringLiteral("from_ms"))
+                && params.value(QStringLiteral("limit")).toInt() == 500)
+            {
+                sawUnfiltered = true;
+                return true;
+            }
+        }
+        return false;
+    }()), 5000);
+    QVERIFY(sawUnfiltered);
 }
 
 QTEST_MAIN(TestEngineController)

@@ -60,6 +60,10 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList tradeHistory READ tradeHistory NOTIFY tradeHistoryChanged)
     /// Aggregate over every matched row: count/filled/wins/win_rate/net_pnl/fees.
     Q_PROPERTY(QVariantMap tradeHistorySummary READ tradeHistorySummary NOTIFY tradeHistoryChanged)
+    /// Local calendar day ("yyyy-MM-dd") the history is filtered to; empty = all.
+    Q_PROPERTY(QString historyDate READ historyDate NOTIFY historyDateChanged)
+    /// Days (newest first) present in the newest UNFILTERED history fetch.
+    Q_PROPERTY(QStringList historyDates READ historyDates NOTIFY historyDatesChanged)
     /// External traders derived from `xau_team:<member>:<seq>` attribution:
     /// one row per member with open positions, notional, uPnL and entries.
     Q_PROPERTY(QVariantList teamRows READ teamRows NOTIFY teamChanged)
@@ -168,11 +172,17 @@ public:
     [[nodiscard]] QString mode() const { return m_mode; }
     [[nodiscard]] QVariantList tradeHistory() const { return m_tradeHistory; }
     [[nodiscard]] QVariantMap tradeHistorySummary() const { return m_tradeHistorySummary; }
+    [[nodiscard]] QString historyDate() const { return m_historyDate; }
+    [[nodiscard]] QStringList historyDates() const { return m_historyDates; }
     [[nodiscard]] QVariantList teamRows() const { return m_teamRows; }
     [[nodiscard]] QVariantMap teamSummary() const { return m_teamSummary; }
 
     /// One-shot fetch of the persisted history (opens the dialog).
     Q_INVOKABLE void fetchTradeHistory();
+
+    /// Filter the persisted history to one LOCAL calendar day ("yyyy-MM-dd");
+    /// an empty string restores every date. A malformed day is ignored.
+    Q_INVOKABLE void setHistoryDate(const QString& day);
     [[nodiscard]] bool simulated() const { return m_simulated; }
     [[nodiscard]] bool tradingHalted() const { return m_tradingHalted; }
     [[nodiscard]] QString activeMarket() const { return m_activeMarket; }
@@ -223,6 +233,8 @@ public:
 
 signals:
     void tradeHistoryChanged();
+    void historyDateChanged();
+    void historyDatesChanged();
     /// Rebuilt whenever positions, history or the paper status change.
     void teamChanged();
     void connectionStateChanged();
@@ -330,6 +342,13 @@ private:
     QString m_mode{ QStringLiteral("live") };
     bool m_simulated{ false };
     QVariantList m_tradeHistory;
+    /// Local day filter for the history view ("" = every date).
+    QString m_historyDate;
+    /// Days seen in the newest UNFILTERED fetch, newest first.
+    QStringList m_historyDates;
+    /// A date change arrived while a history request was in flight; re-fetch
+    /// once it lands instead of dropping the new window.
+    bool m_historyDirty = false;
     QVariantMap m_tradeHistorySummary;
     /// Raw `get_positions` rows, kept for the team aggregation (the model
     /// exposes roles but is awkward to iterate from C++).

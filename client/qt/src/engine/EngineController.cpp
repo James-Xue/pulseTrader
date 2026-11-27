@@ -1,5 +1,7 @@
 #include "engine/EngineController.hpp"
 
+#include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -8,6 +10,7 @@
 #include <QJsonValue>
 #include <QMap>
 #include <QSettings>
+#include <QTimeZone>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -462,11 +465,51 @@ void EngineController::fetchTradeHistory()
     {
         return;
     }
+    m_historyDirty = false;
     QJsonObject params;
-    params[QStringLiteral("limit")] = 500;
+    // A single day is fetched with its local-midnight window so the engine can
+    // return the whole day; without a filter the newest page is enough.
+    bool dayWindow = false;
+    if (!m_historyDate.isEmpty())
+    {
+        const QDate day =
+            QDate::fromString(m_historyDate, QStringLiteral("yyyy-MM-dd"));
+        if (day.isValid())
+        {
+            const QDateTime start(day, QTime(0, 0),
+                                  QTimeZone::systemTimeZone());
+            params[QStringLiteral("from_ms")] =
+                static_cast<double>(start.toMSecsSinceEpoch());
+            params[QStringLiteral("to_ms")] = static_cast<double>(
+                start.addDays(1).toMSecsSinceEpoch() - 1);
+            dayWindow = true;
+        }
+    }
+    params[QStringLiteral("limit")] = dayWindow ? 1000 : 500;
     const qint64 id =
         m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
     m_inFlight.insert(id, PollKind::TradeHistory);
+}
+
+void EngineController::setHistoryDate(const QString& day)
+{
+    const QString normalized = day.trimmed();
+    if (normalized == m_historyDate)
+    {
+        return;
+    }
+    if (!normalized.isEmpty()
+        && !QDate::fromString(normalized, QStringLiteral("yyyy-MM-dd"))
+                .isValid())
+    {
+        // Malformed input is ignored: an invalid day must not silently show
+        // every row while the picker claims a filter.
+        return;
+    }
+    m_historyDate = normalized;
+    m_historyDirty = true;
+    emit historyDateChanged();
+    fetchTradeHistory();
 }
 
 void EngineController::fetchMarket(const QString& symbol)
@@ -634,9 +677,46 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         m_tradeHistorySummary = result.value(QStringLiteral("summary"))
                                     .toObject()
                                     .toVariantMap();
+        if (m_historyDate.isEmpty())
+        {
+            // Only an unfiltered answer can teach the picker its day list; a
+            // day-window reply would collapse the choices to that one day.
+            QStringList days;
+            for (const QVariant& row : m_tradeHistory)
+            {
+                const qint64 ms =
+                    row.toMap().value(QStringLiteral("time_ms")).toLongLong();
+                if (ms <= 0)
+                {
+                    continue;
+                }
+                const QString day =
+                    QDateTime::fromMSecsSinceEpoch(ms)
+                        .date()
+                        .toString(QStringLiteral("yyyy-MM-dd"));
+                if (!day.isEmpty() && !days.contains(day))
+                {
+                    days << day;
+                }
+            }
+            days.sort();
+            std::reverse(days.begin(), days.end());
+            if (days != m_historyDates)
+            {
+                m_historyDates = days;
+                emit historyDatesChanged();
+            }
+        }
         setLastError(QString());
         rebuildTeam();
         emit tradeHistoryChanged();
+        if (m_historyDirty)
+        {
+            // The picker changed while this request was in flight; honour the
+            // new window now that the old one has landed.
+            m_historyDirty = false;
+            fetchTradeHistory();
+        }
         break;
     case PollKind::Positions:
         m_positionsModel->setRows(result.value(QStringLiteral("positions")).toArray());
