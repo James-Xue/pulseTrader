@@ -1,0 +1,375 @@
+{
+  "note": "E1 replay legs: 56 recorded venue exits (prices derived from the recorded PnL) + 18 reconstructed (8 short -0.20, 10 long -0.089) to match the audit E1 totals.",
+  "legs": [
+    {
+      "side": "long",
+      "entry": 3582.24,
+      "exit": 3578.58
+    },
+    {
+      "side": "short",
+      "entry": 3576.07,
+      "exit": 3579.79
+    },
+    {
+      "side": "long",
+      "entry": 3579.71,
+      "exit": 3584.48
+    },
+    {
+      "side": "short",
+      "entry": 3583.23,
+      "exit": 3586.89
+    },
+    {
+      "side": "long",
+      "entry": 3589.63,
+      "exit": 3594.58
+    },
+    {
+      "side": "short",
+      "entry": 3594.18,
+      "exit": 3597.83
+    },
+    {
+      "side": "long",
+      "entry": 3597.61,
+      "exit": 3593.91
+    },
+    {
+      "side": "short",
+      "entry": 3591.63,
+      "exit": 3595.46
+    },
+    {
+      "side": "long",
+      "entry": 3596.51,
+      "exit": 3601.06
+    },
+    {
+      "side": "short",
+      "entry": 3589.68,
+      "exit": 3593.28
+    },
+    {
+      "side": "long",
+      "entry": 3603.05,
+      "exit": 3599.32
+    },
+    {
+      "side": "short",
+      "entry": 3583.95,
+      "exit": 3578.76
+    },
+    {
+      "side": "long",
+      "entry": 3573.0,
+      "exit": 3578.0
+    },
+    {
+      "side": "short",
+      "entry": 3567.27,
+      "exit": 3570.86
+    },
+    {
+      "side": "long",
+      "entry": 3570.15,
+      "exit": 3566.46
+    },
+    {
+      "side": "long",
+      "entry": 3572.29,
+      "exit": 3568.57
+    },
+    {
+      "side": "short",
+      "entry": 3568.22,
+      "exit": 3572.61
+    },
+    {
+      "side": "long",
+      "entry": 3573.53,
+      "exit": 3569.82
+    },
+    {
+      "side": "short",
+      "entry": 3567.58,
+      "exit": 3563.32
+    },
+    {
+      "side": "long",
+      "entry": 3569.84,
+      "exit": 3566.26
+    },
+    {
+      "side": "short",
+      "entry": 3566.5,
+      "exit": 3566.78
+    },
+    {
+      "side": "long",
+      "entry": 3565.5,
+      "exit": 3571.33
+    },
+    {
+      "side": "short",
+      "entry": 3570.86,
+      "exit": 3574.45
+    },
+    {
+      "side": "long",
+      "entry": 3574.54,
+      "exit": 3570.67
+    },
+    {
+      "side": "short",
+      "entry": 3573.82,
+      "exit": 3568.42
+    },
+    {
+      "side": "short",
+      "entry": 3564.7,
+      "exit": 3568.36
+    },
+    {
+      "side": "long",
+      "entry": 3568.06,
+      "exit": 3564.45
+    },
+    {
+      "side": "short",
+      "entry": 3564.86,
+      "exit": 3568.43
+    },
+    {
+      "side": "short",
+      "entry": 3567.74,
+      "exit": 3571.63
+    },
+    {
+      "side": "long",
+      "entry": 3571.6,
+      "exit": 3567.87
+    },
+    {
+      "side": "short",
+      "entry": 3568.29,
+      "exit": 3563.1
+    },
+    {
+      "side": "long",
+      "entry": 3568.67,
+      "exit": 3565.0
+    },
+    {
+      "side": "long",
+      "entry": 3567.86,
+      "exit": 3573.82
+    },
+    {
+      "side": "short",
+      "entry": 3564.88,
+      "exit": 3568.53
+    },
+    {
+      "side": "long",
+      "entry": 3568.97,
+      "exit": 3565.35
+    },
+    {
+      "side": "short",
+      "entry": 3568.26,
+      "exit": 3572.94
+    },
+    {
+      "side": "long",
+      "entry": 3572.94,
+      "exit": 3569.31
+    },
+    {
+      "side": "long",
+      "entry": 3574.21,
+      "exit": 3575.38
+    },
+    {
+      "side": "long",
+      "entry": 3574.42,
+      "exit": 3575.33
+    },
+    {
+      "side": "short",
+      "entry": 3576.74,
+      "exit": 3580.37
+    },
+    {
+      "side": "long",
+      "entry": 3580.63,
+      "exit": 3576.67
+    },
+    {
+      "side": "long",
+      "entry": 3571.51,
+      "exit": 3571.48
+    },
+    {
+      "side": "short",
+      "entry": 3571.12,
+      "exit": 3574.73
+    },
+    {
+      "side": "long",
+      "entry": 3576.25,
+      "exit": 3572.38
+    },
+    {
+      "side": "long",
+      "entry": 3570.54,
+      "exit": 3566.91
+    },
+    {
+      "side": "long",
+      "entry": 3567.31,
+      "exit": 3565.83
+    },
+    {
+      "side": "long",
+      "entry": 3565.85,
+      "exit": 3565.92
+    },
+    {
+      "side": "short",
+      "entry": 3566.0,
+      "exit": 3565.35
+    },
+    {
+      "side": "long",
+      "entry": 3567.26,
+      "exit": 3572.21
+    },
+    {
+      "side": "long",
+      "entry": 3570.36,
+      "exit": 3570.78
+    },
+    {
+      "side": "long",
+      "entry": 3569.97,
+      "exit": 3570.78
+    },
+    {
+      "side": "short",
+      "entry": 3565.77,
+      "exit": 3570.24
+    },
+    {
+      "side": "long",
+      "entry": 3570.16,
+      "exit": 3566.06
+    },
+    {
+      "side": "long",
+      "entry": 3560.28,
+      "exit": 3558.6
+    },
+    {
+      "side": "long",
+      "entry": 3560.58,
+      "exit": 3560.16
+    },
+    {
+      "side": "long",
+      "entry": 3564.73,
+      "exit": 3561.15
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "short",
+      "entry": 3600.0,
+      "exit": 3600.2
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    },
+    {
+      "side": "long",
+      "entry": 3600.0,
+      "exit": 3599.911
+    }
+  ]
+}

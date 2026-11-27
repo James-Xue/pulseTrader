@@ -209,6 +209,9 @@ OrderFlowExecutor::buildRequestFromSignal(const strategy::TradingSignal &sig) co
     req.side        = (strategy::SignalType::Buy == sig.type) ? Side::Buy : Side::Sell;
     req.type        = OrderType::Market;
     req.price       = sig.price;
+    // Market orders have no exchange price; the signal price is the risk
+    // gate's reference for the notional cap (audit 2026-11-27 §4.6).
+    req.reference_price = sig.price;
     req.market_type = sig.market_type;
     // Futures qty is in contracts: the risk gate must compute notional as
     // qty * price * quanto_multiplier, or a 1-contract order (≈6 USDT for
@@ -838,6 +841,28 @@ void OrderFlowExecutor::onOrderComplete(
         {
             log_app->warn("Failed to open position: {}",
                           error(open_result).message);
+
+            // The venue filled but the engine book refused the position (the
+            // fill price exceeded the reservation's reference price, or the
+            // reservation was consumed elsewhere). The leg is real money and
+            // must not become invisible to the risk engine — audit 2026-11-27
+            // §4.6 found four such legs with no engine position. Adopt it by
+            // exchange id; sync is idempotent, so a later import cannot twin
+            // it. No locks beyond PositionManager's are taken here.
+            if (!report.exchange_position_id.empty())
+            {
+                m_positionMgr.syncPositionFromExchange(
+                    report.symbol, report.side, report.filled_qty,
+                    report.avg_fill_price, report.avg_fill_price, mt,
+                    leverage_market ? reservation.request.leverage : 1.0,
+                    MarginMode::Cross, reservation.request.quanto_multiplier,
+                    0.005, 0.0, Timestamp::clock::now(),
+                    reservation.request.sl_price.value_or(0.0),
+                    reservation.request.tp_price.value_or(0.0),
+                    report.exchange_position_id);
+                log_app->warn("Adopted venue position {} into the engine book",
+                              report.exchange_position_id);
+            }
         }
         else
         {

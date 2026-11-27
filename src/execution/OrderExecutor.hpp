@@ -50,6 +50,16 @@ struct OrderRequest
     std::optional<Price> sl_price;
     std::optional<Price> tp_price;
 
+    /// Risk-only reference price for market orders (audit 2026-11-27 §4.6).
+    /// A market order has no exchange price, so `price` stays 0 and the
+    /// notional gate would otherwise approve it at zero notional. The control
+    /// plane fills this with the freshest mark before risk evaluation.
+    ///
+    /// It is never sent to the exchange and is deliberately excluded from the
+    /// open_order idempotency fingerprint (which keeps hashing `price`), so a
+    /// changing mark cannot turn a retry into a Conflict.
+    Price reference_price{ 0.0 };
+
     /// Default constructor.
     OrderRequest()
         : symbol{}

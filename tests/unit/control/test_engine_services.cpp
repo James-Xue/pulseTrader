@@ -18,8 +18,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -278,6 +280,7 @@ TEST_F(EngineServicesTest, OpenOrderRequiresValidParams)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
     });
     ASSERT_TRUE(ok(result)) << error(result).message;
     EXPECT_EQ("fake", value(result).order_id);
@@ -482,6 +485,7 @@ TEST_F(EngineServicesTest, EngineAuthorityAllowedWhileExternalOrdersDisabled)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // limit reference: the notional gate needs it
     });
 
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -736,6 +740,7 @@ TEST_F(EngineServicesTest, OpenOrderReplaysSameClientOrderId)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "gt-retry-1" },
     };
 
@@ -760,6 +765,7 @@ TEST_F(EngineServicesTest, OpenOrderRejectsClientOrderIdReuseWithDifferentParams
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "gt-reuse-1" },
     };
     const auto first = m_services->openOrder(params);
@@ -850,6 +856,7 @@ TEST_F(EngineServicesTest, SubmittedEventNeverReportsATerminalStatus)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "evt-filled-1" },
     });
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -872,6 +879,7 @@ TEST_F(EngineServicesTest, OpenOrderPreFlightRiskRejectionKeepsKeyRetryable)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "gt-halt-1" },
     };
 
@@ -902,6 +910,7 @@ TEST_F(EngineServicesTest, OpenOrderTransportFailureReplaysAsOutcomeUnknown)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "gt-unknown-1" },
     };
 
@@ -931,6 +940,7 @@ TEST_F(EngineServicesTest, OpenOrderDefinitiveRejectionIsReplayedVerbatim)
         { "side", "buy" },
         { "quantity", 0.001 },
         { "market_type", "spot" },
+        { "price", 65000.0 }, // the notional gate needs a reference
         { "client_order_id", "gt-reject-1" },
     };
 
@@ -1878,6 +1888,10 @@ class PaperEngineServicesTest : public ::testing::Test
     {
         m_paperCfg.initial_balance_usdt = 100.0;
         m_paperCfg.contract_volume["XAUUSD"] = 100.0;
+        // The E1 replay drives exits through target prices on both sides of the
+        // book; stop-out would fire on the far-side mark first and change which
+        // price the exit fills at.
+        m_paperCfg.stop_out_enabled = false;
         m_stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::system_clock::now().time_since_epoch())
                       .count();
@@ -1909,6 +1923,13 @@ class PaperEngineServicesTest : public ::testing::Test
         m_riskCfg.maxPositionNotionalCfd = 20000.0;
         m_riskCfg.maxOpenPositions = 5;
 
+        buildStack();
+    }
+
+    /// (Re)build the risk + order-flow + services stack from m_riskCfg. Tests
+    /// that change a cap call this again; the venue and recorder persist.
+    void buildStack()
+    {
         m_positionMgr = std::make_unique<PositionManager>(m_riskCfg);
         m_drawdownGuard = std::make_unique<DrawdownGuard>(m_riskCfg);
         m_rateLimiter =
@@ -1989,6 +2010,14 @@ class PaperEngineServicesTest : public ::testing::Test
     /// entry row is recorded before this returns.
     void placeThroughFlow(Side side, const std::string &member, double price)
     {
+        const auto placed = placeThroughFlowResult(side, member, price);
+        ASSERT_TRUE(ok(placed)) << error(placed).message;
+    }
+
+    /// Same, but hands the risk gate's verdict back to the caller.
+    Result<execution::OrderResponse> placeThroughFlowResult(
+        Side side, const std::string &member, double price)
+    {
         m_price = price;
         execution::OrderRequest req;
         req.symbol = "XAUUSD";
@@ -1999,9 +2028,10 @@ class PaperEngineServicesTest : public ::testing::Test
         req.leverage = 1000.0;
         req.quanto_multiplier = 100.0;
         req.client_order_id = member;
-
-        const auto placed = m_flow->placeOrder(req);
-        ASSERT_TRUE(ok(placed)) << error(placed).message;
+        // Direct flow call: no EngineServices::openOrder to resolve the mark,
+        // so the test supplies the reference price the risk gate needs.
+        req.reference_price = price;
+        return m_flow->placeOrder(req);
     }
 
     PaperConfig m_paperCfg;
@@ -2116,4 +2146,185 @@ TEST_F(PaperEngineServicesTest, CfdEntryRowsCarryNoPnl)
         EXPECT_NEAR(0.0, row.pnl, 1e-12) << row.order_id;
     }
 }
+
+TEST_F(PaperEngineServicesTest, E1ReplayReproducesVenueTotals)
+{
+    // Full E1 replay (audit §6 P1/P2, §7 #8): 74 entries, 74 exits, one
+    // PnL-bearing row per venue position, and the audit's totals:
+    //   Sum pnl -74.55, Sum fees 4.44, cash 21.01.
+    //
+    // The fixture stores 56 recorded exits (entry prices derived from the
+    // venue's recorded PnL) plus 18 reconstructed legs whose aggregate is the
+    // audit's unrecorded -2.49 / 0.48. See tests/fixtures/reconciliation/.
+    std::ifstream stream(std::filesystem::path(PULSE_RECONCILIATION_FIXTURE_DIR)
+                         / "e1-legs.json");
+    ASSERT_TRUE(stream.good()) << "missing e1-legs.json fixture";
+    const nlohmann::json document = nlohmann::json::parse(stream);
+    const nlohmann::json &legs = document.at("legs");
+    ASSERT_EQ(74, legs.size());
+
+    // 1. Entry rows. A long entry is the BUY leg and pays 0.06; a short entry
+    //    is free. The replay records them through the same audit path the
+    //    engine uses for fills it did not place.
+    int index = 0;
+    for (const auto &leg : legs)
+    {
+        const bool is_long = (leg.at("side") == "long");
+        const double entry_price = leg.at("entry").get<double>();
+        ++index;
+
+        execution::ExecutionReport entry;
+        entry.order_id = "paper-cfd-" + std::to_string(index);
+        entry.client_order_id = "xau_team:e1_replay:000001";
+        entry.symbol = "XAUUSD";
+        entry.side = is_long ? Side::Buy : Side::Sell;
+        entry.type = OrderType::Market;
+        entry.requested_qty = 0.01;
+        entry.filled_qty = 0.01;
+        entry.avg_fill_price = entry_price;
+        entry.submit_mid_price = entry_price;
+        entry.fees = is_long ? 0.06 : 0.0;
+        entry.submit_time = Timestamp::clock::now();
+        entry.fill_time = entry.submit_time;
+        entry.final_status = OrderStatus::Filled;
+        m_flow->recordExternalClose(entry, 0.0, MarketType::Cfd, 1000.0, 100.0);
+
+        if (is_long)
+        {
+            m_account->chargeFee(execution::PaperLeg::Cfd, 0.06);
+        }
+    }
+
+    // 2. Exits. One position at a time: restore it with its exit price as the
+    //    take-profit, tick at that exact price, and require the venue to drain
+    //    the book. Per-leg isolation keeps a long's TP from firing on the mark
+    //    chosen for a short (E1's exit prices overlap across both sides).
+    index = 0;
+    for (const auto &leg : legs)
+    {
+        const bool is_long = (leg.at("side") == "long");
+        const double entry_price = leg.at("entry").get<double>();
+        const double exit_price = leg.at("exit").get<double>();
+        ++index;
+
+        const nlohmann::json position{
+            { "exchange_position_id", "pp-" + std::to_string(index) },
+            { "symbol", "XAUUSD" },
+            { "side", is_long ? "buy" : "sell" },
+            { "lots", 0.01 },
+            { "entry_price", entry_price },
+            { "leverage", 1000.0 },
+            { "quanto", 100.0 },
+            { "locked_margin", 0.01 * 100.0 * entry_price / 1000.0 },
+            { "sl_price", 0.0 },
+            { "tp_price", exit_price },
+            { "open_time_ms", m_stamp },
+            { "client_order_id", "xau_team:e1_replay:000001" },
+        };
+        ASSERT_TRUE(m_venue->restore(nlohmann::json{
+            { "seq", index },
+            { "positions", nlohmann::json::array({ position }) } }));
+        ASSERT_EQ(1u, m_venue->openPositionCount());
+
+        m_price = exit_price;
+        m_services->tickPaperVenue(m_stamp + index);
+        ASSERT_EQ(0u, m_venue->openPositionCount());
+    }
+
+    // 3. One row per entry and one per exit, with the venue's PnL and fees.
+    const auto trades = m_recorder->getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades)) << error(trades).message;
+    const auto &rows = value(trades);
+    ASSERT_EQ(148u, rows.size());
+    double sum_pnl = 0.0;
+    double sum_fees = 0.0;
+    int pnl_rows = 0;
+    for (const auto &row : rows)
+    {
+        sum_pnl += row.pnl;
+        sum_fees += row.fees;
+        if (0.0 != row.pnl)
+        {
+            ++pnl_rows;
+        }
+    }
+    EXPECT_EQ(74, pnl_rows);
+    EXPECT_NEAR(-74.55, sum_pnl, 1e-9);
+    EXPECT_NEAR(4.44, sum_fees, 1e-9);
+
+    // 4. Account identity (audit §2): cash = seed + realized - fees.
+    const auto snapshot = m_account->snapshot();
+    EXPECT_NEAR(-74.55, snapshot.cfd.realized_pnl_usdt, 1e-9);
+    EXPECT_NEAR(4.44, snapshot.cfd.fees_paid_usdt, 1e-9);
+    EXPECT_NEAR(21.01, snapshot.cfd.cash_usdt, 1e-9);
+}
+
+TEST_F(PaperEngineServicesTest, FifthConcurrentCfdLegRejectedPreTrade)
+{
+    // Four 0.01-lot legs at 4,000 = 16,000 notional exactly fill the CFD cap.
+    // The fifth must be refused by the risk gate BEFORE the venue sees it, so
+    // no orphan venue position is left behind.
+    m_riskCfg.maxPositionNotional = 16000.0;
+    m_riskCfg.maxSymbolNotional = 20000.0;
+    m_riskCfg.maxPositionNotionalCfd = 16000.0;
+    m_riskCfg.maxOpenPositions = 10;
+    buildStack();
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        placeThroughFlow(Side::Buy, "member" + std::to_string(i), 4000.0);
+    }
+    ASSERT_EQ(4u, m_venue->openPositionCount());
+
+    const auto fifth = placeThroughFlowResult(Side::Buy, "member4", 4000.0);
+    ASSERT_FALSE(ok(fifth));
+    EXPECT_EQ(4u, m_venue->openPositionCount());
+
+    const auto trades = m_recorder->getTrades("XAUUSD");
+    ASSERT_TRUE(ok(trades)) << error(trades).message;
+    EXPECT_EQ(4u, value(trades).size());
+}
+
+TEST_F(PaperEngineServicesTest, PostFillOpenFailureAdoptsVenuePosition)
+{
+    // The reservation approves at the reference price (4,000) but the venue
+    // fills at 4,500, which exceeds the 4,200 cap. The engine book refuses to
+    // open the position; it must adopt the venue leg by exchange id instead of
+    // leaving a real position invisible to the risk engine (audit §4.6).
+    m_riskCfg.maxPositionNotional = 4200.0;
+    m_riskCfg.maxSymbolNotional = 20000.0;
+    m_riskCfg.maxPositionNotionalCfd = 4200.0;
+    m_riskCfg.maxOpenPositions = 5;
+    buildStack();
+    m_flow->setActiveMarket(MarketType::Cfd);
+
+    m_price = 4500.0; // the fill mark
+    execution::OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 1000.0;
+    req.quanto_multiplier = 100.0;
+    req.client_order_id = "xau_team:adopt:000001";
+    req.reference_price = 4000.0; // what the risk gate reserved against
+
+    const auto placed = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(placed)) << error(placed).message;
+
+    ASSERT_EQ(1u, m_venue->openPositionCount());
+    const auto positions = m_positionMgr->getPositionsBySymbol("XAUUSD");
+    ASSERT_EQ(1u, positions.size());
+    // The adopted position carries the venue's id (order ids and position ids
+    // share the venue sequence, so the first position is pp-2, not pp-1).
+    const auto venue_rows = m_venue->openPositions(MarketType::Cfd);
+    ASSERT_EQ(1u, venue_rows.size());
+    EXPECT_EQ(venue_rows[0].exchange_position_id,
+              positions[0].exchange_position_id);
+    EXPECT_FALSE(positions[0].exchange_position_id.empty());
+    EXPECT_DOUBLE_EQ(4500.0, positions[0].entry_price);
+}
+
 #endif // PULSE_ENABLE_SQLITE

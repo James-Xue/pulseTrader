@@ -20,6 +20,7 @@ deliberate change requiring a new audit entry.
 | `paper-state/paper-state.json.bak-20261127-pre-topup` | 648 B | `497f5a3dfd54a17820864dbbb7906d3b7d30f1424a7bffad49dbea34df212ead` |
 | `paper-state/paper-state.json.bak-20261127-pre-final-reset` | 650 B | `77a07eb2b2ac6b31e2d88d8597be7d140032c7330856ce76d0bf484d0e8a3571` |
 | `paper-state/paper-state.json.bak-20261127-post-trade` | 650 B | `77a07eb2b2ac6b31e2d88d8597be7d140032c7330856ce76d0bf484d0e8a3571` |
+| `e1-legs.json` | 6.1 KB | `61ded2251a659e2d99ff64d774db30357d0f107557652dafccb5cc887c98a8be` |
 
 `paper-state.json.bak-20261127-post-trade` is byte-identical to the pre-final-reset
 copy; both are kept because they mark distinct audit events (the 09:46 reset and the
@@ -40,6 +41,22 @@ read.
 | `...bak-20261127-pre-topup` | E1 snapshot (pre-second-reset) |
 | `...bak-20261127-pre-final-reset` | E2 snapshot |
 | `...bak-20261127-post-trade` | E2 evidence after the 09:45:53 trade |
+| `e1-legs.json` | 74 replay legs for `E1ReplayReproducesVenueTotals` |
+
+### About `e1-legs.json`
+
+The E1 venue ledger is only partially recorded: 56 of the 74 exits have rows,
+and the other 18 are known only through the audit's aggregates (−2.49 PnL,
+0.48 of short-close fees). The fixture therefore stores:
+
+- 56 recorded exits, with the entry price derived from the venue's own recorded
+  PnL (`entry = exit − pnl/(qty·100)` for a long close, `+` for a short);
+- 18 reconstructed legs — 8 shorts of −0.20 and 10 longs of −0.089 — whose
+  aggregate is exactly the audit's unrecorded −2.49 / 0.48.
+
+Their sum is −74.55 PnL and 4.44 fees, which the P2 replay test asserts along
+with the account identity (cash 21.01). The reconstruction is explicit so no
+reader mistakes the fixture for a complete venue log.
 
 ### Why the trade database is trimmed
 

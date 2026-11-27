@@ -88,6 +88,11 @@ target_link_libraries(test_control_engine_services
 if(PULSE_ENABLE_SQLITE)
     target_compile_definitions(test_control_engine_services PRIVATE PULSE_ENABLE_SQLITE=1)
     target_link_libraries(test_control_engine_services PRIVATE pulse::trade_recorder)
+    # P2's E1 replay reads the frozen reconciliation legs.
+    target_compile_definitions(test_control_engine_services
+        PRIVATE
+            PULSE_RECONCILIATION_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures/reconciliation"
+    )
 endif()
 include(GoogleTest)
 gtest_discover_tests(test_control_engine_services)

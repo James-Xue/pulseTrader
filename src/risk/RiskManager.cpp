@@ -92,7 +92,9 @@ RiskEvalResult RiskManager::evaluateOrder(const execution::OrderRequest &order)
         order.symbol, order.quantity, order.price, order.quanto_multiplier,
         order.market_type, order.reduce_only, order.side,
         // A caller-authoritative size is never reduced: reject instead.
-        !order.size_authoritative);
+        !order.size_authoritative,
+        // Market orders have no price; the caller-supplied mark binds the cap.
+        order.reference_price);
 
     result.decision = reservation.decision;
     result.approved_qty = reservation.approved_qty;

@@ -1250,3 +1250,79 @@ TEST(PositionManager, SyncReimportOfSameExchangePositionUpdatesInPlace)
     ASSERT_EQ(1u, all.size());
     EXPECT_NEAR(3840.00, all[0].current_price, 1e-9);
 }
+
+// ---------------------------------------------------------------------------
+// P2 of the 2026-11-27 paper-team reconciliation audit: a market order has no
+// exchange price, so the notional gate must read an explicit reference price.
+// ---------------------------------------------------------------------------
+
+TEST(PositionManager, MarketOrderWithReferencePriceBindsNotionalCap)
+{
+    // 0.01 XAUUSD at 4,392 = 4,392 notional. With the old price=0 behaviour the
+    // reservation approved the full size at zero notional; the reference price
+    // must make the 3,000 CFD cap bind and clamp the quantity.
+    RiskConfig cfg = make_config(1000.0, 5, 6000.0);
+    cfg.maxPositionNotionalCfd = 3000.0;
+    PositionManager pm(cfg);
+
+    const auto res = pm.reserveNotional(
+        "XAUUSD", 0.01, /*price=*/0.0, 100.0, MarketType::Cfd,
+        /*reduce_only=*/false, Side::Buy, /*allow_shrink=*/true,
+        /*reference_price=*/4392.0);
+
+    ASSERT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Modified, res.decision);
+    EXPECT_NEAR(3000.0 / (4392.0 * 100.0), res.approved_qty, 1e-9);
+}
+
+TEST(PositionManager, MarketOrderWithoutReferencePriceFailsClosed)
+{
+    // No price and no reference: the cap cannot be evaluated, so a new
+    // exposure is refused rather than reserving zero budget.
+    PositionManager pm(make_config(1000.0, 5, 6000.0));
+
+    const auto res = pm.reserveNotional("XAUUSD", 0.01, 0.0, 100.0,
+                                        MarketType::Cfd);
+    EXPECT_FALSE(res.approved);
+    EXPECT_EQ(RiskDecision::Rejected, res.decision);
+    EXPECT_EQ(ErrorCode::OrderRejected, res.reason_code);
+}
+
+TEST(PositionManager, ReduceOnlyCloseNotShrunkByReferencePrice)
+{
+    // The reference mark (60,000) is below the 65,000 entry. The close is
+    // fully covered by the long, so it must be approved whole — never shrunk
+    // and never rejected because the mark moved.
+    PositionManager pm(make_config(100000.0, 5, 100000.0));
+    const auto opened = pm.openPosition("BTC_USDT", Side::Buy, 1.0, 65000.0,
+                                        "test", MarketType::Futures, 10.0,
+                                        MarginMode::Cross, 1.0, 0.005);
+    ASSERT_TRUE(ok(opened));
+
+    const auto res = pm.reserveNotional(
+        "BTC_USDT", 1.0, /*price=*/0.0, 1.0, MarketType::Futures,
+        /*reduce_only=*/true, Side::Sell, /*allow_shrink=*/true,
+        /*reference_price=*/60000.0);
+
+    EXPECT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Approved, res.decision);
+    EXPECT_DOUBLE_EQ(1.0, res.approved_qty);
+}
+
+TEST(PositionManager, ReduceOnlyCloseWithoutReferenceStillApproves)
+{
+    // A missing reference must never trap a close: reduce-only orders cannot
+    // add exposure, so they are exempt from the fail-closed rule.
+    PositionManager pm(make_config(100000.0, 5, 100000.0));
+    const auto opened = pm.openPosition("BTC_USDT", Side::Buy, 0.5, 65000.0,
+                                        "test", MarketType::Futures, 10.0,
+                                        MarginMode::Cross, 1.0, 0.005);
+    ASSERT_TRUE(ok(opened));
+
+    const auto res = pm.reserveNotional("BTC_USDT", 0.5, 0.0, 1.0,
+                                        MarketType::Futures,
+                                        /*reduce_only=*/true, Side::Sell);
+    EXPECT_TRUE(res.approved);
+    EXPECT_EQ(RiskDecision::Approved, res.decision);
+    EXPECT_DOUBLE_EQ(0.5, res.approved_qty);
+}

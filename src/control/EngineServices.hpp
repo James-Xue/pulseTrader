@@ -445,6 +445,12 @@ class EngineServices
     /// Feed pointer for a market type (nullptr if that market is not wired).
     [[nodiscard]] market::MarketFeed *feedFor(MarketType mt) const;
 
+    /// Freshest reference price for a market order: the paper venue mark when
+    /// paper, else the feed's last ticker. 0 = unknown, which makes the risk
+    /// gate fail the order closed (audit 2026-11-27 §4.6).
+    [[nodiscard]] double referencePriceFor(const Symbol &symbol,
+                                           MarketType market_type) const;
+
     /// Run the `reconcileAll()` safety net on all three trackers, at most
     /// once per kReconcileIntervalMs across every control connection.
     ///

@@ -279,12 +279,20 @@ class PositionManager
     /// own position size and whose stop distance and R-multiple would be
     /// wrong if the engine silently traded a smaller quantity. reduce_only
     /// orders never shrink regardless of this flag.
+    ///
+    /// reference_price (2026-11-27 audit §4.6): a market order has no exchange
+    /// price, so `price` is 0 and `qty * price * quanto` is 0 — every market
+    /// order used to bypass the notional cap. The caller supplies the freshest
+    /// mark as `reference_price`; a non-reduce-only order with neither price
+    /// fails closed instead of reserving zero budget. reduce_only orders are
+    /// exempt: they cannot add exposure, and a missing reference must never
+    /// trap a close.
     [[nodiscard]] NotionalReservation reserveNotional(
         const Symbol &symbol, Quantity qty, Price price,
         double quanto_multiplier = 1.0,
         MarketType market_type = MarketType::Spot,
         bool reduce_only = false, Side side = Side::Buy,
-        bool allow_shrink = true);
+        bool allow_shrink = true, Price reference_price = 0.0);
 
     /// Consume a reservation when an order is filled.
     /// The reserved budget is released; openPosition() trusts the reservation.

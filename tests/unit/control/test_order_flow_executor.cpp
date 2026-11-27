@@ -280,6 +280,7 @@ TEST_F(OrderFlowTest, PlaceOrderApprovedAndTracked)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result));
@@ -369,6 +370,7 @@ TEST_F(OrderFlowTest, PlaceFailureCancelsReservation)
     req.type = OrderType::Market;
     req.quantity = 1.0;
     req.market_type = MarketType::Futures;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_FALSE(ok(result));
@@ -396,6 +398,7 @@ TEST_F(OrderFlowTest, NoExecutorForMarketTypeFails)
     req.type = OrderType::Market;
     req.quantity = 1.0;
     req.market_type = MarketType::Spot;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = no_placer_flow->placeOrder(req);
     ASSERT_FALSE(ok(result));
@@ -412,6 +415,7 @@ TEST_F(OrderFlowTest, FillOpensPositionAndConsumesReservation)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result));
@@ -462,6 +466,7 @@ TEST_F(OrderFlowTest, OrderUpdateCallbackFiresOncePerCompletedReport)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -512,6 +517,7 @@ TEST_F(OrderFlowTest, ManualOrderAnnouncesSubmitBeforeTracking)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
     m_flow->setActiveMarket(MarketType::Futures);
 
     const auto result = m_flow->placeManualOrder(req);
@@ -568,6 +574,7 @@ TEST_F(OrderFlowTest, SignalPathDoesNotAnnounceSubmit)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
     m_flow->setActiveMarket(MarketType::Futures);
 
     const auto result = m_flow->placeOrder(req);
@@ -591,6 +598,7 @@ TEST_F(OrderFlowTest, ThrowingSubmitCallbackDoesNotFailAPlacedOrder)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
     m_flow->setActiveMarket(MarketType::Futures);
 
     const auto result = m_flow->placeManualOrder(req);
@@ -637,6 +645,7 @@ TEST_F(OrderFlowTest, OrderUpdateCallbackReportsTheReportingTrackersMarket)
     req.market_type = MarketType::Cfd;
     req.leverage = 500.0;
     req.quanto_multiplier = 100.0;
+    req.reference_price = 4400.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -665,6 +674,7 @@ TEST_F(OrderFlowTest, ThrowingOrderUpdateCallbackDoesNotBreakBookkeeping)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -693,6 +703,7 @@ TEST_F(OrderFlowTest, FillWithoutClientIdLabelsPositionManual)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -716,6 +727,7 @@ TEST_F(OrderFlowTest, FillWithClientIdLabelsPositionStrategy)
     req.leverage = 10.0;
     req.contract_size = 1;
     req.client_order_id = "t-sig-1";
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -760,6 +772,7 @@ TEST_F(OrderFlowTest, CallerAuthoritativeFillLabelsPositionExternal)
     req.quanto_multiplier = 100.0;
     req.size_authoritative = true;
     req.client_order_id = "gt-xau-1";
+    req.reference_price = 4400.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -788,6 +801,7 @@ TEST_F(OrderFlowTest, SellFillClosesPositionWithPnl)
     req.quantity = 1.0;
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result));
@@ -860,6 +874,7 @@ TEST_F(OrderFlowTest, SignalOnlyModeManualOrdersStillWork)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = flow.placeOrder(req);
     ASSERT_TRUE(ok(result));
@@ -906,6 +921,7 @@ TEST_F(OrderFlowTest, CancelOrderProbesTracker)
     req.type = OrderType::Market;
     req.quantity = 1.0;
     req.market_type = MarketType::Futures;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result));
@@ -931,6 +947,7 @@ TEST_F(OrderFlowTest, FuturesOrderSetsLeverageBeforePlace)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -951,6 +968,7 @@ TEST_F(OrderFlowTest, FuturesOrderSkipsLeverageWhenUnset)
     req.quantity = 1.0;
     req.market_type = MarketType::Futures;
     // req.leverage left at default 0.0
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -972,6 +990,7 @@ TEST_F(OrderFlowTest, SpotOrderSkipsLeverage)
     req.quantity = 0.001;
     req.market_type = MarketType::Spot;
     req.leverage = 10.0;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -996,6 +1015,7 @@ TEST_F(OrderFlowTest, LeverageFailureAbortsOrder)
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
     req.contract_size = 1;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_FALSE(ok(result));
@@ -1145,6 +1165,7 @@ TEST_F(OrderFlowTest, SellFillOpensShortWhenNoLong)
     req.quantity = 1.0;
     req.market_type = MarketType::Futures;
     req.leverage = 10.0;
+    req.reference_price = 65000.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -1195,6 +1216,7 @@ TEST_F(OrderFlowTest, SwitchActiveMarketAllowsCfdAndRejectsFutures)
     cfd_req.market_type = MarketType::Cfd;
     cfd_req.leverage = 500.0;
     cfd_req.quanto_multiplier = 100.0;
+    cfd_req.reference_price = 4400.0; // market orders need a notional reference
 
     auto result = m_flow->placeOrder(cfd_req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -1252,6 +1274,7 @@ TEST_F(OrderFlowTest, ManualCfdOrderAllowedWhileFuturesActive)
     req.market_type = MarketType::Cfd;
     req.leverage = 500.0;
     req.quanto_multiplier = 100.0;
+    req.reference_price = 4400.0; // market orders need a notional reference
 
     auto result = m_flow->placeManualOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -1688,6 +1711,7 @@ TEST_F(OrderFlowTest, CfdFillOpensPositionWithCfdMetadata)
     req.market_type = MarketType::Cfd;
     req.leverage = 500.0;
     req.quanto_multiplier = 100.0;
+    req.reference_price = 4400.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -1739,6 +1763,7 @@ TEST_F(OrderFlowTest, CfdMarketOrderTriggersImmediatePollNoCrash)
     req.market_type = MarketType::Cfd;
     req.leverage = 500.0;
     req.quanto_multiplier = 100.0;
+    req.reference_price = 4400.0; // market orders need a notional reference
 
     const auto result = m_flow->placeOrder(req);
     ASSERT_TRUE(ok(result)) << error(result).message;
@@ -1814,6 +1839,7 @@ TEST_F(OrderFlowTest, CrossMemberOppositeCfdFillKeepsBothPositions)
     member_a.market_type = MarketType::Cfd;
     member_a.leverage = 500.0;
     member_a.quanto_multiplier = 100.0;
+    member_a.reference_price = 4400.0; // market orders need a notional reference
     member_a.client_order_id = "xau_team:xau_a:000001";
 
     const auto a_placed = m_flow->placeOrder(member_a);
@@ -1862,6 +1888,7 @@ TEST_F(OrderFlowTest, EmptyClientIdCfdOpensDoNotNet)
     open_long.market_type = MarketType::Cfd;
     open_long.leverage = 500.0;
     open_long.quanto_multiplier = 100.0;
+    open_long.reference_price = 4400.0; // market orders need a notional reference
 
     const auto long_placed = m_flow->placeOrder(open_long);
     ASSERT_TRUE(ok(long_placed)) << error(long_placed).message;

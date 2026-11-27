@@ -688,7 +688,8 @@ int PositionManager::openPositionCount() const
 
 NotionalReservation PositionManager::reserveNotional(
     const Symbol &symbol, Quantity qty, Price price, double quanto_multiplier,
-    MarketType market_type, bool reduce_only, Side side, bool allow_shrink)
+    MarketType market_type, bool reduce_only, Side side, bool allow_shrink,
+    Price reference_price)
 {
     // Atomically check all limits and reserve notional budget under a single
     // exclusive lock. This prevents the TOCTOU race where two concurrent
@@ -707,6 +708,33 @@ NotionalReservation PositionManager::reserveNotional(
     // consume the CFD budget. Position count and per-symbol caps stay global.
 
     std::unique_lock<std::shared_mutex> write_lock(m_mutex);
+
+    // Market orders carry no exchange price, so qty * price * quanto is 0 and
+    // every notional check would pass trivially (audit 2026-11-27 finding #11:
+    // four venue legs opened with no engine position). A non-reduce-only order
+    // with neither a price nor a reference price fails closed here.
+    //
+    // reduce_only is exempt on purpose: it cannot add exposure, and a missing
+    // reference must never trap a close. Its 0 notional then reads as "fully
+    // covered by existing exposure" below, which is the safe direction.
+    if (price <= 0.0)
+    {
+        price = reference_price;
+    }
+    if (price <= 0.0 && !reduce_only)
+    {
+        NotionalReservation rejected;
+        rejected.decision = RiskDecision::Rejected;
+        rejected.reason_code = ErrorCode::OrderRejected;
+        rejected.reason_message =
+            "market order has no reference price: the notional cap cannot be "
+            "evaluated";
+        PULSE_LOG_WARN("risk",
+                       "Order rejected: no reference price for {} {} (market "
+                       "order without a mark)",
+                       symbol, qty);
+        return rejected;
+    }
 
     NotionalReservation res;
     res.reservation_id = m_nextReservationId++;

@@ -560,6 +560,33 @@ market::MarketFeed *EngineServices::feedFor(MarketType mt) const
     }
 }
 
+double EngineServices::referencePriceFor(const Symbol &symbol,
+                                         MarketType market_type) const
+{
+    // 1. Paper mode: the venue owns the marks; the live feeds may be absent.
+    if (nullptr != m_paperVenue)
+    {
+        const auto mark = m_paperVenue->markFor(symbol, market_type);
+        if (mark.has_value() && 0.0 < mark->price)
+        {
+            return mark->price;
+        }
+    }
+
+    // 2. Live: the freshest ticker the market-data layer has. A stale quote
+    //    is still better than 0, which would fail the order closed; the risk
+    //    gate is a notional bound, not a price-precision check.
+    if (auto *feed = feedFor(market_type))
+    {
+        const auto tick = feed->tickerCache().get(symbol);
+        if (tick.has_value() && 0.0 < tick->last)
+        {
+            return tick->last;
+        }
+    }
+    return 0.0;
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
@@ -1571,6 +1598,15 @@ EngineServices::openOrder(const nlohmann::json &params)
     // multiplier to compute true notional value.
     req.quanto_multiplier = m_orderFlow.quantoMultiplierFor(req.symbol);
 
+    // Market orders carry no exchange price, so the notional gate would see
+    // qty * 0 * quanto = 0 and approve any size (audit 2026-11-27 finding
+    // #11). Resolve the freshest reference price here; if none is available
+    // it stays 0 and reserveNotional rejects the order.
+    if (0.0 >= req.price && OrderType::Market == req.type)
+    {
+        req.reference_price = referencePriceFor(req.symbol, req.market_type);
+    }
+
     // M22 minimum-free-margin-after-stop gate: with a thin account a single
     // stop-loss can leave the account untradeable (2026-08-18: a -5.53
     // spike-through-SL stop on XAUUSD left the CFD account at 5.09 < the
@@ -1581,19 +1617,12 @@ EngineServices::openOrder(const nlohmann::json &params)
         && m_cfg.risk.minAvailableAfterStopUsd.value() > 0.0
         && (nullptr != m_cfdRest || nullptr != m_paperVenue))
     {
-        // Reference entry: the limit price when given, else the latest
-        // CFD ticker (best effort for market orders).
+        // Reference entry: the limit price when given, else the freshest
+        // mark (paper venue or live ticker) via the shared resolver.
         double ref_price = req.price;
         if (ref_price <= 0.0)
         {
-            if (auto *feed = feedFor(MarketType::Cfd))
-            {
-                const auto tick = feed->tickerCache().get(req.symbol);
-                if (tick.has_value())
-                {
-                    ref_price = tick->last;
-                }
-            }
+            ref_price = referencePriceFor(req.symbol, MarketType::Cfd);
         }
         double cfd_available = 0.0;
         if (nullptr != m_paperVenue)
@@ -1869,6 +1898,14 @@ EngineServices::closePosition(const nlohmann::json &params)
     {
         req.type  = OrderType::Limit;
         req.price = params["price"].get<double>();
+    }
+    if (0.0 >= req.price)
+    {
+        // Market close: bind the notional gate to the position's last mark.
+        // (Futures closes are reduce_only and exempt, but a spot close is
+        // not; leaving this 0 would fail the order closed.)
+        req.reference_price =
+            (0.0 < pos.current_price) ? pos.current_price : pos.entry_price;
     }
 
     return m_orderFlow.placeOrder(req);
