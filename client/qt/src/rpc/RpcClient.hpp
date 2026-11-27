@@ -106,7 +106,12 @@ private:
     };
 
     static constexpr int kMaxFrameBytes = 1 << 20; ///< 1 MiB per line.
-    static constexpr int kMaxBackoffMs = 30000;
+    /// Reconnect backoff. The control socket is local, so retries are cheap;
+    /// a long cap only delays attaching after the engine's ~10 s boot (the
+    /// launcher spawns it, then the first attempts are refused until the
+    /// socket binds). 250 ms doubling to 2 s keeps the attach within one
+    /// retry of the bind instead of one 8–30 s backoff step.
+    static constexpr int kMaxBackoffMs = 2000;
 
     void setState(State state);
     void failAll(const RpcError& error);
@@ -132,7 +137,7 @@ private:
 
     State m_state = State::Disconnected;
     bool m_wantConnected = false;
-    int m_backoffMs = 1000;
+    int m_backoffMs = 250;
     QTimer m_reconnectTimer;
 };
 

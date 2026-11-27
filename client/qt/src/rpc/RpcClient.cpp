@@ -271,7 +271,7 @@ void RpcClient::clearPending(qint64 id)
 
 void RpcClient::onConnected()
 {
-    m_backoffMs = 1000;
+    m_backoffMs = 250;
 
     // 1. No token configured: go straight to Ready. If the engine actually
     //    requires one, the first real request returns 9106 and the call fails
