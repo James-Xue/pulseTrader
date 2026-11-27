@@ -96,11 +96,27 @@ static bool resultFor(const QJsonObject& request, QJsonValue& result)
     }
     if (QStringLiteral("get_account") == method)
     {
+        // The paper block also carries the reconciliation ledger the
+        // Dashboard card renders (audit P4).
         result = QJsonObject{
             { QStringLiteral("available"), false },
             { QStringLiteral("spot"), QJsonObject{} },
             { QStringLiteral("cfd"), QJsonObject{} },
             { QStringLiteral("spot_balances"), QJsonArray{} },
+            { QStringLiteral("paper_ledger"),
+              QJsonObject{
+                  { QStringLiteral("identity_ok"), true },
+                  { QStringLiteral("legs"),
+                    QJsonObject{
+                        { QStringLiteral("cfd"),
+                          QJsonObject{
+                              { QStringLiteral("cash_usdt"), 93.59 },
+                              { QStringLiteral("deposits_usdt"), 100.0 },
+                              { QStringLiteral("identity_residual_usdt"),
+                                0.0 },
+                          } } } },
+                  { QStringLiteral("capital_events"), QJsonArray{} },
+              } },
         };
         return true;
     }
@@ -317,6 +333,11 @@ void TestEngineController::goldTradersAndSelection()
     QCOMPARE(3, controller.strategiesModel()->count());
     QTRY_VERIFY_WITH_TIMEOUT(controller.riskModel()->present(), 5000);
     QCOMPARE(0.01, controller.riskModel()->dailyDrawdown());
+
+    // The account poll fills the paper-ledger card (audit P4 identity).
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.paperLedger().isEmpty(), 5000);
+    QVERIFY(controller.paperLedger().value(QStringLiteral("identity_ok"))
+                .toBool());
 
     // The L7 status card gets its data from get_gold_trader.
     QTRY_VERIFY_WITH_TIMEOUT(controller.goldTrader().value(QStringLiteral("armed")).toBool(), 5000);

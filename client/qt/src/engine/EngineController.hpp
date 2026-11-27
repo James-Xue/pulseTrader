@@ -74,6 +74,9 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList teamRows READ teamRows NOTIFY teamChanged)
     /// Team totals plus the paper account line (equity/cash/fees/mode).
     Q_PROPERTY(QVariantMap teamSummary READ teamSummary NOTIFY teamChanged)
+    /// Paper mode only: per-leg capital identity from get_account and the
+    /// recent capital events. Empty for a live engine.
+    Q_PROPERTY(QVariantMap paperLedger READ paperLedger NOTIFY paperLedgerChanged)
     Q_PROPERTY(bool tradingHalted READ tradingHalted NOTIFY statusChanged)
     Q_PROPERTY(QString activeMarket READ activeMarket NOTIFY statusChanged)
     Q_PROPERTY(QStringList symbols READ symbols NOTIFY statusChanged)
@@ -183,6 +186,7 @@ public:
     [[nodiscard]] QStringList historyDates() const { return m_historyDates; }
     [[nodiscard]] QVariantList teamRows() const { return m_teamRows; }
     [[nodiscard]] QVariantMap teamSummary() const { return m_teamSummary; }
+    [[nodiscard]] QVariantMap paperLedger() const { return m_paperLedger; }
 
     /// One-shot fetch of the persisted history (opens the dialog).
     Q_INVOKABLE void fetchTradeHistory();
@@ -244,6 +248,7 @@ signals:
     void historyDatesChanged();
     /// Rebuilt whenever positions, history or the paper status change.
     void teamChanged();
+    void paperLedgerChanged();
     void connectionStateChanged();
     void statusChanged();
     void lastErrorChanged();
@@ -367,6 +372,7 @@ private:
     QVariantMap m_paperStatus;
     QVariantList m_teamRows;
     QVariantMap m_teamSummary;
+    QVariantMap m_paperLedger;
     /// Configured members from the GT runner's team JSON; empty when the
     /// file is absent (the page then shows only attributed traders).
     QVariantList m_teamRoster;

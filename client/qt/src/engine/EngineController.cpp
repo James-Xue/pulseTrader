@@ -872,6 +872,9 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
         break;
     case PollKind::Account:
         m_accountModel->setFromJson(result);
+        m_paperLedger =
+            result.value(QStringLiteral("paper_ledger")).toObject().toVariantMap();
+        emit paperLedgerChanged();
         setLastError(QString());
         break;
     case PollKind::Market:

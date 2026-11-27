@@ -200,6 +200,42 @@
         <source>Value</source>
         <translation>市值</translation>
     </message>
+    <message>
+        <source>Paper ledger · reconciliation</source>
+        <translation>纸面账本 · 对账</translation>
+    </message>
+    <message>
+        <source>identity holds</source>
+        <translation>恒等式成立</translation>
+    </message>
+    <message>
+        <source>residual detected</source>
+        <translation>检测到残差</translation>
+    </message>
+    <message>
+        <source>Leg</source>
+        <translation>腿</translation>
+    </message>
+    <message>
+        <source>Locked</source>
+        <translation>冻结</translation>
+    </message>
+    <message>
+        <source>Deposits</source>
+        <translation>入金</translation>
+    </message>
+    <message>
+        <source>Realized</source>
+        <translation>已实现</translation>
+    </message>
+    <message>
+        <source>Residual</source>
+        <translation>残差</translation>
+    </message>
+    <message>
+        <source>%1 capital events · last: %2</source>
+        <translation>%1 条资本事件 · 最近:%2</translation>
+    </message>
 </context>
 <context>
     <name>EmptyState</name>
