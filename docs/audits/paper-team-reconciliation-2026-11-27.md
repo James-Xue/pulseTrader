@@ -617,3 +617,25 @@ Done:
 
 The running paper engine remains on the pre-P1 binary until the operator
 restarts it (§0.5); P1–P2 are now both green on a copy.
+
+### 2026-11-27 — P4 complete (capital epochs)
+
+- `PaperAccount` records capital events per leg (seed / topup / withdraw /
+  reset / legacy_adjustment) and keeps a deposits counter, so the identity
+  `cash + locked == deposits + realized - fees` is checkable. A reset requires
+  a flat book, starts a new epoch (realized/fee counters restart) and is
+  refused while margin is locked. Withdraw amounts are signed on apply.
+- New control/MCP method **`paper_capital`** (37 tools total, 41 socket
+  methods): validates leg/kind/amount, refuses a reset with an open position,
+  applies the event and mirrors it to `<state_file>.capital.jsonl`.
+- Startup records the four legacy adjustments A–D exactly once (idempotent by
+  id) and logs any identity residual above 0.005 as **WARN-only** — a
+  hand-edited historical state file must never lock the operator out.
+- Tests: `ClosedRoundTripIdentity`, `CapitalEventsKeepTheIdentity`,
+  `ResetRefusedWhileMarginIsLocked`, `LegacyAdjustmentsAreIdempotent`,
+  `LegacyV2StateRemainsReadableAndDowngradeSafe`,
+  `CapitalEventsSurviveTheStateFile`,
+  `PaperCapitalAppliesAndMirrorsToTheJournal`,
+  `PaperCapitalResetRequiresAFlatBook`,
+  `DuplicateExitRowIsSuppressedByOrderId` (crash-window replay).
+  Full PT suite: **1340/1340**.

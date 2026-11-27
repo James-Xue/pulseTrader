@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace pulse::execution
 {
@@ -66,6 +67,32 @@ struct PaperAccountSnapshot
 
 /// Map a market type onto its wallet leg.
 [[nodiscard]] PaperLeg legFor(MarketType market) noexcept;
+
+/// Wire name of a wallet leg ("spot" / "futures" / "cfd").
+[[nodiscard]] const char *legToString(PaperLeg leg) noexcept;
+
+/// One recorded capital movement on a wallet leg.
+///
+/// Why this exists (2026-11-27 audit P4): a reset changes the seed, so the
+/// balance can no longer be reproduced from trades. Recording every capital
+/// change makes the account identity checkable:
+///     cash + locked == deposits + realized - fees
+/// `legacy_adjustment` events move no cash; they document a historical gap
+/// between the engine's trade ledger and the account snapshot.
+struct CapitalEvent
+{
+    std::string id;              ///< Stable key; legacy events are idempotent.
+    std::int64_t ts_ms{ 0 };
+    std::string leg;             ///< "spot" / "futures" / "cfd".
+    std::string kind;            ///< seed/topup/withdraw/reset/legacy_adjustment.
+    double amount_usdt{ 0.0 };   ///< Signed cash movement (+ deposit, - withdraw).
+    double realized_delta{ 0.0 };///< Reconciliation-only PnL delta.
+    double fees_delta{ 0.0 };    ///< Reconciliation-only fee delta.
+    double cash_after{ 0.0 };
+    double realized_after{ 0.0 };
+    double fees_after{ 0.0 };
+    std::string note;
+};
 
 /// Simulated account ledger. One instance per paper process, shared by the
 /// three venue adapters.
@@ -123,6 +150,36 @@ class PaperAccount
     [[nodiscard]] nlohmann::json toJson() const;
     [[nodiscard]] bool restore(const nlohmann::json &j);
 
+    // -- capital events (2026-11-27 audit P4) -----------------------------
+
+    /// Apply a capital movement (seed/topup/withdraw/reset) to one leg and
+    /// record it. `amount_usdt` is signed. A reset sets cash to `amount` and
+    /// zeroes the leg's realized/fee counters, opening a new capital epoch.
+    CapitalEvent applyCapital(PaperLeg leg, const std::string &kind,
+                              double amount_usdt,
+                              const std::string &note = "",
+                              std::int64_t ts_ms = 0);
+
+    /// Record a reconciliation-only adjustment exactly once (idempotent by
+    /// `id`). Returns false when the id was already present.
+    bool recordAdjustmentOnce(const std::string &id, PaperLeg leg,
+                              const std::string &kind,
+                              double realized_delta, double fees_delta,
+                              const std::string &note,
+                              std::int64_t ts_ms = 0);
+
+    [[nodiscard]] std::vector<CapitalEvent> capitalEvents() const;
+
+    [[nodiscard]] bool hasCapitalEvent(const std::string &id) const;
+
+    /// Deposits minus withdrawals recorded for a leg (the configured seed when
+    /// no seed/reset event exists).
+    [[nodiscard]] double netDeposits(PaperLeg leg) const;
+
+    /// |cash + locked - (deposits + realized - fees)|. A startup check logs
+    /// this as a WARN; a hand-edited state file legitimately shows a gap.
+    [[nodiscard]] double identityResidual(PaperLeg leg) const;
+
   private:
     struct Wallet
     {
@@ -130,6 +187,8 @@ class PaperAccount
         double locked_margin{ 0.0 };
         double realized_pnl{ 0.0 };
         double fees_paid{ 0.0 };
+        /// Deposits minus withdrawals since the account opened (P4 identity).
+        double deposits{ 0.0 };
     };
 
     [[nodiscard]] Wallet &wallet(PaperLeg leg) noexcept;
@@ -142,6 +201,14 @@ class PaperAccount
     Wallet m_cfd;
     double m_peakEquity{ 0.0 };
     double m_dailyStartEquity{ 0.0 };
+    double m_initialBalance{ 0.0 };
+    std::vector<CapitalEvent> m_capitalEvents;
 };
+
+/// Append the four documented legacy reconciliation adjustments exactly once
+/// (2026-11-27 audit P4: A −5.91/0.00, B −10.07/−0.54, C 0.00/−0.06, D 0/0).
+/// Returns the number of events actually added (0 on every later start).
+int seedLegacyReconciliationAdjustments(PaperAccount &account,
+                                        std::int64_t ts_ms);
 
 } // namespace pulse::execution

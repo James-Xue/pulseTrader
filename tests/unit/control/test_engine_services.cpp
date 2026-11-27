@@ -1909,6 +1909,8 @@ class PaperEngineServicesTest : public ::testing::Test
         m_dbPath = (std::filesystem::temp_directory_path()
                     / (std::string("pulse_paper_") + test_info->name() + ".db"))
                        .string();
+        // Keep the capital journal beside the test database, never in data/.
+        m_cfg.paper.state_file = m_dbPath + ".state.json";
         cleanupDb();
         auto recorder = trade_recorder::TradeRecorder::open(m_dbPath);
         ASSERT_TRUE(ok(recorder)) << error(recorder).message;
@@ -1971,6 +1973,8 @@ class PaperEngineServicesTest : public ::testing::Test
         std::filesystem::remove(m_dbPath, ec);
         std::filesystem::remove(m_dbPath + "-wal", ec);
         std::filesystem::remove(m_dbPath + "-shm", ec);
+        std::filesystem::remove(m_dbPath + ".state.json", ec);
+        std::filesystem::remove(m_dbPath + ".state.json.capital.jsonl", ec);
     }
 
     /// Inject a venue position through the startup-restore path. No completion
@@ -2375,6 +2379,92 @@ TEST_F(PaperEngineServicesTest, TradeHistoryReturnsNewestPageAndTimeFilter)
     const auto &window_rows = value(window).at("rows");
     ASSERT_EQ(1u, window_rows.size());
     EXPECT_EQ("hist-1", window_rows[0].at("order_id"));
+}
+
+TEST_F(PaperEngineServicesTest, PaperCapitalAppliesAndMirrorsToTheJournal)
+{
+    const auto applied = m_services->paperCapital(nlohmann::json{
+        { "leg", "cfd" },
+        { "kind", "topup" },
+        { "amount", 25.0 },
+        { "note", "audit test" },
+    });
+    ASSERT_TRUE(ok(applied)) << error(applied).message;
+    const auto &payload = value(applied);
+    EXPECT_EQ("topup", payload["event"]["kind"]);
+    EXPECT_NEAR(125.0, payload["account"]["cash_usdt"].get<double>(), 1e-9);
+    EXPECT_NEAR(0.0, payload["identity_residual_usdt"].get<double>(), 1e-9);
+
+    std::ifstream journal(m_cfg.paper.state_file + ".capital.jsonl");
+    ASSERT_TRUE(journal.good());
+    std::string line;
+    std::getline(journal, line);
+    EXPECT_NE(line.find("topup"), std::string::npos);
+    EXPECT_FALSE(std::getline(journal, line)); // exactly one line
+}
+
+TEST_F(PaperEngineServicesTest, PaperCapitalResetRequiresAFlatBook)
+{
+    const std::string pid = restoreVenueShort(3621.38, 0.0);
+    ASSERT_EQ(1u, m_venue->openPositionCount());
+
+    const auto refused = m_services->paperCapital(nlohmann::json{
+        { "leg", "cfd" }, { "kind", "reset" }, { "amount", 100.0 } });
+    ASSERT_FALSE(ok(refused));
+
+    // Flatten the venue book, then the reset opens a new capital epoch.
+    ASSERT_TRUE(ok(m_venue->closeCfdPosition(pid, 0.01, 0.01)));
+    ASSERT_EQ(0u, m_venue->openPositionCount());
+
+    const auto applied = m_services->paperCapital(nlohmann::json{
+        { "leg", "cfd" }, { "kind", "reset" }, { "amount", 50.0 } });
+    ASSERT_TRUE(ok(applied)) << error(applied).message;
+    EXPECT_NEAR(50.0, value(applied)["account"]["cash_usdt"].get<double>(), 1e-9);
+    EXPECT_NEAR(0.0, value(applied)["identity_residual_usdt"].get<double>(), 1e-9);
+}
+
+TEST_F(PaperEngineServicesTest, DuplicateExitRowIsSuppressedByOrderId)
+{
+    // Crash-window guarantee: replaying the same exit report after a restart
+    // must not add a second row. order_id is UNIQUE, and the engine's
+    // paper-exit sequence restarts at 1, so the replay collides.
+    m_flow->setActiveMarket(MarketType::Cfd);
+    execution::OrderRequest req;
+    req.symbol = "XAUUSD";
+    req.side = Side::Buy;
+    req.type = OrderType::Market;
+    req.quantity = 0.01;
+    req.market_type = MarketType::Cfd;
+    req.leverage = 1000.0;
+    req.quanto_multiplier = 100.0;
+    req.reference_price = 4000.0;
+    req.tp_price = 4010.0; // the long's take-profit is what closes it
+    const auto placed = m_flow->placeOrder(req);
+    ASSERT_TRUE(ok(placed)) << error(placed).message;
+    ASSERT_EQ(1u, m_venue->openPositionCount());
+
+    m_price = 4010.0;
+    m_services->tickPaperVenue(m_stamp + 1);
+    // One entry row + one exit row.
+    ASSERT_EQ(2u, value(m_recorder->getTrades("XAUUSD")).size());
+
+    // Replay the same exit id the restarted engine would mint.
+    execution::ExecutionReport replay;
+    replay.order_id = "paper_exit_pp-2_1";
+    replay.client_order_id = "xau_team:e1:000001";
+    replay.symbol = "XAUUSD";
+    replay.side = Side::Sell;
+    replay.type = OrderType::Market;
+    replay.requested_qty = 0.01;
+    replay.filled_qty = 0.01;
+    replay.avg_fill_price = 4010.0;
+    replay.fees = 0.0;
+    replay.final_status = OrderStatus::Filled;
+    replay.exchange_position_id = "pp-2";
+    m_flow->recordExternalClose(replay, 1.0, MarketType::Cfd, 1000.0, 100.0);
+
+    // Still one entry + one exit: the duplicate exit row was rejected.
+    EXPECT_EQ(2u, value(m_recorder->getTrades("XAUUSD")).size());
 }
 
 #endif // PULSE_ENABLE_SQLITE

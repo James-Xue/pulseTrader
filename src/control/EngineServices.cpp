@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <optional>
@@ -1121,6 +1122,131 @@ Result<nlohmann::json> EngineServices::tradeHistory(
                        "get_trade_history: this build has no SQLite trade "
                        "recorder" };
 #endif
+}
+
+Result<nlohmann::json> EngineServices::paperCapital(
+    const nlohmann::json &params)
+{
+    if (nullptr == m_paperVenue)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: only available in paper mode" };
+    }
+    if (!params.is_object())
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: params must be an object" };
+    }
+
+    // 1. Validate the leg, kind and amount before touching the ledger.
+    const std::string leg_name = params.value("leg", std::string{ "cfd" });
+    execution::PaperLeg leg{};
+    if ("spot" == leg_name)
+    {
+        leg = execution::PaperLeg::Spot;
+    }
+    else if ("futures" == leg_name)
+    {
+        leg = execution::PaperLeg::Futures;
+    }
+    else if ("cfd" == leg_name)
+    {
+        leg = execution::PaperLeg::Cfd;
+    }
+    else
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: leg must be spot/futures/cfd" };
+    }
+
+    const std::string kind = params.value("kind", std::string{});
+    if ("seed" != kind && "topup" != kind && "withdraw" != kind
+        && "reset" != kind)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: kind must be "
+                           "seed/topup/withdraw/reset" };
+    }
+    const double amount = params.value("amount", 0.0);
+    if (!std::isfinite(amount) || 0.0 > amount)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: amount must be a non-negative "
+                           "number" };
+    }
+    if (("topup" == kind || "withdraw" == kind) && 0.0 >= amount)
+    {
+        return PulseError{ ErrorCode::ControlInvalidRequest,
+                           "paper_capital: topup/withdraw require amount > 0" };
+    }
+
+    // 2. A reset must not erase locked margin; require a flat book first.
+    if ("reset" == kind
+        && (0 < m_paperVenue->openPositionCount()
+            || !m_positionMgr.getAllPositions().empty()))
+    {
+        return PulseError{ ErrorCode::OrderRejected,
+                           "paper_capital: reset requires a flat book "
+                           "(close every position first)" };
+    }
+
+    // 3. Apply + record. The account stamps the event and refuses a reset
+    //    with locked margin as a second line of defence.
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    const auto event = m_paperVenue->account().applyCapital(
+        leg, kind, amount, params.value("note", std::string{}), now_ms);
+    if (event.id.empty())
+    {
+        return PulseError{ ErrorCode::OrderRejected,
+                           "paper_capital: refused (locked margin on the leg)" };
+    }
+
+    const nlohmann::json event_json{
+        { "id", event.id },
+        { "ts_ms", event.ts_ms },
+        { "leg", event.leg },
+        { "kind", event.kind },
+        { "amount_usdt", event.amount_usdt },
+        { "cash_after", event.cash_after },
+        { "realized_after", event.realized_after },
+        { "fees_after", event.fees_after },
+        { "note", event.note },
+    };
+
+    // 4. Best-effort JSONL mirror: the state file stays the atomic record,
+    //    the journal is a human-readable append-only history.
+    const std::string journal = m_cfg.paper.state_file + ".capital.jsonl";
+    std::ofstream out(journal, std::ios::app);
+    if (out)
+    {
+        out << event_json.dump() << '\n';
+        out.flush();
+    }
+    else
+    {
+        PULSE_LOG_WARN("control", "paper_capital: cannot append {}",
+                       journal);
+    }
+
+    const auto snapshot = m_paperVenue->accountSnapshot();
+    const nlohmann::json account_json{
+        { "equity_usdt", snapshot.equity_usdt },
+        { "peak_equity_usdt", snapshot.peak_equity_usdt },
+        { "cash_usdt",
+          (execution::PaperLeg::Cfd == leg)
+              ? snapshot.cfd.cash_usdt
+              : ((execution::PaperLeg::Futures == leg)
+                     ? snapshot.futures.cash_usdt
+                     : snapshot.spot.cash_usdt) },
+    };
+    return nlohmann::json{
+        { "event", event_json },
+        { "account", account_json },
+        { "identity_residual_usdt",
+          m_paperVenue->account().identityResidual(leg) },
+    };
 }
 
 Result<nlohmann::json> EngineServices::strategyPerformance(int hours) const

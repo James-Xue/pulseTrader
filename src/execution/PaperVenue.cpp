@@ -696,6 +696,11 @@ std::size_t PaperVenue::openPositionCount() const
     return m_positions.size();
 }
 
+PaperAccount &PaperVenue::account() noexcept
+{
+    return m_account;
+}
+
 nlohmann::json PaperVenue::toJson() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);

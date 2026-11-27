@@ -100,7 +100,7 @@ TEST(McpServer, ToolsListHasAllTools)
         should_exit);
     const auto resp = nlohmann::json::parse(line);
     const auto &tools = resp["result"]["tools"];
-    EXPECT_EQ(36, tools.size()); // +3: get_param_history / get_strategy_performance / get_trade_history
+    EXPECT_EQ(37, tools.size()); // +4: param_history / strategy_performance / trade_history / paper_capital
                                  // +1: set_strategy_trading
                                  // +1: submit_decision (gold decision intake)
                                  // +1: get_gold_trader (L7 status card)
@@ -183,7 +183,7 @@ TEST(McpServer, UnknownMethodReturns32601)
 TEST(McpServer, ToolDefinitionsAllHaveSchemas)
 {
     const auto tools = McpServer::toolDefinitions();
-    EXPECT_EQ(36, tools.size()); // +3: get_param_history / get_strategy_performance / get_trade_history
+    EXPECT_EQ(37, tools.size()); // +4: param_history / strategy_performance / trade_history / paper_capital
                                  // +1: set_strategy_trading
                                  // +1: submit_decision (gold decision intake)
                                  // +1: get_gold_trader (L7 status card)

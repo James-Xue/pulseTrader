@@ -271,6 +271,26 @@ nlohmann::json McpServer::toolDefinitions()
         },
         {});
 
+    add("paper_capital",
+        "Paper mode only: apply a capital event (seed/topup/withdraw/reset) "
+        "to one wallet leg, mirror it to the JSONL journal, and return the "
+        "event plus the account snapshot. A reset requires a flat book.",
+        nlohmann::json{
+            { "leg", nlohmann::json{
+                  { "type", "string" },
+                  { "description", "spot / futures / cfd (default cfd)" } } },
+            { "kind", nlohmann::json{
+                  { "type", "string" },
+                  { "description", "seed / topup / withdraw / reset" } } },
+            { "amount", nlohmann::json{
+                  { "type", "number" },
+                  { "description", "USDT; signed meaning per kind" } } },
+            { "note", nlohmann::json{
+                  { "type", "string" },
+                  { "description", "Free-text note stored with the event" } } },
+        },
+        { "leg", "kind" });
+
     add("get_strategy_performance",
         "Per-strategy trade performance over the last N hours (trades DB): "
         "trade count, total pnl, win rate, fees.",

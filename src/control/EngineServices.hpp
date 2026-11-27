@@ -154,6 +154,12 @@ class EngineServices
     [[nodiscard]] Result<nlohmann::json>
     tradeHistory(const nlohmann::json &params) const;
 
+    /// Paper mode only: apply a capital event (seed / topup / withdraw /
+    /// reset) to one wallet leg, mirror it to a JSONL journal, and return the
+    /// event plus the fresh account snapshot. A reset requires a flat book.
+    [[nodiscard]] Result<nlohmann::json>
+    paperCapital(const nlohmann::json &params);
+
     /// Paper mode only: advance the simulated venue, refresh the engine's
     /// marks from it, and apply venue-initiated exits.
     ///

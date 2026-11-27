@@ -1063,6 +1063,10 @@ MethodRegistry makeMethodRegistry(EngineServices &services)
     {
         return RpcResult{ services.tradeHistory(params) };
     };
+    reg["paper_capital"] = [&services](const nlohmann::json &params)
+    {
+        return RpcResult{ services.paperCapital(params) };
+    };
     reg["modify_sl_tp"] = [&services](const nlohmann::json &params)
     {
         return RpcResult{ services.modifySlTp(params) };

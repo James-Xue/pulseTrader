@@ -166,3 +166,88 @@ TEST(PaperAccountTest, LegMappingMatchesMarketType)
     EXPECT_EQ(PaperLeg::Futures, legFor(MarketType::Futures));
     EXPECT_EQ(PaperLeg::Cfd, legFor(MarketType::Cfd));
 }
+
+// ---------------------------------------------------------------------------
+// P4 of the 2026-11-27 paper-team reconciliation audit: capital events and
+// the account identity.
+// ---------------------------------------------------------------------------
+
+TEST(PaperAccountTest, ClosedRoundTripIdentity)
+{
+    // cash + locked == deposits + realized - fees after a full CFD round trip.
+    PaperConfig cfg;
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+
+    const double margin = 0.01 * 100.0 * 4000.0 / 1000.0; // 4.0 at 1000x
+    ASSERT_TRUE(account.lockMargin(PaperLeg::Cfd, margin));
+    account.chargeFee(PaperLeg::Cfd, 0.06); // entry BUY leg
+    account.releaseMargin(PaperLeg::Cfd, margin, 10.0); // exit at 4010
+    account.chargeFee(PaperLeg::Cfd, 0.0); // SELL leg is free
+
+    const auto s = account.snapshot();
+    EXPECT_NEAR(109.94, s.cfd.cash_usdt, 1e-9);
+    EXPECT_NEAR(0.0, s.cfd.locked_margin_usdt, 1e-9);
+    EXPECT_NEAR(0.0, account.identityResidual(PaperLeg::Cfd), 1e-9);
+}
+
+TEST(PaperAccountTest, CapitalEventsKeepTheIdentity)
+{
+    PaperConfig cfg;
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+
+    account.applyCapital(PaperLeg::Cfd, "topup", 50.0, "test top-up", 1);
+    EXPECT_NEAR(150.0, account.netDeposits(PaperLeg::Cfd), 1e-9);
+    EXPECT_NEAR(0.0, account.identityResidual(PaperLeg::Cfd), 1e-9);
+
+    account.applyCapital(PaperLeg::Cfd, "withdraw", 20.0, "test withdraw", 2);
+    EXPECT_NEAR(130.0, account.netDeposits(PaperLeg::Cfd), 1e-9);
+    EXPECT_NEAR(0.0, account.identityResidual(PaperLeg::Cfd), 1e-9);
+
+    // A reset opens a new epoch: cash = new deposit, counters zeroed.
+    account.applyCapital(PaperLeg::Cfd, "reset", 40.0, "reset", 3);
+    const auto s = account.snapshot();
+    EXPECT_NEAR(40.0, s.cfd.cash_usdt, 1e-9);
+    EXPECT_NEAR(0.0, s.cfd.realized_pnl_usdt, 1e-9);
+    EXPECT_NEAR(0.0, s.cfd.fees_paid_usdt, 1e-9);
+    EXPECT_NEAR(0.0, account.identityResidual(PaperLeg::Cfd), 1e-9);
+    EXPECT_EQ(3u, account.capitalEvents().size());
+}
+
+TEST(PaperAccountTest, ResetRefusedWhileMarginIsLocked)
+{
+    PaperConfig cfg;
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+    ASSERT_TRUE(account.lockMargin(PaperLeg::Cfd, 4.0));
+
+    const auto refused = account.applyCapital(PaperLeg::Cfd, "reset", 50.0);
+    EXPECT_TRUE(refused.id.empty());
+    // Locked margin is unchanged and still backed by the same cash.
+    const auto s = account.snapshot();
+    EXPECT_NEAR(96.0, s.cfd.cash_usdt, 1e-9);
+    EXPECT_NEAR(4.0, s.cfd.locked_margin_usdt, 1e-9);
+    EXPECT_TRUE(account.capitalEvents().empty());
+}
+
+TEST(PaperAccountTest, LegacyAdjustmentsAreIdempotent)
+{
+    PaperConfig cfg;
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+
+    EXPECT_EQ(4, seedLegacyReconciliationAdjustments(account, 1));
+    EXPECT_EQ(0, seedLegacyReconciliationAdjustments(account, 2));
+
+    const auto events = account.capitalEvents();
+    ASSERT_EQ(4u, events.size());
+    EXPECT_EQ("legacy:E0", events[0].id);
+    EXPECT_NEAR(-5.91, events[0].realized_delta, 1e-9);
+    EXPECT_NEAR(-10.07, events[1].realized_delta, 1e-9);
+    EXPECT_NEAR(-0.54, events[1].fees_delta, 1e-9);
+    EXPECT_NEAR(-0.06, events[2].fees_delta, 1e-9);
+    EXPECT_NEAR(0.0, events[3].realized_delta, 1e-9);
+    // Adjustments document history; they never move cash.
+    EXPECT_NEAR(100.0, account.snapshot().cfd.cash_usdt, 1e-9);
+}

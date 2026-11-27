@@ -1041,6 +1041,36 @@ static int runTrade(int argc, char* argv[], bool paper_requested = false)
             paper_account->releaseOrphanedMargin();
         }
 
+        // P4: record the four documented legacy reconciliation adjustments
+        // exactly once, then check the account identity. The check is
+        // WARN-only by design: a hand-edited historical state file shows a
+        // residual, and refusing to start would lock the operator out of the
+        // very ledger that needs repairing.
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        const int legacy_adjustments =
+            pulse::execution::seedLegacyReconciliationAdjustments(
+                *paper_account, now_ms);
+        if (0 < legacy_adjustments)
+        {
+            log->warn("paper: recorded {} legacy reconciliation adjustment(s)",
+                      legacy_adjustments);
+        }
+        for (const auto leg : { pulse::execution::PaperLeg::Spot,
+                                pulse::execution::PaperLeg::Futures,
+                                pulse::execution::PaperLeg::Cfd })
+        {
+            const double residual = paper_account->identityResidual(leg);
+            if (0.005 < std::abs(residual))
+            {
+                log->warn(
+                    "paper identity check: {} leg residual {:.4f} USDT "
+                    "(cash+locked vs deposits+realized-fees)",
+                    pulse::execution::legToString(leg), residual);
+            }
+        }
+
         paper_store->setVenueProvider(
             [&paper_venue]() { return paper_venue->toJson(); });
         paper_store->start(*paper_account);

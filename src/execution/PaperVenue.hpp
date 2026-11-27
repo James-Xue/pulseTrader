@@ -220,6 +220,9 @@ class PaperVenue final : public IOrderPlacer, public IOrderTracker
     /// Number of open venue positions (diagnostics/tests).
     [[nodiscard]] std::size_t openPositionCount() const;
 
+    /// The ledger behind the venue (capital events / reconciliation).
+    [[nodiscard]] PaperAccount &account() noexcept;
+
     /// Serialize the venue book (positions + id sequence) for the state
     /// store. The account (cash/margin) lives in PaperAccount and is
     /// persisted separately in the same file.

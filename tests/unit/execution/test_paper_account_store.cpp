@@ -215,3 +215,71 @@ TEST(PaperAccountStoreTest, StateFileCarriesNoCredentials)
     EXPECT_EQ(std::string::npos, contents.find("apiSecret"));
     EXPECT_NE(std::string::npos, contents.find("paper-no-key"));
 }
+
+// ---------------------------------------------------------------------------
+// P4 of the 2026-11-27 paper-team reconciliation audit: capital events.
+// ---------------------------------------------------------------------------
+
+TEST(PaperAccountStoreTest, LegacyV2StateRemainsReadableAndDowngradeSafe)
+{
+    // A v2 file written before the capital fields existed has no
+    // deposits_usdt and no capital_events. It must still load, and the
+    // deposits counter must fall back to the configured seed rather than
+    // making the identity fail on every legacy file.
+    const auto dir = freshDir("legacy-v2");
+    const auto path = dir / "state.json";
+    writeText(path, R"({
+      "schema_version": 2,
+      "account": {
+        "account_id": "legacy",
+        "spot":    {"cash_usdt": 100.0, "locked_margin_usdt": 0.0,
+                    "realized_pnl_usdt": 0.0, "fees_paid_usdt": 0.0},
+        "futures": {"cash_usdt": 100.0, "locked_margin_usdt": 0.0,
+                    "realized_pnl_usdt": 0.0, "fees_paid_usdt": 0.0},
+        "cfd":     {"cash_usdt": 88.2425, "locked_margin_usdt": 3.6375,
+                    "realized_pnl_usdt": -7.70, "fees_paid_usdt": 0.42},
+        "peak_equity_usdt": 300.0,
+        "daily_start_equity_usdt": 300.0
+      },
+      "venue": {"positions": [], "seq": 0}
+    })");
+
+    PaperConfig cfg;
+    cfg.account_id = "legacy";
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+    PaperAccountStore store(path, 1'000);
+
+    EXPECT_EQ(PaperStoreLoad::Loaded, store.load(account));
+    EXPECT_TRUE(account.capitalEvents().empty());
+    EXPECT_NEAR(100.0, account.netDeposits(PaperLeg::Cfd), 1e-9);
+    // cash + locked - (deposits + realized - fees) = 91.88 - 91.88
+    EXPECT_NEAR(0.0, account.identityResidual(PaperLeg::Cfd), 1e-9);
+}
+
+TEST(PaperAccountStoreTest, CapitalEventsSurviveTheStateFile)
+{
+    const auto dir = freshDir("capital-events");
+    const auto path = dir / "state.json";
+
+    PaperConfig cfg;
+    cfg.account_id = "capital";
+    cfg.initial_balance_usdt = 100.0;
+    PaperAccount account(cfg);
+    account.applyCapital(PaperLeg::Cfd, "topup", 25.0, "audit test", 42);
+
+    {
+        PaperAccountStore store(path, 1'000);
+        store.saveNow(account);
+    }
+
+    PaperAccount loaded(cfg);
+    PaperAccountStore store(path, 1'000);
+    ASSERT_EQ(PaperStoreLoad::Loaded, store.load(loaded));
+    const auto events = loaded.capitalEvents();
+    ASSERT_EQ(1u, events.size());
+    EXPECT_EQ("topup", events[0].kind);
+    EXPECT_NEAR(25.0, events[0].amount_usdt, 1e-9);
+    EXPECT_NEAR(125.0, loaded.netDeposits(PaperLeg::Cfd), 1e-9);
+    EXPECT_NEAR(0.0, loaded.identityResidual(PaperLeg::Cfd), 1e-9);
+}
