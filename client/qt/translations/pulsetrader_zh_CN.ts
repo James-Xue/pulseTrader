@@ -1113,6 +1113,49 @@
         <source>%1 orders · %2 closed · win rate %3% · net %4 · fees %5</source>
         <translation>%1 笔订单 · 已平 %2 · 胜率 %3% · 净额 %4 · 费用 %5</translation>
     </message>
+    <message>
+        <source>From</source>
+        <translation>起始</translation>
+    </message>
+    <message>
+        <source>To</source>
+        <translation>终止</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>清除</translation>
+    </message>
+    <message>
+        <source>Custom range</source>
+        <translation>自定义区间</translation>
+    </message>
+    <message>
+        <source>from %1</source>
+        <translation>自 %1 起</translation>
+    </message>
+    <message>
+        <source>until %1</source>
+        <translation>截至 %1</translation>
+    </message>
+    <message>
+        <source>Showing %1 orders %2 · closed %3 · net %4 · fees %5</source>
+        <translation>显示 %2 的 %1 笔订单 · 已平 %3 · 净额 %4 · 费用 %5</translation>
+    </message>
+</context>
+<context>
+    <name>DateTimeWheel</name>
+    <message>
+        <source>Any time</source>
+        <translation>不限时间</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>OK</source>
+        <translation>确定</translation>
+    </message>
 </context>
 <context>
     <name>PositionsPage</name>

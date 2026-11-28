@@ -60,10 +60,37 @@ ColumnLayout {
     readonly property string historyDate: root.controller
         ? root.controller.historyDate : ""
 
+    /// Inclusive history window mirrored from the controller, in epoch
+    /// milliseconds (0 = unbounded). The two wheel fields drive it and every
+    /// other filter below derives from it.
+    readonly property double historyFromMs: root.controller
+        ? root.controller.historyFromMs : 0
+    readonly property double historyToMs: root.controller
+        ? root.controller.historyToMs : 0
+    readonly property bool hasHistoryRange: root.historyFromMs > 0
+                                            || root.historyToMs > 0
+
     function dateLabel(key) {
-        if (!key) return qsTr("All dates")
+        if (!key) {
+            return root.hasHistoryRange ? qsTr("Custom range")
+                                        : qsTr("All dates")
+        }
         const day = new Date(key + "T00:00:00")
         return Qt.formatDate(day, "yyyy-MM-dd ddd")
+    }
+
+    /// Human label for the selected window, used by the summary line.
+    function rangeLabel() {
+        function fmt(ms) {
+            return Qt.formatDateTime(new Date(ms), "yyyy-MM-dd HH:mm")
+        }
+        if (root.historyFromMs > 0 && root.historyToMs > 0) {
+            return fmt(root.historyFromMs) + " – " + fmt(root.historyToMs)
+        }
+        if (root.historyFromMs > 0) {
+            return qsTr("from %1").arg(fmt(root.historyFromMs))
+        }
+        return qsTr("until %1").arg(fmt(root.historyToMs))
     }
 
     /// "" (all dates) plus every day seen in the newest unfiltered fetch. A
@@ -77,23 +104,6 @@ ColumnLayout {
         return keys
     }
     readonly property var dateOptions: root.dateKeys.map(root.dateLabel)
-
-    /// Manual date entry, for days older than anything the picker has seen.
-    property string dateInput: ""
-    property bool dateInputInvalid: false
-
-    function applyDateInput() {
-        if (!root.controller) return
-        const value = root.dateInput.trim()
-        const valid = /^\d{4}-\d{2}-\d{2}$/.test(value)
-                      && !isNaN(Date.parse(value + "T00:00:00"))
-        if (!valid) {
-            root.dateInputInvalid = true
-            return
-        }
-        root.dateInputInvalid = false
-        root.controller.setHistoryDate(value)
-    }
 
     /// A day that vanished from the list (e.g. a new day rolled over) must
     /// not leave the page silently filtered by an unselectable date.
@@ -131,6 +141,15 @@ ColumnLayout {
             }
             const when = Number(order.exit_time_ms)
                          || Number(order.entry_time_ms) || 0
+            // The engine already brackets the fetch, but a range edited while
+            // rows were in flight (and the half-open windows the picker
+            // allows) would otherwise leave stragglers in view.
+            if (root.historyFromMs > 0 && when > 0 && when < root.historyFromMs) {
+                continue
+            }
+            if (root.historyToMs > 0 && when > 0 && when > root.historyToMs) {
+                continue
+            }
             const day = Qt.formatDate(new Date(when), "yyyy-MM-dd")
             if (root.historyDate !== "" && day !== root.historyDate) {
                 continue
@@ -540,6 +559,14 @@ ColumnLayout {
                             .arg(stats.net.toFixed(2))
                             .arg(stats.fees.toFixed(2))
                     }
+                    if (root.hasHistoryRange) {
+                        return qsTr("Showing %1 orders %2 · closed %3 · net %4 · fees %5")
+                            .arg(stats.count)
+                            .arg(root.rangeLabel())
+                            .arg(stats.closed)
+                            .arg(stats.net.toFixed(2))
+                            .arg(stats.fees.toFixed(2))
+                    }
                     if (root.strategyFilter !== "") {
                         return qsTr("Showing %1 of %2 orders for %3 · net %4 · fees %5")
                             .arg(stats.count)
@@ -557,36 +584,55 @@ ColumnLayout {
                 }
             }
 
-            // Manual date entry: the picker only lists days present in the
-            // newest fetch, so an older day must be typed.
+            // Inclusive time window. Each field opens a scroll-wheel picker;
+            // the controller owns the state, so a field only displays it and
+            // reports the confirmed instant. Either side may stay empty, which
+            // makes the window half-open.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Style.gapSmall
 
                 SelectableText {
-                    text: qsTr("Jump to date")
+                    text: qsTr("From")
                     color: Style.secondaryText
                     font.pixelSize: Style.fontSizeSmall
                 }
-                MacTextField {
-                    Layout.preferredWidth: 130
-                    placeholderText: qsTr("YYYY-MM-DD")
-                    text: root.dateInput
-                    onTextChanged: root.dateInput = text
-                    onAccepted: root.applyDateInput()
-                    color: root.dateInputInvalid ? Style.danger : Style.text
+                DateTimeWheel {
+                    Layout.preferredWidth: 156
+                    epochMs: root.historyFromMs
+                    fallbackMs: {
+                        const start = new Date()
+                        start.setHours(0, 0, 0, 0)
+                        return start.getTime()
+                    }
+                    onPicked: function(ms) {
+                        if (root.controller) {
+                            root.controller.setHistoryRange(ms, root.historyToMs)
+                        }
+                    }
                 }
-                MacButton {
-                    text: qsTr("Go")
-                    onClicked: root.applyDateInput()
+
+                SelectableText {
+                    text: qsTr("To")
+                    color: Style.secondaryText
+                    font.pixelSize: Style.fontSizeSmall
                 }
+                DateTimeWheel {
+                    Layout.preferredWidth: 156
+                    epochMs: root.historyToMs
+                    fallbackMs: Date.now()
+                    onPicked: function(ms) {
+                        if (root.controller) {
+                            root.controller.setHistoryRange(root.historyFromMs, ms)
+                        }
+                    }
+                }
+
                 MacButton {
-                    text: qsTr("All dates")
-                    enabled: root.historyDate !== ""
+                    text: qsTr("Clear")
+                    enabled: root.hasHistoryRange
                     onClicked: {
-                        if (root.controller) root.controller.setHistoryDate("")
-                        root.dateInput = ""
-                        root.dateInputInvalid = false
+                        if (root.controller) root.controller.setHistoryRange(0, 0)
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -675,8 +721,8 @@ ColumnLayout {
                 delegate: Rectangle {
                     width: Math.max(historyList.width, root.historyTableWidth)
                     height: orderExpanded
-                        ? 30 + orderRow.order.legs.length * 24
-                          + (orderRow.order.unpaired ? 22 : 0) + 6
+                        ? 30 + order.legs.length * 24
+                          + (order.unpaired ? 22 : 0) + 6
                         : 30
                     color: orderExpanded ? Style.controlBackgroundHover
                                          : "transparent"
@@ -698,9 +744,9 @@ ColumnLayout {
                             spacing: Style.gapSmall
 
                             SelectableText {
-                                text: (orderRow.orderExpanded ? "▾ " : "▸ ")
-                                    + new Date(Number(orderRow.order.exit_time_ms)
-                                               || Number(orderRow.order.entry_time_ms) || 0)
+                                text: (orderExpanded ? "▾ " : "▸ ")
+                                    + new Date(Number(order.exit_time_ms)
+                                               || Number(order.entry_time_ms) || 0)
                                           .toLocaleString(Qt.locale(), "MM-dd HH:mm:ss")
                                 color: Style.text
                                 font.pixelSize: Style.fontSizeSmall
@@ -708,21 +754,21 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[0]
                             }
                             SelectableText {
-                                text: orderRow.order.symbol
+                                text: order.symbol
                                 color: Style.text
                                 font.pixelSize: Style.fontSizeSmall
                                 Layout.preferredWidth: root.historyColumns[1]
                             }
                             SelectableText {
-                                text: String(orderRow.order.side) === "buy"
+                                text: String(order.side) === "buy"
                                       ? qsTr("Buy") : qsTr("Sell")
-                                color: String(orderRow.order.side) === "buy"
+                                color: String(order.side) === "buy"
                                        ? Style.success : Style.danger
                                 font.pixelSize: Style.fontSizeSmall
                                 Layout.preferredWidth: root.historyColumns[2]
                             }
                             SelectableText {
-                                text: Number(orderRow.order.quantity || 0).toFixed(4)
+                                text: Number(order.quantity || 0).toFixed(4)
                                 color: Style.text
                                 font.pixelSize: Style.fontSizeSmall
                                 font.family: "monospace"
@@ -730,9 +776,9 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[3]
                             }
                             SelectableText {
-                                text: Number(orderRow.order.status === "closed"
-                                              ? orderRow.order.exit_price
-                                              : orderRow.order.entry_price).toFixed(2)
+                                text: Number(order.status === "closed"
+                                              ? order.exit_price
+                                              : order.entry_price).toFixed(2)
                                 color: Style.text
                                 font.pixelSize: Style.fontSizeSmall
                                 font.family: "monospace"
@@ -740,8 +786,8 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[4]
                             }
                             SelectableText {
-                                text: Number(orderRow.order.pnl || 0).toFixed(2)
-                                color: Number(orderRow.order.pnl || 0) >= 0
+                                text: Number(order.pnl || 0).toFixed(2)
+                                color: Number(order.pnl || 0) >= 0
                                        ? Style.upColor : Style.downColor
                                 font.pixelSize: Style.fontSizeSmall
                                 font.family: "monospace"
@@ -749,7 +795,7 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[5]
                             }
                             SelectableText {
-                                text: Number(orderRow.order.fees || 0).toFixed(2)
+                                text: Number(order.fees || 0).toFixed(2)
                                 color: Style.secondaryText
                                 font.pixelSize: Style.fontSizeSmall
                                 font.family: "monospace"
@@ -757,9 +803,9 @@ ColumnLayout {
                                 Layout.preferredWidth: root.historyColumns[6]
                             }
                             SelectableText {
-                                text: orderRow.order.unpaired
+                                text: order.unpaired
                                       ? qsTr("unpaired")
-                                      : (orderRow.order.status === "closed"
+                                      : (order.status === "closed"
                                          ? qsTr("closed") : qsTr("open"))
                                 color: Style.secondaryText
                                 font.pixelSize: Style.fontSizeSmall
@@ -767,14 +813,14 @@ ColumnLayout {
                             }
                             SelectableText {
                                 text: {
-                                    const cid = String(orderRow.order.client_order_id || "")
+                                    const cid = String(order.client_order_id || "")
                                     if (cid.indexOf("xau_team:") === 0) {
                                         const parts = cid.split(":")
                                         if (parts.length > 1 && parts[1] !== "") {
                                             return parts[1]
                                         }
                                     }
-                                    return orderRow.order.strategy || cid || "—"
+                                    return order.strategy || cid || "—"
                                 }
                                 color: Style.tertiaryText
                                 font.pixelSize: Style.fontSizeSmall
@@ -784,15 +830,32 @@ ColumnLayout {
 
                         // The two legs, revealed on click: buy time/price and
                         // sell time/price (order is chronological, so the
-                        // entry leg always comes first).
+                        // entry leg always comes first). The legs are hidden
+                        // while the row is collapsed — the delegate height is
+                        // only 30 px then, so a visible leg would be painted
+                        // on top of the next row. Each cell reuses the table
+                        // column width so the legs stay under the header.
                         Repeater {
-                            model: orderRow.order.legs
+                            model: order.legs
 
                             delegate: RowLayout {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 24
+                                visible: orderExpanded
                                 spacing: Style.gapSmall
 
+                                SelectableText {
+                                    text: new Date(Number(modelData.time_ms) || 0)
+                                              .toLocaleString(Qt.locale(),
+                                                              "MM-dd HH:mm:ss")
+                                    color: Style.secondaryText
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    Layout.preferredWidth: root.historyColumns[0]
+                                }
+                                // Symbol is omitted on a leg: both legs are
+                                // the same instrument as the round trip.
+                                Item { Layout.preferredWidth: root.historyColumns[1] }
                                 SelectableText {
                                     text: String(modelData.side) === "buy"
                                           ? qsTr("Buy") : qsTr("Sell")
@@ -800,63 +863,58 @@ ColumnLayout {
                                            ? Style.success : Style.danger
                                     font.pixelSize: Style.fontSizeSmall
                                     font.bold: true
-                                    Layout.preferredWidth: 48
-                                }
-                                SelectableText {
-                                    text: new Date(Number(modelData.time_ms) || 0)
-                                              .toLocaleString(Qt.locale(),
-                                                              "yyyy-MM-dd HH:mm:ss")
-                                    color: Style.secondaryText
-                                    font.pixelSize: Style.fontSizeSmall
-                                    font.family: "monospace"
-                                    Layout.preferredWidth: 160
-                                }
-                                SelectableText {
-                                    text: qsTr("price %1").arg(
-                                              Number(modelData.price || 0).toFixed(2))
-                                    color: Style.text
-                                    font.pixelSize: Style.fontSizeSmall
-                                    font.family: "monospace"
-                                    Layout.preferredWidth: 110
+                                    Layout.preferredWidth: root.historyColumns[2]
                                 }
                                 SelectableText {
                                     text: "×" + Number(modelData.quantity || 0).toFixed(4)
                                     color: Style.text
                                     font.pixelSize: Style.fontSizeSmall
                                     font.family: "monospace"
-                                    Layout.preferredWidth: 90
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: root.historyColumns[3]
                                 }
                                 SelectableText {
-                                    text: qsTr("fee %1").arg(
-                                              Number(modelData.fees || 0).toFixed(2))
-                                    color: Style.secondaryText
+                                    text: Number(modelData.price || 0).toFixed(2)
+                                    color: Style.text
                                     font.pixelSize: Style.fontSizeSmall
                                     font.family: "monospace"
-                                    Layout.preferredWidth: 80
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: root.historyColumns[4]
                                 }
                                 SelectableText {
-                                    visible: modelData.is_exit === true
-                                    text: qsTr("PnL %1").arg(
-                                              Number(modelData.pnl || 0).toFixed(2))
+                                    // PnL belongs to the exit leg only.
+                                    text: modelData.is_exit === true
+                                          ? Number(modelData.pnl || 0).toFixed(2)
+                                          : ""
                                     color: Number(modelData.pnl || 0) >= 0
                                            ? Style.upColor : Style.downColor
                                     font.pixelSize: Style.fontSizeSmall
                                     font.family: "monospace"
-                                    Layout.preferredWidth: 90
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: root.historyColumns[5]
                                 }
+                                SelectableText {
+                                    text: Number(modelData.fees || 0).toFixed(2)
+                                    color: Style.secondaryText
+                                    font.pixelSize: Style.fontSizeSmall
+                                    font.family: "monospace"
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: root.historyColumns[6]
+                                }
+                                Item { Layout.preferredWidth: root.historyColumns[7] }
                                 SelectableText {
                                     text: String(modelData.order_id || "")
                                     color: Style.tertiaryText
                                     font.pixelSize: Style.fontSizeSmall - 1
                                     font.family: "monospace"
-                                    Layout.preferredWidth: 190
+                                    Layout.preferredWidth: root.historyColumns[8]
                                 }
                             }
                         }
 
                         SelectableText {
                             Layout.fillWidth: true
-                            visible: orderRow.order.unpaired === true
+                            visible: orderExpanded && order.unpaired === true
                             text: qsTr("Legacy fill without a venue id — cannot be paired")
                             color: Style.tertiaryText
                             font.pixelSize: Style.fontSizeSmall

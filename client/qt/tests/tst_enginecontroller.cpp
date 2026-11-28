@@ -507,6 +507,61 @@ void TestEngineController::tradeHistoryDateWindow()
         return false;
     }()), 5000);
     QVERIFY(sawUnfiltered);
+
+    // A custom window is forwarded verbatim: the scroll wheels pick minutes,
+    // not whole days.
+    const qint64 rangeFrom = 1795000000000LL;
+    const qint64 rangeTo = rangeFrom + 3LL * 3600LL * 1000LL;
+    controller.setHistoryRange(static_cast<double>(rangeFrom),
+                               static_cast<double>(rangeTo));
+    bool sawCustom = false;
+    QTRY_VERIFY_WITH_TIMEOUT(([&]()
+    {
+        for (const QJsonObject& request : requests)
+        {
+            if (request.value(QStringLiteral("method")).toString()
+                != QStringLiteral("get_trade_history"))
+            {
+                continue;
+            }
+            const QJsonObject params =
+                request.value(QStringLiteral("params")).toObject();
+            const qint64 from = static_cast<qint64>(
+                params.value(QStringLiteral("from_ms")).toDouble());
+            const qint64 to = static_cast<qint64>(
+                params.value(QStringLiteral("to_ms")).toDouble());
+            if (from == rangeFrom && to == rangeTo
+                && params.value(QStringLiteral("limit")).toInt() == 1000)
+            {
+                sawCustom = true;
+                return true;
+            }
+        }
+        return false;
+    }()), 5000);
+    QVERIFY(sawCustom);
+    QCOMPARE(controller.historyFromMs(), static_cast<double>(rangeFrom));
+    QCOMPARE(controller.historyToMs(), static_cast<double>(rangeTo));
+    // A multi-hour window is not a calendar day, so the day label clears.
+    QVERIFY(controller.historyDate().isEmpty());
+
+    // Ends picked backwards are swapped instead of emptying the view.
+    controller.setHistoryRange(static_cast<double>(rangeTo),
+                               static_cast<double>(rangeFrom));
+    QCOMPARE(controller.historyFromMs(), static_cast<double>(rangeFrom));
+    QCOMPARE(controller.historyToMs(), static_cast<double>(rangeTo));
+
+    // A whole-day window restores the day label without a second setter.
+    controller.setHistoryRange(static_cast<double>(expectedFrom),
+                               static_cast<double>(expectedTo));
+    QCOMPARE(controller.historyDate(),
+             day.toString(QStringLiteral("yyyy-MM-dd")));
+
+    // Zero on both ends clears the window and returns to the newest page.
+    controller.setHistoryRange(0, 0);
+    QCOMPARE(controller.historyFromMs(), 0.0);
+    QCOMPARE(controller.historyToMs(), 0.0);
+    QVERIFY(controller.historyDate().isEmpty());
 }
 
 

@@ -69,6 +69,11 @@ class EngineController : public QObject
     Q_PROPERTY(QString historyDate READ historyDate NOTIFY historyDateChanged)
     /// Days (newest first) present in the newest UNFILTERED history fetch.
     Q_PROPERTY(QStringList historyDates READ historyDates NOTIFY historyDatesChanged)
+    /// Inclusive history window in epoch milliseconds; 0 = unbounded on that
+    /// side. This is what the two wheel pickers in the Orders page drive;
+    /// `historyDate` is derived from it when the window spans exactly one day.
+    Q_PROPERTY(double historyFromMs READ historyFromMs NOTIFY historyRangeChanged)
+    Q_PROPERTY(double historyToMs READ historyToMs NOTIFY historyRangeChanged)
     /// True when the last history page was full, i.e. older rows may exist.
     Q_PROPERTY(bool canLoadOlderHistory READ canLoadOlderHistory
                NOTIFY tradeHistoryChanged)
@@ -187,6 +192,14 @@ public:
     [[nodiscard]] QVariantMap tradeHistorySummary() const { return m_tradeHistorySummary; }
     [[nodiscard]] QString historyDate() const { return m_historyDate; }
     [[nodiscard]] QStringList historyDates() const { return m_historyDates; }
+    [[nodiscard]] double historyFromMs() const
+    {
+        return static_cast<double>(m_historyFromMs);
+    }
+    [[nodiscard]] double historyToMs() const
+    {
+        return static_cast<double>(m_historyToMs);
+    }
     [[nodiscard]] QVariantList teamRows() const { return m_teamRows; }
     [[nodiscard]] QVariantMap teamSummary() const { return m_teamSummary; }
     [[nodiscard]] QVariantMap paperLedger() const { return m_paperLedger; }
@@ -197,6 +210,12 @@ public:
     /// Filter the persisted history to one LOCAL calendar day ("yyyy-MM-dd");
     /// an empty string restores every date. A malformed day is ignored.
     Q_INVOKABLE void setHistoryDate(const QString& day);
+
+    /// Restrict the persisted history to [fromMs, toMs] (epoch milliseconds,
+    /// inclusive); 0 leaves that side unbounded. An inverted window is swapped
+    /// rather than cleared, because a picker can emit either order. A window
+    /// that spans exactly one local day also updates `historyDate`.
+    Q_INVOKABLE void setHistoryRange(double fromMs, double toMs);
 
     /// Append the next older page (bounded by the oldest loaded fill). No-op
     /// while a request is in flight or when the last page was short.
@@ -254,6 +273,7 @@ signals:
     void tradeHistoryChanged();
     void historyDateChanged();
     void historyDatesChanged();
+    void historyRangeChanged();
     /// Rebuilt whenever positions, history or the paper status change.
     void teamChanged();
     void paperLedgerChanged();
@@ -364,8 +384,12 @@ private:
     QString m_mode{ QStringLiteral("live") };
     bool m_simulated{ false };
     QVariantList m_tradeHistory;
-    /// Local day filter for the history view ("" = every date).
+    /// Local day filter for the history view ("" = every date). Derived from
+    /// the window below: it is set only when the window spans exactly one day.
     QString m_historyDate;
+    /// Inclusive history window in epoch milliseconds (0 = unbounded).
+    qint64 m_historyFromMs = 0;
+    qint64 m_historyToMs = 0;
     /// Days seen in the newest UNFILTERED fetch, newest first.
     QStringList m_historyDates;
     /// A date change arrived while a history request was in flight; re-fetch

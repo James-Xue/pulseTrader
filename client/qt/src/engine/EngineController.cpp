@@ -15,6 +15,7 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <utility>
 
 #include "models/AccountModel.hpp"
 #include "models/OrdersModel.hpp"
@@ -468,25 +469,20 @@ void EngineController::fetchTradeHistory()
     }
     m_historyDirty = false;
     QJsonObject params;
-    // A single day is fetched with its local-midnight window so the engine can
-    // return the whole day; without a filter the newest page is enough.
-    bool dayWindow = false;
-    if (!m_historyDate.isEmpty())
+    // A bounded window is fetched with both ends so the engine can return
+    // every row inside it; without a filter the newest page is enough. A
+    // half-open window (only one end set) is legal and is forwarded as-is.
+    const bool ranged = (0 < m_historyFromMs) || (0 < m_historyToMs);
+    if (0 < m_historyFromMs)
     {
-        const QDate day =
-            QDate::fromString(m_historyDate, QStringLiteral("yyyy-MM-dd"));
-        if (day.isValid())
-        {
-            const QDateTime start(day, QTime(0, 0),
-                                  QTimeZone::systemTimeZone());
-            params[QStringLiteral("from_ms")] =
-                static_cast<double>(start.toMSecsSinceEpoch());
-            params[QStringLiteral("to_ms")] = static_cast<double>(
-                start.addDays(1).toMSecsSinceEpoch() - 1);
-            dayWindow = true;
-        }
+        params[QStringLiteral("from_ms")] =
+            static_cast<double>(m_historyFromMs);
     }
-    m_historyRequestedLimit = dayWindow ? 1000 : 500;
+    if (0 < m_historyToMs)
+    {
+        params[QStringLiteral("to_ms")] = static_cast<double>(m_historyToMs);
+    }
+    m_historyRequestedLimit = ranged ? 1000 : 500;
     params[QStringLiteral("limit")] = m_historyRequestedLimit;
     const qint64 id =
         m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
@@ -523,17 +519,12 @@ void EngineController::fetchOlderTradeHistory()
     QJsonObject params;
     params[QStringLiteral("limit")] = 500;
     params[QStringLiteral("to_ms")] = static_cast<double>(oldestMs - 1);
-    if (!m_historyDate.isEmpty())
+    // Keep the lower end of the selected window, otherwise "load older" would
+    // walk past it and mix rows the filter promised to exclude.
+    if (0 < m_historyFromMs)
     {
-        const QDate day =
-            QDate::fromString(m_historyDate, QStringLiteral("yyyy-MM-dd"));
-        if (day.isValid())
-        {
-            const QDateTime start(day, QTime(0, 0),
-                                  QTimeZone::systemTimeZone());
-            params[QStringLiteral("from_ms")] =
-                static_cast<double>(start.toMSecsSinceEpoch());
-        }
+        params[QStringLiteral("from_ms")] =
+            static_cast<double>(m_historyFromMs);
     }
     const qint64 id =
         m_rest->call(methods::kGetTradeHistory, params, kAccountTimeoutMs);
@@ -683,21 +674,79 @@ QVariantList EngineController::mergedTradeHistory() const
 void EngineController::setHistoryDate(const QString& day)
 {
     const QString normalized = day.trimmed();
-    if (normalized == m_historyDate)
+    if (normalized.isEmpty())
     {
+        setHistoryRange(0, 0);
         return;
     }
-    if (!normalized.isEmpty()
-        && !QDate::fromString(normalized, QStringLiteral("yyyy-MM-dd"))
-                .isValid())
+    const QDate parsed =
+        QDate::fromString(normalized, QStringLiteral("yyyy-MM-dd"));
+    if (!parsed.isValid())
     {
         // Malformed input is ignored: an invalid day must not silently show
         // every row while the picker claims a filter.
         return;
     }
-    m_historyDate = normalized;
+    // 1. Anchor the window at local midnight, not UTC: the engine stores
+    //    epoch ms and the trader reads the calendar in machine time.
+    // 2. End at the last millisecond of the day so the window is inclusive.
+    const QDateTime start(parsed, QTime(0, 0), QTimeZone::systemTimeZone());
+    setHistoryRange(static_cast<double>(start.toMSecsSinceEpoch()),
+                    static_cast<double>(start.addDays(1).toMSecsSinceEpoch()
+                                        - 1));
+}
+
+void EngineController::setHistoryRange(double fromMs, double toMs)
+{
+    qint64 from = static_cast<qint64>(fromMs);
+    qint64 to = static_cast<qint64>(toMs);
+    // Negative values are as meaningless as "before the epoch"; normalise
+    // them to "unbounded" so a picker bug cannot filter everything away.
+    if (0 >= from)
+    {
+        from = 0;
+    }
+    if (0 >= to)
+    {
+        to = 0;
+    }
+    // 1. A picker may emit the two ends in either order (the trader picks the
+    //    end first often enough); swap instead of returning an empty window.
+    if (0 < from && 0 < to && from > to)
+    {
+        std::swap(from, to);
+    }
+    if (from == m_historyFromMs && to == m_historyToMs)
+    {
+        return;
+    }
+    m_historyFromMs = from;
+    m_historyToMs = to;
+
+    // 2. Keep `historyDate` derived, never independent: the day picker and the
+    //    "showing orders on <day>" summary only speak of whole local days.
+    QString day;
+    if (0 < from && 0 < to)
+    {
+        const QDateTime start =
+            QDateTime::fromMSecsSinceEpoch(from, QTimeZone::systemTimeZone());
+        const QDateTime end =
+            QDateTime::fromMSecsSinceEpoch(to, QTimeZone::systemTimeZone());
+        if (start.date() == end.date()
+            && QTime(0, 0) == start.time()
+            && QTime(23, 59, 59, 999) == end.time())
+        {
+            day = start.date().toString(QStringLiteral("yyyy-MM-dd"));
+        }
+    }
+    if (day != m_historyDate)
+    {
+        m_historyDate = day;
+        emit historyDateChanged();
+    }
+
     m_historyDirty = true;
-    emit historyDateChanged();
+    emit historyRangeChanged();
     fetchTradeHistory();
 }
 
@@ -868,10 +917,10 @@ void EngineController::handleSuccess(qint64 id, const QJsonObject& result)
                                     .toVariantMap();
         m_historyHasMore =
             m_tradeHistory.size() >= m_historyRequestedLimit;
-        if (m_historyDate.isEmpty())
+        if (0 >= m_historyFromMs && 0 >= m_historyToMs)
         {
             // Only an unfiltered answer can teach the picker its day list; a
-            // day-window reply would collapse the choices to that one day.
+            // ranged reply would collapse the choices to the selected window.
             QStringList days;
             for (const QVariant& row : m_tradeHistory)
             {

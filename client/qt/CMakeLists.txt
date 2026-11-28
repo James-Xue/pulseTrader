@@ -67,6 +67,7 @@ qt_add_qml_module(pulseTraderQt
         qml/components/MacSwitch.qml
         qml/components/MacComboBox.qml
         qml/components/MacSegmentedControl.qml
+        qml/components/DateTimeWheel.qml
     SOURCES
         src/rpc/RpcClient.cpp          src/rpc/RpcClient.hpp
         src/rpc/RpcError.cpp           src/rpc/RpcError.hpp
